@@ -1,4 +1,6 @@
-use geo::{GeoFloat, Geometry, GeometryCollection, MultiLineString, MultiPoint, MultiPolygon};
+use geo::{
+    GeoFloat, Geometry, GeometryCollection, MultiLineString, MultiPoint, MultiPolygon, Polygon,
+};
 use rayon::prelude::*;
 
 use crate::config::MakeValidConfig;
@@ -72,6 +74,20 @@ pub fn par_fix_multi_polygon(mp: &MultiPolygon<f64>, config: &MakeValidConfig) -
     }
     let mp = MultiPolygon::new(shells);
     Geometry::MultiPolygon(geo::algorithm::bool_ops::unary_union(&mp))
+}
+
+/// Process a batch of independent polygons in parallel.
+/// Each polygon is fixed independently with no shared state — near-linear scaling.
+/// Returns the results in the same order as input.
+#[cfg(any(feature = "arrange", feature = "structure"))]
+pub fn par_fix_polygon_batch(
+    polys: &[&Polygon<f64>],
+    config: &MakeValidConfig,
+) -> Vec<Geometry<f64>> {
+    polys
+        .par_iter()
+        .map(|p| (*p).make_valid_with_config(config))
+        .collect()
 }
 
 #[cfg(not(any(feature = "arrange", feature = "structure")))]

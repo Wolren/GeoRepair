@@ -1,34 +1,59 @@
-use geo::coordinate_position::{coord_pos_relative_to_ring, CoordPos};
 use geo::LineString;
 
 pub(crate) fn classify_holes(
     shell: &LineString<f64>,
     holes: &[LineString<f64>],
 ) -> (Vec<LineString<f64>>, Vec<LineString<f64>>) {
-    let mut inner = Vec::new();
-    let mut outer = Vec::new();
-
-    let shell_bbox = bbox(shell);
-
-    for hole in holes {
-        // Bbox pre-check: if hole bbox doesn't overlap shell bbox, it's definitely outside
-        if !bboxes_overlap(shell_bbox, bbox(hole)) {
-            outer.push(hole.clone());
-            continue;
+    #[cfg(feature = "parallel")]
+    {
+        use rayon::prelude::*;
+        let shell_bbox = bbox(shell);
+        let classified: Vec<(LineString<f64>, bool)> = holes
+            .par_iter()
+            .map(|hole| {
+                if !bboxes_overlap(shell_bbox, bbox(hole)) {
+                    return (hole.clone(), true);
+                }
+                let is_outside = hole
+                    .0
+                    .iter()
+                    .all(|pt| !crate::simd::point_in_ring_exclusive(*pt, &shell.0));
+                (hole.clone(), is_outside)
+            })
+            .collect();
+        let mut inner = Vec::new();
+        let mut outer = Vec::new();
+        for (hole, is_outside) in classified {
+            if is_outside {
+                outer.push(hole);
+            } else {
+                inner.push(hole);
+            }
         }
-
-        let is_outside = hole
-            .0
-            .iter()
-            .all(|pt| matches!(coord_pos_relative_to_ring(*pt, shell), CoordPos::Outside));
-        if is_outside {
-            outer.push(hole.clone());
-        } else {
-            inner.push(hole.clone());
-        }
+        (inner, outer)
     }
-
-    (inner, outer)
+    #[cfg(not(feature = "parallel"))]
+    {
+        let mut inner = Vec::new();
+        let mut outer = Vec::new();
+        let shell_bbox = bbox(shell);
+        for hole in holes {
+            if !bboxes_overlap(shell_bbox, bbox(hole)) {
+                outer.push(hole.clone());
+                continue;
+            }
+            let is_outside = hole
+                .0
+                .iter()
+                .all(|pt| !crate::simd::point_in_ring_exclusive(*pt, &shell.0));
+            if is_outside {
+                outer.push(hole.clone());
+            } else {
+                inner.push(hole.clone());
+            }
+        }
+        (inner, outer)
+    }
 }
 
 type Bbox = (f64, f64, f64, f64);

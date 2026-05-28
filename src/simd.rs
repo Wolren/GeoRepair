@@ -19,12 +19,12 @@ pub(crate) fn orient2d_batch_4<T: GeoFloat>(
     #[cfg(target_feature = "avx")]
     unsafe {
         // Load coordinates
-        let pbx = _mm256_set_pd(pb[0].x, pb[1].x, pb[2].x, pb[3].x);
-        let pax = _mm256_set_pd(pa[0].x, pa[1].x, pa[2].x, pa[3].x);
-        let pcy = _mm256_set_pd(pc[0].y, pc[1].y, pc[2].y, pc[3].y);
-        let pay = _mm256_set_pd(pa[0].y, pa[1].y, pa[2].y, pa[3].y);
-        let pby = _mm256_set_pd(pb[0].y, pb[1].y, pb[2].y, pb[3].y);
-        let pcx = _mm256_set_pd(pc[0].x, pc[1].x, pc[2].x, pc[3].x);
+        let pbx = _mm256_setr_pd(pb[0].x, pb[1].x, pb[2].x, pb[3].x);
+        let pax = _mm256_setr_pd(pa[0].x, pa[1].x, pa[2].x, pa[3].x);
+        let pcy = _mm256_setr_pd(pc[0].y, pc[1].y, pc[2].y, pc[3].y);
+        let pay = _mm256_setr_pd(pa[0].y, pa[1].y, pa[2].y, pa[3].y);
+        let pby = _mm256_setr_pd(pb[0].y, pb[1].y, pb[2].y, pb[3].y);
+        let pcx = _mm256_setr_pd(pc[0].x, pc[1].x, pc[2].x, pc[3].x);
 
         // (pb.x - pa.x) * (pc.y - pa.y)
         let dx = _mm256_sub_pd(pbx, pax);
@@ -152,6 +152,99 @@ pub(crate) fn is_ring_ccw_simd(coords: &[Coord<f64>]) -> bool {
     area > 0.0
 }
 
+/// Point-in-ring test using winding number, with SIMD batching for 4 edges at a time.
+/// Returns true if `pt` is strictly inside the closed ring `coords`.
+#[inline(always)]
+pub(crate) fn point_in_ring_exclusive(pt: Coord<f64>, coords: &[Coord<f64>]) -> bool {
+    let n = coords.len();
+    if n < 3 {
+        return false;
+    }
+
+    // First check if pt is on any edge boundary — if so, not strictly inside
+    let eps = 1e-12;
+    for i in 0..n - 1 {
+        let a = coords[i];
+        let b = coords[i + 1];
+        let o = (b.x - a.x) * (pt.y - a.y) - (b.y - a.y) * (pt.x - a.x);
+        if o.abs() <= eps {
+            let between_x =
+                (a.x - b.x).abs() > eps && pt.x > a.x.min(b.x) + eps && pt.x < a.x.max(b.x) - eps;
+            let between_y =
+                (a.y - b.y).abs() > eps && pt.y > a.y.min(b.y) + eps && pt.y < a.y.max(b.y) - eps;
+            if between_x || between_y || pt == a || pt == b {
+                return false;
+            }
+        }
+    }
+
+    let mut wn = 0i32;
+
+    #[cfg(target_arch = "x86_64")]
+    #[cfg(target_feature = "avx")]
+    {
+        let mut i = 0usize;
+        while i + 5 <= n {
+            let pa = [pt; 4];
+            let pb = [coords[i], coords[i + 1], coords[i + 2], coords[i + 3]];
+            let pc = [coords[i + 1], coords[i + 2], coords[i + 3], coords[i + 4]];
+            let orient = orient2d_batch_4(&pa, &pb, &pc);
+            for j in 0..4 {
+                let p1 = pb[j];
+                let p2 = pc[j];
+                if p1.y <= pt.y {
+                    if p2.y > pt.y && orient[j] > 0.0 {
+                        wn += 1;
+                    }
+                } else if p2.y <= pt.y && orient[j] < 0.0 {
+                    wn -= 1;
+                }
+            }
+            i += 4;
+        }
+        for j in i..n - 1 {
+            let p1 = coords[j];
+            let p2 = coords[j + 1];
+            if p1.y <= pt.y {
+                if p2.y > pt.y {
+                    let o = (p2.x - p1.x) * (pt.y - p1.y) - (p2.y - p1.y) * (pt.x - p1.x);
+                    if o > 0.0 {
+                        wn += 1;
+                    }
+                }
+            } else if p2.y <= pt.y {
+                let o = (p2.x - p1.x) * (pt.y - p1.y) - (p2.y - p1.y) * (pt.x - p1.x);
+                if o < 0.0 {
+                    wn -= 1;
+                }
+            }
+        }
+    }
+
+    #[cfg(not(all(target_arch = "x86_64", target_feature = "avx")))]
+    {
+        for j in 0..n - 1 {
+            let p1 = coords[j];
+            let p2 = coords[j + 1];
+            if p1.y <= pt.y {
+                if p2.y > pt.y {
+                    let o = (p2.x - p1.x) * (pt.y - p1.y) - (p2.y - p1.y) * (pt.x - p1.x);
+                    if o > 0.0 {
+                        wn += 1;
+                    }
+                }
+            } else if p2.y <= pt.y {
+                let o = (p2.x - p1.x) * (pt.y - p1.y) - (p2.y - p1.y) * (pt.x - p1.x);
+                if o < 0.0 {
+                    wn -= 1;
+                }
+            }
+        }
+    }
+
+    wn != 0
+}
+
 #[cfg(test)]
 #[cfg(target_arch = "x86_64")]
 mod tests {
@@ -239,6 +332,45 @@ mod tests {
         }
         coords.push(coords[0]);
         assert!(!is_ring_ccw_simd(&coords));
+    }
+
+    #[test]
+    fn test_point_in_ring_exclusive_square() {
+        let pt = Coord { x: 5.0, y: 5.0 };
+        let ring = vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 10.0, y: 0.0 },
+            Coord { x: 10.0, y: 10.0 },
+            Coord { x: 0.0, y: 10.0 },
+            Coord { x: 0.0, y: 0.0 },
+        ];
+        assert!(point_in_ring_exclusive(pt, &ring));
+    }
+
+    #[test]
+    fn test_point_in_ring_exclusive_outside() {
+        let pt = Coord { x: 15.0, y: 5.0 };
+        let ring = vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 10.0, y: 0.0 },
+            Coord { x: 10.0, y: 10.0 },
+            Coord { x: 0.0, y: 10.0 },
+            Coord { x: 0.0, y: 0.0 },
+        ];
+        assert!(!point_in_ring_exclusive(pt, &ring));
+    }
+
+    #[test]
+    fn test_point_in_ring_exclusive_on_vertex() {
+        let pt = Coord { x: 0.0, y: 0.0 };
+        let ring = vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 10.0, y: 0.0 },
+            Coord { x: 10.0, y: 10.0 },
+            Coord { x: 0.0, y: 10.0 },
+            Coord { x: 0.0, y: 0.0 },
+        ];
+        assert!(!point_in_ring_exclusive(pt, &ring));
     }
 
     #[test]

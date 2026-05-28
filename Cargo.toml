@@ -10,7 +10,7 @@ edition = "2024"
 rust-version = "1.88"
 
 [features]
-default = ["arrange", "structure", "parallel"]
+default = ["arrange", "structure", "parallel", "simd"]
 arrange = ["dep:spade", "geo/spade"]
 structure = []
 parallel = ["dep:rayon", "geo/multithreading"]
@@ -24,6 +24,9 @@ rayon = { version = "1.10", optional = true }
 
 robust = "1"
 thiserror = "2"
+rustc-hash = "2"
+smallvec = { version = "1", default-features = false, features = ["union"] }
+mimalloc = { version = "0.1", default-features = false }
 geos = { version = "11.1.1", optional = true, features = ["v3_8_0"] }
 
 [dev-dependencies]

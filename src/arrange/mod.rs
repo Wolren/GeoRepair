@@ -213,7 +213,7 @@ pub(crate) fn fix_multi_polygon(
     }
 }
 
-fn fix_from_lines(lines: Vec<geo::Line<f64>>) -> Option<MultiPolygon<f64>> {
+pub(crate) fn fix_from_lines(lines: Vec<geo::Line<f64>>) -> Option<MultiPolygon<f64>> {
     let prepared = prep::prepare_lines(lines).ok()?;
     let cdt = cdt::build(&prepared).ok()?;
     if cdt.num_inner_faces() == 0 {

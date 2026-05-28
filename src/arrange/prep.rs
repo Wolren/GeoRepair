@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 #[cfg(feature = "parallel")]
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -23,7 +23,7 @@ pub(crate) fn prepare_lines(lines: Vec<Line<f64>>) -> Result<PreparedLines, Make
     // Use grid-hashed spatial lookup for O(n) snap dedup
     let snap_radius = 1e-8;
     let cell_size = snap_radius * 2.0;
-    let mut grid: HashMap<(i64, i64), Coord<f64>> = HashMap::new();
+    let mut grid: FxHashMap<(i64, i64), Coord<f64>> = FxHashMap::default();
     let mut snapped = Vec::with_capacity(lines.len());
     for mut line in lines {
         line.start = snap_or_push_grid(line.start, &mut grid, snap_radius, cell_size);
@@ -56,7 +56,7 @@ fn grid_key(coord: Coord<f64>, cell_size: f64) -> (i64, i64) {
 
 fn snap_or_push_grid(
     coord: Coord<f64>,
-    grid: &mut HashMap<(i64, i64), Coord<f64>>,
+    grid: &mut FxHashMap<(i64, i64), Coord<f64>>,
     snap_radius: f64,
     cell_size: f64,
 ) -> Coord<f64> {
@@ -289,7 +289,9 @@ fn compute_overlaps(lines: &[Line<f64>], mc1: &MonoChain, mc2: &MonoChain) -> bo
     rec_overlaps(lines, mc1, mc1.start, mc1.end, mc2, mc2.start, mc2.end)
 }
 
-fn build_chain_grid(chains: &[MonoChain]) -> (HashMap<(i64, i64), Vec<usize>>, f64, f64, f64, f64) {
+fn build_chain_grid(
+    chains: &[MonoChain],
+) -> (FxHashMap<(i64, i64), Vec<usize>>, f64, f64, f64, f64) {
     let nc = chains.len();
     let mut min_x = f64::MAX;
     let mut min_y = f64::MAX;
@@ -305,7 +307,8 @@ fn build_chain_grid(chains: &[MonoChain]) -> (HashMap<(i64, i64), Vec<usize>>, f
     let cell_size = (scale / (nc as f64).sqrt()).max(1e-12);
     let inv_cell = 1.0 / cell_size;
 
-    let mut grid: HashMap<(i64, i64), Vec<usize>> = HashMap::with_capacity(nc * 2);
+    let mut grid: FxHashMap<(i64, i64), Vec<usize>> =
+        FxHashMap::with_capacity_and_hasher(nc * 2, Default::default());
     for (ci, mc) in chains.iter().enumerate() {
         let ix0 = ((mc.min_x - min_x) * inv_cell).floor() as i64;
         let iy0 = ((mc.min_y - min_y) * inv_cell).floor() as i64;
@@ -589,7 +592,7 @@ fn split_segments(lines: Vec<Line<f64>>) -> Result<Vec<Line<f64>>, MakeValidErro
     let mut split_points: Vec<Vec<(f64, Coord<f64>)>> = vec![Vec::new(); n];
 
     let grid = SegGrid::build(&lines);
-    let mut seen = HashSet::new();
+    let mut seen = FxHashSet::default();
 
     for cell in &grid.cells {
         if cell.len() < 2 {
@@ -969,7 +972,7 @@ mod tests {
 
     #[test]
     fn test_snap_or_push_new() {
-        let mut grid = std::collections::HashMap::new();
+        let mut grid = FxHashMap::default();
         let snap_radius = 1e-8;
         let cell_size = snap_radius * 2.0;
         let result = snap_or_push_grid(Coord { x: 5.0, y: 5.0 }, &mut grid, snap_radius, cell_size);
@@ -979,7 +982,7 @@ mod tests {
 
     #[test]
     fn test_snap_or_push_existing() {
-        let mut grid = std::collections::HashMap::new();
+        let mut grid = FxHashMap::default();
         let snap_radius = 1e-8;
         let cell_size = snap_radius * 2.0;
         grid.insert(
@@ -998,7 +1001,7 @@ mod tests {
 
     #[test]
     fn test_snap_or_push_far() {
-        let mut grid = std::collections::HashMap::new();
+        let mut grid = FxHashMap::default();
         let snap_radius = 1e-8;
         let cell_size = snap_radius * 2.0;
         let result = snap_or_push_grid(

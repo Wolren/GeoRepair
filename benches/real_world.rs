@@ -7,8 +7,12 @@
 use geo::{Coord, LineString, Polygon};
 use geo_repair::arrange::{self, validate_polygon};
 use geo_repair::orient::orient2d;
+use geo_repair::parallel::par_fix_polygon_batch;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
+#[cfg(feature = "bench-geos")]
 use geos::Geom;
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::time::Instant;
@@ -177,9 +181,15 @@ fn main() {
     let n_polys = polys.len();
     eprintln!("[1/5] Loaded {n_polys} polys in {load_time:.3}s");
 
-    // Pre-compute validity and vertex counts
+    // Pre-compute validity and vertex counts in parallel
     eprint!("[2/5] Validating {n_polys} polys...");
     let t0 = Instant::now();
+    #[cfg(feature = "parallel")]
+    let infos: Vec<_> = polys
+        .par_iter()
+        .map(|p| (validate_polygon(p), poly_n_vert(p)))
+        .collect();
+    #[cfg(not(feature = "parallel"))]
     let infos: Vec<_> = polys
         .iter()
         .map(|p| (validate_polygon(p), poly_n_vert(p)))
@@ -261,7 +271,7 @@ fn main() {
     // =========================================================================
     // Method comparison: Structure vs GEOS on invalid polys
     // =========================================================================
-    const SAMPLE: usize = 100;
+    const SAMPLE: usize = 1848;
     let sample_n = n_invalid.min(SAMPLE);
     let sample_idx: Vec<usize> = invalid_idx.iter().copied().take(SAMPLE).collect();
 
@@ -272,81 +282,90 @@ fn main() {
     }
     std::io::stderr().flush().ok();
 
-    let mut stru_times = Vec::with_capacity(sample_n);
-    let mut geos_times = Vec::with_capacity(sample_n);
-    let mut geos_errs = 0usize;
+    // Collect invalid polys
+    let invalid_polys: Vec<&Polygon<f64>> = sample_idx.iter().map(|&idx| &polys[idx]).collect();
 
-    for (pos, &idx) in sample_idx.iter().enumerate() {
-        let p = &polys[idx];
-        let nv = infos[idx].1;
+    // Parallel Structure batch processing
+    let t0 = Instant::now();
+    let cfg = MakeValidConfig {
+        poly_method: PolyMethod::Structure,
+        ..Default::default()
+    };
+    let results = par_fix_polygon_batch(&invalid_polys, &cfg);
+    let stru_total = t0.elapsed().as_secs_f64();
 
-        eprint!(
-            "\r    {}/{} idx={} nv={}: Structure...",
-            pos + 1,
-            sample_n,
-            idx,
-            nv
-        );
-        std::io::stderr().flush().ok();
-        let t0 = Instant::now();
-        let _ = p.make_valid_with_config(&MakeValidConfig {
-            poly_method: PolyMethod::Structure,
-            ..Default::default()
-        });
-        let ts = t0.elapsed().as_secs_f64();
+    // Validate all Structure outputs through GEOS is_valid()
+    let mut stru_invalid_outputs = 0usize;
+    for g in &results {
+        let wkt = g.wkt_string();
+        match geos::Geometry::new_from_wkt(&wkt) {
+            Ok(gg) => {
+                if !gg.is_valid().unwrap_or(false) {
+                    stru_invalid_outputs += 1;
+                }
+            }
+            Err(_) => stru_invalid_outputs += 1,
+        }
+    }
 
-        eprint!(
-            "\r    {}/{} idx={} nv={}: GEOS...      ",
-            pos + 1,
-            sample_n,
-            idx,
-            nv
-        );
-        std::io::stderr().flush().ok();
-        let t0 = Instant::now();
+    // Sequential GEOS processing for comparison
+    let t0 = Instant::now();
+    for p in &invalid_polys {
         match geos::Geometry::new_from_wkt(&p.wkt_string()) {
             Ok(g) => {
                 let _ = g.make_valid();
-                geos_times.push(t0.elapsed().as_secs_f64());
             }
-            Err(_) => {
-                geos_times.push(t0.elapsed().as_secs_f64());
-                geos_errs += 1;
-            }
+            Err(_) => {}
         }
-        stru_times.push(ts);
-
-        eprintln!(
-            "\r    {}/{} idx={} nv={}: str={:.4}s, geos={:.4}s  ",
-            pos + 1,
-            sample_n,
-            idx,
-            nv,
-            ts,
-            geos_times[pos]
-        );
-        std::io::stderr().flush().ok();
     }
-    eprintln!();
+    let geos_total = t0.elapsed().as_secs_f64();
+
+    // =========================================================================
+    // Full-dataset timing: process N random polys through both methods
+    // =========================================================================
+    let full_n = n_polys;
+    eprintln!("\n[5/5] Full dataset: {full_n} polys (parallel Structure vs sequential GEOS)");
+
+    let t0 = Instant::now();
+    let cfg = MakeValidConfig {
+        poly_method: PolyMethod::Structure,
+        ..Default::default()
+    };
+    let all_polys: Vec<&Polygon<f64>> = (0..full_n).map(|i| &polys[i]).collect();
+    let _full_results = par_fix_polygon_batch(&all_polys, &cfg);
+    let full_stru = t0.elapsed().as_secs_f64();
+
+    let t0 = Instant::now();
+    for i in 0..full_n {
+        match geos::Geometry::new_from_wkt(&polys[i].wkt_string()) {
+            Ok(g) => {
+                let _ = g.make_valid();
+            }
+            Err(_) => {}
+        }
+    }
+    let full_geos = t0.elapsed().as_secs_f64();
 
     // =========================================================================
     // Summary
     // =========================================================================
-    let stru_total: f64 = stru_times.iter().sum();
-    let geos_total: f64 = geos_times.iter().sum();
-    let est_valid_time = n_valid as f64 * fp_time;
+    let full_ratio = if full_geos > 0.0 {
+        full_stru / full_geos
+    } else {
+        0.0
+    };
 
-    eprintln!("\n\n[5/5] Results (sample: first {sample_n} of {n_invalid} invalid polys, {geos_errs} GEOS errors)");
+    eprintln!("\n\n[6/5] Results");
     eprintln!("═════════════════════════════════════════════════════════════════════");
     eprintln!("  Data: {n_polys} polys ({n_valid} valid, {n_invalid} invalid)");
+    eprintln!("  Fast-path: {:.3}µs/valid poly", fp_time * 1e6);
     eprintln!(
-        "  Fast-path: {:.3}µs/valid poly · estimated valid total: {:.4}s",
-        fp_time * 1e6,
-        est_valid_time
+        "  Structure output GEOS-valid: {}/{} invalid polys",
+        stru_invalid_outputs, sample_n
     );
-    eprintln!("═════════════════════════════════════════════════════════════════════");
-    eprintln!("  Method               │  sample (s) │ per-poly (ms) │  vs GEOS");
-    eprintln!("  ─────────────────────┼─────────────┼───────────────┼───────────");
+    eprintln!("─────────────────────────────────────────────────────────────────────");
+    eprintln!("  Method (invalid polys)│  total (s) │ per-poly (ms) │  vs GEOS");
+    eprintln!("  ──────────────────────┼────────────┼───────────────┼───────────");
     let stru_per = stru_total * 1000.0 / sample_n as f64;
     let geos_per = geos_total * 1000.0 / sample_n as f64;
     let stru_rat = if geos_total > 0.0 {
@@ -355,9 +374,13 @@ fn main() {
         0.0
     };
     eprintln!(
-        "  Structure            │ {stru_total:>9.4}s │ {stru_per:>11.3}    │ {stru_rat:>6.2}x"
+        "  Structure             │ {stru_total:>9.4}s │ {stru_per:>11.3}    │ {stru_rat:>6.2}x"
     );
-    eprintln!("  ─────────────────────┼─────────────┼───────────────┼───────────");
-    eprintln!("  GEOS                 │ {geos_total:>9.4}s │ {geos_per:>11.3}    │      —");
+    eprintln!("  GEOS                  │ {geos_total:>9.4}s │ {geos_per:>11.3}    │      —");
+    eprintln!("─────────────────────────────────────────────────────────────────────");
+    let full_stru_per = full_stru * 1000.0 / full_n as f64;
+    let full_geos_per = full_geos * 1000.0 / full_n as f64;
+    eprintln!("  Full dataset ({full_n} poly) │ {full_stru:>9.4}s │ {full_stru_per:>9.4}    │ {full_ratio:>6.2}x");
+    eprintln!("  GEOS (full)           │ {full_geos:>9.4}s │ {full_geos_per:>9.4}    │      —");
     eprintln!("═════════════════════════════════════════════════════════════════════");
 }

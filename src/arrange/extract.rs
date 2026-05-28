@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 use geo::Coord;
 use spade::handles::{FixedDirectedEdgeHandle, FixedFaceHandle, InnerTag};
@@ -6,7 +6,7 @@ use spade::{ConstrainedDelaunayTriangulation, Triangulation};
 
 pub(crate) fn trace_rings(
     cdt: &ConstrainedDelaunayTriangulation<Coord<f64>>,
-    interior: &HashSet<FixedFaceHandle<InnerTag>>,
+    interior: &FxHashSet<FixedFaceHandle<InnerTag>>,
 ) -> Vec<Vec<Coord<f64>>> {
     let is_interior = |face: spade::handles::FaceHandle<
         '_,
@@ -22,13 +22,13 @@ pub(crate) fn trace_rings(
             .unwrap_or(false)
     };
 
-    let boundary_edges: HashSet<FixedDirectedEdgeHandle> = cdt
+    let boundary_edges: FxHashSet<FixedDirectedEdgeHandle> = cdt
         .directed_edges()
         .filter(|e| is_interior(e.face()) && !is_interior(e.rev().face()))
         .map(|e| e.fix())
         .collect();
 
-    let mut used: HashSet<FixedDirectedEdgeHandle> = HashSet::new();
+    let mut used: FxHashSet<FixedDirectedEdgeHandle> = FxHashSet::default();
     let mut rings = Vec::new();
 
     for &start_handle in &boundary_edges {

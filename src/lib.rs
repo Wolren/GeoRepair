@@ -18,3 +18,6 @@ pub mod simd;
 pub use config::{MakeValidConfig, PolyMethod};
 pub use error::MakeValidError;
 pub use make_valid::MakeValid;
+
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;

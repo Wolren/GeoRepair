@@ -1,7 +1,11 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use rustc_hash::{FxHashMap, FxHashSet};
+use smallvec::SmallVec;
+use std::collections::VecDeque;
 
 use geo::Buffer;
-use geo::{Coord, Line, LineString, MultiPolygon, Polygon};
+use geo::{Coord, Line, LineString, Polygon};
+
+use crate::orient::orient2d;
 
 pub(crate) fn repair_ring(ring: &LineString<f64>) -> Option<Vec<LineString<f64>>> {
     let coords = basic_cleanup(ring)?;
@@ -12,47 +16,64 @@ pub(crate) fn repair_ring(ring: &LineString<f64>) -> Option<Vec<LineString<f64>>
         return Some(vec![LineString::new(coords)]);
     }
 
-    let n = coords.len();
-
-    // For very large self-intersecting rings, skip planar graph (O(n²) face splitting)
-    // and let the caller fall back to CDT arrange.
-    const LARGE_RING_THRESHOLD: usize = 25000;
-    if n > LARGE_RING_THRESHOLD {
-        return None;
+    // For small self-intersecting rings, use bufferByZero (GEOS-style robust ring fixer).
+    // It handles collinear overlaps and degeneracies that the planar graph may miss.
+    // Large rings use the planar graph directly (buffer can hang on certain inputs).
+    if coords.len() < 500 {
+        let clean_ring = LineString::new(coords.clone());
+        if let Some(rings) = buffer_by_zero_repair(&clean_ring) {
+            return Some(rings);
+        }
     }
 
-    // Try buffer(0) first — GEOS-style robust single-pass ring fixer
-    let clean_ring = LineString::new(coords.clone());
-    if let Some(rings) = buffer_by_zero_repair(&clean_ring) {
-        return Some(rings);
+    // Planar graph face extraction (O(n) face splitting via Vec index lookup)
+    if let Some(rings) = fix_self_intersecting(&coords) {
+        let cleaned: Vec<LineString<f64>> = rings
+            .into_iter()
+            .filter_map(|r| basic_cleanup(&r).map(LineString::new))
+            .filter(|r| r.0.len() >= 4)
+            .collect();
+        if cleaned.is_empty() {
+            return None;
+        }
+        return Some(cleaned);
     }
-    // Fall back to planar graph face extraction
-    fix_self_intersecting(&coords)
+    None
 }
 
-/// GEOS `bufferByZero()` equivalent: wraps the ring as a Polygon and buffers by 0.
-/// The buffer operation naturally resolves self-intersections and produces valid OGC output.
 fn buffer_by_zero_repair(ring: &LineString<f64>) -> Option<Vec<LineString<f64>>> {
     let poly = Polygon::new(ring.clone(), Vec::new());
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| poly.buffer(0.0)));
-    match result {
-        Ok(mp) if !mp.0.is_empty() => {
-            let rings: Vec<LineString<f64>> =
-                mp.0.into_iter()
-                    .flat_map(|p| {
-                        let mut rings = vec![p.exterior().clone()];
-                        rings.extend(p.interiors().iter().cloned());
-                        rings
-                    })
-                    .collect();
-            if rings.is_empty() {
-                None
-            } else {
-                Some(rings)
+
+    let (tx, rx) = std::sync::mpsc::channel::<geo::MultiPolygon<f64>>();
+    let handle = std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(move || {
+            let result =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| poly.buffer(0.0)));
+            if let Ok(mp) = result {
+                let _ = tx.send(mp);
             }
+        });
+
+    if let Ok(_h) = handle {
+        match rx.recv_timeout(std::time::Duration::from_secs(10)) {
+            Ok(mp) if !mp.0.is_empty() => {
+                let rings: Vec<LineString<f64>> =
+                    mp.0.into_iter()
+                        .flat_map(|p| {
+                            let mut rings = vec![p.exterior().clone()];
+                            rings.extend(p.interiors().iter().cloned());
+                            rings
+                        })
+                        .collect();
+                if !rings.is_empty() {
+                    return Some(rings);
+                }
+            }
+            _ => {}
         }
-        _ => None,
     }
+    None
 }
 
 fn basic_cleanup(ring: &LineString<f64>) -> Option<Vec<Coord<f64>>> {
@@ -88,14 +109,16 @@ fn remove_consecutive_duplicates(coords: Vec<Coord<f64>>) -> Vec<Coord<f64>> {
     result
 }
 
-fn has_self_intersections(coords: &[Coord<f64>]) -> bool {
+pub(crate) fn has_self_intersections(coords: &[Coord<f64>]) -> bool {
     let n = coords.len();
     if n < 4 {
         return false;
     }
 
-    // Check for duplicate non-consecutive vertices (pinch points) via HashSet
-    let mut seen: HashSet<(u64, u64)> = HashSet::with_capacity(n);
+    // Check for duplicate non-consecutive vertices (pinch points) via FxHashSet
+    // These trigger the planar graph which handles them via split_face_at_pinch_points.
+    let mut seen: FxHashSet<(u64, u64)> =
+        FxHashSet::with_capacity_and_hasher(n, Default::default());
     for i in 0..n - 1 {
         let key = (coords[i].x.to_bits(), coords[i].y.to_bits());
         if !seen.insert(key) {
@@ -181,106 +204,148 @@ fn has_self_intersections_grid(coords: &[Coord<f64>]) -> bool {
         }
     }
 
-    // For each pair of edges in the same cell, check for intersection
-    // Use a Set to avoid checking the same pair twice
-    let mut checked: HashSet<(usize, usize)> = HashSet::new();
-
-    for cell in &grid {
-        if cell.len() < 2 {
-            continue;
-        }
-        // Sort to enable early exit when j is far from i
-        let mut sorted = cell.clone();
-        sorted.sort_unstable();
-        for ii in 0..sorted.len() {
-            let ei = sorted[ii];
-            for jj in (ii + 1)..sorted.len() {
-                let ej = sorted[jj];
-                if !checked.insert((ei, ej)) {
-                    continue;
-                }
-                // Skip consecutive edges and the first/last edge pair
-                if ei.abs_diff(ej) <= 1 || (ei == 0 && ej == n_edges - 1) {
-                    continue;
-                }
-                if check_edge_pair(coords, ei, ej) {
-                    return true;
+    // Parallel cell processing — each cell's edge pairs are independent
+    #[cfg(feature = "parallel")]
+    {
+        use rayon::prelude::*;
+        grid.par_iter()
+            .any(|cell| cell_has_intersection(coords, cell, n_edges))
+    }
+    #[cfg(not(feature = "parallel"))]
+    {
+        let mut checked: FxHashSet<(usize, usize)> = FxHashSet::default();
+        for cell in &grid {
+            if cell.len() < 2 {
+                continue;
+            }
+            let mut sorted = cell.clone();
+            sorted.sort_unstable();
+            for ii in 0..sorted.len() {
+                let ei = sorted[ii];
+                for jj in (ii + 1)..sorted.len() {
+                    let ej = sorted[jj];
+                    if !checked.insert((ei, ej)) {
+                        continue;
+                    }
+                    if ei.abs_diff(ej) <= 1 || (ei == 0 && ej == n_edges - 1) {
+                        continue;
+                    }
+                    if check_edge_pair(coords, ei, ej) {
+                        return true;
+                    }
                 }
             }
         }
+        false
     }
+}
 
+/// Check a single grid cell for intersecting edge pairs.
+fn cell_has_intersection(coords: &[Coord<f64>], cell: &[usize], n_edges: usize) -> bool {
+    if cell.len() < 2 {
+        return false;
+    }
+    let mut sorted = cell.to_vec();
+    sorted.sort_unstable();
+    for ii in 0..sorted.len() {
+        let ei = sorted[ii];
+        for jj in (ii + 1)..sorted.len() {
+            let ej = sorted[jj];
+            if ei.abs_diff(ej) <= 1 || (ei == 0 && ej == n_edges - 1) {
+                continue;
+            }
+            if check_edge_pair(coords, ei, ej) {
+                return true;
+            }
+        }
+    }
     false
 }
 
-/// Check a single pair of edges for any type of intersection
+/// Check a single pair of edges for any type of intersection.
+/// Uses a single batch of 4 orient2d calls (SIMD) for ALL sub-checks.
+#[inline(always)]
 fn check_edge_pair(coords: &[Coord<f64>], i: usize, j: usize) -> bool {
-    if edges_cross_proper(coords[i], coords[i + 1], coords[j], coords[j + 1]) {
+    let a1 = coords[i];
+    let a2 = coords[i + 1];
+    let b1 = coords[j];
+    let b2 = coords[j + 1];
+    let eps = 1e-12;
+
+    // Single batch of 4 orient2d:
+    // o[0] = orient2d(a1, a2, b1)
+    // o[1] = orient2d(a1, a2, b2)
+    // o[2] = orient2d(b1, b2, a1)
+    // o[3] = orient2d(b1, b2, a2)
+    let o = crate::simd::orient2d_batch_4(&[a1, a1, b1, b1], &[a2, a2, b2, b2], &[b1, b2, a1, a2]);
+
+    // edges_cross_proper
+    if (o[0].abs() > eps || o[1].abs() > eps || o[2].abs() > eps || o[3].abs() > eps)
+        && o[0].signum() != o[1].signum()
+        && o[2].signum() != o[3].signum()
+    {
         return true;
     }
-    if vertex_on_edge(coords[i], coords[j], coords[j + 1]) {
-        return true;
+
+    // vertex_on_edge(a1 on b1-b2): orient2d(b1, b2, a1) = o[2]
+    // vertex_on_edge(a2 on b1-b2): orient2d(b1, b2, a2) = o[3]
+    // vertex_on_edge(b1 on a1-a2): orient2d(a1, a2, b1) = o[0]
+    // vertex_on_edge(b2 on a1-a2): orient2d(a1, a2, b2) = o[1]
+    if o[2].abs() <= eps && a1 != b1 && a1 != b2 {
+        if (b1.x - b2.x).abs() > eps && a1.x > b1.x.min(b2.x) + eps && a1.x < b1.x.max(b2.x) - eps
+            || (b1.y - b2.y).abs() > eps
+                && a1.y > b1.y.min(b2.y) + eps
+                && a1.y < b1.y.max(b2.y) - eps
+        {
+            return true;
+        }
     }
-    if vertex_on_edge(coords[i + 1], coords[j], coords[j + 1]) {
-        return true;
+    if o[3].abs() <= eps && a2 != b1 && a2 != b2 {
+        if (b1.x - b2.x).abs() > eps && a2.x > b1.x.min(b2.x) + eps && a2.x < b1.x.max(b2.x) - eps
+            || (b1.y - b2.y).abs() > eps
+                && a2.y > b1.y.min(b2.y) + eps
+                && a2.y < b1.y.max(b2.y) - eps
+        {
+            return true;
+        }
     }
-    if vertex_on_edge(coords[j], coords[i], coords[i + 1]) {
-        return true;
+    if o[0].abs() <= eps && b1 != a1 && b1 != a2 {
+        if (a1.x - a2.x).abs() > eps && b1.x > a1.x.min(a2.x) + eps && b1.x < a1.x.max(a2.x) - eps
+            || (a1.y - a2.y).abs() > eps
+                && b1.y > a1.y.min(a2.y) + eps
+                && b1.y < a1.y.max(a2.y) - eps
+        {
+            return true;
+        }
     }
-    if vertex_on_edge(coords[j + 1], coords[i], coords[i + 1]) {
-        return true;
+    if o[1].abs() <= eps && b2 != a1 && b2 != a2 {
+        if (a1.x - a2.x).abs() > eps && b2.x > a1.x.min(a2.x) + eps && b2.x < a1.x.max(a2.x) - eps
+            || (a1.y - a2.y).abs() > eps
+                && b2.y > a1.y.min(a2.y) + eps
+                && b2.y < a1.y.max(a2.y) - eps
+        {
+            return true;
+        }
     }
-    if edges_collinear_overlap(coords[i], coords[i + 1], coords[j], coords[j + 1]) {
-        return true;
+
+    // edges_collinear_overlap: all 4 orient2d are zero
+    if o[0].abs() <= eps && o[1].abs() <= eps && o[2].abs() <= eps && o[3].abs() <= eps {
+        let lo_x = a1.x.min(a2.x).max(b1.x.min(b2.x));
+        let hi_x = a1.x.max(a2.x).min(b1.x.max(b2.x));
+        let lo_y = a1.y.min(a2.y).max(b1.y.min(b2.y));
+        let hi_y = a1.y.max(a2.y).min(b1.y.max(b2.y));
+        if lo_x + eps < hi_x && lo_y + eps < hi_y {
+            return true;
+        }
     }
+
     false
 }
 
-fn vertex_on_edge(v: Coord<f64>, a: Coord<f64>, b: Coord<f64>) -> bool {
-    let eps = 1e-12;
-    if orient2d(a, b, v).abs() > eps {
-        return false;
-    }
-    if v == a || v == b {
-        return false;
-    }
-    let between_x = (a.x - b.x).abs() > eps && v.x > a.x.min(b.x) + eps && v.x < a.x.max(b.x) - eps;
-    let between_y = (a.y - b.y).abs() > eps && v.y > a.y.min(b.y) + eps && v.y < a.y.max(b.y) - eps;
-    between_x || between_y
-}
-
-fn edges_collinear_overlap(a1: Coord<f64>, a2: Coord<f64>, b1: Coord<f64>, b2: Coord<f64>) -> bool {
-    let eps = 1e-12;
-    let o1 = orient2d(a1, a2, b1);
-    let o2 = orient2d(a1, a2, b2);
-    let o3 = orient2d(b1, b2, a1);
-    let o4 = orient2d(b1, b2, a2);
-    if o1.abs() > eps || o2.abs() > eps || o3.abs() > eps || o4.abs() > eps {
-        return false;
-    }
-    let lo_x = a1.x.min(a2.x).max(b1.x.min(b2.x));
-    let hi_x = a1.x.max(a2.x).min(b1.x.max(b2.x));
-    let lo_y = a1.y.min(a2.y).max(b1.y.min(b2.y));
-    let hi_y = a1.y.max(a2.y).min(b1.y.max(b2.y));
-    lo_x + eps < hi_x && lo_y + eps < hi_y
-}
-
-fn orient2d(a: Coord<f64>, b: Coord<f64>, c: Coord<f64>) -> f64 {
-    (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
-}
-
-fn edges_cross_proper(a1: Coord<f64>, a2: Coord<f64>, b1: Coord<f64>, b2: Coord<f64>) -> bool {
-    let eps = 1e-12;
-    let o1 = orient2d(a1, a2, b1);
-    let o2 = orient2d(a1, a2, b2);
-    let o3 = orient2d(b1, b2, a1);
-    let o4 = orient2d(b1, b2, a2);
-    if o1.abs() > eps || o2.abs() > eps || o3.abs() > eps || o4.abs() > eps {
-        return o1.signum() != o2.signum() && o3.signum() != o4.signum();
-    }
-    false
-}
-
+/// ---------------------------------------------------------------------------
+/// Self-intersecting ring fixer
+/// ---------------------------------------------------------------------------
+/// Self-intersecting ring fixer
 /// ---------------------------------------------------------------------------
 /// Self-intersecting ring fixer
 /// ---------------------------------------------------------------------------
@@ -308,7 +373,7 @@ fn fix_self_intersecting(coords: &[Coord<f64>]) -> Option<Vec<LineString<f64>>> 
     if simple_faces.is_empty() {
         return None;
     }
-    let interior = label_interior_faces(&noded, &simple_faces)?;
+    let interior = label_interior_faces(&noded, &verts, coords, &simple_faces)?;
     let mut result: Vec<LineString<f64>> = Vec::new();
     for &fi in &interior {
         let face = &simple_faces[fi];
@@ -392,30 +457,72 @@ fn split_edges_bruteforce(edges: &[Line<f64>], split_points: &mut [Vec<f64>], ep
 fn split_edges_grid(edges: &[Line<f64>], split_points: &mut [Vec<f64>], eps: f64) {
     let n = edges.len();
     let grid = build_edge_grid(edges);
-    let mut checked: HashSet<(usize, usize)> = HashSet::new();
 
-    for cell in &grid {
-        if cell.len() < 2 {
-            continue;
-        }
-        let mut sorted = cell.clone();
-        sorted.sort_unstable();
-        for ii in 0..sorted.len() {
-            let ei = sorted[ii];
-            for jj in (ii + 1)..sorted.len() {
-                let ej = sorted[jj];
-                if !checked.insert((ei, ej)) {
-                    continue;
+    #[cfg(feature = "parallel")]
+    {
+        use rayon::prelude::*;
+        // Each cell produces Vec<(edge_idx, param)> — only for pairs that intersect
+        let cell_results: Vec<Vec<(usize, f64)>> = grid
+            .par_iter()
+            .map(|cell| {
+                let mut hits = Vec::new();
+                if cell.len() < 2 {
+                    return hits;
                 }
-                if ei.abs_diff(ej) <= 1 || (ei == 0 && ej == n - 1) {
-                    continue;
-                }
-                if let Some((ti, tj)) = intersect_param(&edges[ei], &edges[ej], eps) {
-                    if ti > eps && ti < 1.0 - eps {
-                        split_points[ei].push(ti);
+                let mut sorted = cell.clone();
+                sorted.sort_unstable();
+                for ii in 0..sorted.len() {
+                    let ei = sorted[ii];
+                    for jj in (ii + 1)..sorted.len() {
+                        let ej = sorted[jj];
+                        if ei.abs_diff(ej) <= 1 || (ei == 0 && ej == n - 1) {
+                            continue;
+                        }
+                        if let Some((ti, tj)) = intersect_param(&edges[ei], &edges[ej], eps) {
+                            if ti > eps && ti < 1.0 - eps {
+                                hits.push((ei, ti));
+                            }
+                            if tj > eps && tj < 1.0 - eps {
+                                hits.push((ej, tj));
+                            }
+                        }
                     }
-                    if tj > eps && tj < 1.0 - eps {
-                        split_points[ej].push(tj);
+                }
+                hits
+            })
+            .collect();
+        for hits in cell_results {
+            for (ei, t) in hits {
+                split_points[ei].push(t);
+            }
+        }
+    }
+    #[cfg(not(feature = "parallel"))]
+    {
+        let mut checked: FxHashSet<(usize, usize)> = FxHashSet::default();
+        for cell in &grid {
+            if cell.len() < 2 {
+                continue;
+            }
+            let mut sorted = cell.clone();
+            sorted.sort_unstable();
+            for ii in 0..sorted.len() {
+                let ei = sorted[ii];
+                for jj in (ii + 1)..sorted.len() {
+                    let ej = sorted[jj];
+                    if !checked.insert((ei, ej)) {
+                        continue;
+                    }
+                    if ei.abs_diff(ej) <= 1 || (ei == 0 && ej == n - 1) {
+                        continue;
+                    }
+                    if let Some((ti, tj)) = intersect_param(&edges[ei], &edges[ej], eps) {
+                        if ti > eps && ti < 1.0 - eps {
+                            split_points[ei].push(ti);
+                        }
+                        if tj > eps && tj < 1.0 - eps {
+                            split_points[ej].push(tj);
+                        }
                     }
                 }
             }
@@ -469,6 +576,7 @@ fn build_edge_grid(edges: &[Line<f64>]) -> Vec<Vec<usize>> {
     grid
 }
 
+#[inline]
 fn intersect_param(e1: &Line<f64>, e2: &Line<f64>, eps: f64) -> Option<(f64, f64)> {
     let denom = (e1.end.x - e1.start.x) * (e2.end.y - e2.start.y)
         - (e1.end.y - e1.start.y) * (e2.end.x - e2.start.x);
@@ -492,6 +600,7 @@ fn intersect_param(e1: &Line<f64>, e2: &Line<f64>, eps: f64) -> Option<(f64, f64
 /// Handle collinear / near-parallel edge pairs: check if the edges overlap in projection
 /// along their shared direction. If they overlap, return the overlap endpoints as split
 /// parameters on both edges.
+#[inline]
 fn intersect_param_collinear(e1: &Line<f64>, e2: &Line<f64>, eps: f64) -> Option<(f64, f64)> {
     let o1 = orient2d(e1.start, e1.end, e2.start);
     let o2 = orient2d(e1.start, e1.end, e2.end);
@@ -564,6 +673,7 @@ fn intersect_param_collinear(e1: &Line<f64>, e2: &Line<f64>, eps: f64) -> Option
     None
 }
 
+#[inline(always)]
 fn lerp(e: Line<f64>, t: f64) -> Coord<f64> {
     Coord {
         x: e.start.x + t * (e.end.x - e.start.x),
@@ -571,6 +681,7 @@ fn lerp(e: Line<f64>, t: f64) -> Coord<f64> {
     }
 }
 
+#[inline(always)]
 fn dist2(a: Coord<f64>, b: Coord<f64>) -> f64 {
     (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y)
 }
@@ -581,6 +692,7 @@ fn dist2(a: Coord<f64>, b: Coord<f64>) -> f64 {
 
 const SNAP_SCALE: f64 = 1e8;
 
+#[inline(always)]
 fn snap_key(c: Coord<f64>) -> (i64, i64) {
     (
         (c.x * SNAP_SCALE).round() as i64,
@@ -588,6 +700,7 @@ fn snap_key(c: Coord<f64>) -> (i64, i64) {
     )
 }
 
+#[inline(always)]
 fn key_to_coord(key: (i64, i64)) -> Coord<f64> {
     Coord {
         x: key.0 as f64 / SNAP_SCALE,
@@ -598,11 +711,11 @@ fn key_to_coord(key: (i64, i64)) -> Coord<f64> {
 struct Graph {
     verts: Vec<Coord<f64>>,
     edges: Vec<(usize, usize)>,
-    sorted_adj: Vec<Vec<(usize, usize)>>,
+    sorted_adj: Vec<SmallVec<[(usize, usize); 4]>>,
 }
 
 fn build_graph(lines: &[Line<f64>]) -> (Graph, Vec<Coord<f64>>) {
-    let mut key_to_idx: HashMap<(i64, i64), usize> = HashMap::new();
+    let mut key_to_idx: FxHashMap<(i64, i64), usize> = FxHashMap::default();
     let mut verts: Vec<Coord<f64>> = Vec::new();
     let mut get_vert = |c: Coord<f64>| -> usize {
         let key = snap_key(c);
@@ -621,24 +734,23 @@ fn build_graph(lines: &[Line<f64>]) -> (Graph, Vec<Coord<f64>>) {
         }
     }
     let n_verts = verts.len();
-    let mut adj: Vec<Vec<(usize, usize)>> = vec![Vec::new(); n_verts];
+    let mut adj: Vec<SmallVec<[(usize, usize); 4]>> = vec![SmallVec::new(); n_verts];
     for (ei, &(fi, ti)) in edges.iter().enumerate() {
         adj[fi].push((ti, ei));
         adj[ti].push((fi, ei));
     }
-    let sorted_adj: Vec<Vec<(usize, usize)>> = adj
-        .iter()
+    let sorted_adj: Vec<SmallVec<[(usize, usize); 4]>> = adj
+        .into_iter()
         .enumerate()
-        .map(|(vi, neighbors)| {
+        .map(|(vi, mut neighbors)| {
             let cx = verts[vi].x;
             let cy = verts[vi].y;
-            let mut sorted = neighbors.clone();
-            sorted.sort_by(|(a_idx, _), (b_idx, _)| {
+            neighbors.sort_by(|(a_idx, _), (b_idx, _)| {
                 let aa = (verts[*a_idx].y - cy).atan2(verts[*a_idx].x - cx);
                 let ba = (verts[*b_idx].y - cy).atan2(verts[*b_idx].x - cx);
                 aa.partial_cmp(&ba).unwrap_or(std::cmp::Ordering::Equal)
             });
-            sorted
+            neighbors
         })
         .collect();
     (
@@ -806,30 +918,26 @@ fn find_next_edge(
 fn split_face_at_pinch_points(face: &[(usize, usize)]) -> Vec<Vec<(usize, usize)>> {
     let verts: Vec<usize> = face.iter().map(|&(_, to)| to).collect();
     let n = verts.len();
-    for i in 0..n {
-        for j in i + 1..n {
-            if verts[i] == verts[j] {
-                // Skip normal closure (last vertex == first vertex)
-                if i == 0 && j == n - 1 {
-                    continue;
-                }
-                // sub1 = edges from LEAVING V (at i) to ENTERING V (at j)
-                // face[i+1] leaves V (from_vertex = verts[i] = V)
-                // face[j] enters V (to_vertex = verts[j] = V)
-                let sub1: Vec<(usize, usize)> = face[i + 1..=j].to_vec();
-                // sub2 = remaining edges from LEAVING V (at j) to ENTERING V (at i)
-                // face[j+1] leaves V (from_vertex = verts[j] = V)
-                // face[i] enters V (to_vertex = verts[i] = V)
-                let sub2: Vec<(usize, usize)> = face[j + 1..]
-                    .iter()
-                    .chain(face[0..=i].iter())
-                    .copied()
-                    .collect();
-                let mut result = split_face_at_pinch_points(&sub1);
-                result.extend(split_face_at_pinch_points(&sub2));
-                return result;
+    // Find max vertex ID in this face to size the lookup table
+    let max_id = verts.iter().copied().max().unwrap_or(0);
+    let mut first_seen = vec![None; max_id + 1];
+    for j in 0..n {
+        let v = verts[j];
+        if let Some(i) = first_seen[v] {
+            if i == 0 && j == n - 1 {
+                continue;
             }
+            let sub1: Vec<(usize, usize)> = face[i + 1..=j].to_vec();
+            let sub2: Vec<(usize, usize)> = face[j + 1..]
+                .iter()
+                .chain(face[0..=i].iter())
+                .copied()
+                .collect();
+            let mut result = split_face_at_pinch_points(&sub1);
+            result.extend(split_face_at_pinch_points(&sub2));
+            return result;
         }
+        first_seen[v] = Some(j);
     }
     vec![face.to_vec()]
 }
@@ -838,23 +946,30 @@ fn split_face_at_pinch_points(face: &[(usize, usize)]) -> Vec<Vec<(usize, usize)
 /// Face labeling: BFS from exterior face toggling interior/exterior
 /// ---------------------------------------------------------------------------
 
+/// Label interior faces using BFS with winding-number verification.
+/// BFS toggles parity across shared edges (works for 99% of cases).
+/// Winding-number at face centroid catches any mislabeled faces from degenerate adjacency.
 fn label_interior_faces(
     edges: &[Line<f64>],
+    verts: &[Coord<f64>],
+    input_ring: &[Coord<f64>],
     faces: &[Vec<(usize, usize)>],
-) -> Option<HashSet<usize>> {
+) -> Option<FxHashSet<usize>> {
     let n_faces = faces.len();
     if n_faces == 0 {
         return None;
     }
 
-    let mut edge_to_faces: HashMap<usize, Vec<usize>> = HashMap::new();
+    use crate::orient::orient2d;
+
+    // Build adjacency from shared edges
+    let mut edge_to_faces: FxHashMap<usize, Vec<usize>> = FxHashMap::default();
     for (fi, face) in faces.iter().enumerate() {
         for &(ei, _) in face {
             edge_to_faces.entry(ei).or_default().push(fi);
         }
     }
-
-    let mut adj: HashMap<usize, Vec<usize>> = HashMap::new();
+    let mut adj: FxHashMap<usize, Vec<usize>> = FxHashMap::default();
     for faces_on_edge in edge_to_faces.values() {
         if faces_on_edge.len() == 2 {
             adj.entry(faces_on_edge[0])
@@ -866,10 +981,30 @@ fn label_interior_faces(
         }
     }
 
-    let exterior = find_exterior_face(faces, edges)?;
+    // Find exterior face (largest bbox area)
+    let exterior = {
+        let mut best: Option<(usize, f64)> = None;
+        for (fi, face) in faces.iter().enumerate() {
+            let (mut min_x, mut max_x, mut min_y, mut max_y) =
+                (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+            for &(ei, _) in face {
+                let e = &edges[ei];
+                min_x = min_x.min(e.start.x).min(e.end.x);
+                max_x = max_x.max(e.start.x).max(e.end.x);
+                min_y = min_y.min(e.start.y).min(e.end.y);
+                max_y = max_y.max(e.start.y).max(e.end.y);
+            }
+            let area = (max_x - min_x) * (max_y - min_y);
+            if best.is_none_or(|(_, a)| area > a) {
+                best = Some((fi, area));
+            }
+        }
+        best.map(|(i, _)| i)?
+    };
 
-    let mut interior: HashSet<usize> = HashSet::new();
-    let mut visited: HashSet<usize> = HashSet::new();
+    // BFS labeling
+    let mut interior: FxHashSet<usize> = FxHashSet::default();
+    let mut visited: FxHashSet<usize> = FxHashSet::default();
     let mut queue: VecDeque<(usize, bool)> = VecDeque::new();
     visited.insert(exterior);
     queue.push_back((exterior, false));
@@ -886,29 +1021,42 @@ fn label_interior_faces(
             }
         }
     }
-    Some(interior)
-}
 
-fn find_exterior_face(faces: &[Vec<(usize, usize)>], edges: &[Line<f64>]) -> Option<usize> {
-    let mut best: Option<(usize, f64)> = None;
-    for (fi, face) in faces.iter().enumerate() {
-        let mut min_x = f64::MAX;
-        let mut max_x = f64::MIN;
-        let mut min_y = f64::MAX;
-        let mut max_y = f64::MIN;
-        for &(ei, _) in face {
-            let e = &edges[ei];
-            min_x = min_x.min(e.start.x).min(e.end.x);
-            max_x = max_x.max(e.start.x).max(e.end.x);
-            min_y = min_y.min(e.start.y).min(e.end.y);
-            max_y = max_y.max(e.start.y).max(e.end.y);
+    // Verify each labeled interior face via winding number on input ring.
+    // Faces with even winding number (outside the input ring) are mislabeled.
+    let mut to_remove = Vec::new();
+    for &fi in &interior {
+        let face = &faces[fi];
+        let (mut cx, mut cy) = (0.0f64, 0.0f64);
+        for &(_, vi) in face {
+            let p = verts[vi];
+            cx += p.x;
+            cy += p.y;
         }
-        let area = (max_x - min_x) * (max_y - min_y);
-        if best.is_none() || area > best.unwrap().1 {
-            best = Some((fi, area));
+        cx /= face.len() as f64;
+        cy /= face.len() as f64;
+
+        let mut wn = 0i32;
+        for i in 0..input_ring.len() - 1 {
+            let a = input_ring[i];
+            let b = input_ring[i + 1];
+            if a.y <= cy {
+                if b.y > cy && orient2d(a, b, Coord { x: cx, y: cy }) > 0.0 {
+                    wn += 1;
+                }
+            } else if b.y <= cy && orient2d(a, b, Coord { x: cx, y: cy }) < 0.0 {
+                wn -= 1;
+            }
+        }
+        if wn % 2 == 0 {
+            to_remove.push(fi);
         }
     }
-    best.map(|(i, _)| i)
+    for fi in to_remove {
+        interior.remove(&fi);
+    }
+
+    Some(interior)
 }
 
 // ---------------------------------------------------------------------------

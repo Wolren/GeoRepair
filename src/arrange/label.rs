@@ -1,4 +1,5 @@
-use std::collections::{HashSet, VecDeque};
+use rustc_hash::FxHashSet;
+use std::collections::VecDeque;
 
 use geo::Coord;
 use spade::handles::{FixedFaceHandle, InnerTag};
@@ -6,9 +7,9 @@ use spade::{ConstrainedDelaunayTriangulation, Triangulation};
 
 pub(crate) fn label_faces(
     cdt: &ConstrainedDelaunayTriangulation<Coord<f64>>,
-) -> HashSet<FixedFaceHandle<InnerTag>> {
-    let mut interior: HashSet<FixedFaceHandle<InnerTag>> = HashSet::new();
-    let mut visited: HashSet<FixedFaceHandle<InnerTag>> = HashSet::new();
+) -> FxHashSet<FixedFaceHandle<InnerTag>> {
+    let mut interior: FxHashSet<FixedFaceHandle<InnerTag>> = FxHashSet::default();
+    let mut visited: FxHashSet<FixedFaceHandle<InnerTag>> = FxHashSet::default();
     let mut queue: VecDeque<(FixedFaceHandle<InnerTag>, bool)> = VecDeque::new();
 
     for edge in cdt.directed_edges() {

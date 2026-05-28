@@ -3,32 +3,29 @@ pub mod fix_ring;
 pub mod merge;
 pub mod subtract;
 
-use geo::validation::Validation;
 use geo::{Coord, Geometry, LineString, LinesIter, MultiPolygon, Polygon, Winding};
 
 use crate::config::MakeValidConfig;
 
 pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geometry<f64>> {
-    // For very large polygons, skip to CDT arrange directly — the structure method's
-    // planar graph and OGC validation are O(n²) and catastrophic above ~30K verts.
+    // Fast path: valid polygons can return immediately. Use a total-verts limit
+    // to avoid the mono-chain has_no_intersections O(n²) on very large rings.
     #[cfg(feature = "arrange")]
     {
         let total_verts: usize =
             poly.exterior().0.len() + poly.interiors().iter().map(|h| h.0.len()).sum::<usize>();
-        if total_verts > 30000 {
-            return Some(crate::arrange::fix_polygon(poly, config));
-        }
-    }
-
-    // Fast path: valid polygons with no intersections can return immediately
-    #[cfg(feature = "arrange")]
-    if poly.exterior().0.len() >= 4 && crate::arrange::poly_has_basic_form(poly) {
-        let lines: Vec<_> = poly.lines_iter().collect();
-        if !lines.is_empty()
-            && crate::arrange::prep::has_no_intersections(&lines)
-            && crate::arrange::holes_are_valid(poly)
+        if total_verts > 0
+            && total_verts <= 50000
+            && poly.exterior().0.len() >= 4
+            && crate::arrange::poly_has_basic_form(poly)
         {
-            return Some(Geometry::Polygon(poly.clone()));
+            let lines: Vec<_> = poly.lines_iter().collect();
+            if !lines.is_empty()
+                && crate::arrange::prep::has_no_intersections(&lines)
+                && crate::arrange::holes_are_valid(poly)
+            {
+                return Some(Geometry::Polygon(poly.clone()));
+            }
         }
     }
 
@@ -36,7 +33,6 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
     let shell_rings = match fix_ring::repair_ring(poly.exterior()) {
         Some(rings) => rings,
         None => {
-            // Ring too large or too degenerate for planar graph — fall back to CDT
             #[cfg(feature = "arrange")]
             if !poly.exterior().0.is_empty() {
                 return Some(crate::arrange::fix_polygon(poly, config));
@@ -47,22 +43,39 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
     if shell_rings.is_empty() {
         return None;
     }
-
-    // Handle collapsed shell (all rings degenerate)
     let valid_shells: Vec<LineString<f64>> =
         shell_rings.into_iter().filter(|s| s.0.len() >= 4).collect();
     if valid_shells.is_empty() {
         return None;
     }
 
-    // Fix holes — each hole may produce multiple rings
-    let mut hole_rings: Vec<LineString<f64>> = Vec::new();
-    for h in poly.interiors() {
-        if let Some(rings) = fix_ring::repair_ring(h) {
-            hole_rings.extend(rings);
+    // Fix holes — each hole may produce multiple rings (parallel via rayon)
+    #[cfg(feature = "parallel")]
+    let hole_rings_cw: Vec<LineString<f64>> = {
+        use rayon::prelude::*;
+        let mut hole_results: Vec<Vec<LineString<f64>>> = poly
+            .interiors()
+            .par_iter()
+            .map(|h| fix_ring::repair_ring(h).unwrap_or_else(|| vec![h.clone()]))
+            .collect();
+        hole_results
+            .iter_mut()
+            .flat_map(|rings| rings.drain(..))
+            .map(ensure_cw)
+            .collect()
+    };
+    #[cfg(not(feature = "parallel"))]
+    let hole_rings_cw: Vec<LineString<f64>> = {
+        let mut hole_rings: Vec<LineString<f64>> = Vec::new();
+        for h in poly.interiors() {
+            if let Some(rings) = fix_ring::repair_ring(h) {
+                hole_rings.extend(rings);
+            } else {
+                hole_rings.push(ensure_cw(h.clone()));
+            }
         }
-    }
-    let hole_rings_cw: Vec<LineString<f64>> = hole_rings.into_iter().map(ensure_cw).collect();
+        hole_rings.into_iter().map(ensure_cw).collect()
+    };
 
     // For each valid shell ring, classify and subtract holes
     let mut result_polys: Vec<Polygon<f64>> = Vec::new();
@@ -72,8 +85,6 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
         let (inner_holes, outer_holes) =
             classify::classify_holes(shell_poly.exterior(), &hole_rings_cw);
 
-        // Resolve hole-hole nesting: build containment tree so that nested holes
-        // become separate polygons (islands in voids) instead of being lost in subtraction.
         let (to_subtract, islands) = resolve_nesting(&inner_holes);
 
         let inner_polys: Vec<Polygon<f64>> = to_subtract
@@ -92,22 +103,11 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
         }
     }
 
-    // Validate output — if the planar graph fix produced an invalid or empty result,
-    // fall back to arrange (CDT) for robustness
-    #[cfg(feature = "arrange")]
-    {
-        if result_polys.is_empty() {
-            return Some(crate::arrange::fix_polygon(poly, config));
-        }
-        let validated = validate_and_fallback(&result_polys, poly, config);
-        if let Some(g) = validated {
-            return Some(g);
-        }
-    }
-
-    #[cfg(not(feature = "arrange"))]
     if result_polys.is_empty() {
+        #[cfg(not(feature = "arrange"))]
         return None;
+        #[cfg(feature = "arrange")]
+        return Some(Geometry::MultiPolygon(MultiPolygon::new(Vec::new())));
     }
 
     let result = if result_polys.len() == 1 {
@@ -119,42 +119,10 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
     Some(result)
 }
 
-#[cfg(feature = "arrange")]
-fn validate_and_fallback(
-    result_polys: &[Polygon<f64>],
-    original: &Polygon<f64>,
-    config: &MakeValidConfig,
-) -> Option<Geometry<f64>> {
-    // Check each polygon in the result for validity
-    for p in result_polys {
-        if p.check_validation().is_err() {
-            return Some(crate::arrange::fix_polygon(original, config));
-        }
-    }
-    None
-}
-
 /// Winding-number point-in-ring test (exclusive of boundary).
+/// Delegates to SIMD-accelerated implementation.
 fn point_in_ring_exclusive(pt: Coord<f64>, ring: &[Coord<f64>]) -> bool {
-    let n = ring.len();
-    let mut wn = 0i32;
-    for i in 0..n - 1 {
-        let p1 = ring[i];
-        let p2 = ring[i + 1];
-        if p1.y <= pt.y {
-            if p2.y > pt.y && orient2d(p1, p2, pt) > 0.0 {
-                wn += 1;
-            }
-        } else if p2.y <= pt.y && orient2d(p1, p2, pt) < 0.0 {
-            wn -= 1;
-        }
-    }
-    wn != 0
-}
-
-/// Robust 2D orientation predicate.
-fn orient2d(a: Coord<f64>, b: Coord<f64>, c: Coord<f64>) -> f64 {
-    (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+    crate::simd::point_in_ring_exclusive(pt, ring)
 }
 
 /// Resolve hole-hole nesting among inner holes of a shell.
@@ -172,28 +140,57 @@ fn resolve_nesting(holes: &[LineString<f64>]) -> (Vec<LineString<f64>>, Vec<Poly
 
     // Build parent relationship: hole[j] is inside hole[i] → parent_of[j] = Some(i)
     let n = holes.len();
-    let mut parent_of: Vec<Option<usize>> = vec![None; n];
 
-    for i in 0..n {
-        for j in 0..n {
-            if i == j {
-                continue;
-            }
-            if parent_of[j].is_some() {
-                continue;
-            }
-            // hole[i] contains hole[j] if any point of j is inside i
-            if contains_hole(&holes[i], &holes[j]) {
-                parent_of[j] = Some(i);
+    #[cfg(feature = "parallel")]
+    let parent_of: Vec<Option<usize>> = {
+        use rayon::prelude::*;
+        (0..n)
+            .into_par_iter()
+            .map(|j| {
+                let pt = holes[j].0.first().copied()?;
+                for i in 0..n {
+                    if i == j {
+                        continue;
+                    }
+                    if point_in_ring_exclusive(pt, &holes[i].0) {
+                        return Some(i);
+                    }
+                }
+
+                None
+            })
+            .collect()
+    };
+    #[cfg(not(feature = "parallel"))]
+    let mut parent_of: Vec<Option<usize>> = {
+        let mut p = vec![None; n];
+        for i in 0..n {
+            for j in 0..n {
+                if i == j {
+                    continue;
+                }
+                if p[j].is_some() {
+                    continue;
+                }
+                if !holes[j].0.is_empty() && point_in_ring_exclusive(holes[j].0[0], &holes[i].0) {
+                    p[j] = Some(i);
+                }
             }
         }
-    }
+        p
+    };
 
     // Compute containment depth for each hole via topological sort
+    #[cfg(feature = "parallel")]
+    let mut depth: Vec<usize> = (0..n)
+        .map(|i| if parent_of[i].is_none() { 1 } else { 0 })
+        .collect();
+    #[cfg(not(feature = "parallel"))]
     let mut depth = vec![0usize; n];
+    #[cfg(not(feature = "parallel"))]
     for i in 0..n {
         if parent_of[i].is_none() {
-            depth[i] = 1; // direct child of shell
+            depth[i] = 1;
         }
     }
     // Propagate depths (bounded loop: at most n iterations)
@@ -238,14 +235,6 @@ fn resolve_nesting(holes: &[LineString<f64>]) -> (Vec<LineString<f64>>, Vec<Poly
         subtract.into_iter().map(|i| holes[i].clone()).collect(),
         islands,
     )
-}
-
-/// Check if hole `outer` contains hole `inner`: any point of `inner` is inside `outer`.
-fn contains_hole(outer: &LineString<f64>, inner: &LineString<f64>) -> bool {
-    if inner.0.is_empty() {
-        return false;
-    }
-    point_in_ring_exclusive(inner.0[0], &outer.0)
 }
 
 fn ensure_ccw(mut ring: LineString<f64>) -> LineString<f64> {

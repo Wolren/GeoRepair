@@ -10,7 +10,7 @@ use geo::Coord;
 /// negative if clockwise, and zero if collinear.
 ///
 /// Uses Shewchuk's adaptive precision algorithm via the `robust` crate.
-#[inline]
+#[inline(always)]
 pub fn orient2d(pa: Coord<f64>, pb: Coord<f64>, pc: Coord<f64>) -> f64 {
     robust::orient2d(
         robust::Coord { x: pa.x, y: pa.y },
@@ -21,7 +21,7 @@ pub fn orient2d(pa: Coord<f64>, pb: Coord<f64>, pc: Coord<f64>) -> f64 {
 
 /// Naive double-precision orient2d.
 /// Fast but may produce incorrect results near degenerate cases.
-#[inline]
+#[inline(always)]
 pub fn orient2d_fast(pa: Coord<f64>, pb: Coord<f64>, pc: Coord<f64>) -> f64 {
     (pb.x - pa.x) * (pc.y - pa.y) - (pb.y - pa.y) * (pc.x - pa.x)
 }
