@@ -1,0 +1,42 @@
+[package]
+name = "geo-repair"
+description = "Fix invalid GIS geometries using optimal algorithms per type: CDT arrangement for polygons, noding for lines, structure method as fast path"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/georust/geo-repair"
+keywords = ["gis", "geo", "geospatial", "validation", "repair"]
+categories = ["science::geo"]
+edition = "2024"
+rust-version = "1.88"
+
+[features]
+default = ["arrange", "structure", "parallel"]
+arrange = ["dep:spade", "geo/spade"]
+structure = []
+parallel = ["dep:rayon", "geo/multithreading"]
+simd = []
+bench-geos = ["dep:geos"]
+
+[dependencies]
+geo = { version = "0.33", default-features = false }
+spade = { version = "2.10", optional = true }
+rayon = { version = "1.10", optional = true }
+
+robust = "1"
+thiserror = "2"
+geos = { version = "11.1.1", optional = true, features = ["v3_8_0"] }
+
+[dev-dependencies]
+approx = "0.5"
+wkt = "0.14"
+criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1"
+rstest = "0.19"
+shapefile = { version = "0.8", features = ["geo-types"] }
+[[bench]]
+name = "bench"
+harness = false
+
+[[bench]]
+name = "real_world"
+harness = false

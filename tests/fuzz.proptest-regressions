@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 06dd73215257dfab73464802bc852fb903efca400322a0be589369c56206b443 # shrinks to coords = [-6.926365420033958e-235, 0.0, 9.547781205615636e285, 0.0, 0.0, 0.0]
+cc 118bc553f2b1b974840e1530020e48125ba006e94bb93de8bb82a5b571aab322 # shrinks to kind = 4, coords = [COORD(-473.98778261653666 0.0), COORD(253.57958502756492 -110.44582804650324), COORD(-58.98560707404324 0.0), COORD(0.0 371.7823110180443), COORD(381.6394108952645 -461.8578294842999)]
+cc 44749a1692af7460d64048cbace8b5384dd8601251073a67bfee3d9fede7d2f0 # shrinks to coords = [COORD(24.98067421370836 -48.74598841817452), COORD(43.41920884090412 -11.706887659348396), COORD(0.0 -48.872982406633916), COORD(36.238941634732896 -27.026741944150448)]
