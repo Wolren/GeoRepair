@@ -1,34 +1,13 @@
-use geo::validation::Validation;
 use geo::{
     Coord, Geometry, GeometryCollection, LineString, MultiLineString, MultiPoint, MultiPolygon,
     Point, Polygon,
 };
-use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
+use geo_repair::{MakeValid, MakeValidConfig};
 use wkt::TryFromWkt;
 
-fn assert_valid(g: &Geometry<f64>) {
-    assert!(
-        g.check_validation().is_ok(),
-        "expected valid, got: {:?}",
-        g.check_validation()
-    );
-}
-
-fn assert_not_empty(g: &Geometry<f64>) {
-    assert!(
-        !matches!(g, Geometry::GeometryCollection(gc) if gc.0.is_empty()),
-        "expected non-empty, got: {:?}",
-        g
-    );
-}
-
-fn geom_from_wkt(s: &str) -> Geometry<f64> {
-    Geometry::<f64>::try_from_wkt_str(s).unwrap()
-}
-
-fn cfg_auto() -> MakeValidConfig {
-    MakeValidConfig::default()
-}
+#[path = "common/mod.rs"]
+mod common;
+use common::*;
 
 // =========================================================================
 // GEOS XML MakeValid test fixtures
@@ -54,7 +33,8 @@ fn xml_point_valid() {
 fn xml_point_empty() {
     let g = geom_from_wkt("POINT EMPTY");
     let result = g.make_valid_with_config(&cfg_auto());
-    assert_valid(&result);
+    assert_valid_ogc(&result);
+    assert_is_empty(&result);
 }
 
 // ---------------------------------------------------------------------------
@@ -78,7 +58,7 @@ fn xml_linestring_collapsed_to_point() {
     let result = g.make_valid_with_config(&cfg_auto());
     // GEOS returns POINT even with keepCollapsed=false by default
     // Our implementation returns empty GC for zero-length by default since keep_collapsed defaults to false
-    assert_valid(&result);
+    assert_is_empty(&result);
 }
 
 // ---------------------------------------------------------------------------
@@ -88,7 +68,7 @@ fn xml_linestring_collapsed_to_point() {
 fn xml_linestring_empty() {
     let g = geom_from_wkt("LINESTRING EMPTY");
     let result = g.make_valid_with_config(&cfg_auto());
-    assert_valid(&result);
+    assert_is_empty(&result);
 }
 
 // ---------------------------------------------------------------------------
@@ -98,7 +78,7 @@ fn xml_linestring_empty() {
 fn xml_multilinestring_empty() {
     let g = geom_from_wkt("MULTILINESTRING EMPTY");
     let result = g.make_valid_with_config(&cfg_auto());
-    assert_valid(&result);
+    assert_is_empty(&result);
 }
 
 // ---------------------------------------------------------------------------
@@ -110,9 +90,13 @@ fn xml_multilinestring_empty() {
 fn xml_multilinestring_case1() {
     let g = geom_from_wkt("MULTILINESTRING ((0 0, 0 0), (1 1, 2 2))");
     let result = g.make_valid_with_config(&cfg_auto());
-    assert_valid(&result);
-    // Must contain the valid line (1,1)-(2,2)
+    assert_valid_ogc(&result);
     assert_not_empty(&result);
+    // Must contain the valid line (1,1)-(2,2) — should be GeometryCollection or MultiLineString
+    assert!(matches!(
+        &result,
+        Geometry::GeometryCollection(_) | Geometry::MultiLineString(_)
+    ));
 }
 
 // ---------------------------------------------------------------------------
@@ -124,8 +108,12 @@ fn xml_multilinestring_case1() {
 fn xml_multilinestring_case2() {
     let g = geom_from_wkt("MULTILINESTRING ((0 0, 0 0), (1 1, 2 2), (2 2, 3 3))");
     let result = g.make_valid_with_config(&cfg_auto());
-    assert_valid(&result);
+    assert_valid_ogc(&result);
     assert_not_empty(&result);
+    assert!(matches!(
+        &result,
+        Geometry::GeometryCollection(_) | Geometry::MultiLineString(_)
+    ));
 }
 
 // ---------------------------------------------------------------------------
@@ -137,7 +125,7 @@ fn xml_multilinestring_case2() {
 fn xml_multilinestring_two_collapses() {
     let g = geom_from_wkt("MULTILINESTRING ((0 0, 0 0), (1 1, 2 2), (2 2, 3 3), (4 4, 4 4))");
     let result = g.make_valid_with_config(&cfg_auto());
-    assert_valid(&result);
+    assert_valid_ogc(&result);
     assert_not_empty(&result);
 }
 
@@ -148,8 +136,8 @@ fn xml_multilinestring_two_collapses() {
 fn xml_polygon_valid() {
     let g = geom_from_wkt("POLYGON ((0 0, 0 1, 1 1, 0 0))");
     let result = g.make_valid_with_config(&cfg_auto());
-    assert_valid(&result);
-    assert_not_empty(&result);
+    assert_valid_ogc(&result);
+    assert_is_polygon(&result);
 }
 
 // ---------------------------------------------------------------------------
@@ -159,7 +147,7 @@ fn xml_polygon_valid() {
 fn xml_polygon_bowtie() {
     let g = geom_from_wkt("POLYGON ((0 0, 1 1, 0 1, 1 0, 0 0))");
     let result = g.make_valid_with_config(&cfg_auto());
-    assert_valid(&result);
+    assert_valid_ogc(&result);
     assert_not_empty(&result);
 }
 
@@ -170,7 +158,7 @@ fn xml_polygon_bowtie() {
 fn xml_hole_touching_two_places() {
     let g = geom_from_wkt("POLYGON ((0 0, 0 1, 1 1, 1 0, 0 0), (0 0.5, 0.5 0.1, 1 0.5, 0 0.5))");
     let result = g.make_valid_with_config(&cfg_auto());
-    assert_valid(&result);
+    assert_valid_ogc(&result);
     assert_not_empty(&result);
 }
 
@@ -183,7 +171,7 @@ fn xml_multipolygon_overlapping() {
         "MULTIPOLYGON (((0 0, 0 1, 1 1, 1 0, 0 0)), ((0.8 0.1, 2 0.1, 2 0.9, 0.8 0.9, 0.8 0.1)))",
     );
     let result = g.make_valid_with_config(&cfg_auto());
-    assert_valid(&result);
+    assert_valid_ogc(&result);
     assert_not_empty(&result);
 }
 
@@ -196,7 +184,7 @@ fn xml_multipolygon_crossing_overlapping() {
         "MULTIPOLYGON (((0 0, 1 1, 0 1, 1 0, 0 0)), ((0.8 0.1, 2 0.1, 2 0.9, 0.8 0.9, 0.8 0.1)))",
     );
     let result = g.make_valid_with_config(&cfg_auto());
-    assert_valid(&result);
+    assert_valid_ogc(&result);
     assert_not_empty(&result);
 }
 
@@ -207,5 +195,6 @@ fn xml_multipolygon_crossing_overlapping() {
 fn xml_geometry_collection_with_empties() {
     let g = geom_from_wkt("GEOMETRYCOLLECTION (POINT EMPTY, LINESTRING EMPTY, POLYGON ((0 0, 0 1, 1 1, 1 0, 0 0), (0 0.5, 0.5 0.1, 1 0.5, 0 0.5)))");
     let result = g.make_valid_with_config(&cfg_auto());
-    assert_valid(&result);
+    assert_valid_ogc(&result);
+    assert_not_empty(&result);
 }
