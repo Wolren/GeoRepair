@@ -2,8 +2,14 @@
 //!
 //! Provides packed implementations of orient2d (cross product of three coords)
 //! using 256-bit SIMD registers for 4× throughput on applicable loops.
+//!
+//! The robust functions use a hybrid approach: SIMD fast-path with Shewchuk's
+//! error bound check, falling back to the `robust` crate's exact adaptive-precision
+//! arithmetic only when the fast result is within the error bound.
 
 use geo::{Coord, GeoFloat};
+
+use crate::orient::orient2d as orient2d_robust;
 
 /// Compute orient2d for four pairs of coordinates in parallel.
 /// Returns [sign(pa0, pb0, pc0), sign(pa1, pb1, pc1), ...].
@@ -70,6 +76,42 @@ pub(crate) fn orient2d_batch_4<T: GeoFloat>(
     pc: &[Coord<T>; 4],
 ) -> [T; 4] {
     scalar_orient2d_batch(pa, pb, pc)
+}
+
+/// Robust orient2d batch: SIMD fast-path with Shewchuk adaptive-precision fallback.
+///
+/// Computes 4 orientation tests in parallel via AVX, then checks each result
+/// against the floating-point error bound `|(3ε+16ε²) * determinant|`.
+/// Results within the error bound are recomputed via the exact adaptive-precision
+/// algorithm from the `robust` crate.
+///
+/// This provides SIMD throughput for the 99.9% case while guaranteeing correct
+/// sign for near-degenerate configurations where naive f64 arithmetic fails.
+pub(crate) fn orient2d_batch_4_robust(
+    pa: &[Coord<f64>; 4],
+    pb: &[Coord<f64>; 4],
+    pc: &[Coord<f64>; 4],
+) -> [f64; 4] {
+    let fast = orient2d_batch_4(pa, pb, pc);
+
+    let epsilon = f64::EPSILON;
+    let coeff = 3.0 + 16.0 * epsilon;
+
+    let mut out = fast;
+    for i in 0..4 {
+        let ax = pa[i].x - pc[i].x;
+        let ay = pa[i].y - pc[i].y;
+        let bx = pb[i].x - pc[i].x;
+        let by = pb[i].y - pc[i].y;
+        let abs_det = (ax * by).abs() + (bx * ay).abs();
+        let error_bound = coeff * epsilon * abs_det;
+
+        if fast[i].abs() <= error_bound {
+            out[i] = orient2d_robust(pa[i], pb[i], pc[i]);
+        }
+    }
+
+    out
 }
 
 /// Check ring winding direction using SIMD where available.
@@ -188,7 +230,7 @@ pub(crate) fn point_in_ring_exclusive(pt: Coord<f64>, coords: &[Coord<f64>]) -> 
             let pa = [pt; 4];
             let pb = [coords[i], coords[i + 1], coords[i + 2], coords[i + 3]];
             let pc = [coords[i + 1], coords[i + 2], coords[i + 3], coords[i + 4]];
-            let orient = orient2d_batch_4(&pa, &pb, &pc);
+            let orient = orient2d_batch_4_robust(&pa, &pb, &pc);
             for j in 0..4 {
                 let p1 = pb[j];
                 let p2 = pc[j];
@@ -404,6 +446,160 @@ mod tests {
         for i in 0..4 {
             assert!((batch[i] - expected[i]).abs() < 1e-12);
         }
+    }
+
+    #[test]
+    fn test_orient2d_batch_4_robust_collinear() {
+        let pa = [Coord { x: 0.0, y: 0.0 }; 4];
+        let pb = [
+            Coord { x: 1.0, y: 1.0 },
+            Coord { x: 1.0, y: 1.0 },
+            Coord { x: 1.0, y: 1.0 },
+            Coord { x: 1.0, y: 1.0 },
+        ];
+        let pc = [
+            Coord { x: 2.0, y: 2.0 },
+            Coord { x: 2.0, y: 2.0 },
+            Coord { x: 2.0, y: 2.0 },
+            Coord { x: 2.0, y: 2.0 },
+        ];
+        let batch = orient2d_batch_4_robust(&pa, &pb, &pc);
+        for i in 0..4 {
+            assert_eq!(
+                batch[i], 0.0,
+                "collinear triplet {i} should be exactly zero"
+            );
+        }
+    }
+
+    #[test]
+    fn test_orient2d_batch_4_robust_near_collinear() {
+        // Triplets where fast f64 is ambiguous but exact sign is known
+        let pa = [Coord { x: 0.0, y: 0.0 }; 4];
+        let pb = [Coord { x: 1e10, y: 1e10 }; 4];
+        let pc = [
+            Coord {
+                x: 2e10,
+                y: 2e10 + 1e-6,
+            },
+            Coord {
+                x: 2e10 + 1e-6,
+                y: 2e10,
+            },
+            Coord {
+                x: 2e10,
+                y: 2e10 - 1e-6,
+            },
+            Coord {
+                x: 2e10 - 1e-6,
+                y: 2e10,
+            },
+        ];
+        let batch = orient2d_batch_4_robust(&pa, &pb, &pc);
+        for i in 0..4 {
+            let expected = crate::orient::orient2d(pa[i], pb[i], pc[i]);
+            assert_eq!(
+                batch[i].signum(),
+                expected.signum(),
+                "triplet {i}: robust sign mismatch"
+            );
+            assert!(
+                batch[i] == expected,
+                "triplet {i}: robust value mismatch (batch={}, expected={})",
+                batch[i],
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn test_orient2d_batch_4_robust_matches_individual() {
+        // Various coordinate scales and angles
+        let test_cases: [(f64, f64); 10] = [
+            (1e-10, 0.0),
+            (1.0, 1.0),
+            (1e5, 1e5),
+            (1e10, 1e10),
+            (1e15, 1e15),
+            (1e-5, 1e5),
+            (1e10, 1e-10),
+            (-1e8, 1e8),
+            (0.0, 1e-8),
+            (1e8, 1e8),
+        ];
+        for (dx, dy) in &test_cases {
+            let pa = [Coord { x: 0.0, y: 0.0 }; 4];
+            let pb = [
+                Coord { x: *dx, y: *dy },
+                Coord {
+                    x: *dx + 1e-10,
+                    y: *dy,
+                },
+                Coord {
+                    x: *dx,
+                    y: *dy + 1e-10,
+                },
+                Coord {
+                    x: *dx + 1e-10,
+                    y: *dy + 1e-10,
+                },
+            ];
+            let pc = [
+                Coord {
+                    x: *dx * 0.5,
+                    y: *dy * 2.0,
+                },
+                Coord {
+                    x: *dx * 2.0,
+                    y: *dy * 0.5,
+                },
+                Coord {
+                    x: *dx * 1.5,
+                    y: *dy * 1.5,
+                },
+                Coord {
+                    x: *dx * 0.1,
+                    y: *dy * 0.1,
+                },
+            ];
+            let batch = orient2d_batch_4_robust(&pa, &pb, &pc);
+            for i in 0..4 {
+                let expected = crate::orient::orient2d(pa[i], pb[i], pc[i]);
+                assert_eq!(
+                    batch[i].signum(),
+                    expected.signum(),
+                    "sign mismatch at case ({},{}) triplet {}",
+                    dx,
+                    dy,
+                    i
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_point_in_ring_robust_near_boundary() {
+        let ring = vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 1e6, y: 0.0 },
+            Coord { x: 1e6, y: 1e6 },
+            Coord { x: 0.0, y: 1e6 },
+            Coord { x: 0.0, y: 0.0 },
+        ];
+        // Point extremely close to edge — should still be classified correctly
+        let pt_inside = Coord {
+            x: 5e5,
+            y: 5e5 + 1e-10,
+        };
+        assert!(
+            point_in_ring_exclusive(pt_inside, &ring),
+            "point should be inside"
+        );
+        let pt_outside = Coord { x: -1.0, y: 5e5 };
+        assert!(
+            !point_in_ring_exclusive(pt_outside, &ring),
+            "point should be outside"
+        );
     }
 }
 

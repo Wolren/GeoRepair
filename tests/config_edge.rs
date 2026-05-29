@@ -189,6 +189,137 @@ fn test_line_near_equal_endpoints() {
     assert_not_empty(&l.make_valid());
 }
 
+#[test]
+fn test_line_valid_across_configs() {
+    let l = Line::new(Point::new(0.0, 0.0), Point::new(10.0, 10.0));
+    for method in [PolyMethod::Auto, PolyMethod::Structure, PolyMethod::Arrange] {
+        for keep in [true, false] {
+            let cfg = cfg(method, keep);
+            let result = l.make_valid_with_config(&cfg);
+            assert_eq!(result, Geometry::Line(l));
+        }
+    }
+}
+
+#[test]
+fn test_line_extreme_large_coords() {
+    let l = Line::new(Point::new(1e15, -1e15), Point::new(-1e15, 1e15));
+    let result = l.make_valid();
+    assert_not_empty(&result);
+    assert_eq!(result, Geometry::Line(l));
+}
+
+#[test]
+fn test_line_negative_coords() {
+    let l = Line::new(Point::new(-100.0, -100.0), Point::new(-0.001, -0.001));
+    let result = l.make_valid();
+    assert_eq!(result, Geometry::Line(l));
+}
+
+#[test]
+fn test_linestring_collinear() {
+    let ls = LineString::new(vec![
+        Coord { x: 0.0, y: 0.0 },
+        Coord { x: 5.0, y: 5.0 },
+        Coord { x: 10.0, y: 10.0 },
+        Coord { x: 20.0, y: 20.0 },
+    ]);
+    let result = ls.make_valid();
+    assert_valid(&result);
+    assert_not_empty(&result);
+}
+
+#[test]
+fn test_linestring_self_intersecting_returns_multi() {
+    let ls = LineString::new(vec![
+        Coord { x: 0.0, y: 0.0 },
+        Coord { x: 10.0, y: 10.0 },
+        Coord { x: 10.0, y: 0.0 },
+        Coord { x: 0.0, y: 10.0 },
+        Coord { x: 0.0, y: 0.0 },
+    ]);
+    for method in [PolyMethod::Auto, PolyMethod::Structure, PolyMethod::Arrange] {
+        let cfg = cfg(method, false);
+        let result = ls.make_valid_with_config(&cfg);
+        assert_valid(&result);
+        assert_not_empty(&result);
+        assert!(
+            matches!(&result, Geometry::MultiLineString(mls) if !mls.0.is_empty()),
+            "expected MultiLineString, got {:?}",
+            result
+        );
+    }
+}
+
+#[test]
+fn test_linestring_collinear_self_overlap() {
+    let ls = LineString::new(vec![
+        Coord { x: 0.0, y: 0.0 },
+        Coord { x: 10.0, y: 0.0 },
+        Coord { x: 20.0, y: 0.0 },
+        Coord { x: 5.0, y: 0.0 },
+        Coord { x: 15.0, y: 0.0 },
+    ]);
+    let result = ls.make_valid();
+    assert_not_empty(&result);
+}
+
+#[test]
+fn test_linestring_dedup_keeps_non_adjacent_duplicates() {
+    let ls = LineString::new(vec![
+        Coord { x: 0.0, y: 0.0 },
+        Coord { x: 1.0, y: 1.0 },
+        Coord { x: 0.0, y: 0.0 },
+        Coord { x: 2.0, y: 2.0 },
+    ]);
+    let result = ls.make_valid();
+    assert_valid(&result);
+    assert_not_empty(&result);
+}
+
+#[test]
+fn test_linestring_single_point_keep_collapsed() {
+    let ls = LineString::new(vec![Coord { x: 5.0, y: 5.0 }]);
+    for method in [PolyMethod::Auto, PolyMethod::Structure, PolyMethod::Arrange] {
+        let r1 = ls.make_valid_with_config(&cfg(method, true));
+        assert_eq!(
+            r1,
+            Geometry::Point(Point::new(5.0, 5.0)),
+            "keep_collapsed=true should give Point"
+        );
+
+        let r2 = ls.make_valid_with_config(&cfg(method, false));
+        assert_empty(&r2);
+    }
+}
+
+#[test]
+fn test_multilinestring_valid_preserved() {
+    let mls = MultiLineString::new(vec![
+        LineString::new(vec![Coord { x: 0.0, y: 0.0 }, Coord { x: 1.0, y: 1.0 }]),
+        LineString::new(vec![Coord { x: 2.0, y: 2.0 }, Coord { x: 3.0, y: 3.0 }]),
+    ]);
+    let result = mls.make_valid();
+    assert_eq!(result, Geometry::MultiLineString(mls));
+}
+
+#[test]
+fn test_linestring_valid_across_configs() {
+    let ls = LineString::new(vec![
+        Coord { x: 0.0, y: 0.0 },
+        Coord { x: 5.0, y: 5.0 },
+        Coord { x: 10.0, y: 0.0 },
+    ]);
+    for method in [PolyMethod::Auto, PolyMethod::Structure, PolyMethod::Arrange] {
+        for keep in [true, false] {
+            let cfg = cfg(method, keep);
+            let result = ls.make_valid_with_config(&cfg);
+            assert_valid(&result);
+            assert_not_empty(&result);
+        }
+    }
+}
+
 // =========================================================================
 // LineString edge cases
 // =========================================================================

@@ -24,7 +24,7 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
                 && crate::arrange::prep::has_no_intersections(&lines)
                 && crate::arrange::holes_are_valid(poly)
             {
-                return Some(Geometry::Polygon(poly.clone()));
+                return Some(enforce_winding(Geometry::Polygon(poly.clone())));
             }
         }
     }

@@ -113,7 +113,7 @@ impl<T: GeoFloat> MakeValid for LineString<T> {
         if coords.is_empty() {
             return empty_geom();
         }
-        let deduped = remove_consecutive_duplicates(coords);
+        let deduped = remove_consecutive_duplicates(&coords);
         if deduped.len() < 2 {
             if config.keep_collapsed && deduped.len() == 1 {
                 return Geometry::Point(Point(deduped[0]));

@@ -37,7 +37,7 @@ optional = true
 
 [dev-dependencies]
 approx = "0.5"
-wkt = "0.14"
+wkt = { version = "0.14", features = ["geo-types"] }
 criterion = { version = "0.5", features = ["html_reports"] }
 proptest = "1"
 rstest = "0.19"
@@ -47,4 +47,8 @@ harness = false
 
 [[bench]]
 name = "real_world"
+harness = false
+
+[[bench]]
+name = "quick_bench"
 harness = false

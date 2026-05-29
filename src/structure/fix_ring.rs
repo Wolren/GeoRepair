@@ -2,8 +2,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 use std::collections::VecDeque;
 
-use geo::Buffer;
-use geo::{Coord, Line, LineString, Polygon};
+use geo::{Coord, Line, LineString};
 
 use crate::orient::orient2d;
 
@@ -14,18 +13,6 @@ pub(crate) fn repair_ring(ring: &LineString<f64>) -> Option<Vec<LineString<f64>>
     }
     if !has_self_intersections(&coords) {
         return Some(vec![LineString::new(coords)]);
-    }
-
-    // For small self-intersecting rings, use bufferByZero (GEOS-style robust ring fixer).
-    // It handles collinear overlaps and degeneracies that the planar graph may miss.
-    // Large rings use the planar graph directly (buffer can hang on certain inputs).
-    if coords.len() < 500 {
-        let clean_ring = LineString::new(coords.clone());
-        if let Some(rings) = buffer_by_zero_repair(&clean_ring) {
-            if rings.iter().all(|r| !has_self_intersections(&r.0)) {
-                return Some(rings);
-            }
-        }
     }
 
     // Planar graph face extraction (O(n) face splitting via Vec index lookup)
@@ -43,41 +30,6 @@ pub(crate) fn repair_ring(ring: &LineString<f64>) -> Option<Vec<LineString<f64>>
     None
 }
 
-fn buffer_by_zero_repair(ring: &LineString<f64>) -> Option<Vec<LineString<f64>>> {
-    let poly = Polygon::new(ring.clone(), Vec::new());
-
-    let (tx, rx) = std::sync::mpsc::channel::<geo::MultiPolygon<f64>>();
-    let handle = std::thread::Builder::new()
-        .stack_size(256 * 1024)
-        .spawn(move || {
-            let result =
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| poly.buffer(0.0)));
-            if let Ok(mp) = result {
-                let _ = tx.send(mp);
-            }
-        });
-
-    if let Ok(_h) = handle {
-        match rx.recv_timeout(std::time::Duration::from_secs(10)) {
-            Ok(mp) if !mp.0.is_empty() => {
-                let rings: Vec<LineString<f64>> =
-                    mp.0.into_iter()
-                        .flat_map(|p| {
-                            let mut rings = vec![p.exterior().clone()];
-                            rings.extend(p.interiors().iter().cloned());
-                            rings
-                        })
-                        .collect();
-                if !rings.is_empty() {
-                    return Some(rings);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
 fn basic_cleanup(ring: &LineString<f64>) -> Option<Vec<Coord<f64>>> {
     let coords: Vec<_> = ring
         .0
@@ -88,7 +40,7 @@ fn basic_cleanup(ring: &LineString<f64>) -> Option<Vec<Coord<f64>>> {
     if coords.is_empty() {
         return None;
     }
-    let mut deduped = remove_consecutive_duplicates(coords);
+    let mut deduped = remove_consecutive_duplicates(&coords);
     if deduped.is_empty() {
         return None;
     }
@@ -101,11 +53,11 @@ fn basic_cleanup(ring: &LineString<f64>) -> Option<Vec<Coord<f64>>> {
     Some(deduped)
 }
 
-fn remove_consecutive_duplicates(coords: Vec<Coord<f64>>) -> Vec<Coord<f64>> {
+fn remove_consecutive_duplicates(coords: &[Coord<f64>]) -> Vec<Coord<f64>> {
     let mut result = Vec::with_capacity(coords.len());
     for c in coords {
-        if result.last() != Some(&c) {
-            result.push(c);
+        if result.last() != Some(c) {
+            result.push(*c);
         }
     }
     result
@@ -289,7 +241,11 @@ fn check_edge_pair(coords: &[Coord<f64>], i: usize, j: usize, eps: f64) -> bool 
     // o[1] = orient2d(a1, a2, b2)
     // o[2] = orient2d(b1, b2, a1)
     // o[3] = orient2d(b1, b2, a2)
-    let o = crate::simd::orient2d_batch_4(&[a1, a1, b1, b1], &[a2, a2, b2, b2], &[b1, b2, a1, a2]);
+    let o = crate::simd::orient2d_batch_4_robust(
+        &[a1, a1, b1, b1],
+        &[a2, a2, b2, b2],
+        &[b1, b2, a1, a2],
+    );
 
     // edges_cross_proper — strict sign product: zero = shared endpoint, not a crossing
     if o[0] * o[1] < 0.0 && o[2] * o[3] < 0.0 {
@@ -365,7 +321,7 @@ fn fix_self_intersecting(coords: &[Coord<f64>]) -> Option<Vec<LineString<f64>>> 
     if noded.is_empty() {
         return None;
     }
-    let (graph, verts) = build_graph(&noded);
+    let graph = build_graph(&noded);
     if graph.edges.is_empty() {
         return None;
     }
@@ -382,12 +338,14 @@ fn fix_self_intersecting(coords: &[Coord<f64>]) -> Option<Vec<LineString<f64>>> 
     if simple_faces.is_empty() {
         return None;
     }
-    let interior = label_interior_faces(&noded, &verts, coords, &simple_faces)?;
+    let interior = label_interior_faces(&noded, &graph.verts, coords, &simple_faces)?;
     let mut result: Vec<LineString<f64>> = Vec::new();
     for &fi in &interior {
         let face = &simple_faces[fi];
-        let mut ring_coords: Vec<Coord<f64>> =
-            face.iter().map(|&(_, to_idx)| verts[to_idx]).collect();
+        let mut ring_coords: Vec<Coord<f64>> = face
+            .iter()
+            .map(|&(_, to_idx)| graph.verts[to_idx])
+            .collect();
         if ring_coords.len() >= 3 {
             ring_coords.push(ring_coords[0]);
             result.push(LineString::new(ring_coords));
@@ -743,10 +701,9 @@ const SNAP_SCALE: f64 = 1e8;
 
 #[inline(always)]
 fn snap_key(c: Coord<f64>) -> (i64, i64) {
-    (
-        (c.x * SNAP_SCALE).round() as i64,
-        (c.y * SNAP_SCALE).round() as i64,
-    )
+    let x = (c.x * SNAP_SCALE).round() as i64;
+    let y = (c.y * SNAP_SCALE).round() as i64;
+    (x, y)
 }
 
 #[inline(always)]
@@ -763,7 +720,7 @@ struct Graph {
     sorted_adj: Vec<SmallVec<[(usize, usize); 4]>>,
 }
 
-fn build_graph(lines: &[Line<f64>]) -> (Graph, Vec<Coord<f64>>) {
+fn build_graph(lines: &[Line<f64>]) -> Graph {
     let mut key_to_idx: FxHashMap<(i64, i64), usize> = FxHashMap::default();
     let mut verts: Vec<Coord<f64>> = Vec::new();
     let mut get_vert = |c: Coord<f64>| -> usize {
@@ -802,14 +759,11 @@ fn build_graph(lines: &[Line<f64>]) -> (Graph, Vec<Coord<f64>>) {
             neighbors
         })
         .collect();
-    (
-        Graph {
-            verts: verts.clone(),
-            edges,
-            sorted_adj,
-        },
+    Graph {
         verts,
-    )
+        edges,
+        sorted_adj,
+    }
 }
 
 /// ---------------------------------------------------------------------------
@@ -1265,7 +1219,7 @@ mod tests {
             Line::new(Coord { x: 1.0, y: 1.0 }, Coord { x: 0.0, y: 1.0 }),
             Line::new(Coord { x: 0.0, y: 1.0 }, Coord { x: 0.0, y: 0.0 }),
         ];
-        let (graph, _) = build_graph(&edges);
+        let graph = build_graph(&edges);
         let faces = extract_all_faces(&graph);
         assert!(faces.is_some());
         assert_eq!(faces.unwrap().len(), 2);

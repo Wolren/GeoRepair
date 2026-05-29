@@ -6,8 +6,7 @@ pub mod prep;
 
 use crate::config::MakeValidConfig;
 use geo::{Geometry, GeometryCollection, LinesIter, MultiPolygon, Polygon};
-#[cfg(feature = "parallel")]
-use rayon::prelude::*;
+use rustc_hash::FxHashSet;
 use spade::Triangulation;
 
 pub(crate) fn fix_polygon(poly: &Polygon<f64>, _config: &MakeValidConfig) -> Geometry<f64> {
@@ -71,6 +70,19 @@ pub(crate) fn holes_are_valid(poly: &Polygon<f64>) -> bool {
             return false;
         };
         if !point_in_ring_exclusive(pt, shell_coords) {
+            return false;
+        }
+        let (mut min_x, mut max_x, mut min_y, mut max_y) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+        for c in &hole.0 {
+            min_x = min_x.min(c.x);
+            max_x = max_x.max(c.x);
+            min_y = min_y.min(c.y);
+            max_y = max_y.max(c.y);
+        }
+        let scale = (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
+        if (max_x - min_x).abs() < f64::EPSILON * scale
+            || (max_y - min_y).abs() < f64::EPSILON * scale
+        {
             return false;
         }
     }
@@ -165,29 +177,10 @@ pub(crate) fn poly_has_basic_form(poly: &Polygon<f64>) -> bool {
                 return false;
             }
         }
-        let mut sorted: Vec<_> = coords[..coords.len() - 1].to_vec();
-        #[cfg(feature = "parallel")]
-        if sorted.len() > 5000 {
-            sorted.par_sort_by(|a, b| {
-                a.x.partial_cmp(&b.x)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-                    .then_with(|| a.y.partial_cmp(&b.y).unwrap_or(std::cmp::Ordering::Equal))
-            });
-        } else {
-            sorted.sort_by(|a, b| {
-                a.x.partial_cmp(&b.x)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-                    .then_with(|| a.y.partial_cmp(&b.y).unwrap_or(std::cmp::Ordering::Equal))
-            });
-        }
-        #[cfg(not(feature = "parallel"))]
-        sorted.sort_by(|a, b| {
-            a.x.partial_cmp(&b.x)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| a.y.partial_cmp(&b.y).unwrap_or(std::cmp::Ordering::Equal))
-        });
-        for w in sorted.windows(2) {
-            if w[0] == w[1] {
+        let n = coords.len() - 1;
+        let mut seen = FxHashSet::with_capacity_and_hasher(n, Default::default());
+        for c in &coords[..n] {
+            if !seen.insert((c.x.to_bits(), c.y.to_bits())) {
                 return false;
             }
         }

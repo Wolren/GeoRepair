@@ -7,6 +7,7 @@
 use geo::{
     Coord, CoordNum, GeoFloat, Geometry, GeometryCollection, Line, LineString, MultiLineString,
 };
+use rustc_hash::FxHashSet;
 
 /// Node a line string by removing repeated points and splitting at
 /// self-intersections. Returns a MultiLineString if splitting occurred,
@@ -20,7 +21,7 @@ pub(crate) fn node_line_string<T: GeoFloat>(ls: &LineString<T>) -> Geometry<T> {
     if coords.len() < 2 {
         return empty();
     }
-    let deduped = remove_consecutive_duplicates(coords);
+    let deduped = remove_consecutive_duplicates(&coords);
     if deduped.len() < 2 {
         return empty();
     }
@@ -34,7 +35,7 @@ pub(crate) fn node_line_string<T: GeoFloat>(ls: &LineString<T>) -> Geometry<T> {
     }
 
     // Split at self-intersections using the same approach as prep.rs
-    let split_edges = split_edges_at_intersections(edges);
+    let split_edges = split_edges_at_intersections(&edges);
     if split_edges.is_empty() {
         return empty();
     }
@@ -160,27 +161,124 @@ fn orient2d_generic<T: GeoFloat>(a: Coord<T>, b: Coord<T>, c: Coord<T>) -> T {
 }
 
 /// Split edges at all pairwise intersection points.
-fn split_edges_at_intersections<T: GeoFloat>(edges: Vec<Line<T>>) -> Vec<Line<T>> {
+fn split_edges_at_intersections<T: GeoFloat>(edges: &[Line<T>]) -> Vec<Line<T>> {
     let n = edges.len();
     let mut split_points: Vec<Vec<T>> = vec![Vec::new(); n];
     let eps = T::from(1e-12).unwrap();
     let one = T::one();
     let zero = T::zero();
 
-    for i in 0..n {
-        for j in (i + 2)..n {
-            if i + 1 == j && edges[i].end == edges[j].start {
+    if n >= 64 {
+        // Grid-accelerated spatial index for large edge sets
+        let mut min_x = edges[0].start.x;
+        let mut max_x = edges[0].start.x;
+        let mut min_y = edges[0].start.y;
+        let mut max_y = edges[0].start.y;
+        for e in edges {
+            min_x = min_x.min(e.start.x).min(e.end.x);
+            max_x = max_x.max(e.start.x).max(e.end.x);
+            min_y = min_y.min(e.start.y).min(e.end.y);
+            max_y = max_y.max(e.start.y).max(e.end.y);
+        }
+        let range_x = max_x - min_x;
+        let range_y = max_y - min_y;
+        let n_cells = (n as f64).sqrt().ceil() as usize;
+        let n_cells = n_cells.clamp(1, 64);
+        let cell_w = if range_x > zero {
+            range_x / T::from(n_cells).unwrap()
+        } else {
+            T::one()
+        };
+        let cell_h = if range_y > zero {
+            range_y / T::from(n_cells).unwrap()
+        } else {
+            T::one()
+        };
+
+        let mut cell_edges: Vec<Vec<usize>> = vec![Vec::new(); n_cells * n_cells];
+        for (i, e) in edges.iter().enumerate() {
+            let cx1 = ((e.start.x - min_x) / cell_w)
+                .floor()
+                .to_usize()
+                .unwrap_or(0)
+                .min(n_cells - 1);
+            let cy1 = ((e.start.y - min_y) / cell_h)
+                .floor()
+                .to_usize()
+                .unwrap_or(0)
+                .min(n_cells - 1);
+            let cx2 = ((e.end.x - min_x) / cell_w)
+                .floor()
+                .to_usize()
+                .unwrap_or(0)
+                .min(n_cells - 1);
+            let cy2 = ((e.end.y - min_y) / cell_h)
+                .floor()
+                .to_usize()
+                .unwrap_or(0)
+                .min(n_cells - 1);
+            let x0 = cx1.min(cx2);
+            let x1 = cx1.max(cx2);
+            let y0 = cy1.min(cy2);
+            let y1 = cy1.max(cy2);
+            for cy in y0..=y1 {
+                for cx in x0..=x1 {
+                    cell_edges[cy * n_cells + cx].push(i);
+                }
+            }
+        }
+
+        let mut checked: FxHashSet<(usize, usize)> = FxHashSet::default();
+        for cell in &cell_edges {
+            if cell.len() < 2 {
                 continue;
             }
-            let (ti, tj, _pt) = match compute_intersection_param(&edges[i], &edges[j], eps) {
-                Some(v) => v,
-                None => continue,
-            };
-            if ti > zero && ti < one {
-                split_points[i].push(ti);
+            let mut sorted = cell.clone();
+            sorted.sort_unstable();
+            for ii in 0..sorted.len() {
+                let i = sorted[ii];
+                for jj in (ii + 1)..sorted.len() {
+                    let j = sorted[jj];
+                    if !checked.insert((i, j)) {
+                        continue;
+                    }
+                    if i + 1 == j && edges[i].end == edges[j].start {
+                        continue;
+                    }
+                    if j + 1 == i && edges[j].end == edges[i].start {
+                        continue;
+                    }
+                    let (ti, tj, _pt) = match compute_intersection_param(&edges[i], &edges[j], eps)
+                    {
+                        Some(v) => v,
+                        None => continue,
+                    };
+                    if ti > zero && ti < one {
+                        split_points[i].push(ti);
+                    }
+                    if tj > zero && tj < one {
+                        split_points[j].push(tj);
+                    }
+                }
             }
-            if tj > zero && tj < one {
-                split_points[j].push(tj);
+        }
+    } else {
+        // Brute force for small edge sets
+        for i in 0..n {
+            for j in (i + 2)..n {
+                if i + 1 == j && edges[i].end == edges[j].start {
+                    continue;
+                }
+                let (ti, tj, _pt) = match compute_intersection_param(&edges[i], &edges[j], eps) {
+                    Some(v) => v,
+                    None => continue,
+                };
+                if ti > zero && ti < one {
+                    split_points[i].push(ti);
+                }
+                if tj > zero && tj < one {
+                    split_points[j].push(tj);
+                }
             }
         }
     }
@@ -309,11 +407,11 @@ pub(crate) fn node_multi_line_string<T: GeoFloat>(mls: &MultiLineString<T>) -> G
     }
 }
 
-pub(crate) fn remove_consecutive_duplicates<T: CoordNum>(coords: Vec<Coord<T>>) -> Vec<Coord<T>> {
+pub(crate) fn remove_consecutive_duplicates<T: CoordNum>(coords: &[Coord<T>]) -> Vec<Coord<T>> {
     let mut result = Vec::with_capacity(coords.len());
     for c in coords {
-        if result.last() != Some(&c) {
-            result.push(c);
+        if result.last() != Some(c) {
+            result.push(*c);
         }
     }
     result
@@ -333,7 +431,7 @@ mod tests {
 
     #[test]
     fn test_remove_consecutive_duplicates_empty() {
-        let result = remove_consecutive_duplicates::<f64>(Vec::new());
+        let result = remove_consecutive_duplicates::<f64>(&[]);
         assert!(result.is_empty());
     }
 
@@ -344,7 +442,7 @@ mod tests {
             Coord { x: 1.0, y: 1.0 },
             Coord { x: 2.0, y: 2.0 },
         ];
-        let result = remove_consecutive_duplicates(coords.clone());
+        let result = remove_consecutive_duplicates(&coords);
         assert_eq!(result, coords);
     }
 
@@ -355,7 +453,7 @@ mod tests {
             Coord { x: 1.0, y: 1.0 },
             Coord { x: 1.0, y: 1.0 },
         ];
-        let result = remove_consecutive_duplicates(coords);
+        let result = remove_consecutive_duplicates(&coords);
         assert_eq!(result, vec![Coord { x: 1.0, y: 1.0 }]);
     }
 
@@ -368,7 +466,7 @@ mod tests {
             Coord { x: 2.0, y: 2.0 },
             Coord { x: 2.0, y: 2.0 },
         ];
-        let result = remove_consecutive_duplicates(coords);
+        let result = remove_consecutive_duplicates(&coords);
         assert_eq!(
             result,
             vec![
@@ -547,7 +645,7 @@ mod tests {
             Line::new(Coord { x: 0.0, y: 0.0 }, Coord { x: 1.0, y: 0.0 }),
             Line::new(Coord { x: 1.0, y: 0.0 }, Coord { x: 2.0, y: 0.0 }),
         ];
-        let result = split_edges_at_intersections(edges.clone());
+        let result = split_edges_at_intersections(&edges);
         assert_eq!(result, edges);
     }
 
@@ -561,7 +659,7 @@ mod tests {
         // Edge 0 (0->2) and edge 2 (2->0) cross at (1,1)
         // Edge 0 should split into two: (0,0)-(1,1) and (1,1)-(2,2)
         // Edge 2 should stay as (2,0)-(0,2) [or split? depends on param range]
-        let result = split_edges_at_intersections(edges);
+        let result = split_edges_at_intersections(&edges);
         assert!(result.len() >= 3);
     }
 
@@ -780,7 +878,7 @@ mod tests {
             Coord { x: 1.0, y: 1.0 },
             Coord { x: 0.0, y: 0.0 },
         ];
-        let result = remove_consecutive_duplicates(coords);
+        let result = remove_consecutive_duplicates(&coords);
         assert_eq!(result.len(), 3);
     }
 
