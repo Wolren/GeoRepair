@@ -116,7 +116,7 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
         Geometry::MultiPolygon(MultiPolygon::new(merge::merge_shells(result_polys).0))
     };
 
-    Some(result)
+    Some(enforce_winding(result))
 }
 
 /// Winding-number point-in-ring test (exclusive of boundary).
@@ -253,4 +253,46 @@ fn ensure_cw(mut ring: LineString<f64>) -> LineString<f64> {
         ring.make_cw_winding();
     }
     ring
+}
+
+fn enforce_winding(g: Geometry<f64>) -> Geometry<f64> {
+    fn fix_ccw(r: LineString<f64>) -> LineString<f64> {
+        if r.winding_order() == Some(geo::winding_order::WindingOrder::CounterClockwise) {
+            r
+        } else {
+            let mut c = r;
+            c.make_ccw_winding();
+            c
+        }
+    }
+    fn fix_cw(r: LineString<f64>) -> LineString<f64> {
+        if r.winding_order() == Some(geo::winding_order::WindingOrder::Clockwise) {
+            r
+        } else {
+            let mut c = r;
+            c.make_cw_winding();
+            c
+        }
+    }
+
+    match g {
+        Geometry::Polygon(p) => {
+            let ext = fix_ccw(p.exterior().clone());
+            let holes: Vec<_> = p.interiors().iter().map(|h| fix_cw(h.clone())).collect();
+            Geometry::Polygon(Polygon::new(ext, holes))
+        }
+        Geometry::MultiPolygon(mp) => {
+            let polys: Vec<_> = mp
+                .0
+                .into_iter()
+                .map(|p| {
+                    let ext = fix_ccw(p.exterior().clone());
+                    let holes: Vec<_> = p.interiors().iter().map(|h| fix_cw(h.clone())).collect();
+                    Polygon::new(ext, holes)
+                })
+                .collect();
+            Geometry::MultiPolygon(MultiPolygon::new(polys))
+        }
+        other => other,
+    }
 }

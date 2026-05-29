@@ -1,11 +1,26 @@
 //! Real-world benchmark: Structure method vs GEOS on real SHP data.
 //!
+//! You can benchmark any dataset by setting `BENCH_FILE` or passing file as first arg:
+//!
+//!   $env:BENCH_FILE = "benches/real_world/alaska.shp"
+//!   cargo bench --features bench-geos --bench real_world
+//!
+//! Supported: .bin (custom binary), .shp (shapefile)
+//!
 //! Run with:
 //!   $env:Path = "C:\Users\Wildbot\miniconda3\Library\bin;$env:Path"
 //!   cargo bench --features bench-geos --bench real_world
 
-use geo::{Coord, LineString, Polygon};
+use std::env;
+use std::io::Write;
+use std::path::Path;
+use std::time::Instant;
+
+use geo::{Coord, Polygon};
 use geo_repair::arrange::{self, validate_polygon};
+use geo_repair::load::load_bin;
+#[cfg(feature = "load-shp")]
+use geo_repair::load::load_shp;
 use geo_repair::orient::orient2d;
 use geo_repair::parallel::par_fix_polygon_batch;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
@@ -13,49 +28,7 @@ use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 use geos::Geom;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
-use std::fs::File;
-use std::io::{Read, Write};
-use std::time::Instant;
 use wkt::ToWkt;
-
-fn read_f64(buf: &[u8], pos: &mut usize) -> f64 {
-    let v = f64::from_le_bytes(buf[*pos..*pos + 8].try_into().unwrap());
-    *pos += 8;
-    v
-}
-fn read_u32(buf: &[u8], pos: &mut usize) -> u32 {
-    let v = u32::from_le_bytes(buf[*pos..*pos + 4].try_into().unwrap());
-    *pos += 4;
-    v
-}
-fn read_ring(buf: &[u8], pos: &mut usize) -> LineString<f64> {
-    let n = read_u32(buf, pos) as usize;
-    let mut coords = Vec::with_capacity(n);
-    for _ in 0..n {
-        coords.push(Coord {
-            x: read_f64(buf, pos),
-            y: read_f64(buf, pos),
-        });
-    }
-    LineString::new(coords)
-}
-fn read_binary(path: &str) -> Vec<Polygon<f64>> {
-    let mut buf = Vec::new();
-    File::open(path).unwrap().read_to_end(&mut buf).unwrap();
-    let mut pos = 0;
-    let n_polys = read_u32(&buf, &mut pos) as usize;
-    let mut polys = Vec::with_capacity(n_polys);
-    for _ in 0..n_polys {
-        let ext = read_ring(&buf, &mut pos);
-        let n_holes = read_u32(&buf, &mut pos) as usize;
-        let mut holes = Vec::with_capacity(n_holes);
-        for _ in 0..n_holes {
-            holes.push(read_ring(&buf, &mut pos));
-        }
-        polys.push(Polygon::new(ext, holes));
-    }
-    polys
-}
 
 fn poly_n_vert(poly: &Polygon<f64>) -> usize {
     let mut n = poly.exterior().0.len();
@@ -173,10 +146,31 @@ fn sample_fastpath(
     t0.elapsed().as_secs_f64() / sample as f64
 }
 
+fn load_polys(path: &str) -> Vec<Polygon<f64>> {
+    let ext = Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    match ext {
+        #[cfg(feature = "load-shp")]
+        "shp" => load_shp(path),
+        "bin" => load_bin(path),
+        #[cfg(not(feature = "load-shp"))]
+        "shp" => panic!("load-shp feature not enabled. Re-run with --features load-shp"),
+        other => panic!("Unsupported file extension '.{other}'. Use .shp or .bin"),
+    }
+}
+
 fn main() {
-    let path = "benches/real_world/data_0.bin";
+    // Resolve input file: env var BENCH_FILE, or first CLI arg, or default
+    let path = env::var("BENCH_FILE")
+        .ok()
+        .or_else(|| env::args().nth(1))
+        .unwrap_or_else(|| "benches/real_world/data_0.bin".into());
+    eprintln!("Dataset: {path}");
+
     let t0 = Instant::now();
-    let polys = read_binary(path);
+    let polys = load_polys(&path);
     let load_time = t0.elapsed().as_secs_f64();
     let n_polys = polys.len();
     eprintln!("[1/5] Loaded {n_polys} polys in {load_time:.3}s");
@@ -214,47 +208,58 @@ fn main() {
     );
 
     // =========================================================================
-    // Polygon #24823 deep analysis
+    // Deep-dive analysis of a specific polygon (ANALYZE_POLY env var)
     // =========================================================================
-    let target = 24822;
-    let poly = &polys[target];
-    eprintln!(
-        "\n══ Polygon #{0} ═══════════════════════════════════",
-        target + 1
-    );
-    eprintln!("  n_vert (ext):     {}", poly.exterior().0.len());
-    eprintln!("  n_holes:          {}", poly.interiors().len());
-    eprintln!("  valid:            {}", infos[target].0);
+    if let Ok(target_str) = env::var("ANALYZE_POLY") {
+        if let Ok(target) = target_str.parse::<usize>() {
+            if target < n_polys {
+                let poly = &polys[target];
+                eprintln!(
+                    "\n══ Polygon #{0} ═══════════════════════════════════",
+                    target + 1
+                );
+                eprintln!("  n_vert (ext):     {}", poly.exterior().0.len());
+                eprintln!("  n_holes:          {}", poly.interiors().len());
+                eprintln!("  valid:            {}", infos[target].0);
 
-    let reasons = examine_validity(poly);
-    if !reasons.is_empty() {
-        eprintln!("  why invalid:");
-        for r in reasons {
-            eprintln!("    · {r}");
+                let reasons = examine_validity(poly);
+                if !reasons.is_empty() {
+                    eprintln!("  why invalid:");
+                    for r in reasons {
+                        eprintln!("    · {r}");
+                    }
+                } else {
+                    eprintln!("  why invalid:      self-intersections (only remaining check)");
+                }
+
+                if let Some(t) = arrange::diagnose_arrange(poly) {
+                    eprintln!("  CDT prep:         {:.6}s", t.prep_secs);
+                    eprintln!(
+                        "  CDT build:        {:.6}s  ({} faces)",
+                        t.cdt_build_secs, t.cdt_faces
+                    );
+                    eprintln!("  CDT label:        {:.6}s", t.label_secs);
+                    eprintln!("  CDT extract:      {:.6}s", t.extract_secs);
+                    eprintln!("  CDT total:        {:.6}s", t.total_secs);
+                }
+
+                let t0 = Instant::now();
+                let wkt = poly.wkt_string();
+                match geos::Geometry::new_from_wkt(&wkt) {
+                    Ok(geom) => {
+                        let _ = geom.make_valid();
+                        eprintln!("  GEOS:             {:.6}s", t0.elapsed().as_secs_f64());
+                    }
+                    Err(e) => eprintln!("  GEOS err:         {e}"),
+                }
+            } else {
+                eprintln!(
+                    "  ANALYZE_POLY={target} out of range (dataset has {n_polys} polys) — skipping"
+                );
+            }
+        } else {
+            eprintln!("  ANALYZE_POLY='{target_str}' is not a valid index — skipping deep-dive");
         }
-    } else {
-        eprintln!("  why invalid:      self-intersections (only remaining check)");
-    }
-
-    if let Some(t) = arrange::diagnose_arrange(poly) {
-        eprintln!("  CDT prep:         {:.6}s", t.prep_secs);
-        eprintln!(
-            "  CDT build:        {:.6}s  ({} faces)",
-            t.cdt_build_secs, t.cdt_faces
-        );
-        eprintln!("  CDT label:        {:.6}s", t.label_secs);
-        eprintln!("  CDT extract:      {:.6}s", t.extract_secs);
-        eprintln!("  CDT total:        {:.6}s", t.total_secs);
-    }
-
-    let t0 = Instant::now();
-    let wkt = poly.wkt_string();
-    match geos::Geometry::new_from_wkt(&wkt) {
-        Ok(geom) => {
-            let _ = geom.make_valid();
-            eprintln!("  GEOS:             {:.6}s", t0.elapsed().as_secs_f64());
-        }
-        Err(e) => eprintln!("  GEOS err:         {e}"),
     }
 
     // =========================================================================
@@ -262,7 +267,7 @@ fn main() {
     // =========================================================================
     eprint!("\n[3/5] Sampling fast-path (100 polys)...");
     let cfg = MakeValidConfig {
-        poly_method: PolyMethod::Arrange,
+        poly_method: PolyMethod::Structure,
         ..Default::default()
     };
     let fp_time = sample_fastpath(&polys, &valid_idx, &cfg, 100);
@@ -308,10 +313,14 @@ fn main() {
         }
     }
 
-    // Sequential GEOS processing for comparison
-    let t0 = Instant::now();
+    // Pre-serialize WKT outside GEOS timer
+    let mut invalid_wkts: Vec<String> = Vec::with_capacity(sample_n);
     for p in &invalid_polys {
-        match geos::Geometry::new_from_wkt(&p.wkt_string()) {
+        invalid_wkts.push(p.wkt_string());
+    }
+    let t0 = Instant::now();
+    for wkt in &invalid_wkts {
+        match geos::Geometry::new_from_wkt(wkt) {
             Ok(g) => {
                 let _ = g.make_valid();
             }
@@ -335,9 +344,19 @@ fn main() {
     let _full_results = par_fix_polygon_batch(&all_polys, &cfg);
     let full_stru = t0.elapsed().as_secs_f64();
 
+    // Pre-serialize all WKT outside the GEOS timer to avoid counting serialization overhead
+    eprint!("  Pre-serializing {} polys to WKT...", full_n);
     let t0 = Instant::now();
-    for i in 0..full_n {
-        match geos::Geometry::new_from_wkt(&polys[i].wkt_string()) {
+    let mut wkts: Vec<String> = Vec::with_capacity(full_n);
+    for p in &polys {
+        wkts.push(p.wkt_string());
+    }
+    let wkt_time = t0.elapsed().as_secs_f64();
+    eprintln!(" {:.3}s", wkt_time);
+
+    let t0 = Instant::now();
+    for wkt in &wkts {
+        match geos::Geometry::new_from_wkt(wkt) {
             Ok(g) => {
                 let _ = g.make_valid();
             }
@@ -345,6 +364,7 @@ fn main() {
         }
     }
     let full_geos = t0.elapsed().as_secs_f64();
+    let full_geos_total = wkt_time + full_geos;
 
     // =========================================================================
     // Summary
@@ -381,6 +401,9 @@ fn main() {
     let full_stru_per = full_stru * 1000.0 / full_n as f64;
     let full_geos_per = full_geos * 1000.0 / full_n as f64;
     eprintln!("  Full dataset ({full_n} poly) │ {full_stru:>9.4}s │ {full_stru_per:>9.4}    │ {full_ratio:>6.2}x");
-    eprintln!("  GEOS (full)           │ {full_geos:>9.4}s │ {full_geos_per:>9.4}    │      —");
+    eprintln!(
+        "  GEOS (full)           │ {full_geos_total:>9.4}s │ {full_geos_per:>9.4}    │      —"
+    );
+    eprintln!("    (WKT serde: {wkt_time:.3}s, make_valid: {full_geos:.3}s)");
     eprintln!("═════════════════════════════════════════════════════════════════════");
 }

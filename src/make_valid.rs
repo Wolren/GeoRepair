@@ -228,6 +228,25 @@ impl MakeValid for Polygon<f64> {
     type Scalar = f64;
 
     fn make_valid_with_config(&self, config: &MakeValidConfig) -> Geometry<f64> {
+        if !config.keep_collapsed && self.exterior().0.len() >= 4 {
+            let coords = &self.exterior().0;
+            let mut min_x = coords[0].x;
+            let mut max_x = coords[0].x;
+            let mut min_y = coords[0].y;
+            let mut max_y = coords[0].y;
+            for w in coords.windows(2) {
+                min_x = min_x.min(w[1].x);
+                max_x = max_x.max(w[1].x);
+                min_y = min_y.min(w[1].y);
+                max_y = max_y.max(w[1].y);
+            }
+            let scale = (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
+            if (max_x - min_x).abs() < f64::EPSILON * scale
+                || (max_y - min_y).abs() < f64::EPSILON * scale
+            {
+                return empty_geom();
+            }
+        }
         match config.poly_method {
             PolyMethod::Arrange => arrange_or_empty(self, config),
             PolyMethod::Structure => {

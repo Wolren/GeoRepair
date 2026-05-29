@@ -15,7 +15,8 @@ arrange = ["dep:spade", "geo/spade"]
 structure = []
 parallel = ["dep:rayon", "geo/multithreading"]
 simd = []
-bench-geos = ["dep:geos"]
+bench-geos = ["dep:geos", "load-shp"]
+load-shp = ["dep:shapefile"]
 
 [dependencies]
 geo = { version = "0.33", default-features = false }
@@ -29,13 +30,17 @@ smallvec = { version = "1", default-features = false, features = ["union"] }
 mimalloc = { version = "0.1", default-features = false }
 geos = { version = "11.1.1", optional = true, features = ["v3_8_0"] }
 
+[dependencies.shapefile]
+version = "0.8"
+features = ["geo-types"]
+optional = true
+
 [dev-dependencies]
 approx = "0.5"
 wkt = "0.14"
 criterion = { version = "0.5", features = ["html_reports"] }
 proptest = "1"
 rstest = "0.19"
-shapefile = { version = "0.8", features = ["geo-types"] }
 [[bench]]
 name = "bench"
 harness = false

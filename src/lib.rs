@@ -1,5 +1,6 @@
 pub mod config;
 pub mod error;
+pub mod load;
 pub mod make_valid;
 pub mod orient;
 pub mod snap;

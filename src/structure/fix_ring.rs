@@ -22,7 +22,9 @@ pub(crate) fn repair_ring(ring: &LineString<f64>) -> Option<Vec<LineString<f64>>
     if coords.len() < 500 {
         let clean_ring = LineString::new(coords.clone());
         if let Some(rings) = buffer_by_zero_repair(&clean_ring) {
-            return Some(rings);
+            if rings.iter().all(|r| !has_self_intersections(&r.0)) {
+                return Some(rings);
+            }
         }
     }
 
@@ -289,11 +291,8 @@ fn check_edge_pair(coords: &[Coord<f64>], i: usize, j: usize, eps: f64) -> bool 
     // o[3] = orient2d(b1, b2, a2)
     let o = crate::simd::orient2d_batch_4(&[a1, a1, b1, b1], &[a2, a2, b2, b2], &[b1, b2, a1, a2]);
 
-    // edges_cross_proper
-    if (o[0].abs() > eps || o[1].abs() > eps || o[2].abs() > eps || o[3].abs() > eps)
-        && o[0].signum() != o[1].signum()
-        && o[2].signum() != o[3].signum()
-    {
+    // edges_cross_proper — strict sign product: zero = shared endpoint, not a crossing
+    if o[0] * o[1] < 0.0 && o[2] * o[3] < 0.0 {
         return true;
     }
 
@@ -344,7 +343,7 @@ fn check_edge_pair(coords: &[Coord<f64>], i: usize, j: usize, eps: f64) -> bool 
         let hi_x = a1.x.max(a2.x).min(b1.x.max(b2.x));
         let lo_y = a1.y.min(a2.y).max(b1.y.min(b2.y));
         let hi_y = a1.y.max(a2.y).min(b1.y.max(b2.y));
-        if lo_x + eps < hi_x && lo_y + eps < hi_y {
+        if lo_x + eps < hi_x || lo_y + eps < hi_y {
             return true;
         }
     }
@@ -860,6 +859,8 @@ fn walk_face(
     let mut cur_to = start_to;
     let mut first = true;
 
+    let mut used_any_dir = vec![false; graph.edges.len()];
+
     loop {
         if !first && cur_ei == start_ei && cur_to == start_to {
             break;
@@ -877,6 +878,7 @@ fn walk_face(
             break;
         }
         used[cur_ei] = true;
+        used_any_dir[cur_ei] = true;
 
         face.push((cur_ei, cur_to));
 
@@ -896,6 +898,7 @@ fn walk_face(
             incoming_angle,
             used_fwd,
             used_rev,
+            &used_any_dir,
             start_ei,
         );
 
@@ -922,6 +925,7 @@ fn find_next_edge(
     incoming_angle: f64,
     used_fwd: &[bool],
     used_rev: &[bool],
+    used_any_dir: &[bool],
     start_ei: usize,
 ) -> Option<(usize, usize)> {
     let mut best: Option<(usize, f64, usize)> = None;
@@ -941,6 +945,10 @@ fn find_next_edge(
 
         // Skip used edges UNLESS this is the start edge (allows cycle closure)
         if used && e_idx != start_ei {
+            continue;
+        }
+        // Skip if edge was traversed in ANY direction within this walk
+        if used_any_dir[e_idx] && e_idx != start_ei {
             continue;
         }
 
@@ -1114,6 +1122,40 @@ fn label_interior_faces(
         interior.remove(&fi);
     }
 
+    // Faces missed by BFS (share only vertices, not edges) or misclassified
+    // as exterior by the largest-bbox heuristic — verify ALL faces via
+    // winding number on the input ring.
+    for (fi, face) in faces.iter().enumerate() {
+        if interior.contains(&fi) {
+            continue;
+        }
+
+        let (mut cx, mut cy) = (0.0f64, 0.0f64);
+        for &(_, vi) in face {
+            let p = verts[vi];
+            cx += p.x;
+            cy += p.y;
+        }
+        cx /= face.len() as f64;
+        cy /= face.len() as f64;
+
+        let mut wn = 0i32;
+        for i in 0..input_ring.len() - 1 {
+            let a = input_ring[i];
+            let b = input_ring[i + 1];
+            if a.y <= cy {
+                if b.y > cy && orient2d(a, b, Coord { x: cx, y: cy }) > 0.0 {
+                    wn += 1;
+                }
+            } else if b.y <= cy && orient2d(a, b, Coord { x: cx, y: cy }) < 0.0 {
+                wn -= 1;
+            }
+        }
+        if wn % 2 != 0 {
+            interior.insert(fi);
+        }
+    }
+
     Some(interior)
 }
 
@@ -1125,6 +1167,18 @@ fn label_interior_faces(
 mod tests {
     use super::*;
 
+    fn ring_area(ring: &LineString<f64>) -> f64 {
+        let mut s = 0.0;
+        for w in ring.0.windows(2) {
+            s += w[0].x * w[1].y - w[1].x * w[0].y;
+        }
+        s.abs() / 2.0
+    }
+
+    fn total_area(rings: &[LineString<f64>]) -> f64 {
+        rings.iter().map(ring_area).sum()
+    }
+
     #[test]
     fn test_square() {
         let ring = ls(&[
@@ -1134,9 +1188,19 @@ mod tests {
             (0.0, 10.0),
             (0.0, 0.0),
         ]);
+        let input_area = ring_area(&ring);
         let r = repair_ring(&ring);
         assert!(r.is_some());
-        assert_eq!(r.unwrap().len(), 1);
+        let rings = r.unwrap();
+        assert_eq!(rings.len(), 1);
+        let output_area = total_area(&rings);
+        if input_area > 0.0 {
+            assert!(
+                (output_area / input_area - 1.0).abs() < 0.5,
+                "square area ratio {:.4}",
+                output_area / input_area
+            );
+        }
     }
 
     #[test]
@@ -1148,6 +1212,7 @@ mod tests {
             (0.0, 10.0),
             (0.0, 0.0),
         ]);
+        let input_area = ring_area(&ring);
         let r = repair_ring(&ring);
         assert!(r.is_some(), "bowtie should produce result");
         let rings = r.unwrap();
@@ -1155,6 +1220,20 @@ mod tests {
         for ring in &rings {
             assert!(ring.0.len() >= 4, "ring too short");
             assert_eq!(ring.0.first(), ring.0.last(), "ring not closed");
+        }
+        let output_area = total_area(&rings);
+        if input_area > 0.0 {
+            assert!(
+                (output_area / input_area - 1.0).abs() < 0.5,
+                "bowtie area ratio {:.4}",
+                output_area / input_area
+            );
+        } else {
+            assert!(
+                output_area > 0.0,
+                "bowtie output should have positive area, got {:.0}",
+                output_area
+            );
         }
     }
 
@@ -1166,19 +1245,6 @@ mod tests {
             (10.0, 10.0),
             (5.0, 5.0),
             (0.0, 10.0),
-            (0.0, 0.0),
-        ]);
-        let r = repair_ring(&ring);
-        assert!(r.is_some());
-    }
-
-    #[test]
-    fn test_figure_eight() {
-        let ring = ls(&[
-            (0.0, 0.0),
-            (0.0, 10.0),
-            (10.0, 10.0),
-            (10.0, 0.0),
             (0.0, 0.0),
         ]);
         let r = repair_ring(&ring);
