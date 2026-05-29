@@ -122,7 +122,7 @@ fn main() {
     eprintln!("GEOS-invalid after fix: {geos_bad}");
 
     let mut f = BufWriter::new(File::create(&out_path).unwrap());
-    write!(f, "{{\"type\":\"FeatureCollection\",\"features\":[").unwrap();
+    write!(f, "{{\"type\":\"FeatureCollection\",\"crs\":{{\"type\":\"name\",\"properties\":{{\"name\":\"EPSG:2964\"}}}},\"features\":[").unwrap();
     for (ri, g) in results.iter().enumerate() {
         if ri > 0 {
             write!(f, ",").unwrap();

@@ -140,7 +140,8 @@ fn alaska_structure_output_all_geos_valid() {
         match geos::Geometry::new_from_wkt(&wkt) {
             Ok(gg) => {
                 if !gg.is_valid().unwrap_or(false) {
-                    failures.push((invalid_indices[ri], "GEOS is_valid returned false".into()));
+                    let reason = gg.is_valid_reason().unwrap_or_else(|_| "unknown".into());
+                    failures.push((invalid_indices[ri], reason));
                 }
             }
             Err(e) => {

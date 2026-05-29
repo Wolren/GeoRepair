@@ -126,23 +126,34 @@ pub(crate) fn has_self_intersections(coords: &[Coord<f64>]) -> bool {
         }
     }
 
+    // Compute coordinate-scale-relative epsilon for edge checks at large scales
+    let (mut min_x, mut max_x, mut min_y, mut max_y) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+    for &c in coords {
+        min_x = min_x.min(c.x);
+        max_x = max_x.max(c.x);
+        min_y = min_y.min(c.y);
+        max_y = max_y.max(c.y);
+    }
+    let coord_scale = (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
+    let eps = 1e-12 * coord_scale;
+
     // Spatial grid to accelerate edge intersection checks
     if n > 500 {
-        return has_self_intersections_grid(coords);
+        return has_self_intersections_grid(coords, eps);
     }
 
-    has_self_intersections_bruteforce(coords)
+    has_self_intersections_bruteforce(coords, eps)
 }
 
 /// O(n²) brute force for small rings
-fn has_self_intersections_bruteforce(coords: &[Coord<f64>]) -> bool {
+fn has_self_intersections_bruteforce(coords: &[Coord<f64>], eps: f64) -> bool {
     let n = coords.len();
     for i in 0..n - 1 {
         for j in i + 2..n - 1 {
             if i == 0 && j == n - 2 {
                 continue;
             }
-            if check_edge_pair(coords, i, j) {
+            if check_edge_pair(coords, i, j, eps) {
                 return true;
             }
         }
@@ -151,7 +162,7 @@ fn has_self_intersections_bruteforce(coords: &[Coord<f64>]) -> bool {
 }
 
 /// O(n log n) expected via uniform spatial grid — for large rings
-fn has_self_intersections_grid(coords: &[Coord<f64>]) -> bool {
+fn has_self_intersections_grid(coords: &[Coord<f64>], eps: f64) -> bool {
     let n = coords.len();
     let n_edges = n - 1;
 
@@ -173,7 +184,7 @@ fn has_self_intersections_grid(coords: &[Coord<f64>]) -> bool {
 
     // Degenerate bbox: fall back to brute force
     if dx < eps || dy < eps {
-        return has_self_intersections_bruteforce(coords);
+        return has_self_intersections_bruteforce(coords, eps);
     }
 
     // Grid size: sqrt(n) × sqrt(n), at least 4, at most 256
@@ -209,7 +220,7 @@ fn has_self_intersections_grid(coords: &[Coord<f64>]) -> bool {
     {
         use rayon::prelude::*;
         grid.par_iter()
-            .any(|cell| cell_has_intersection(coords, cell, n_edges))
+            .any(|cell| cell_has_intersection(coords, cell, n_edges, eps))
     }
     #[cfg(not(feature = "parallel"))]
     {
@@ -230,7 +241,7 @@ fn has_self_intersections_grid(coords: &[Coord<f64>]) -> bool {
                     if ei.abs_diff(ej) <= 1 || (ei == 0 && ej == n_edges - 1) {
                         continue;
                     }
-                    if check_edge_pair(coords, ei, ej) {
+                    if check_edge_pair(coords, ei, ej, eps) {
                         return true;
                     }
                 }
@@ -241,7 +252,7 @@ fn has_self_intersections_grid(coords: &[Coord<f64>]) -> bool {
 }
 
 /// Check a single grid cell for intersecting edge pairs.
-fn cell_has_intersection(coords: &[Coord<f64>], cell: &[usize], n_edges: usize) -> bool {
+fn cell_has_intersection(coords: &[Coord<f64>], cell: &[usize], n_edges: usize, eps: f64) -> bool {
     if cell.len() < 2 {
         return false;
     }
@@ -254,7 +265,7 @@ fn cell_has_intersection(coords: &[Coord<f64>], cell: &[usize], n_edges: usize) 
             if ei.abs_diff(ej) <= 1 || (ei == 0 && ej == n_edges - 1) {
                 continue;
             }
-            if check_edge_pair(coords, ei, ej) {
+            if check_edge_pair(coords, ei, ej, eps) {
                 return true;
             }
         }
@@ -265,12 +276,11 @@ fn cell_has_intersection(coords: &[Coord<f64>], cell: &[usize], n_edges: usize) 
 /// Check a single pair of edges for any type of intersection.
 /// Uses a single batch of 4 orient2d calls (SIMD) for ALL sub-checks.
 #[inline(always)]
-fn check_edge_pair(coords: &[Coord<f64>], i: usize, j: usize) -> bool {
+fn check_edge_pair(coords: &[Coord<f64>], i: usize, j: usize, eps: f64) -> bool {
     let a1 = coords[i];
     let a2 = coords[i + 1];
     let b1 = coords[j];
     let b2 = coords[j + 1];
-    let eps = 1e-12;
 
     // Single batch of 4 orient2d:
     // o[0] = orient2d(a1, a2, b1)
@@ -401,8 +411,19 @@ fn edges_from_coords(coords: &[Coord<f64>]) -> Vec<Line<f64>> {
 
 fn split_edges(edges: &[Line<f64>]) -> Vec<Line<f64>> {
     let n = edges.len();
-    let mut split_points: Vec<Vec<f64>> = vec![Vec::new(); n];
-    let eps = 1e-12;
+    let mut split_points: Vec<Vec<(f64, Coord<f64>)>> = vec![Vec::new(); n];
+
+    // Scale epsilon with coordinate magnitude so that near-parallel detection
+    // works correctly for large coordinates (e.g. UTM at 5 million scale).
+    let (mut min_x, mut max_x, mut min_y, mut max_y) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+    for e in edges {
+        min_x = min_x.min(e.start.x).min(e.end.x);
+        max_x = max_x.max(e.start.x).max(e.end.x);
+        min_y = min_y.min(e.start.y).min(e.end.y);
+        max_y = max_y.max(e.start.y).max(e.end.y);
+    }
+    let coord_scale = (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
+    let eps = 1e-12 * coord_scale;
 
     if n > 500 {
         split_edges_grid(edges, &mut split_points, eps);
@@ -414,12 +435,11 @@ fn split_edges(edges: &[Line<f64>]) -> Vec<Line<f64>> {
     let mut result = Vec::new();
     for i in 0..n {
         let e = edges[i];
-        let mut params: Vec<f64> = std::mem::take(&mut split_points[i]);
-        params.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        params.dedup_by(|a, b| (*a - *b).abs() < eps_param);
+        let mut pts: Vec<(f64, Coord<f64>)> = std::mem::take(&mut split_points[i]);
+        pts.sort_by(|(a, _), (b, _)| a.partial_cmp(b).unwrap());
+        pts.dedup_by(|(a, _), (b, _)| (*a - *b).abs() < eps_param);
         let mut prev_pt = e.start;
-        for &t in &params {
-            let pt = lerp(e, t);
+        for &(_, pt) in &pts {
             if dist2(pt, prev_pt) > eps_param {
                 result.push(Line::new(prev_pt, pt));
             }
@@ -432,7 +452,11 @@ fn split_edges(edges: &[Line<f64>]) -> Vec<Line<f64>> {
     result
 }
 
-fn split_edges_bruteforce(edges: &[Line<f64>], split_points: &mut [Vec<f64>], eps: f64) {
+fn split_edges_bruteforce(
+    edges: &[Line<f64>],
+    split_points: &mut [Vec<(f64, Coord<f64>)>],
+    eps: f64,
+) {
     let n = edges.len();
     for i in 0..n {
         for j in (i + 2)..n {
@@ -443,26 +467,36 @@ fn split_edges_bruteforce(edges: &[Line<f64>], split_points: &mut [Vec<f64>], ep
                 continue;
             }
             if let Some((ti, tj)) = intersect_param(&edges[i], &edges[j], eps) {
-                if ti > eps && ti < 1.0 - eps {
-                    split_points[i].push(ti);
-                }
-                if tj > eps && tj < 1.0 - eps {
-                    split_points[j].push(tj);
+                // Compute split point ONCE from BOTH edges, then average.
+                // This ensures both edges are split at the SAME coordinate,
+                // preventing T-junctions in the planar graph.
+                if (ti > eps && ti < 1.0 - eps) || (tj > eps && tj < 1.0 - eps) {
+                    let pi = lerp(edges[i], ti);
+                    let pj = lerp(edges[j], tj);
+                    let pt = Coord {
+                        x: (pi.x + pj.x) * 0.5,
+                        y: (pi.y + pj.y) * 0.5,
+                    };
+                    if ti > eps && ti < 1.0 - eps {
+                        split_points[i].push((ti, pt));
+                    }
+                    if tj > eps && tj < 1.0 - eps {
+                        split_points[j].push((tj, pt));
+                    }
                 }
             }
         }
     }
 }
 
-fn split_edges_grid(edges: &[Line<f64>], split_points: &mut [Vec<f64>], eps: f64) {
+fn split_edges_grid(edges: &[Line<f64>], split_points: &mut [Vec<(f64, Coord<f64>)>], eps: f64) {
     let n = edges.len();
     let grid = build_edge_grid(edges);
 
     #[cfg(feature = "parallel")]
     {
         use rayon::prelude::*;
-        // Each cell produces Vec<(edge_idx, param)> — only for pairs that intersect
-        let cell_results: Vec<Vec<(usize, f64)>> = grid
+        let cell_results: Vec<Vec<(usize, f64, Coord<f64>)>> = grid
             .par_iter()
             .map(|cell| {
                 let mut hits = Vec::new();
@@ -479,11 +513,19 @@ fn split_edges_grid(edges: &[Line<f64>], split_points: &mut [Vec<f64>], eps: f64
                             continue;
                         }
                         if let Some((ti, tj)) = intersect_param(&edges[ei], &edges[ej], eps) {
-                            if ti > eps && ti < 1.0 - eps {
-                                hits.push((ei, ti));
-                            }
-                            if tj > eps && tj < 1.0 - eps {
-                                hits.push((ej, tj));
+                            if (ti > eps && ti < 1.0 - eps) || (tj > eps && tj < 1.0 - eps) {
+                                let pi = lerp(edges[ei], ti);
+                                let pj = lerp(edges[ej], tj);
+                                let pt = Coord {
+                                    x: (pi.x + pj.x) * 0.5,
+                                    y: (pi.y + pj.y) * 0.5,
+                                };
+                                if ti > eps && ti < 1.0 - eps {
+                                    hits.push((ei, ti, pt));
+                                }
+                                if tj > eps && tj < 1.0 - eps {
+                                    hits.push((ej, tj, pt));
+                                }
                             }
                         }
                     }
@@ -492,8 +534,8 @@ fn split_edges_grid(edges: &[Line<f64>], split_points: &mut [Vec<f64>], eps: f64
             })
             .collect();
         for hits in cell_results {
-            for (ei, t) in hits {
-                split_points[ei].push(t);
+            for (ei, t, pt) in hits {
+                split_points[ei].push((t, pt));
             }
         }
     }
@@ -517,11 +559,19 @@ fn split_edges_grid(edges: &[Line<f64>], split_points: &mut [Vec<f64>], eps: f64
                         continue;
                     }
                     if let Some((ti, tj)) = intersect_param(&edges[ei], &edges[ej], eps) {
-                        if ti > eps && ti < 1.0 - eps {
-                            split_points[ei].push(ti);
-                        }
-                        if tj > eps && tj < 1.0 - eps {
-                            split_points[ej].push(tj);
+                        if (ti > eps && ti < 1.0 - eps) || (tj > eps && tj < 1.0 - eps) {
+                            let pi = lerp(edges[ei], ti);
+                            let pj = lerp(edges[ej], tj);
+                            let pt = Coord {
+                                x: (pi.x + pj.x) * 0.5,
+                                y: (pi.y + pj.y) * 0.5,
+                            };
+                            if ti > eps && ti < 1.0 - eps {
+                                split_points[ei].push((ti, pt));
+                            }
+                            if tj > eps && tj < 1.0 - eps {
+                                split_points[ej].push((tj, pt));
+                            }
                         }
                     }
                 }
@@ -899,8 +949,16 @@ fn find_next_edge(
             .atan2(graph.verts[dest].x - graph.verts[v_idx].x);
 
         let mut turn = out_angle - incoming_angle;
+        // For near-zero negative turns (floating-point noise from nearly colinear
+        // edges), clamp to zero instead of wrapping to ~2π. Without this, the
+        // smallest CCW turn picks the wrong outgoing edge, creating self-intersecting
+        // face boundaries.
         if turn < 0.0 {
-            turn += 2.0 * std::f64::consts::PI;
+            if turn > -1e-10 {
+                turn = 0.0;
+            } else {
+                turn += 2.0 * std::f64::consts::PI;
+            }
         }
 
         if best.is_none() || turn < best.unwrap().1 {
