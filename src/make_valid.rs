@@ -254,10 +254,15 @@ impl MakeValid for Polygon<f64> {
             PolyMethod::Structure => {
                 structure_fix(self, config).unwrap_or_else(|| empty_geom::<f64>())
             }
-            PolyMethod::Auto => structure_fix(self, config).unwrap_or_else(|| {
-                warn!("Auto mode: structure_fix returned None, falling back to CDT arrange");
+            PolyMethod::Auto => {
+                if let Some(result) = structure_fix(self, config) {
+                    if <Geometry<f64> as geo::validation::Validation>::is_valid(&result) {
+                        return result;
+                    }
+                    warn!("Auto mode: structure_fix produced invalid output, falling back to CDT arrange");
+                }
                 arrange_or_empty(self, config)
-            }),
+            }
         }
     }
 }
@@ -290,6 +295,11 @@ impl MakeValid for MultiPolygon<f64> {
         let mp = MultiPolygon::new(shells);
         Geometry::MultiPolygon(geo::algorithm::bool_ops::unary_union(&mp))
     }
+
+    #[cfg(feature = "parallel")]
+    fn par_make_valid_with_config(&self, config: &MakeValidConfig) -> Geometry<f64> {
+        crate::parallel::par_fix_multi_polygon(self, config)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -312,6 +322,22 @@ impl MakeValid for Geometry<f64> {
             Geometry::GeometryCollection(g) => g.make_valid_with_config(config),
             Geometry::Rect(g) => g.make_valid_with_config(config),
             Geometry::Triangle(g) => g.make_valid_with_config(config),
+        }
+    }
+
+    #[cfg(feature = "parallel")]
+    fn par_make_valid_with_config(&self, config: &MakeValidConfig) -> Geometry<f64> {
+        match self {
+            Geometry::Point(g) => g.par_make_valid_with_config(config),
+            Geometry::Line(g) => g.par_make_valid_with_config(config),
+            Geometry::LineString(g) => g.par_make_valid_with_config(config),
+            Geometry::Polygon(g) => g.par_make_valid_with_config(config),
+            Geometry::MultiPoint(g) => g.par_make_valid_with_config(config),
+            Geometry::MultiLineString(g) => g.par_make_valid_with_config(config),
+            Geometry::MultiPolygon(g) => g.par_make_valid_with_config(config),
+            Geometry::GeometryCollection(g) => g.par_make_valid_with_config(config),
+            Geometry::Rect(g) => g.par_make_valid_with_config(config),
+            Geometry::Triangle(g) => g.par_make_valid_with_config(config),
         }
     }
 }
@@ -353,7 +379,10 @@ fn structure_fix(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geomet
 }
 
 #[cfg(not(feature = "structure"))]
-fn structure_fix(_poly: &Polygon<f64>, _config: &MakeValidConfig) -> Option<Geometry<f64>> {
+fn structure_fix(poly: &Polygon<f64>, _config: &MakeValidConfig) -> Option<Geometry<f64>> {
+    if !poly.exterior().0.is_empty() {
+        warn!("PolyMethod::Structure selected but 'structure' feature is not enabled. Enable the 'structure' feature in Cargo.toml to use Structure mode.");
+    }
     None
 }
 
@@ -377,6 +406,11 @@ impl MakeValid for GeometryCollection<f64> {
         } else {
             Geometry::GeometryCollection(GeometryCollection(fixed))
         }
+    }
+
+    #[cfg(feature = "parallel")]
+    fn par_make_valid_with_config(&self, config: &MakeValidConfig) -> Geometry<f64> {
+        crate::parallel::par_fix_collection(self, config)
     }
 }
 
@@ -427,19 +461,17 @@ pub trait ValidateAndFix: MakeValid<Scalar = f64> + GeoValidation<Scalar = f64> 
     }
 
     /// Return the validated geometry, or fix it if invalid.
-    /// Returns Ok(geometry) if valid, Err((validation_errors, fixed_geometry)) if invalid.
+    /// Returns Ok(geometry) if valid or fix succeeded, Err((validation_errors, fixed_geometry)) if still invalid.
     fn validate_or_fix(&self) -> Result<Geometry<f64>, (ValidationResult, Geometry<f64>)> {
         let result = <Self as GeoValidation>::validate(self);
         if result.valid {
-            Ok(<Self as MakeValid>::make_valid(self))
+            return Ok(<Self as MakeValid>::make_valid(self));
+        }
+        let fixed = <Self as MakeValid>::make_valid(self);
+        if <Geometry<f64> as GeoValidation>::validate(&fixed).valid {
+            Ok(fixed)
         } else {
-            let fixed = <Self as MakeValid>::make_valid(self);
-            let fixed_result = <Geometry<f64> as GeoValidation>::validate(&fixed);
-            if fixed_result.valid {
-                Err((result, fixed))
-            } else {
-                Err((result, fixed))
-            }
+            Err((result, fixed))
         }
     }
 }

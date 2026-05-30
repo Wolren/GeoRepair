@@ -41,12 +41,15 @@ pub fn count_sub_polys(g: &Geometry<f64>) -> usize {
 /// Load polygons from a shapefile at `path`. Each shapefile Polygon ring
 /// is grouped into geo::Polygon using signed-area winding direction to
 /// distinguish exterior vs holes.
+///
+/// Corrupt shapes are silently skipped; missing or unreadable files panic.
 #[cfg(feature = "load-shp")]
 pub fn load_shp(path: &str) -> Vec<Polygon<f64>> {
-    let mut reader = shapefile::Reader::from_path(path).unwrap();
+    let mut reader = shapefile::Reader::from_path(path)
+        .unwrap_or_else(|e| panic!("Cannot open shapefile {path}: {e}"));
     let mut all_rings: Vec<Vec<Coord<f64>>> = Vec::new();
     for result in reader.iter_shapes_and_records() {
-        let (shape, _) = result.unwrap();
+        let Ok((shape, _)) = result else { continue };
         if let shapefile::Shape::Polygon(poly) = shape {
             for r in poly.rings() {
                 let coords: Vec<Coord<f64>> = r
@@ -106,45 +109,65 @@ pub fn load_shp(path: &str) -> Vec<Polygon<f64>> {
 ///   [u32: n_polys]
 ///   for each: [ring_data] [u32: n_holes] [hole_rings...]
 ///   each ring: [u32: n_coords] [f64: x, f64: y] × n_coords
-pub fn load_bin(path: &str) -> Vec<Polygon<f64>> {
+///
+/// Returns `Err` with a description if the file cannot be read or the data
+/// is malformed (e.g. truncated or corrupt).
+pub fn load_bin(path: &str) -> Result<Vec<Polygon<f64>>, String> {
     let mut buf = Vec::new();
-    File::open(path).unwrap().read_to_end(&mut buf).unwrap();
+    File::open(path)
+        .map_err(|e| format!("cannot open {path}: {e}"))?
+        .read_to_end(&mut buf)
+        .map_err(|e| format!("cannot read {path}: {e}"))?;
     let mut pos = 0;
 
-    let read_u32 = |buf: &[u8], pos: &mut usize| -> u32 {
-        let v = u32::from_le_bytes(buf[*pos..*pos + 4].try_into().unwrap());
+    let read_u32 = |buf: &[u8], pos: &mut usize| -> Result<u32, String> {
+        if *pos + 4 > buf.len() {
+            return Err("unexpected EOF reading u32".into());
+        }
+        let v = u32::from_le_bytes(
+            buf[*pos..*pos + 4]
+                .try_into()
+                .map_err(|_| "invalid u32 bytes")?,
+        );
         *pos += 4;
-        v
+        Ok(v)
     };
-    let read_f64 = |buf: &[u8], pos: &mut usize| -> f64 {
-        let v = f64::from_le_bytes(buf[*pos..*pos + 8].try_into().unwrap());
+    let read_f64 = |buf: &[u8], pos: &mut usize| -> Result<f64, String> {
+        if *pos + 8 > buf.len() {
+            return Err("unexpected EOF reading f64".into());
+        }
+        let v = f64::from_le_bytes(
+            buf[*pos..*pos + 8]
+                .try_into()
+                .map_err(|_| "invalid f64 bytes")?,
+        );
         *pos += 8;
-        v
+        Ok(v)
     };
-    let read_ring = |buf: &[u8], pos: &mut usize| -> LineString<f64> {
-        let n = read_u32(buf, pos) as usize;
+    let read_ring = |buf: &[u8], pos: &mut usize| -> Result<LineString<f64>, String> {
+        let n = read_u32(buf, pos)? as usize;
         let mut coords = Vec::with_capacity(n);
         for _ in 0..n {
             coords.push(Coord {
-                x: read_f64(buf, pos),
-                y: read_f64(buf, pos),
+                x: read_f64(buf, pos)?,
+                y: read_f64(buf, pos)?,
             });
         }
-        LineString::new(coords)
+        Ok(LineString::new(coords))
     };
 
-    let n_polys = read_u32(&buf, &mut pos) as usize;
+    let n_polys = read_u32(&buf, &mut pos)? as usize;
     let mut polys = Vec::with_capacity(n_polys);
     for _ in 0..n_polys {
-        let ext = read_ring(&buf, &mut pos);
-        let n_holes = read_u32(&buf, &mut pos) as usize;
+        let ext = read_ring(&buf, &mut pos)?;
+        let n_holes = read_u32(&buf, &mut pos)? as usize;
         let mut holes = Vec::with_capacity(n_holes);
         for _ in 0..n_holes {
-            holes.push(read_ring(&buf, &mut pos));
+            holes.push(read_ring(&buf, &mut pos)?);
         }
         polys.push(Polygon::new(ext, holes));
     }
-    polys
+    Ok(polys)
 }
 
 /// Streaming shapefile reader — yields polygons one at a time without loading
@@ -152,7 +175,8 @@ pub fn load_bin(path: &str) -> Vec<Polygon<f64>> {
 /// conversion for ring-to-polygon grouping.
 #[cfg(feature = "load-shp")]
 pub fn load_shp_stream(path: &str) -> impl Iterator<Item = Polygon<f64>> {
-    let reader = shapefile::Reader::from_path(path).unwrap();
+    let reader = shapefile::Reader::from_path(path)
+        .unwrap_or_else(|e| panic!("Cannot open shapefile {path}: {e}"));
     LoadShpStream {
         reader,
         buf: Vec::new(),
@@ -196,8 +220,10 @@ impl Iterator for LoadShpStream {
 
 /// Streaming binary reader — yields polygons one at a time without loading
 /// the entire file into memory. Matches the `load_bin` wire format.
+///
+/// Corrupt or truncated data silently ends the stream; missing files panic.
 pub fn load_bin_stream(path: &str) -> impl Iterator<Item = Polygon<f64>> {
-    let file = std::fs::File::open(path).unwrap();
+    let file = std::fs::File::open(path).unwrap_or_else(|e| panic!("Cannot open {path}: {e}"));
     let reader = std::io::BufReader::new(file);
     LoadBinStream {
         reader,
@@ -214,28 +240,28 @@ struct LoadBinStream {
     polys_yielded: u32,
 }
 
-fn read_u32<R: std::io::Read>(r: &mut R) -> u32 {
+fn read_u32<R: std::io::Read>(r: &mut R) -> Option<u32> {
     let mut buf = [0u8; 4];
-    r.read_exact(&mut buf).unwrap();
-    u32::from_le_bytes(buf)
+    r.read_exact(&mut buf).ok()?;
+    Some(u32::from_le_bytes(buf))
 }
 
-fn read_f64<R: std::io::Read>(r: &mut R) -> f64 {
+fn read_f64<R: std::io::Read>(r: &mut R) -> Option<f64> {
     let mut buf = [0u8; 8];
-    r.read_exact(&mut buf).unwrap();
-    f64::from_le_bytes(buf)
+    r.read_exact(&mut buf).ok()?;
+    Some(f64::from_le_bytes(buf))
 }
 
-fn read_ring<R: std::io::Read>(r: &mut R) -> LineString<f64> {
-    let n = read_u32(r) as usize;
+fn read_ring<R: std::io::Read>(r: &mut R) -> Option<LineString<f64>> {
+    let n = read_u32(r)? as usize;
     let mut coords = Vec::with_capacity(n);
     for _ in 0..n {
         coords.push(Coord {
-            x: read_f64(r),
-            y: read_f64(r),
+            x: read_f64(r)?,
+            y: read_f64(r)?,
         });
     }
-    LineString::new(coords)
+    Some(LineString::new(coords))
 }
 
 impl Iterator for LoadBinStream {
@@ -243,7 +269,7 @@ impl Iterator for LoadBinStream {
 
     fn next(&mut self) -> Option<Polygon<f64>> {
         if !self.header_read {
-            self.total_polys = read_u32(&mut self.reader);
+            self.total_polys = read_u32(&mut self.reader)?;
             self.header_read = true;
             if self.total_polys == 0 {
                 return None;
@@ -253,11 +279,11 @@ impl Iterator for LoadBinStream {
             return None;
         }
         self.polys_yielded += 1;
-        let ext = read_ring(&mut self.reader);
-        let n_holes = read_u32(&mut self.reader) as usize;
+        let ext = read_ring(&mut self.reader)?;
+        let n_holes = read_u32(&mut self.reader)? as usize;
         let mut holes = Vec::with_capacity(n_holes);
         for _ in 0..n_holes {
-            holes.push(read_ring(&mut self.reader));
+            holes.push(read_ring(&mut self.reader)?);
         }
         Some(Polygon::new(ext, holes))
     }

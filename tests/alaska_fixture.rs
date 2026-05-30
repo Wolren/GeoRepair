@@ -6,7 +6,9 @@
 #![cfg(feature = "bench-geos")]
 
 use geo::Polygon;
-use geo_repair::load::{geo_area, load_shp, signed_area};
+use geo_repair::io::load::{geo_area, signed_area};
+#[cfg(feature = "load-shp")]
+use geo_repair::io::load_shp;
 use geo_repair::parallel::par_fix_polygon_batch;
 use geo_repair::{MakeValidConfig, PolyMethod};
 use geos::Geom;

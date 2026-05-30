@@ -4,7 +4,7 @@ pub mod merge;
 pub mod subtract;
 pub mod sweep;
 
-use geo::{Coord, Geometry, LineString, LinesIter, MultiPolygon, Polygon, Winding};
+use geo::{Coord, Geometry, LineString, LinesIter, MultiPolygon, Point, Polygon, Winding};
 use rstar::{RTree, RTreeObject, AABB};
 
 use crate::core::MakeValidConfig;
@@ -41,16 +41,16 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
             if !poly.exterior().0.is_empty() {
                 return Some(crate::arrange::fix_polygon(poly, config));
             }
-            return None;
+            return handle_collapse_result(poly.exterior(), config);
         }
     };
     if shell_rings.is_empty() {
-        return None;
+        return handle_collapse_result(poly.exterior(), config);
     }
     let valid_shells: Vec<LineString<f64>> =
         shell_rings.into_iter().filter(|s| s.0.len() >= 4).collect();
     if valid_shells.is_empty() {
-        return None;
+        return handle_collapse_result(poly.exterior(), config);
     }
 
     // Fix holes — each hole may produce multiple rings (parallel via rayon)
@@ -285,6 +285,43 @@ fn ensure_cw(mut ring: LineString<f64>) -> LineString<f64> {
         ring.make_cw_winding();
     }
     ring
+}
+
+/// When keep_collapsed is true and the polygon shell collapsed during repair,
+/// return a Point or LineString instead of empty.
+fn handle_collapse_result(
+    exterior: &LineString<f64>,
+    config: &MakeValidConfig,
+) -> Option<Geometry<f64>> {
+    if !config.keep_collapsed {
+        return None;
+    }
+    let coords: Vec<Coord<f64>> = exterior
+        .0
+        .iter()
+        .copied()
+        .filter(|c| c.x.is_finite() && c.y.is_finite())
+        .collect();
+    match coords.len() {
+        0 => None,
+        1 => Some(Geometry::Point(Point(coords[0]))),
+        _ => {
+            let deduped: Vec<Coord<f64>> = {
+                let mut v = Vec::with_capacity(coords.len());
+                for c in coords {
+                    if v.last() != Some(&c) {
+                        v.push(c);
+                    }
+                }
+                v
+            };
+            if deduped.len() == 1 {
+                Some(Geometry::Point(Point(deduped[0])))
+            } else {
+                Some(Geometry::LineString(LineString::new(deduped)))
+            }
+        }
+    }
 }
 
 fn enforce_winding(g: Geometry<f64>) -> Geometry<f64> {

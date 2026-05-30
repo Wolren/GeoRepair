@@ -589,63 +589,6 @@ fn reconnect_edges_f64(edges: Vec<Line<f64>>) -> Vec<LineString<f64>> {
     result
 }
 
-/// Node a multi line string by fixing each component and noding
-/// across components (inter-component intersections are split).
-#[allow(dead_code)]
-pub(crate) fn node_multi_line_string<T: GeoFloat>(mls: &MultiLineString<T>) -> Geometry<T> {
-    // Clean each component and build a flat edge list for cross-component noding
-    let mut cleaned: Vec<LineString<T>> = Vec::new();
-    let mut all_edges: Vec<Line<T>> = Vec::new();
-
-    for ls in &mls.0 {
-        let coords: Vec<Coord<T>> =
-            ls.0.iter()
-                .copied()
-                .filter(|c| c.x.is_finite() && c.y.is_finite())
-                .collect();
-        if coords.len() < 2 {
-            continue;
-        }
-        let deduped = remove_consecutive_duplicates(&coords);
-        if deduped.len() < 2 {
-            continue;
-        }
-
-        cleaned.push(LineString::new(deduped.clone()));
-
-        for w in deduped.windows(2) {
-            all_edges.push(Line::new(w[0], w[1]));
-        }
-    }
-
-    if all_edges.is_empty() {
-        return empty();
-    }
-
-    // Check for intersections across ALL components (intra + inter)
-    if check_self_intersections(&all_edges) {
-        let split_edges = split_edges_at_intersections(&all_edges);
-        if split_edges.is_empty() {
-            return empty();
-        }
-        let linestrings = reconnect_edges(split_edges);
-        if linestrings.is_empty() {
-            return empty();
-        }
-        if linestrings.len() == 1 {
-            return Geometry::LineString(linestrings.into_iter().next().unwrap());
-        }
-        return Geometry::MultiLineString(MultiLineString::new(linestrings));
-    }
-
-    // No inter-component intersections — return per-component cleaned result
-    if cleaned.len() == 1 {
-        Geometry::LineString(cleaned.into_iter().next().unwrap())
-    } else {
-        Geometry::MultiLineString(MultiLineString::new(cleaned))
-    }
-}
-
 pub(crate) fn remove_consecutive_duplicates<T: CoordNum>(coords: &[Coord<T>]) -> Vec<Coord<T>> {
     let mut result = Vec::with_capacity(coords.len());
     for c in coords {
@@ -1079,35 +1022,6 @@ mod tests {
         ]);
         let result = node_line_string(&ls);
         assert!(matches!(result, Geometry::LineString(_)));
-    }
-
-    #[test]
-    fn test_node_multi_line_string_empty() {
-        let mls = MultiLineString::<f64>::new(Vec::new());
-        let result = node_multi_line_string(&mls);
-        assert!(matches!(result, Geometry::GeometryCollection(_)));
-    }
-
-    #[test]
-    fn test_node_multi_line_string_with_self_intersection() {
-        let mls = MultiLineString::new(vec![
-            LineString::new(vec![Coord { x: 0.0, y: 0.0 }, Coord { x: 1.0, y: 0.0 }]),
-            LineString::new(vec![
-                Coord { x: 0.0, y: 0.0 },
-                Coord { x: 2.0, y: 2.0 },
-                Coord { x: 2.0, y: 0.0 },
-                Coord { x: 0.0, y: 2.0 },
-            ]),
-        ]);
-        let result = node_multi_line_string(&mls);
-        assert!(matches!(result, Geometry::MultiLineString(_)));
-    }
-
-    #[test]
-    fn test_node_multi_line_string_all_invalid() {
-        let mls: MultiLineString<f64> = MultiLineString::new(vec![LineString::new(Vec::new())]);
-        let result = node_multi_line_string(&mls);
-        assert!(matches!(result, Geometry::GeometryCollection(_)));
     }
 
     #[test]
