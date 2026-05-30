@@ -2,7 +2,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 #[cfg(feature = "parallel")]
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::error::MakeValidError;
+use crate::core::MakeValidError;
 use crate::orient::{orient2d, orient2d_fast};
 use crate::snap;
 use geo::{Coord, Line};
@@ -1152,8 +1152,8 @@ mod tests {
         let hni = has_no_intersections(&lines);
         println!("has_no_intersections returned: {hni}");
 
-        let config = crate::config::MakeValidConfig {
-            poly_method: crate::config::PolyMethod::Arrange,
+        let config = crate::core::MakeValidConfig {
+            poly_method: crate::core::PolyMethod::Arrange,
             ..Default::default()
         };
 

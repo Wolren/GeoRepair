@@ -9,9 +9,8 @@
 //! known CGAL validation/invalidation test scenarios, with specific
 //! assertions about output geometry type and component count.
 
-use geo::{Coord, Geometry, LineString, MultiPolygon, Polygon};
-use geo_repair::{MakeValid, MakeValidConfig};
-use wkt::TryFromWkt;
+use geo::{Coord, Geometry, LineString, Polygon};
+use geo_repair::MakeValid;
 
 #[path = "common/mod.rs"]
 mod common;

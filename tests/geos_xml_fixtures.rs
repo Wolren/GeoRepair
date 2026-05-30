@@ -1,9 +1,5 @@
-use geo::{
-    Coord, Geometry, GeometryCollection, LineString, MultiLineString, MultiPoint, MultiPolygon,
-    Point, Polygon,
-};
-use geo_repair::{MakeValid, MakeValidConfig};
-use wkt::TryFromWkt;
+use geo::Geometry;
+use geo_repair::MakeValid;
 
 #[path = "common/mod.rs"]
 mod common;

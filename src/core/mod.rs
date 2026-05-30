@@ -1,5 +1,37 @@
-use geo::GeoFloat;
+use geo::algorithm::bool_ops::FillRule;
 use thiserror::Error;
+
+// ---------------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug)]
+pub struct MakeValidConfig {
+    pub keep_collapsed: bool,
+    pub poly_method: PolyMethod,
+    pub fill_rule: FillRule,
+}
+
+impl Default for MakeValidConfig {
+    fn default() -> Self {
+        Self {
+            keep_collapsed: false,
+            poly_method: PolyMethod::Auto,
+            fill_rule: FillRule::EvenOdd,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PolyMethod {
+    Auto,
+    Structure,
+    Arrange,
+}
+
+// ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
 
 #[derive(Error, Clone, Debug)]
 pub enum MakeValidError {
@@ -34,9 +66,4 @@ impl From<spade::InsertionError> for MakeValidError {
             }
         }
     }
-}
-
-pub(crate) trait RaiseError {
-    type Scalar: GeoFloat;
-    fn check_valid_coords(&self) -> Result<(), MakeValidError>;
 }

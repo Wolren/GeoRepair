@@ -24,8 +24,8 @@
 //!   cargo run --release --example fix --features "bench-geos load-shp" -- --gen-fixtures tests/alaska_bad3_fixtures.rs
 //!   cargo run --release --example fix --features "load-shp" -- data.shp out.geojson --no-fix
 
-use geo::{Coord, Geometry, LineString, Polygon};
-use geo_repair::load;
+use geo::{Coord, Geometry, Polygon};
+use geo_repair::io::load;
 use geo_repair::parallel::par_fix_polygon_batch;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 use std::env;

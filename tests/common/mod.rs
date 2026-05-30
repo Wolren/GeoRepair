@@ -4,10 +4,7 @@
 //! and then call `common::*` or `use common::*`.
 
 use geo::validation::Validation;
-use geo::{
-    Coord, Geometry, GeometryCollection, LineString, MultiLineString, MultiPoint, MultiPolygon,
-    Polygon,
-};
+use geo::{Coord, Geometry, LineString, Polygon};
 use geo_repair::{MakeValidConfig, PolyMethod};
 use wkt::TryFromWkt;
 
@@ -40,6 +37,7 @@ pub fn assert_not_empty(g: &Geometry<f64>) {
 }
 
 /// Count the number of top-level geometric components in a Geometry.
+#[allow(dead_code)]
 pub fn count_geometries(g: &Geometry<f64>) -> usize {
     match g {
         Geometry::Point(_) => 1,
@@ -54,6 +52,7 @@ pub fn count_geometries(g: &Geometry<f64>) -> usize {
 }
 
 /// Assert the result is a MultiPolygon with exactly `expected` component polygons.
+#[allow(dead_code)]
 pub fn assert_multipolygon_count(g: &Geometry<f64>, expected: usize) {
     let msg = format!("expected MultiPolygon with {expected} polygon(s), got: {g:?}");
     match g {
@@ -63,6 +62,7 @@ pub fn assert_multipolygon_count(g: &Geometry<f64>, expected: usize) {
 }
 
 /// Assert the result is exactly a Polygon (not MultiPolygon, not GC).
+#[allow(dead_code)]
 pub fn assert_is_polygon(g: &Geometry<f64>) {
     assert!(
         matches!(g, Geometry::Polygon(_)),
@@ -71,6 +71,7 @@ pub fn assert_is_polygon(g: &Geometry<f64>) {
 }
 
 /// Assert the result is a Polygon with no holes.
+#[allow(dead_code)]
 pub fn assert_simple_polygon(g: &Geometry<f64>) {
     match g {
         Geometry::Polygon(p) => {
@@ -142,6 +143,7 @@ pub fn assert_is_empty(g: &Geometry<f64>) {
 }
 
 /// Assert the output equals the input (valid geometry should pass through unchanged).
+#[allow(dead_code)]
 pub fn assert_unchanged(input: &Geometry<f64>, output: &Geometry<f64>) {
     assert_eq!(
         input, output,
@@ -150,6 +152,7 @@ pub fn assert_unchanged(input: &Geometry<f64>, output: &Geometry<f64>) {
 }
 
 /// Returns a human-readable geometry type name.
+#[allow(dead_code)]
 pub fn geometry_type_name(g: &Geometry<f64>) -> &'static str {
     match g {
         Geometry::Point(_) => "Point",
@@ -172,6 +175,7 @@ pub fn cfg_auto() -> MakeValidConfig {
 }
 
 /// Create an Arrange config.
+#[allow(dead_code)]
 pub fn cfg_arrange() -> MakeValidConfig {
     MakeValidConfig {
         poly_method: PolyMethod::Arrange,
@@ -180,6 +184,7 @@ pub fn cfg_arrange() -> MakeValidConfig {
 }
 
 /// Create a Structure config.
+#[allow(dead_code)]
 pub fn cfg_structure() -> MakeValidConfig {
     MakeValidConfig {
         poly_method: PolyMethod::Structure,

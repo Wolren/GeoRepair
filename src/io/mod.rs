@@ -1,14 +1,15 @@
-use std::fs::File;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::Path;
 
 use geo::{Coord, Geometry, LineString, Polygon};
 
-use crate::error::MakeValidError;
+use crate::core::MakeValidError;
+
+pub mod load;
 
 #[cfg(feature = "load-shp")]
-pub use crate::load::load_shp;
-pub use crate::load::{export_geojson, load_bin, polygon_area, signed_area};
+pub use self::load::load_shp;
+pub use self::load::{export_geojson, load_bin, polygon_area, signed_area};
 
 /// Detect format from file extension and load geometries.
 /// Supports: .shp, .bin, .geojson/.json, .wkt, .wkb, .csv

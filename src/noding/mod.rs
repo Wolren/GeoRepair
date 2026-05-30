@@ -413,7 +413,7 @@ fn collinear_split_params<T: GeoFloat>(e1: &Line<T>, e2: &Line<T>, eps: T) -> (V
     if dot1 > eps_sq {
         let t2s = ((e2.start.x - e1.start.x) * dx1 + (e2.start.y - e1.start.y) * dy1) / dot1;
         let t2e = ((e2.end.x - e1.start.x) * dx1 + (e2.end.y - e1.start.y) * dy1) / dot1;
-        let (zero, one) = (T::zero(), T::one());
+        let one = T::one();
         if t2s > eps && t2s < one - eps {
             p1.push(t2s);
         }
@@ -429,7 +429,7 @@ fn collinear_split_params<T: GeoFloat>(e1: &Line<T>, e2: &Line<T>, eps: T) -> (V
     if dot2 > eps_sq {
         let t1s = ((e1.start.x - e2.start.x) * dx2 + (e1.start.y - e2.start.y) * dy2) / dot2;
         let t1e = ((e1.end.x - e2.start.x) * dx2 + (e1.end.y - e2.start.y) * dy2) / dot2;
-        let (zero, one) = (T::zero(), T::one());
+        let one = T::one();
         if t1s > eps && t1s < one - eps {
             p2.push(t1s);
         }
@@ -591,6 +591,7 @@ fn reconnect_edges_f64(edges: Vec<Line<f64>>) -> Vec<LineString<f64>> {
 
 /// Node a multi line string by fixing each component and noding
 /// across components (inter-component intersections are split).
+#[allow(dead_code)]
 pub(crate) fn node_multi_line_string<T: GeoFloat>(mls: &MultiLineString<T>) -> Geometry<T> {
     // Clean each component and build a flat edge list for cross-component noding
     let mut cleaned: Vec<LineString<T>> = Vec::new();

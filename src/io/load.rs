@@ -1,7 +1,9 @@
 use std::fs::File;
 use std::io::{BufWriter, Read, Write};
 
-use geo::{Coord, Geometry, LineString, MultiPolygon, Polygon};
+#[cfg(feature = "load-shp")]
+use geo::MultiPolygon;
+use geo::{Coord, Geometry, LineString, Polygon};
 
 /// Compute signed area of a closed ring (positive = CCW).
 /// The ring should be closed (first == last).

@@ -1,7 +1,5 @@
-use geo::{LineString, Coord};
-use geo::algorithm::winding_order::WindingOrder;
 use geo::algorithm::Winding;
-use geo::algorithm::Contains;
+use geo::{Coord, LineString};
 
 fn main() {
     let coords = vec![
@@ -14,7 +12,7 @@ fn main() {
     let mut ring = LineString::new(coords);
     let wo = ring.winding_order();
     eprintln!("winding_order: {wo:?}");
-    
+
     ring.make_ccw_winding();
     let wo2 = ring.winding_order();
     eprintln!("after make_ccw_winding: {wo2:?}");

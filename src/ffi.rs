@@ -1,7 +1,7 @@
 use std::ffi::{c_char, CString};
 use std::ptr;
 
-use crate::config::MakeValidConfig;
+use crate::core::MakeValidConfig;
 use crate::make_valid::MakeValid;
 use crate::validation::GeoValidation;
 use geo::Geometry;

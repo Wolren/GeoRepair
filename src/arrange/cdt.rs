@@ -1,5 +1,5 @@
 use super::prep::PreparedLines;
-use crate::error::MakeValidError;
+use crate::core::MakeValidError;
 use geo::Coord;
 use spade::{ConstrainedDelaunayTriangulation, Triangulation};
 

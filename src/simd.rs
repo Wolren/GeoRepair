@@ -20,10 +20,10 @@ pub(crate) fn orient2d_batch_4<T: GeoFloat>(
     pc: &[Coord<T>; 4],
 ) -> [T; 4] {
     // Scalar fallback until simd feature is stabilized for f64
-    use std::arch::x86_64::*;
 
     #[cfg(target_feature = "avx")]
     unsafe {
+        use std::arch::x86_64::*;
         // Load coordinates
         let pbx = _mm256_setr_pd(pb[0].x, pb[1].x, pb[2].x, pb[3].x);
         let pax = _mm256_setr_pd(pa[0].x, pa[1].x, pa[2].x, pa[3].x);
@@ -118,16 +118,15 @@ pub(crate) fn orient2d_batch_4_robust(
 /// Uses f64 specialization since SIMD intrinsics are f64-only.
 #[cfg(target_arch = "x86_64")]
 pub(crate) fn is_ring_ccw_simd(coords: &[Coord<f64>]) -> bool {
-    use std::arch::x86_64::*;
     let n = coords.len();
     if n < 3 {
         return true;
     }
     let mut area = 0.0f64;
-    let origin = Coord { x: 0.0, y: 0.0 };
 
     #[cfg(target_feature = "avx")]
     {
+        use std::arch::x86_64::*;
         let mut i = 0usize;
         while i + 4 <= n {
             let pa = [origin; 4];
