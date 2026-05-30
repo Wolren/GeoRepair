@@ -14,7 +14,7 @@ use common::*;
 use geo::{
     Coord, Geometry, GeometryCollection, LineString, MultiPoint, MultiPolygon, Point, Polygon,
 };
-use geo_repair::{MakeValid, MakeValidConfig};
+use geo_repair::MakeValid;
 
 // ---------------------------------------------------------------------------
 // Self-touching ring that forms a ring-within-ring

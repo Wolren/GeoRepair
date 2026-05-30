@@ -3,7 +3,7 @@ use geo::{
 };
 use rayon::prelude::*;
 
-use crate::config::MakeValidConfig;
+use crate::core::MakeValidConfig;
 use crate::make_valid::MakeValid;
 
 pub fn par_fix_multi_point<T: GeoFloat + Send + Sync>(

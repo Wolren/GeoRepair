@@ -1,7 +1,5 @@
 use geo::validation::Validation;
-use geo::{
-    Coord, Geometry, GeometryCollection, LineString, MultiPolygon, Point, Polygon, Triangle,
-};
+use geo::{Coord, Geometry, LineString, Polygon};
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 use wkt::TryFromWkt;
 
@@ -20,6 +18,7 @@ fn assert_not_empty(g: &Geometry<f64>) {
     );
 }
 
+#[allow(dead_code)]
 fn geom_from_wkt(s: &str) -> Geometry<f64> {
     Geometry::<f64>::try_from_wkt_str(s).unwrap()
 }

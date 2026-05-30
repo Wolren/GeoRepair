@@ -7,7 +7,7 @@ pub mod sweep;
 use geo::{Coord, Geometry, LineString, LinesIter, MultiPolygon, Polygon, Winding};
 use rstar::{RTree, RTreeObject, AABB};
 
-use crate::config::MakeValidConfig;
+use crate::core::MakeValidConfig;
 use log::warn;
 
 pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geometry<f64>> {

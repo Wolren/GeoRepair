@@ -4,7 +4,7 @@ pub mod extract;
 pub mod label;
 pub mod prep;
 
-use crate::config::MakeValidConfig;
+use crate::core::MakeValidConfig;
 use geo::{Coord, Geometry, GeometryCollection, LinesIter, MultiPolygon, Polygon};
 use rstar::{RTree, RTreeObject, AABB};
 use rustc_hash::FxHashSet;
@@ -241,6 +241,7 @@ pub(crate) fn poly_has_basic_form(poly: &Polygon<f64>) -> bool {
     poly.interiors().iter().all(|h| ring_is_plausible(h))
 }
 
+#[allow(dead_code)]
 pub(crate) fn fix_multi_polygon(
     mp: &MultiPolygon<f64>,
     _config: &MakeValidConfig,

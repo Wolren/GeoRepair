@@ -7,8 +7,7 @@
 
 use geo::validation::Validation;
 use geo::{
-    Coord, Geometry, GeometryCollection, LineString, MultiLineString, MultiPoint, MultiPolygon,
-    Point, Polygon,
+    Coord, Geometry, GeometryCollection, LineString, MultiLineString, MultiPolygon, Point, Polygon,
 };
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 use wkt::TryFromWkt;
@@ -32,6 +31,7 @@ fn assert_not_empty(g: &Geometry<f64>) {
     );
 }
 
+#[allow(dead_code)]
 fn geom_from_wkt(s: &str) -> Geometry<f64> {
     Geometry::<f64>::try_from_wkt_str(s).unwrap()
 }
@@ -40,6 +40,7 @@ fn cfg_auto() -> MakeValidConfig {
     MakeValidConfig::default()
 }
 
+#[allow(dead_code)]
 fn cfg_arrange() -> MakeValidConfig {
     MakeValidConfig {
         poly_method: PolyMethod::Arrange,
@@ -47,6 +48,7 @@ fn cfg_arrange() -> MakeValidConfig {
     }
 }
 
+#[allow(dead_code)]
 fn cfg_keep_collapsed() -> MakeValidConfig {
     MakeValidConfig {
         keep_collapsed: true,

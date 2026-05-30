@@ -1,7 +1,5 @@
-pub mod config;
-pub mod error;
+pub mod core;
 pub mod io;
-pub mod load;
 pub mod make_valid;
 pub mod orient;
 pub mod snap;
@@ -13,15 +11,14 @@ pub mod noding;
 #[cfg(feature = "structure")]
 pub mod structure;
 
+#[cfg(feature = "ffi")]
+pub mod ffi;
 #[cfg(feature = "parallel")]
 pub mod parallel;
 #[cfg(feature = "simd")]
 pub mod simd;
-#[cfg(feature = "ffi")]
-pub mod ffi;
 
-pub use config::{MakeValidConfig, PolyMethod};
-pub use error::MakeValidError;
+pub use core::{MakeValidConfig, MakeValidError, PolyMethod};
 pub use io::load_geometries;
 pub use make_valid::MakeValid;
 #[cfg(any(feature = "arrange", feature = "structure"))]

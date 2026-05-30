@@ -3,7 +3,7 @@ use geo::{
     MultiPoint, MultiPolygon, Point, Polygon, Rect, Triangle,
 };
 
-use crate::config::{MakeValidConfig, PolyMethod};
+use crate::core::{MakeValidConfig, PolyMethod};
 use crate::noding::{node_line_string, remove_consecutive_duplicates};
 use crate::validation::{GeoValidation, ValidationResult};
 use log::warn;

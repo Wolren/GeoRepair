@@ -9,10 +9,7 @@
 #![cfg(feature = "parallel")]
 
 use geo::validation::Validation;
-use geo::{
-    Coord, Geometry, GeometryCollection, LineString, MultiLineString, MultiPoint, MultiPolygon,
-    Point, Polygon,
-};
+use geo::{Coord, Geometry, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 
 fn assert_valid(g: &Geometry<f64>) {
@@ -34,12 +31,14 @@ fn assert_not_empty(g: &Geometry<f64>) {
 fn cfg_auto() -> MakeValidConfig {
     MakeValidConfig::default()
 }
+#[allow(dead_code)]
 fn cfg_arrange() -> MakeValidConfig {
     MakeValidConfig {
         poly_method: PolyMethod::Arrange,
         ..Default::default()
     }
 }
+#[allow(dead_code)]
 fn cfg_structure() -> MakeValidConfig {
     MakeValidConfig {
         poly_method: PolyMethod::Structure,

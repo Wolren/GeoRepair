@@ -7,7 +7,6 @@
 #[allow(unused_imports)]
 use geo::{Coord, Geometry, GeometryCollection, LineString, MultiPolygon, Polygon};
 use geo_repair::{MakeValid, MakeValidConfig};
-use wkt::TryFromWkt;
 
 #[path = "common/mod.rs"]
 mod common;
