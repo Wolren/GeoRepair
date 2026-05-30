@@ -91,9 +91,9 @@ pub(crate) fn has_self_intersections(coords: &[Coord<f64>]) -> bool {
     let coord_scale = (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
     let eps = 1e-12 * coord_scale;
 
-    // Spatial grid to accelerate edge intersection checks
+    // Sweep-line via interval tree — O((n + k) log n)
     if n > 500 {
-        return has_self_intersections_grid(coords, eps);
+        return super::sweep::has_self_intersections(coords, eps);
     }
 
     has_self_intersections_bruteforce(coords, eps)
@@ -230,7 +230,7 @@ fn cell_has_intersection(coords: &[Coord<f64>], cell: &[usize], n_edges: usize, 
 /// Check a single pair of edges for any type of intersection.
 /// Uses a single batch of 4 orient2d calls (SIMD) for ALL sub-checks.
 #[inline(always)]
-fn check_edge_pair(coords: &[Coord<f64>], i: usize, j: usize, eps: f64) -> bool {
+pub(crate) fn check_edge_pair(coords: &[Coord<f64>], i: usize, j: usize, eps: f64) -> bool {
     let a1 = coords[i];
     let a2 = coords[i + 1];
     let b1 = coords[j];

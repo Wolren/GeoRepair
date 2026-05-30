@@ -1,20 +1,40 @@
-//! Cross-comparison benchmarks: geo-repair vs GEOS vs CGAL.
-//!
-//! Run with GEOS comparison:
-//!   cargo bench --features bench-geos
-//!
-//! Future: Add CGAL comparison when CGAL C++ executables are compiled.
+//! Sweep structure parallel vs GEOS across all geometry shapes.
+//! Usage: cargo bench --bench quick_bench (no GEOS)
+//!        cargo bench --features bench-geos --bench quick_bench (with GEOS)
+use std::time::Instant;
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use geo::{
-    Coord, Geometry, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon, Rect,
-    Triangle,
-};
+use geo::{Coord, Geometry, Line, LineString, MultiLineString, Polygon};
+use geo_repair::parallel::par_fix_polygon_batch;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
+
 #[cfg(feature = "bench-geos")]
 use geos::Geom;
 #[cfg(feature = "bench-geos")]
 use wkt::ToWkt;
+
+#[cfg(feature = "bench-geos")]
+fn run_geos_batch(wkts: &[String]) -> f64 {
+    let t0 = Instant::now();
+    for wkt in wkts {
+        if let Ok(gg) = geos::Geometry::new_from_wkt(wkt) {
+            let _ = gg.make_valid();
+        }
+    }
+    t0.elapsed().as_secs_f64()
+}
+
+fn make_valid_ring(n: usize, r: f64) -> Polygon<f64> {
+    let mut coords = Vec::with_capacity(n);
+    for i in 0..n - 1 {
+        let angle = 2.0 * std::f64::consts::PI * i as f64 / (n - 1) as f64;
+        coords.push(Coord {
+            x: r * angle.cos() + 500.0,
+            y: r * angle.sin() + 500.0,
+        });
+    }
+    coords.push(coords[0]);
+    Polygon::new(LineString::new(coords), Vec::new())
+}
 
 fn make_bowtie() -> Polygon<f64> {
     Polygon::new(
@@ -28,549 +48,491 @@ fn make_bowtie() -> Polygon<f64> {
     )
 }
 
-fn make_valid_square() -> Polygon<f64> {
-    Polygon::new(
-        LineString::new(vec![
-            Coord { x: 0.0, y: 0.0 },
-            Coord { x: 10.0, y: 0.0 },
-            Coord { x: 10.0, y: 10.0 },
-            Coord { x: 0.0, y: 10.0 },
-        ]),
-        Vec::new(),
-    )
+fn run_ser(polys: &[Polygon<f64>], cfg: &MakeValidConfig) -> f64 {
+    let t0 = Instant::now();
+    for p in polys {
+        let _ = p.make_valid_with_config(cfg);
+    }
+    t0.elapsed().as_secs_f64()
 }
 
-fn make_large_polygon(n: usize, r: f64) -> Polygon<f64> {
-    let mut seed = 0xDEADBEEF_DEADBEEFu64;
-    let mut coords = Vec::with_capacity(n);
+fn run_par(polys: &[&Polygon<f64>], cfg: &MakeValidConfig) -> f64 {
+    let t0 = Instant::now();
+    let _ = par_fix_polygon_batch(polys, cfg);
+    t0.elapsed().as_secs_f64()
+}
+
+fn run_line_ser(items: &[Geometry<f64>], cfg: &MakeValidConfig) -> f64 {
+    let t0 = Instant::now();
+    for g in items {
+        let _ = g.make_valid_with_config(cfg);
+    }
+    t0.elapsed().as_secs_f64()
+}
+
+fn run_line_par(items: &[Geometry<f64>], cfg: &MakeValidConfig) -> f64 {
+    use rayon::prelude::*;
+    let t0 = Instant::now();
+    let _: Vec<_> = items
+        .par_iter()
+        .map(|g| g.make_valid_with_config(cfg))
+        .collect();
+    t0.elapsed().as_secs_f64()
+}
+
+fn make_line(coords: [(f64, f64); 2]) -> Geometry<f64> {
+    Geometry::Line(Line::new(
+        Coord {
+            x: coords[0].0,
+            y: coords[0].1,
+        },
+        Coord {
+            x: coords[1].0,
+            y: coords[1].1,
+        },
+    ))
+}
+
+fn make_linestring(coords: &[(f64, f64)]) -> Geometry<f64> {
+    let ls: Vec<Coord<f64>> = coords.iter().map(|&(x, y)| Coord { x, y }).collect();
+    Geometry::LineString(LineString::new(ls))
+}
+
+fn make_multilinestring(parts: &[Vec<(f64, f64)>]) -> Geometry<f64> {
+    let lines: Vec<LineString<f64>> = parts
+        .iter()
+        .map(|coords| {
+            let cs: Vec<Coord<f64>> = coords.iter().map(|&(x, y)| Coord { x, y }).collect();
+            LineString::new(cs)
+        })
+        .collect();
+    Geometry::MultiLineString(MultiLineString::new(lines))
+}
+
+// ─── Specialized shape generators ─────────────────────────────────
+
+fn make_starburst(spikes: usize, r: f64) -> Geometry<f64> {
+    let mut coords = Vec::with_capacity(spikes * 2 + 1);
+    for i in 0..spikes {
+        let a = 2.0 * std::f64::consts::PI * i as f64 / spikes as f64;
+        coords.push((0.0, 0.0));
+        coords.push((r * a.cos(), r * a.sin()));
+    }
+    coords.push((0.0, 0.0));
+    make_linestring(&coords)
+}
+
+fn make_collinear_overlap(segments: usize) -> Geometry<f64> {
+    let mut coords = Vec::new();
+    for i in 0..segments {
+        let x = i as f64 * 10.0;
+        coords.push((x, 0.0));
+        // overlap back by 5 units
+        coords.push((x + 10.0, 0.0));
+        if i < segments - 1 {
+            coords.push((x + 5.0, 0.0));
+        }
+    }
+    make_linestring(&coords)
+}
+
+fn make_extreme_mixed_scale(n: usize) -> Geometry<f64> {
+    let mut coords = Vec::with_capacity(n + 1);
     for i in 0..n {
-        let angle = 2.0 * std::f64::consts::PI * i as f64 / n as f64;
-        seed = seed
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
-        let dt = (seed as f64 / u64::MAX as f64 - 0.5) * (2.0 * std::f64::consts::PI / n as f64);
-        seed = seed
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
-        let dr = (seed as f64 / u64::MAX as f64 - 0.5) * r * 0.35;
-        let rr = r + dr;
-        let aa = angle + dt;
-        coords.push(Coord {
-            x: rr * aa.cos(),
-            y: rr * aa.sin(),
-        });
+        let x = if i % 2 == 0 { 1e12 } else { 1e-12 };
+        let y = if i % 3 == 0 { -1e12 } else { 1e-12 };
+        coords.push((x + i as f64, y + i as f64));
     }
     coords.push(coords[0]);
-    Polygon::new(LineString::new(coords), Vec::new())
+    make_linestring(&coords)
 }
 
-fn make_complex_bowtie() -> Polygon<f64> {
-    Polygon::new(
-        LineString::new(vec![
-            Coord { x: 0.0, y: 0.0 },
-            Coord { x: 3.0, y: 3.0 },
-            Coord { x: 2.0, y: 5.0 },
-            Coord { x: 5.0, y: 2.0 },
-            Coord { x: 7.0, y: 4.0 },
-            Coord { x: 4.0, y: 7.0 },
-            Coord { x: 1.0, y: 9.0 },
-            Coord { x: 8.0, y: 1.0 },
-            Coord { x: 6.0, y: 8.0 },
-            Coord { x: 9.0, y: 5.0 },
-        ]),
-        Vec::new(),
-    )
+fn make_tight_ringing(n: usize, amplitude: f64) -> Geometry<f64> {
+    let mut coords = Vec::with_capacity(n + 1);
+    for i in 0..n {
+        let x = i as f64 * 0.1;
+        let y = amplitude * ((i as f64 * 3.0).sin() + (i as f64 * 5.0).sin());
+        coords.push((x, y));
+    }
+    coords.push(coords[0]);
+    make_linestring(&coords)
 }
 
-fn make_overlapping_polygons() -> MultiPolygon<f64> {
-    MultiPolygon::new(vec![
-        Polygon::new(
-            LineString::new(vec![
-                Coord { x: 0.0, y: 0.0 },
-                Coord { x: 10.0, y: 0.0 },
-                Coord { x: 10.0, y: 10.0 },
-                Coord { x: 0.0, y: 10.0 },
-            ]),
-            Vec::new(),
-        ),
-        Polygon::new(
-            LineString::new(vec![
-                Coord { x: 5.0, y: 5.0 },
-                Coord { x: 15.0, y: 5.0 },
-                Coord { x: 15.0, y: 15.0 },
-                Coord { x: 5.0, y: 15.0 },
-            ]),
-            Vec::new(),
-        ),
-    ])
-}
-
-// =========================================================================
-// Orientation benchmark (orient2d)
-// =========================================================================
-
-fn bench_orient2d(c: &mut Criterion) {
-    let pts: Vec<(f64, f64)> = (0..1000)
-        .map(|i| {
-            let x = (i as f64 * 7.3).fract();
-            let y = (i as f64 * 13.7).fract();
-            (x, y)
-        })
-        .collect();
-
-    let mut group = c.benchmark_group("orient2d");
-    group.bench_function("geo_repair", |b| {
-        b.iter(|| {
-            for i in 0..pts.len() - 2 {
-                black_box(geo_repair::orient::orient2d(
-                    Coord {
-                        x: pts[i].0,
-                        y: pts[i].1,
-                    },
-                    Coord {
-                        x: pts[i + 1].0,
-                        y: pts[i + 1].1,
-                    },
-                    Coord {
-                        x: pts[i + 2].0,
-                        y: pts[i + 2].1,
-                    },
-                ));
+fn hilbert_coords(order: u32) -> Vec<(f64, f64)> {
+    fn d2xy(n: u32, d: u32) -> (f64, f64) {
+        let mut x = 0i32;
+        let mut y = 0i32;
+        let mut t = d;
+        let mut s = 1i32;
+        while s < n as i32 {
+            let rx = (t >> 1) & s as u32;
+            let ry = (t ^ rx) & s as u32;
+            if ry == 0 {
+                if rx != 0 {
+                    x = s - 1 - x;
+                    y = s - 1 - y;
+                }
+                std::mem::swap(&mut x, &mut y);
             }
-        })
-    });
+            x += rx as i32;
+            y += ry as i32;
+            t >>= 2;
+            s <<= 1;
+        }
+        (x as f64 * 10.0, y as f64 * 10.0)
+    }
+    let n = 1u32 << order;
+    let total = n * n;
+    let mut coords = Vec::with_capacity(total as usize + 1);
+    for i in 0..total {
+        coords.push(d2xy(n, i));
+    }
+    coords.push(coords[0]);
+    coords
+}
 
+fn make_lissajous(n: usize, a: f64, b: f64, scale: f64) -> Geometry<f64> {
+    let mut coords = Vec::with_capacity(n + 1);
+    for i in 0..n {
+        let t = 2.0 * std::f64::consts::PI * i as f64 / n as f64;
+        coords.push((scale * (a * t).sin(), scale * (b * t).sin()));
+    }
+    coords.push(coords[0]);
+    make_linestring(&coords)
+}
+
+fn make_spoke_wheel(spokes: usize, r: f64) -> Geometry<f64> {
+    let mut coords = Vec::new();
+    for i in 0..spokes {
+        let a = 2.0 * std::f64::consts::PI * i as f64 / spokes as f64;
+        coords.push((r * a.cos(), r * a.sin()));
+        coords.push((0.0, 0.0));
+    }
+    coords.push((r, 0.0));
+    make_linestring(&coords)
+}
+
+fn bench_line(label: &str, g: &Geometry<f64>, batch: usize, cfg: &MakeValidConfig) {
+    let items: Vec<Geometry<f64>> = (0..batch).map(|_| g.clone()).collect();
+    let par = run_line_par(&items, cfg);
     #[cfg(feature = "bench-geos")]
-    group.bench_function("GEOS", |b| {
-        let geos_pts: Vec<(f64, f64)> = pts.clone();
-        b.iter(|| {
-            for i in 0..geos_pts.len() - 2 {
-                let result = geos::orientation_index(
-                    geos_pts[i].0,
-                    geos_pts[i].1,
-                    geos_pts[i + 1].0,
-                    geos_pts[i + 1].1,
-                    geos_pts[i + 2].0,
-                    geos_pts[i + 2].1,
-                )
-                .unwrap();
-                black_box(result);
-            }
-        })
-    });
-    group.finish();
+    {
+        let wkts: Vec<String> = items.iter().map(|g| g.to_wkt().to_string()).collect();
+        let geos = run_geos_batch(&wkts);
+        eprintln!(
+            "  {:<20} {:>10.3} {:>10.3} µs",
+            label,
+            par * 1_000_000.0 / batch as f64,
+            geos * 1_000_000.0 / batch as f64,
+        );
+    }
+    #[cfg(not(feature = "bench-geos"))]
+    {
+        let ser = run_line_ser(&items, cfg);
+        eprintln!(
+            "  {:<20} {:>10.3} {:>10.3} µs",
+            label,
+            ser * 1_000_000.0 / batch as f64,
+            par * 1_000_000.0 / batch as f64,
+        );
+    }
 }
 
-// =========================================================================
-// MakeValid benchmarks
-// =========================================================================
+fn bench_polygons(label: &str, polys: &[Polygon<f64>], batch: usize, cfg: &MakeValidConfig) {
+    let refs: Vec<&Polygon<f64>> = polys.iter().collect();
+    let par = run_par(&refs, cfg);
+    #[cfg(feature = "bench-geos")]
+    {
+        let wkts: Vec<String> = polys.iter().map(|p| p.to_wkt().to_string()).collect();
+        let geos = run_geos_batch(&wkts);
+        eprintln!(
+            "  {:<20} {:>10.3} {:>10.3} µs",
+            label,
+            par * 1_000_000.0 / batch as f64,
+            geos * 1_000_000.0 / batch as f64,
+        );
+    }
+    #[cfg(not(feature = "bench-geos"))]
+    {
+        let ser = run_ser(polys, cfg);
+        eprintln!(
+            "  {:<20} {:>10.3} {:>10.3} µs",
+            label,
+            ser * 1_000_000.0 / batch as f64,
+            par * 1_000_000.0 / batch as f64,
+        );
+    }
+}
 
-fn bench_make_valid(c: &mut Criterion) {
-    let square = make_valid_square();
-    let bowtie = make_bowtie();
-    let complex = make_complex_bowtie();
-    let large_100 = make_large_polygon(100, 100.0);
-    let large_500 = make_large_polygon(500, 100.0);
-    let large_2000 = make_large_polygon(2000, 100.0);
-    let large_5000 = make_large_polygon(5000, 100.0);
-    let large_10000 = make_large_polygon(10000, 100.0);
-    let overlapping = make_overlapping_polygons();
-    let config_arrange = MakeValidConfig {
-        poly_method: PolyMethod::Arrange,
-        ..Default::default()
-    };
-    let config_structure = MakeValidConfig {
+fn main() {
+    let cfg = MakeValidConfig {
         poly_method: PolyMethod::Structure,
         ..Default::default()
     };
 
-    #[cfg(feature = "bench-geos")]
-    let (
-        geos_square,
-        geos_bowtie,
-        geos_complex,
-        geos_large_100,
-        geos_large_500,
-        geos_large_2000,
-        geos_large_5000,
-        geos_large_10000,
-        geos_overlapping,
-    ) = {
-        let gs = geos::Geometry::new_from_wkt(&square.wkt_string()).unwrap();
-        let gb = geos::Geometry::new_from_wkt(&bowtie.wkt_string()).unwrap();
-        let gc = geos::Geometry::new_from_wkt(&complex.wkt_string()).unwrap();
-        let gl100 = geos::Geometry::new_from_wkt(&large_100.wkt_string()).unwrap();
-        let gl500 = geos::Geometry::new_from_wkt(&large_500.wkt_string()).unwrap();
-        let gl2000 = geos::Geometry::new_from_wkt(&large_2000.wkt_string()).unwrap();
-        let gl5000 = geos::Geometry::new_from_wkt(&large_5000.wkt_string()).unwrap();
-        let gl10000 = geos::Geometry::new_from_wkt(&large_10000.wkt_string()).unwrap();
-        let go = geos::Geometry::new_from_wkt(&overlapping.wkt_string()).unwrap();
-        (gs, gb, gc, gl100, gl500, gl2000, gl5000, gl10000, go)
-    };
-
-    let mut group = c.benchmark_group("make_valid_square");
-    group.bench_function("geo_repair_arrange", |b| {
-        b.iter(|| black_box(&square).make_valid_with_config(black_box(&config_arrange)))
-    });
-    group.bench_function("geo_repair_structure", |b| {
-        b.iter(|| black_box(&square).make_valid_with_config(black_box(&config_structure)))
-    });
-    #[cfg(feature = "bench-geos")]
-    group.bench_function("GEOS", |b| b.iter(|| black_box(&geos_square).make_valid()));
-    group.finish();
-
-    let mut group = c.benchmark_group("make_valid_bowtie");
-    group.bench_function("geo_repair_arrange", |b| {
-        b.iter(|| black_box(&bowtie).make_valid_with_config(black_box(&config_arrange)))
-    });
-    group.bench_function("geo_repair_structure", |b| {
-        b.iter(|| black_box(&bowtie).make_valid_with_config(black_box(&config_structure)))
-    });
-    #[cfg(feature = "bench-geos")]
-    group.bench_function("GEOS", |b| b.iter(|| black_box(&geos_bowtie).make_valid()));
-    group.finish();
-
-    let mut group = c.benchmark_group("make_valid_complex_bowtie");
-    group.bench_function("geo_repair_arrange", |b| {
-        b.iter(|| black_box(&complex).make_valid_with_config(black_box(&config_arrange)))
-    });
-    group.bench_function("geo_repair_structure", |b| {
-        b.iter(|| black_box(&complex).make_valid_with_config(black_box(&config_structure)))
-    });
-    #[cfg(feature = "bench-geos")]
-    group.bench_function("GEOS", |b| b.iter(|| black_box(&geos_complex).make_valid()));
-    group.finish();
-
-    let large_sizes: [(&str, &Polygon<f64>); 5] = [
-        ("100", &large_100),
-        ("500", &large_500),
-        ("2000", &large_2000),
-        ("5000", &large_5000),
-        ("10000", &large_10000),
-    ];
-
-    #[cfg(feature = "bench-geos")]
-    let geos_large_map: [(&str, &geos::Geometry); 5] = [
-        ("100", &geos_large_100),
-        ("500", &geos_large_500),
-        ("2000", &geos_large_2000),
-        ("5000", &geos_large_5000),
-        ("10000", &geos_large_10000),
-    ];
-
-    for (label, poly) in &large_sizes {
-        let mut group = c.benchmark_group(format!("make_valid_large_{label}"));
-        group.bench_function("geo_repair_arrange", |b| {
-            b.iter(|| black_box(poly).make_valid_with_config(black_box(&config_arrange)))
-        });
-        group.bench_function("geo_repair_structure", |b| {
-            b.iter(|| black_box(poly).make_valid_with_config(black_box(&config_structure)))
-        });
-        #[cfg(feature = "bench-geos")]
-        {
-            let (geos_label, geos_poly) = geos_large_map
-                .iter()
-                .find(|(l, _)| *l == *label)
-                .copied()
-                .unwrap();
-            group.bench_function("GEOS", |b| b.iter(|| black_box(geos_poly).make_valid()));
-        }
-        group.finish();
+    // Warmup
+    let poly4 = make_valid_ring(4, 100.0);
+    let mut warm: Vec<Polygon<f64>> = Vec::new();
+    for _ in 0..10000 {
+        warm.push(poly4.clone());
     }
+    let wrefs: Vec<&Polygon<f64>> = warm.iter().collect();
+    run_ser(&warm, &cfg);
+    run_par(&wrefs, &cfg);
 
-    let mut group = c.benchmark_group("make_valid_overlapping_mpoly");
-    group.bench_function("geo_repair_arrange", |b| {
-        b.iter(|| black_box(&overlapping).make_valid_with_config(black_box(&config_arrange)))
-    });
-    group.bench_function("geo_repair_structure", |b| {
-        b.iter(|| black_box(&overlapping).make_valid_with_config(black_box(&config_structure)))
-    });
     #[cfg(feature = "bench-geos")]
-    group.bench_function("GEOS", |b| {
-        b.iter(|| black_box(&geos_overlapping).make_valid())
-    });
-    group.finish();
-}
+    let header = ("parallel", "geos");
+    #[cfg(not(feature = "bench-geos"))]
+    let header = ("serial", "parallel");
 
-// =========================================================================
-// GEOS fixture benchmarks (real-world data)
-// =========================================================================
-
-fn bench_geos_fixtures(c: &mut Criterion) {
-    let fixtures: Vec<(&str, &str)> = vec![
-        ("bowtie", "POLYGON ((0 0, 1 1, 0 1, 1 0, 0 0))"),
-        ("spike", "POLYGON ((0 0, 10 0, 10 10, 5 5, 0 10, 0 0))"),
-        (
-            "hole_outside",
-            "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (5 5, 15 5, 15 15, 5 15, 5 5))",
-        ),
-        (
-            "self_touch",
-            "POLYGON ((100 0, 100 100, 200 100, 200 0, 150 0, 170 40, 130 40, 150 0, 100 0))",
-        ),
-    ];
-
-    let config_arrange = MakeValidConfig {
-        poly_method: PolyMethod::Arrange,
-        ..Default::default()
-    };
-    let config_structure = MakeValidConfig {
-        poly_method: PolyMethod::Structure,
-        ..Default::default()
-    };
-
-    for (name, wkt_str) in &fixtures {
-        let mut group = c.benchmark_group(format!("fixture_{name}"));
-
-        let poly_geo: Geometry<f64> = wkt::TryFromWkt::try_from_wkt_str(wkt_str).unwrap();
-        let poly = match &poly_geo {
-            Geometry::Polygon(p) => p.clone(),
-            _ => continue,
-        };
-
-        group.bench_function("geo_repair_arrange", |b| {
-            b.iter(|| black_box(&poly).make_valid_with_config(black_box(&config_arrange)))
-        });
-        group.bench_function("geo_repair_structure", |b| {
-            b.iter(|| black_box(&poly).make_valid_with_config(black_box(&config_structure)))
-        });
-
-        #[cfg(feature = "bench-geos")]
-        {
-            let geos_g = geos::Geometry::new_from_wkt(wkt_str).unwrap();
-            group.bench_function("GEOS", |b| b.iter(|| black_box(&geos_g).make_valid()));
-        }
-        group.finish();
-    }
-}
-
-// =========================================================================
-// Missing shapes benchmarks (collinear overlap, star, nested holes, etc.)
-// =========================================================================
-
-fn bench_missing_shapes(c: &mut Criterion) {
-    // Build many_holes WKT dynamically
-    let many_holes_coords: Vec<(f64, f64)> =
-        (0..10).map(|i| (2.0 + (i as f64) * 8.0, 2.0)).collect();
-    let mut many_holes_wkt = String::from("POLYGON ((0 0, 100 0, 100 100, 0 100, 0 0)");
-    for (x, y) in &many_holes_coords {
-        many_holes_wkt.push_str(&format!(
-            ", ({x} {y}, {} {y}, {} {}, {x} {}, {x} {y})",
-            x + 3.0,
-            x + 3.0,
-            y + 3.0,
-            y + 3.0
-        ));
-    }
-    many_holes_wkt.push(')');
-
-    // 3. Backtracking polygon (CGAL simple11)
-    let _backtracking: Geometry<f64> =
-        wkt::TryFromWkt::try_from_wkt_str("POLYGON ((1 0, 2 6, 3 3, 4 5, 5 4, 0 1))").unwrap();
-
-    // 4. Micro-scale polygon (1e-15)
-    let _micro: Geometry<f64> =
-        wkt::TryFromWkt::try_from_wkt_str("POLYGON ((0 0, 1e-15 0, 1e-15 1e-15, 0 1e-15, 0 0))")
-            .unwrap();
-
-    // 5. Extreme coordinates (1e12)
-    let _extreme: Geometry<f64> = wkt::TryFromWkt::try_from_wkt_str(
-        "POLYGON ((-1e12 -1e12, 1e12 -1e12, 1e12 1e12, -1e12 1e12, -1e12 -1e12))",
-    )
-    .unwrap();
-
-    // 6. CW exterior
-    let _cw: Geometry<f64> =
-        wkt::TryFromWkt::try_from_wkt_str("POLYGON ((0 0, 0 10, 10 10, 10 0, 0 0))").unwrap();
-
-    // 7. Nested holes (hole inside hole)
-    let _nested_holes: Geometry<f64> = wkt::TryFromWkt::try_from_wkt_str(
-        "POLYGON ((0 0, 20 0, 20 20, 0 20, 0 0), \
-                  (2 2, 18 2, 18 18, 2 18, 2 2), \
-                  (6 6, 14 6, 14 14, 6 14, 6 6))",
-    )
-    .unwrap();
-
-    // 8. Many holes (10 holes)
-    let many_holes_coords: Vec<(f64, f64)> = (0..10)
-        .map(|i| {
-            let x = 2.0 + (i as f64) * 8.0;
-            (x, 2.0)
-        })
-        .collect();
-    let mut many_holes_wkt = String::from("POLYGON ((0 0, 100 0, 100 100, 0 100, 0 0)");
-    for (x, y) in &many_holes_coords {
-        many_holes_wkt.push_str(&format!(
-            ", ({x} {y}, {} {y}, {} {}, {x} {}, {x} {y})",
-            x + 3.0,
-            x + 3.0,
-            y + 3.0,
-            y + 3.0
-        ));
-    }
-    many_holes_wkt.push(')');
-    let _many_holes: Geometry<f64> = wkt::TryFromWkt::try_from_wkt_str(&many_holes_wkt).unwrap();
-
-    // 9. Hole sharing edge with shell
-    let _shared_edge: Geometry<f64> = wkt::TryFromWkt::try_from_wkt_str(
-        "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), \
-                  (0 0, 5 0, 5 5, 0 5, 0 0))",
-    )
-    .unwrap();
-
-    // 10. Two holes touching at a point
-    let _touching_holes: Geometry<f64> = wkt::TryFromWkt::try_from_wkt_str(
-        "POLYGON ((0 0, 8 0, 8 8, 0 8, 0 0), \
-                  (4 0, 2 2, 4 4, 4 2), \
-                  (4 4, 2 6, 6 6))",
-    )
-    .unwrap();
-
-    // 11. Three holes meeting at common point
-    let _meeting_holes: Geometry<f64> = wkt::TryFromWkt::try_from_wkt_str(
-        "POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), \
-                  (40 80, 60 80, 50 50, 40 80), \
-                  (20 60, 20 40, 50 50, 20 60), \
-                  (40 20, 60 20, 50 50, 40 20))",
-    )
-    .unwrap();
-
-    let config_arrange = MakeValidConfig {
-        poly_method: PolyMethod::Arrange,
-        ..Default::default()
-    };
-    let config_structure = MakeValidConfig {
-        poly_method: PolyMethod::Structure,
-        ..Default::default()
-    };
-
-    let many_holes_wkt_clone = many_holes_wkt.clone();
-    let wkt_lookup: Vec<(&str, &str)> = vec![
-        ("collinear_overlap", "POLYGON ((0 0, 1 0, 1 2, 1 1, 0 1))"),
-        ("star", "POLYGON ((0 3, 1 3, 1 4, 3 4, 3 2, 2 3.5, 2 3, 1.5 3.5, 1 2, 4 1, 7 3, 6 5, 4 2, 4.5 2, 4 1.5, 3.5 3, 3.5 4.5, 4 5, 0 5))"),
-        ("backtracking", "POLYGON ((1 0, 2 6, 3 3, 4 5, 5 4, 0 1))"),
-        ("micro", "POLYGON ((0 0, 1e-15 0, 1e-15 1e-15, 0 1e-15, 0 0))"),
-        ("extreme", "POLYGON ((-1e12 -1e12, 1e12 -1e12, 1e12 1e12, -1e12 1e12, -1e12 -1e12))"),
-        ("cw", "POLYGON ((0 0, 0 10, 10 10, 10 0, 0 0))"),
-        ("nested_holes", "POLYGON ((0 0, 20 0, 20 20, 0 20, 0 0), (2 2, 18 2, 18 18, 2 18, 2 2), (6 6, 14 6, 14 14, 6 14, 6 6))"),
-        ("many_holes", &many_holes_wkt_clone),
-        ("shared_edge", "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (0 0, 5 0, 5 5, 0 5, 0 0))"),
-        ("touching_holes", "POLYGON ((0 0, 8 0, 8 8, 0 8, 0 0), (4 0, 2 2, 4 4, 4 2), (4 4, 2 6, 6 6))"),
-        ("meeting_holes", "POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), (40 80, 60 80, 50 50, 40 80), (20 60, 20 40, 50 50, 20 60), (40 20, 60 20, 50 50, 40 20))"),
-    ];
-
-    let polygons: Vec<(&str, Polygon<f64>, &str)> = wkt_lookup
-        .iter()
-        .filter_map(|(name, wkt)| {
-            let geo: Geometry<f64> = wkt::TryFromWkt::try_from_wkt_str(wkt).ok()?;
-            match geo {
-                Geometry::Polygon(p) => Some((*name, p, *wkt)),
-                _ => None,
-            }
-        })
-        .collect();
-
-    for (name, poly, wkt_str) in &polygons {
-        let mut group = c.benchmark_group(format!("shape_{name}"));
-        group.bench_function("geo_repair_arrange", |b| {
-            b.iter(|| black_box(poly).make_valid_with_config(black_box(&config_arrange)))
-        });
-        group.bench_function("geo_repair_structure", |b| {
-            b.iter(|| black_box(poly).make_valid_with_config(black_box(&config_structure)))
-        });
-
-        #[cfg(feature = "bench-geos")]
-        if let Ok(geos_g) = geos::Geometry::new_from_wkt(wkt_str) {
-            group.bench_function("GEOS", |b| b.iter(|| black_box(&geos_g).make_valid()));
-        }
-        group.finish();
-    }
-}
-
-// =========================================================================
-// Simple type benchmarks
-// =========================================================================
-
-fn bench_simple_types(c: &mut Criterion) {
-    let pt = Point::new(1.0, 2.0);
-    let line = geo::Line::new(Point::new(0.0, 0.0), Point::new(1.0, 1.0));
-    let ls = LineString::new(vec![
-        Coord { x: 0.0, y: 0.0 },
-        Coord { x: 1.0, y: 1.0 },
-        Coord { x: 2.0, y: 2.0 },
-    ]);
-    let rect = Rect::new(Point::new(0.0, 0.0), Point::new(10.0, 10.0));
-    let tri = Triangle::new(
-        Coord { x: 0.0, y: 0.0 },
-        Coord { x: 5.0, y: 0.0 },
-        Coord { x: 2.5, y: 5.0 },
+    eprintln!(
+        "  {:<20} {:>10} {:>10} {:>10}",
+        "test", header.0, header.1, "unit"
     );
-    let config = MakeValidConfig::default();
+    eprintln!("{}", "-".repeat(55));
 
-    let mut group = c.benchmark_group("simple_types");
-    group.bench_function("point", |b| {
-        b.iter(|| black_box(&pt).make_valid_with_config(black_box(&config)))
-    });
-    group.bench_function("line", |b| {
-        b.iter(|| black_box(&line).make_valid_with_config(black_box(&config)))
-    });
-    group.bench_function("linestring", |b| {
-        b.iter(|| black_box(&ls).make_valid_with_config(black_box(&config)))
-    });
-    group.bench_function("rect", |b| {
-        b.iter(|| black_box(&rect).make_valid_with_config(black_box(&config)))
-    });
-    group.bench_function("triangle", |b| {
-        b.iter(|| black_box(&tri).make_valid_with_config(black_box(&config)))
-    });
-    group.finish();
-}
+    // Valid polygons: small batch (50K) for cheap tests, 1000 for expensive
+    for &(n, batch) in &[
+        (4, 50000usize),
+        (10, 50000),
+        (50, 10000),
+        (100, 5000),
+        (500, 1000),
+        (1000, 1000),
+        (5000, 1000),
+        (10000, 1000),
+    ] {
+        let poly = make_valid_ring(n, 100.0);
+        let polys: Vec<Polygon<f64>> = (0..batch).map(|_| poly.clone()).collect();
+        bench_polygons(&format!("valid polygon {:>5}v", n), &polys, batch, &cfg);
+    }
 
-fn bench_multi_types(c: &mut Criterion) {
-    let pts = MultiPoint::new(vec![
-        Point::new(0.0, 0.0),
-        Point::new(1.0, 1.0),
-        Point::new(2.0, 2.0),
-    ]);
-    let lines = MultiLineString::new(vec![
-        LineString::new(vec![Coord { x: 0.0, y: 0.0 }, Coord { x: 1.0, y: 1.0 }]),
-        LineString::new(vec![Coord { x: 2.0, y: 2.0 }, Coord { x: 3.0, y: 3.0 }]),
-    ]);
-    let config = MakeValidConfig::default();
+    // Invalid bowtie 4v
+    {
+        let poly = make_bowtie();
+        let polys: Vec<Polygon<f64>> = (0..50000)
+            .map(|i| {
+                let mut p = poly.clone();
+                p.exterior_mut(|ext| {
+                    for c in &mut ext.0 {
+                        c.x += i as f64 * 20.0;
+                        c.y += i as f64 * 20.0;
+                    }
+                });
+                p
+            })
+            .collect();
+        bench_polygons("invalid bowtie 4v", &polys, 50000, &cfg);
+    }
 
-    let mut group = c.benchmark_group("multi_types");
-    group.bench_function("multipoint", |b| {
-        b.iter(|| black_box(&pts).make_valid_with_config(black_box(&config)))
-    });
-    group.bench_function("multilinestring", |b| {
-        b.iter(|| black_box(&lines).make_valid_with_config(black_box(&config)))
-    });
-    group.finish();
-}
+    // Large invalid star 100v
+    {
+        let mut coords = Vec::with_capacity(100);
+        for i in 0..99 {
+            let angle = 2.0 * std::f64::consts::PI * i as f64 / 99.0;
+            let r = if i % 3 == 0 { 100.0 } else { 50.0 };
+            coords.push(Coord {
+                x: r * angle.cos(),
+                y: r * angle.sin(),
+            });
+        }
+        coords.push(coords[0]);
+        let poly = Polygon::new(LineString::new(coords), Vec::new());
+        let polys: Vec<Polygon<f64>> = (0..1000)
+            .map(|i| {
+                let mut p = poly.clone();
+                p.exterior_mut(|ext| {
+                    for c in &mut ext.0 {
+                        c.x += i as f64 * 300.0;
+                        c.y += i as f64 * 300.0;
+                    }
+                });
+                p
+            })
+            .collect();
+        bench_polygons("invalid star 100v", &polys, 1000, &cfg);
+    }
 
-fn bench_config() -> Criterion {
-    if std::env::var("QUICK_BENCH").is_ok() || std::env::var("CI").is_ok() {
-        Criterion::default()
-            .sample_size(10)
-            .warm_up_time(std::time::Duration::from_millis(1))
-            .measurement_time(std::time::Duration::from_millis(50))
-    } else {
-        Criterion::default()
-            .sample_size(50)
-            .warm_up_time(std::time::Duration::from_millis(500))
-            .measurement_time(std::time::Duration::from_secs(10))
+    // ─── Line benchmarks ─────────────────────────────────────────────
+    eprintln!("{}", "-".repeat(55));
+
+    // Single Line tests
+    bench_line(
+        "valid line",
+        &make_line([(0.0, 0.0), (1000.0, 500.0)]),
+        100000,
+        &cfg,
+    );
+    bench_line(
+        "zero-length line",
+        &make_line([(5.0, 5.0), (5.0, 5.0)]),
+        100000,
+        &cfg,
+    );
+
+    // Valid LineString vertex sweep
+    for &(n, batch) in &[
+        (4, 50000usize),
+        (10, 50000),
+        (50, 10000),
+        (100, 5000),
+        (500, 1000),
+    ] {
+        let coords: Vec<(f64, f64)> = (0..n).map(|i| (i as f64, (i as f64).sin())).collect();
+        let g = make_linestring(&coords);
+        bench_line(&format!("valid ls {:>4}v", n), &g, batch, &cfg);
+    }
+
+    // Collinear LineString vertex sweep
+    for &(n, batch) in &[
+        (4, 50000usize),
+        (10, 50000),
+        (50, 10000),
+        (100, 5000),
+        (500, 1000),
+    ] {
+        let coords: Vec<(f64, f64)> = (0..n).map(|i| (i as f64, 0.0)).collect();
+        let g = make_linestring(&coords);
+        bench_line(&format!("collinear ls {:>4}v", n), &g, batch, &cfg);
+    }
+
+    // Convoluted: zigzag (alternating y)
+    for &(n, batch) in &[(10, 50000usize), (50, 10000), (100, 5000), (500, 1000)] {
+        let coords: Vec<(f64, f64)> = (0..n)
+            .map(|i| (i as f64, if i % 2 == 0 { 0.0 } else { 1000.0 }))
+            .collect();
+        let g = make_linestring(&coords);
+        bench_line(&format!("zigzag ls {:>4}v", n), &g, batch, &cfg);
+    }
+
+    // Convoluted: spiral (tightly wound)
+    for &(n, batch) in &[(10, 50000usize), (50, 10000), (100, 5000)] {
+        let mut coords = Vec::new();
+        for i in 0..n {
+            let t = i as f64 * 0.5;
+            let r = 100.0 + t * 2.0;
+            coords.push((r * t.cos(), r * t.sin()));
+        }
+        let g = make_linestring(&coords);
+        bench_line(&format!("spiral ls {:>4}v", n), &g, batch, &cfg);
+    }
+
+    // Self-intersecting: figure-8
+    {
+        let coords = vec![
+            (0.0, 0.0),
+            (10.0, 10.0),
+            (10.0, 0.0),
+            (0.0, 10.0),
+            (0.0, 0.0),
+        ];
+        let g = make_linestring(&coords);
+        bench_line("self-int ls 5v", &g, 50000, &cfg);
+    }
+
+    // Self-intersecting: many crossing edges (dense bowtie chain)
+    for &(n, batch) in &[(10, 50000usize), (50, 10000), (100, 5000)] {
+        let mut coords = Vec::new();
+        for i in 0..n {
+            let x = i as f64 * 10.0;
+            let y = if i % 2 == 0 { 0.0 } else { 1000.0 } + (i as f64).sin() * 50.0;
+            coords.push((x, y));
+        }
+        let g = make_linestring(&coords);
+        bench_line(&format!("dense self ls {:>4}v", n), &g, batch, &cfg);
+    }
+
+    // LineString with consecutive duplicates
+    {
+        let mut coords = Vec::new();
+        for i in 0..50 {
+            coords.push((i as f64, 0.0));
+            coords.push((i as f64, 0.0));
+        }
+        let g = make_linestring(&coords);
+        bench_line("duped ls 100v", &g, 50000, &cfg);
+    }
+
+    // MultiLineString: many short parts
+    {
+        let parts: Vec<Vec<(f64, f64)>> = (0..50)
+            .map(|i| {
+                let base = i as f64 * 200.0;
+                vec![(base, 0.0), (base + 100.0, 50.0), (base + 200.0, 0.0)]
+            })
+            .collect();
+        let g = make_multilinestring(&parts);
+        bench_line("mls 50x3v", &g, 10000, &cfg);
+    }
+
+    // MultiLineString with many self-intersecting components
+    {
+        let parts: Vec<Vec<(f64, f64)>> = (0..50)
+            .map(|i| {
+                let base = i as f64 * 30.0;
+                vec![
+                    (base, 0.0),
+                    (base + 10.0, 10.0),
+                    (base + 10.0, 0.0),
+                    (base, 10.0),
+                ]
+            })
+            .collect();
+        let g = make_multilinestring(&parts);
+        bench_line("self-int mls 50x4v", &g, 10000, &cfg);
+    }
+
+    // ─── Special shapes ────────────────────────────────────────────
+    eprintln!("{}", "-".repeat(55));
+
+    // Star-burst: all edges from/to center — stresses duplicate-vertex detection
+    for &(spikes, batch) in &[(10usize, 50000usize), (50, 10000), (100, 5000), (500, 100)] {
+        let g = make_starburst(spikes, 1000.0);
+        bench_line(&format!("star-burst {}sp", spikes), &g, batch, &cfg);
+    }
+
+    // Collinear overlap: segments on same line with partial overlap (regression test)
+    for &(segments, batch) in &[(10usize, 50000usize), (50, 10000), (100, 5000), (500, 500)] {
+        let g = make_collinear_overlap(segments);
+        bench_line(&format!("collinear ov {}seg", segments), &g, batch, &cfg);
+    }
+
+    // Extreme mixed scale: alternates 1e12 and 1e-12 coords — tests epsilon robustness
+    for &(n, batch) in &[(10usize, 50000usize), (50, 1000), (100, 100)] {
+        let g = make_extreme_mixed_scale(n);
+        bench_line(&format!("x-scale {}v", n), &g, batch, &cfg);
+    }
+
+    // Tight ringing: dense near-miss oscillations — stresses orient2d near-boundary
+    for &(n, batch) in &[(100usize, 10000usize), (500, 50)] {
+        let g = make_tight_ringing(n, 1e-8);
+        bench_line(&format!("ringing {}v", n), &g, batch, &cfg);
+    }
+
+    // Hilbert curve (order 4 = 256v, order 5 = 1024v) — space-filling, grid stress
+    {
+        let g = make_linestring(&hilbert_coords(4));
+        bench_line("hilbert 256v", &g, 2000, &cfg);
+    }
+    {
+        let g = make_linestring(&hilbert_coords(5));
+        bench_line("hilbert 1024v", &g, 200, &cfg);
+    }
+
+    // Lissajous curve: complex self-intersection pattern (5:3 ratio)
+    for &(n, batch) in &[(200usize, 5000usize), (500, 1000), (1000, 100)] {
+        let g = make_lissajous(n, 5.0, 3.0, 1000.0);
+        bench_line(&format!("lissajous {}v", n), &g, batch, &cfg);
+    }
+    // Lissajous 7:4 ratio (different crossing pattern)
+    {
+        let g = make_lissajous(500, 7.0, 4.0, 1000.0);
+        bench_line("lissajous 7:4 500v", &g, 1000, &cfg);
+    }
+
+    // Spoke wheel: all edges converge at origin — stresses noding at common point
+    for &(spokes, batch) in &[(10usize, 50000usize), (50, 5000), (100, 500), (500, 50)] {
+        let g = make_spoke_wheel(spokes, 1000.0);
+        bench_line(&format!("spoke {}sp", spokes), &g, batch, &cfg);
     }
 }
-
-criterion_group!(
-    name = benches;
-    config = bench_config();
-    targets =
-        bench_simple_types,
-        bench_multi_types,
-        bench_orient2d,
-        bench_make_valid,
-        bench_geos_fixtures,
-        bench_missing_shapes,
-);
-criterion_main!(benches);

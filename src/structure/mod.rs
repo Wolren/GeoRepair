@@ -2,6 +2,7 @@ pub mod classify;
 pub mod fix_ring;
 pub mod merge;
 pub mod subtract;
+pub mod sweep;
 
 use geo::{Coord, Geometry, LineString, LinesIter, MultiPolygon, Polygon, Winding};
 

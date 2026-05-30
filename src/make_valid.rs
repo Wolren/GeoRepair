@@ -5,6 +5,7 @@ use geo::{
 
 use crate::config::{MakeValidConfig, PolyMethod};
 use crate::noding::{node_line_string, remove_consecutive_duplicates};
+use crate::validation::{GeoValidation, ValidationResult};
 
 pub trait MakeValid {
     type Scalar: GeoFloat;
@@ -395,3 +396,78 @@ impl<T: GeoFloat> MakeValid for GeometryCollection<T> {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Validate + Fix mode (GEOS-compatible)
+// ---------------------------------------------------------------------------
+
+/// Combine validation and repair into a single pipeline.
+/// Mirrors GEOS's pattern of checking validity before/comparing to repair.
+pub trait ValidateAndFix: MakeValid<Scalar = f64> + GeoValidation<Scalar = f64> {
+    /// Validate the geometry, then fix it if invalid.
+    /// Returns (validation_result, fixed_geometry).
+    fn validate_and_fix(&self) -> (ValidationResult, Geometry<f64>) {
+        let result = <Self as GeoValidation>::validate(self);
+        if result.valid {
+            (result, <Self as MakeValid>::make_valid(self))
+        } else {
+            (result.clone(), <Self as MakeValid>::make_valid(self))
+        }
+    }
+
+    /// Validate the geometry, then fix it if invalid.
+    /// Returns the fixed geometry unconditionally (fix even valid geoms).
+    fn validate_and_fix_always(&self) -> (ValidationResult, Geometry<f64>) {
+        (
+            <Self as GeoValidation>::validate(self),
+            <Self as MakeValid>::make_valid(self),
+        )
+    }
+
+    /// Return the validated geometry, or fix it if invalid.
+    /// Returns Ok(geometry) if valid, Err((validation_errors, fixed_geometry)) if invalid.
+    fn validate_or_fix(&self) -> Result<Geometry<f64>, (ValidationResult, Geometry<f64>)> {
+        let result = <Self as GeoValidation>::validate(self);
+        if result.valid {
+            Ok(<Self as MakeValid>::make_valid(self))
+        } else {
+            let fixed = <Self as MakeValid>::make_valid(self);
+            let fixed_result = <Geometry<f64> as GeoValidation>::validate(&fixed);
+            if fixed_result.valid {
+                Err((result, fixed))
+            } else {
+                Err((result, fixed))
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ValidateAndFix blanket implementations
+// ---------------------------------------------------------------------------
+
+impl ValidateAndFix for Point<f64> {}
+
+impl ValidateAndFix for MultiPoint<f64> {}
+
+impl ValidateAndFix for Line<f64> {}
+
+impl ValidateAndFix for LineString<f64> {}
+
+impl ValidateAndFix for MultiLineString<f64> {}
+
+impl ValidateAndFix for Rect<f64> {}
+
+impl ValidateAndFix for Triangle<f64> {}
+
+#[cfg(any(feature = "arrange", feature = "structure"))]
+impl ValidateAndFix for Polygon<f64> {}
+
+#[cfg(any(feature = "arrange", feature = "structure"))]
+impl ValidateAndFix for MultiPolygon<f64> {}
+
+#[cfg(any(feature = "arrange", feature = "structure"))]
+impl ValidateAndFix for Geometry<f64> {}
+
+#[cfg(any(feature = "arrange", feature = "structure"))]
+impl ValidateAndFix for GeometryCollection<f64> {}

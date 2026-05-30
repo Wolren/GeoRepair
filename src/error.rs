@@ -14,6 +14,15 @@ pub enum MakeValidError {
 
     #[error("triangulation error: {0}")]
     TriangulationError(String),
+
+    #[error("I/O error: {0}")]
+    IoError(String),
+
+    #[error("parse error: {0}")]
+    ParseError(String),
+
+    #[error("unsupported format: {0}")]
+    UnsupportedFormat(String),
 }
 
 impl From<spade::InsertionError> for MakeValidError {

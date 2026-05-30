@@ -232,6 +232,7 @@ fn main() {
                     eprintln!("  why invalid:      self-intersections (only remaining check)");
                 }
 
+                #[cfg(feature = "bench-geos")]
                 if let Some(t) = arrange::diagnose_arrange(poly) {
                     eprintln!("  CDT prep:         {:.6}s", t.prep_secs);
                     eprintln!(
@@ -243,14 +244,17 @@ fn main() {
                     eprintln!("  CDT total:        {:.6}s", t.total_secs);
                 }
 
-                let t0 = Instant::now();
-                let wkt = poly.wkt_string();
-                match geos::Geometry::new_from_wkt(&wkt) {
-                    Ok(geom) => {
-                        let _ = geom.make_valid();
-                        eprintln!("  GEOS:             {:.6}s", t0.elapsed().as_secs_f64());
+                #[cfg(feature = "bench-geos")]
+                {
+                    let t0 = Instant::now();
+                    let wkt = poly.wkt_string();
+                    match geos::Geometry::new_from_wkt(&wkt) {
+                        Ok(geom) => {
+                            let _ = geom.make_valid();
+                            eprintln!("  GEOS:             {:.6}s", t0.elapsed().as_secs_f64());
+                        }
+                        Err(e) => eprintln!("  GEOS err:         {e}"),
                     }
-                    Err(e) => eprintln!("  GEOS err:         {e}"),
                 }
             } else {
                 eprintln!(
@@ -301,33 +305,41 @@ fn main() {
 
     // Validate all Structure outputs through GEOS is_valid()
     let mut stru_invalid_outputs = 0usize;
-    for g in &results {
-        let wkt = g.wkt_string();
-        match geos::Geometry::new_from_wkt(&wkt) {
-            Ok(gg) => {
-                if !gg.is_valid().unwrap_or(false) {
-                    stru_invalid_outputs += 1;
+    #[cfg(feature = "bench-geos")]
+    {
+        for g in &results {
+            let wkt = g.wkt_string();
+            match geos::Geometry::new_from_wkt(&wkt) {
+                Ok(gg) => {
+                    if !gg.is_valid().unwrap_or(false) {
+                        stru_invalid_outputs += 1;
+                    }
                 }
+                Err(_) => stru_invalid_outputs += 1,
             }
-            Err(_) => stru_invalid_outputs += 1,
         }
     }
 
-    // Pre-serialize WKT outside GEOS timer
-    let mut invalid_wkts: Vec<String> = Vec::with_capacity(sample_n);
-    for p in &invalid_polys {
-        invalid_wkts.push(p.wkt_string());
-    }
-    let t0 = Instant::now();
-    for wkt in &invalid_wkts {
-        match geos::Geometry::new_from_wkt(wkt) {
-            Ok(g) => {
+    // Pre-create GEOS geometries outside GEOS timer
+    let geos_total: f64;
+    #[cfg(feature = "bench-geos")]
+    {
+        let mut geos_geoms: Vec<Option<geos::Geometry>> = Vec::with_capacity(sample_n);
+        for p in &invalid_polys {
+            geos_geoms.push(geos::Geometry::new_from_wkt(&p.wkt_string()).ok());
+        }
+        let t0 = Instant::now();
+        for g in &geos_geoms {
+            if let Some(g) = g {
                 let _ = g.make_valid();
             }
-            Err(_) => {}
         }
+        geos_total = t0.elapsed().as_secs_f64();
     }
-    let geos_total = t0.elapsed().as_secs_f64();
+    #[cfg(not(feature = "bench-geos"))]
+    {
+        geos_total = 0.0;
+    }
 
     // =========================================================================
     // Full-dataset timing: process N random polys through both methods
@@ -344,33 +356,39 @@ fn main() {
     let _full_results = par_fix_polygon_batch(&all_polys, &cfg);
     let full_stru = t0.elapsed().as_secs_f64();
 
-    // Pre-serialize all WKT outside the GEOS timer to avoid counting serialization overhead
-    eprint!("  Pre-serializing {} polys to WKT...", full_n);
-    let t0 = Instant::now();
-    let mut wkts: Vec<String> = Vec::with_capacity(full_n);
-    for p in &polys {
-        wkts.push(p.wkt_string());
-    }
-    let wkt_time = t0.elapsed().as_secs_f64();
-    eprintln!(" {:.3}s", wkt_time);
+    let (geos_setup, full_geos, full_geos_total): (f64, f64, f64);
+    #[cfg(feature = "bench-geos")]
+    {
+        eprint!("  Pre-building {} GEOS geometries...", full_n);
+        let t0 = Instant::now();
+        let mut geos_geoms: Vec<Option<geos::Geometry>> = Vec::with_capacity(full_n);
+        for p in &polys {
+            geos_geoms.push(geos::Geometry::new_from_wkt(&p.wkt_string()).ok());
+        }
+        geos_setup = t0.elapsed().as_secs_f64();
+        eprintln!(" {:.3}s", geos_setup);
 
-    let t0 = Instant::now();
-    for wkt in &wkts {
-        match geos::Geometry::new_from_wkt(wkt) {
-            Ok(g) => {
+        let t0 = Instant::now();
+        for g in &geos_geoms {
+            if let Some(g) = g {
                 let _ = g.make_valid();
             }
-            Err(_) => {}
         }
+        full_geos = t0.elapsed().as_secs_f64();
+        full_geos_total = full_geos;
     }
-    let full_geos = t0.elapsed().as_secs_f64();
-    let full_geos_total = wkt_time + full_geos;
+    #[cfg(not(feature = "bench-geos"))]
+    {
+        geos_setup = 0.0;
+        full_geos = 0.0;
+        full_geos_total = 0.0;
+    }
 
     // =========================================================================
     // Summary
     // =========================================================================
-    let full_ratio = if full_geos > 0.0 {
-        full_stru / full_geos
+    let full_ratio = if full_geos_total > 0.0 {
+        full_stru / full_geos_total
     } else {
         0.0
     };
@@ -404,6 +422,6 @@ fn main() {
     eprintln!(
         "  GEOS (full)           │ {full_geos_total:>9.4}s │ {full_geos_per:>9.4}    │      —"
     );
-    eprintln!("    (WKT serde: {wkt_time:.3}s, make_valid: {full_geos:.3}s)");
+    eprintln!("    (setup: {geos_setup:.3}s, make_valid loop: {full_geos:.3}s)");
     eprintln!("═════════════════════════════════════════════════════════════════════");
 }

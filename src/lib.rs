@@ -1,9 +1,11 @@
 pub mod config;
 pub mod error;
+pub mod io;
 pub mod load;
 pub mod make_valid;
 pub mod orient;
 pub mod snap;
+pub mod validation;
 
 #[cfg(feature = "arrange")]
 pub mod arrange;
@@ -15,11 +17,24 @@ pub mod structure;
 pub mod parallel;
 #[cfg(feature = "simd")]
 pub mod simd;
+#[cfg(feature = "ffi")]
+pub mod ffi;
 
 pub use config::{MakeValidConfig, PolyMethod};
 pub use error::MakeValidError;
+pub use io::load_geometries;
 pub use make_valid::MakeValid;
+#[cfg(any(feature = "arrange", feature = "structure"))]
+pub use make_valid::ValidateAndFix;
+pub use validation::{GeoValidation, GeometryValidationError, ValidationResult};
 
+/// Re-export of the upstream `geo::MakeValid` trait, implemented for
+/// `Polygon<f64>` and `MultiPolygon<f64>` when the `arrange` or `structure`
+/// feature is enabled.
+#[cfg(any(feature = "arrange", feature = "structure"))]
+pub use geo::MakeValid as GeoMakeValid;
+
+#[cfg(feature = "mimalloc")]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
