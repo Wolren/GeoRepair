@@ -31,6 +31,12 @@ mod private {
             c.x.to_bits() ^ c.y.to_bits().rotate_left(32)
         }
     }
+
+    impl NodingFloat for f32 {
+        fn coord_hash_key(c: &Coord<f32>) -> u64 {
+            (c.x.to_bits() as u64) ^ (c.y.to_bits() as u64).rotate_left(32)
+        }
+    }
 }
 
 use private::NodingFloat;
@@ -474,14 +480,21 @@ fn reconnect_edges<T: GeoFloat>(edges: Vec<Line<T>>) -> Vec<LineString<T>> {
         return vec![LineString::new(vec![edges[0].start, edges[0].end])];
     }
 
-    // f64 path: single transmute at dispatch boundary
+    // f64 path: transmute via size check
     if mem::size_of::<T>() == 8 {
         let e_f64: Vec<Line<f64>> = unsafe { mem::transmute(edges) };
-        let r = reconnect_edges_f64(e_f64);
+        let r = reconnect_edges_by_key(e_f64);
         return unsafe { mem::transmute(r) };
     }
 
-    // Generic fallback: O(n²) original approach for non-f64 types
+    // f32 path: same HashMap approach
+    if mem::size_of::<T>() == 4 {
+        let e_f32: Vec<Line<f32>> = unsafe { mem::transmute(edges) };
+        let r = reconnect_edges_by_key(e_f32);
+        return unsafe { mem::transmute(r) };
+    }
+
+    // Generic fallback: O(n²) for unknown types
     let mut remaining: Vec<Line<T>> = edges;
     let mut result = Vec::new();
     while !remaining.is_empty() {
@@ -516,8 +529,8 @@ fn reconnect_edges<T: GeoFloat>(edges: Vec<Line<T>>) -> Vec<LineString<T>> {
 }
 
 /// O(n) chain reconstruction via HashMap from endpoint → edge index.
-/// No unsafety — pure f64 code using the sealed NodingFloat trait.
-fn reconnect_edges_f64(edges: Vec<Line<f64>>) -> Vec<LineString<f64>> {
+/// Works for any type implementing the sealed NodingFloat trait.
+fn reconnect_edges_by_key<T: NodingFloat>(edges: Vec<Line<T>>) -> Vec<LineString<T>> {
     let n = edges.len();
 
     let mut start_map: FxHashMap<u64, Vec<usize>> = FxHashMap::default();
@@ -541,7 +554,7 @@ fn reconnect_edges_f64(edges: Vec<Line<f64>>) -> Vec<LineString<f64>> {
             continue;
         }
 
-        let mut chain: Vec<Coord<f64>> = Vec::new();
+        let mut chain: Vec<Coord<T>> = Vec::new();
         chain.push(edges[start_idx].start);
         chain.push(edges[start_idx].end);
         used[start_idx] = true;

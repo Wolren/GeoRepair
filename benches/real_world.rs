@@ -283,9 +283,8 @@ fn main() {
     // =========================================================================
     // Method comparison: Structure vs GEOS on invalid polys
     // =========================================================================
-    const SAMPLE: usize = 1848;
-    let sample_n = n_invalid.min(SAMPLE);
-    let sample_idx: Vec<usize> = invalid_idx.iter().copied().take(SAMPLE).collect();
+    let sample_n = n_invalid;
+    let sample_idx: Vec<usize> = invalid_idx.iter().copied().take(sample_n).collect();
 
     eprintln!("\n[4/5] Structure vs GEOS on first {sample_n} of {n_invalid} invalid polys");
     eprintln!("  First 10 invalid indices & vertex counts:");
@@ -307,14 +306,27 @@ fn main() {
     let results = par_fix_polygon_batch(&invalid_polys, &cfg);
     let stru_total = t0.elapsed().as_secs_f64();
 
+    // Pre-compute WKT once for all results and input polys
+    #[allow(unused_mut)]
+    let mut result_wkts: Vec<String> = Vec::new();
+    #[cfg(feature = "bench-geos")]
+    {
+        result_wkts = results.iter().map(|g| g.wkt_string()).collect();
+    }
+    #[allow(unused_mut)]
+    let mut input_wkts: Vec<String> = Vec::new();
+    #[cfg(feature = "bench-geos")]
+    {
+        input_wkts = invalid_polys.iter().map(|p| p.wkt_string()).collect();
+    }
+
     // Validate all Structure outputs through GEOS is_valid()
     #[allow(unused_mut)]
     let mut stru_invalid_outputs = 0usize;
     #[cfg(feature = "bench-geos")]
     {
-        for g in &results {
-            let wkt = g.wkt_string();
-            match geos::Geometry::new_from_wkt(&wkt) {
+        for wkt in &result_wkts {
+            match geos::Geometry::new_from_wkt(wkt) {
                 Ok(gg) => {
                     if !gg.is_valid().unwrap_or(false) {
                         stru_invalid_outputs += 1;
@@ -330,8 +342,8 @@ fn main() {
     #[cfg(feature = "bench-geos")]
     {
         let mut geos_geoms: Vec<Option<geos::Geometry>> = Vec::with_capacity(sample_n);
-        for p in &invalid_polys {
-            geos_geoms.push(geos::Geometry::new_from_wkt(&p.wkt_string()).ok());
+        for wkt in &input_wkts {
+            geos_geoms.push(geos::Geometry::new_from_wkt(wkt).ok());
         }
         let t0 = Instant::now();
         for g in &geos_geoms {
@@ -366,9 +378,10 @@ fn main() {
     {
         eprint!("  Pre-building {} GEOS geometries...", full_n);
         let t0 = Instant::now();
+        let all_wkts: Vec<String> = polys.iter().map(|p| p.wkt_string()).collect();
         let mut geos_geoms: Vec<Option<geos::Geometry>> = Vec::with_capacity(full_n);
-        for p in &polys {
-            geos_geoms.push(geos::Geometry::new_from_wkt(&p.wkt_string()).ok());
+        for wkt in &all_wkts {
+            geos_geoms.push(geos::Geometry::new_from_wkt(wkt).ok());
         }
         geos_setup = t0.elapsed().as_secs_f64();
         eprintln!(" {:.3}s", geos_setup);

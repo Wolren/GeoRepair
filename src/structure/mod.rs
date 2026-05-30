@@ -4,7 +4,10 @@ pub mod merge;
 pub mod subtract;
 pub mod sweep;
 
-use geo::{Coord, Geometry, LineString, LinesIter, MultiPolygon, Point, Polygon, Winding};
+use geo::{
+    Coord, Geometry, GeometryCollection, LineString, LinesIter, MultiPolygon, Point, Polygon,
+    Winding,
+};
 use rstar::{RTree, RTreeObject, AABB};
 
 use crate::core::MakeValidConfig;
@@ -39,7 +42,12 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
             warn!("Structure: shell ring repair failed, falling back to CDT arrange");
             #[cfg(feature = "arrange")]
             if !poly.exterior().0.is_empty() {
-                return Some(crate::arrange::fix_polygon(poly, config));
+                let lines: Vec<_> = poly.lines_iter().collect();
+                return Some(
+                    crate::arrange::fix_from_lines(lines)
+                        .map(Geometry::MultiPolygon)
+                        .unwrap_or(Geometry::GeometryCollection(GeometryCollection(Vec::new()))),
+                );
             }
             return handle_collapse_result(poly.exterior(), config);
         }
