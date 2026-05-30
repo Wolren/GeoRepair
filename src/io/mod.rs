@@ -35,7 +35,7 @@ pub fn load_geometries(path: &str) -> Result<Vec<Geometry<f64>>, MakeValidError>
             }
         }
         "bin" => {
-            let polys = load_bin(path);
+            let polys = load_bin(path).map_err(|e| MakeValidError::UnsupportedFormat(e))?;
             Ok(polys.into_iter().map(Geometry::Polygon).collect())
         }
         "geojson" | "json" => {

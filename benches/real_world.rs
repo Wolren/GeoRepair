@@ -17,10 +17,10 @@ use std::path::Path;
 use std::time::Instant;
 
 use geo::{Coord, Polygon};
-use geo_repair::arrange::{self, validate_polygon};
-use geo_repair::load::load_bin;
+use geo_repair::arrange::validate_polygon;
+use geo_repair::io::load_bin;
 #[cfg(feature = "load-shp")]
-use geo_repair::load::load_shp;
+use geo_repair::io::load_shp;
 use geo_repair::orient::orient2d;
 use geo_repair::parallel::par_fix_polygon_batch;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
@@ -28,6 +28,7 @@ use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 use geos::Geom;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
+#[cfg(feature = "bench-geos")]
 use wkt::ToWkt;
 
 fn poly_n_vert(poly: &Polygon<f64>) -> usize {
@@ -154,7 +155,9 @@ fn load_polys(path: &str) -> Vec<Polygon<f64>> {
     match ext {
         #[cfg(feature = "load-shp")]
         "shp" => load_shp(path),
-        "bin" => load_bin(path),
+        "bin" => load_bin(path).unwrap_or_else(|e| {
+            panic!("Failed to load {path}: {e}");
+        }),
         #[cfg(not(feature = "load-shp"))]
         "shp" => panic!("load-shp feature not enabled. Re-run with --features load-shp"),
         other => panic!("Unsupported file extension '.{other}'. Use .shp or .bin"),
@@ -233,7 +236,7 @@ fn main() {
                 }
 
                 #[cfg(feature = "bench-geos")]
-                if let Some(t) = arrange::diagnose_arrange(poly) {
+                if let Some(t) = geo_repair::arrange::diagnose_arrange(poly) {
                     eprintln!("  CDT prep:         {:.6}s", t.prep_secs);
                     eprintln!(
                         "  CDT build:        {:.6}s  ({} faces)",
@@ -300,10 +303,12 @@ fn main() {
         poly_method: PolyMethod::Structure,
         ..Default::default()
     };
+    #[allow(unused_variables)]
     let results = par_fix_polygon_batch(&invalid_polys, &cfg);
     let stru_total = t0.elapsed().as_secs_f64();
 
     // Validate all Structure outputs through GEOS is_valid()
+    #[allow(unused_mut)]
     let mut stru_invalid_outputs = 0usize;
     #[cfg(feature = "bench-geos")]
     {

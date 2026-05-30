@@ -82,7 +82,7 @@ fn write_geometry_json(f: &mut dyn Write, g: &Geometry<f64>) -> std::io::Result<
 
 fn load_polys(path: &str) -> Vec<Polygon<f64>> {
     if path.ends_with(".bin") {
-        load::load_bin(path)
+        load::load_bin(path).unwrap_or_else(|e| panic!("Failed to load {path}: {e}"))
     } else if path.ends_with(".shp") {
         #[cfg(feature = "load-shp")]
         {

@@ -241,21 +241,6 @@ pub(crate) fn poly_has_basic_form(poly: &Polygon<f64>) -> bool {
     poly.interiors().iter().all(|h| ring_is_plausible(h))
 }
 
-#[allow(dead_code)]
-pub(crate) fn fix_multi_polygon(
-    mp: &MultiPolygon<f64>,
-    _config: &MakeValidConfig,
-) -> Geometry<f64> {
-    let lines: Vec<_> = mp.iter().flat_map(|p| p.lines_iter()).collect();
-    if lines.is_empty() {
-        return empty();
-    }
-    match fix_from_lines(lines) {
-        Some(mp) => Geometry::MultiPolygon(mp),
-        None => empty(),
-    }
-}
-
 pub(crate) fn fix_from_lines(lines: Vec<geo::Line<f64>>) -> Option<MultiPolygon<f64>> {
     let prepared = prep::prepare_lines(lines).ok()?;
     let cdt = build_cdt_safe(&prepared)?;

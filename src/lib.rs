@@ -25,12 +25,6 @@ pub use make_valid::MakeValid;
 pub use make_valid::ValidateAndFix;
 pub use validation::{GeoValidation, GeometryValidationError, ValidationResult};
 
-/// Re-export of the upstream `geo::MakeValid` trait, implemented for
-/// `Polygon<f64>` and `MultiPolygon<f64>` when the `arrange` or `structure`
-/// feature is enabled.
-#[cfg(any(feature = "arrange", feature = "structure"))]
-pub use geo::MakeValid as GeoMakeValid;
-
 #[cfg(feature = "mimalloc")]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;

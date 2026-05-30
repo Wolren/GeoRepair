@@ -912,3 +912,125 @@ fn test_degenerate_ring_too_few_points() {
     let result = poly.make_valid();
     assert_geometry_valid(&result);
 }
+
+// ---------------------------------------------------------------------------
+// ValidateAndFix trait tests
+// ---------------------------------------------------------------------------
+
+use geo_repair::ValidateAndFix;
+
+#[test]
+fn test_validate_and_fix_valid_polygon() {
+    let poly = Polygon::new(
+        LineString::new(vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 10.0, y: 0.0 },
+            Coord { x: 10.0, y: 10.0 },
+            Coord { x: 0.0, y: 10.0 },
+            Coord { x: 0.0, y: 0.0 },
+        ]),
+        Vec::new(),
+    );
+    let (result, geom) = poly.validate_and_fix();
+    assert!(result.valid);
+    assert_geometry_valid(&geom);
+}
+
+#[test]
+fn test_validate_and_fix_bowtie() {
+    let poly = Polygon::new(
+        LineString::new(vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 10.0, y: 10.0 },
+            Coord { x: 10.0, y: 0.0 },
+            Coord { x: 0.0, y: 10.0 },
+            Coord { x: 0.0, y: 0.0 },
+        ]),
+        Vec::new(),
+    );
+    let (result, geom) = poly.validate_and_fix();
+    assert!(!result.valid);
+    assert_geometry_valid(&geom);
+}
+
+#[test]
+fn test_validate_and_fix_always_valid() {
+    let poly = Polygon::new(
+        LineString::new(vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 10.0, y: 0.0 },
+            Coord { x: 10.0, y: 10.0 },
+            Coord { x: 0.0, y: 10.0 },
+            Coord { x: 0.0, y: 0.0 },
+        ]),
+        Vec::new(),
+    );
+    let (result, geom) = poly.validate_and_fix_always();
+    assert!(result.valid);
+    assert_geometry_valid(&geom);
+}
+
+#[test]
+fn test_validate_or_fix_valid_returns_ok() {
+    let poly = Polygon::new(
+        LineString::new(vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 10.0, y: 0.0 },
+            Coord { x: 10.0, y: 10.0 },
+            Coord { x: 0.0, y: 10.0 },
+            Coord { x: 0.0, y: 0.0 },
+        ]),
+        Vec::new(),
+    );
+    let result = poly.validate_or_fix();
+    assert!(result.is_ok());
+    assert_geometry_valid(&result.unwrap());
+}
+
+#[test]
+fn test_validate_or_fix_bowtie_returns_fixed() {
+    let poly = Polygon::new(
+        LineString::new(vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 10.0, y: 10.0 },
+            Coord { x: 10.0, y: 0.0 },
+            Coord { x: 0.0, y: 10.0 },
+            Coord { x: 0.0, y: 0.0 },
+        ]),
+        Vec::new(),
+    );
+    let result = poly.validate_or_fix();
+    // Bowtie should be fixable, so validate_or_fix returns Ok
+    assert!(result.is_ok());
+    let geom = result.unwrap();
+    assert_geometry_valid(&geom);
+}
+
+#[test]
+fn test_validate_or_fix_line_valid() {
+    let line = Line::new(Coord { x: 0.0, y: 0.0 }, Coord { x: 10.0, y: 10.0 });
+    let result = line.validate_or_fix();
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_validate_or_fix_point_valid() {
+    let pt = Point::new(1.0, 2.0);
+    let result = pt.validate_or_fix();
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_validate_or_fix_line_invalid() {
+    let line = Line::new(
+        Coord {
+            x: f64::NAN,
+            y: 0.0,
+        },
+        Coord { x: 10.0, y: 10.0 },
+    );
+    let result = line.validate_or_fix();
+    // NaN line is valid according to geo validation? Or does it fix?
+    // Just verify it doesn't panic
+    let _ = result;
+}

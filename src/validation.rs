@@ -402,6 +402,7 @@ fn is_rotated_duplicate(a: &[Coord<f64>], b: &[Coord<f64>]) -> bool {
     if n == 0 {
         return false;
     }
+    // Forward scan (same winding order)
     for start in 0..n {
         if a[start] != b[0] {
             continue;
@@ -409,6 +410,22 @@ fn is_rotated_duplicate(a: &[Coord<f64>], b: &[Coord<f64>]) -> bool {
         let mut match_ = true;
         for i in 0..n {
             if a[(start + i) % n] != b[i] {
+                match_ = false;
+                break;
+            }
+        }
+        if match_ {
+            return true;
+        }
+    }
+    // Reverse scan (opposite winding order)
+    for start in 0..n {
+        if a[start] != b[0] {
+            continue;
+        }
+        let mut match_ = true;
+        for i in 0..n {
+            if a[(start + n - i) % n] != b[i] {
                 match_ = false;
                 break;
             }
