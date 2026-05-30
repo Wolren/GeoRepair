@@ -10,9 +10,6 @@ pub enum GeometryValidationError {
     #[error("Coordinate is NaN")]
     CoordinateNaN,
 
-    #[error("Coordinate is infinite")]
-    CoordinateInfinite,
-
     #[error("Ring has too few points: found {found}, minimum required {min}")]
     RingTooFewPoints { found: usize, min: usize },
 
@@ -43,11 +40,23 @@ pub enum GeometryValidationError {
     #[error("Collinear ring: all points lie on a line")]
     CollinearRing,
 
+    #[error("Geometry has repeated (duplicate) points")]
+    RepeatedPoint,
+
+    #[error("Geometry contains duplicate rings")]
+    DuplicatedRings,
+
     #[error("Line has zero length (start == end at {0:?})")]
     ZeroLengthLine(Coord<f64>),
 
     #[error("Polygon exterior ring is degenerate (collapsed)")]
     DegenerateExterior,
+
+    #[error("Geometry is not simple: components intersect at interior points")]
+    NotSimple,
+
+    #[error("GeometryCollection nesting exceeds maximum depth")]
+    ExcessiveNesting,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -134,6 +143,7 @@ fn check_ring_validity(ring: &[Coord<f64>], is_exterior: bool) -> Vec<GeometryVa
         max_y = max_y.max(c.y);
     }
     let scale = (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
+    let eps = 1e-12 * scale;
     if (max_x - min_x).abs() < f64::EPSILON * scale || (max_y - min_y).abs() < f64::EPSILON * scale
     {
         if is_exterior {
@@ -144,15 +154,32 @@ fn check_ring_validity(ring: &[Coord<f64>], is_exterior: bool) -> Vec<GeometryVa
         return errors;
     }
 
-    let mut seen = rustc_hash::FxHashSet::with_capacity_and_hasher(n, Default::default());
-    for c in &ring[..n] {
-        if !seen.insert((c.x.to_bits(), c.y.to_bits())) {
-            errors.push(GeometryValidationError::PinchPoint);
-            break;
+    {
+        let mut prev_coord = &ring[0];
+        for c in &ring[1..n] {
+            if c.x == prev_coord.x && c.y == prev_coord.y {
+                errors.push(GeometryValidationError::RepeatedPoint);
+                break;
+            }
+            prev_coord = c;
         }
     }
 
-    let eps = 1e-12 * scale;
+    let mut seen: rustc_hash::FxHashMap<(u64, u64), usize> =
+        rustc_hash::FxHashMap::with_capacity_and_hasher(n, Default::default());
+    for (idx, c) in ring[..n].iter().enumerate() {
+        let key = (c.x.to_bits(), c.y.to_bits());
+        if let Some(&prev) = seen.get(&key) {
+            if prev + 1 == idx {
+                continue;
+            }
+            errors.push(GeometryValidationError::PinchPoint);
+            break;
+        } else {
+            seen.insert(key, idx);
+        }
+    }
+
     struct EdgeEnv {
         idx: u32,
         env: AABB<[f64; 2]>,
@@ -232,21 +259,24 @@ fn check_ring_validity(ring: &[Coord<f64>], is_exterior: bool) -> Vec<GeometryVa
     errors
 }
 
-fn check_edge_pair_intersection(coords: &[Coord<f64>], i: usize, j: usize, eps: f64) -> bool {
-    let a1 = coords[i];
-    let a2 = coords[(i + 1) % (coords.len() - 1)];
-    let b1 = coords[j];
-    let b2 = coords[(j + 1) % (coords.len() - 1)];
-
+fn edges_intersect_general(
+    a1: Coord<f64>,
+    a2: Coord<f64>,
+    b1: Coord<f64>,
+    b2: Coord<f64>,
+    eps: f64,
+) -> bool {
     let o1 = (a2.x - a1.x) * (b1.y - a1.y) - (a2.y - a1.y) * (b1.x - a1.x);
     let o2 = (a2.x - a1.x) * (b2.y - a1.y) - (a2.y - a1.y) * (b2.x - a1.x);
     let o3 = (b2.x - b1.x) * (a1.y - b1.y) - (b2.y - b1.y) * (a1.x - b1.x);
     let o4 = (b2.x - b1.x) * (a2.y - b1.y) - (b2.y - b1.y) * (a2.x - b1.x);
 
+    // Proper crossing
     if o1 * o2 < 0.0 && o3 * o4 < 0.0 {
         return true;
     }
 
+    // Collinear overlap (excluding endpoint-only touching)
     let collinear = o1.abs() < eps && o2.abs() < eps;
     if collinear {
         let dx = a2.x - a1.x;
@@ -263,6 +293,38 @@ fn check_edge_pair_intersection(coords: &[Coord<f64>], i: usize, j: usize, eps: 
         }
     }
 
+    false
+}
+
+fn check_edge_pair_intersection(coords: &[Coord<f64>], i: usize, j: usize, eps: f64) -> bool {
+    let n = coords.len() - 1;
+    let a1 = coords[i];
+    let a2 = coords[(i + 1) % n];
+    let b1 = coords[j];
+    let b2 = coords[(j + 1) % n];
+    edges_intersect_general(a1, a2, b1, b2, eps)
+}
+
+/// Check whether two rings (from different polygons) have any intersecting edges.
+/// Touching at a single vertex is allowed (OGC), but crossing, overlapping, or
+/// touching along an edge is not.
+fn check_rings_intersect(ring1: &[Coord<f64>], ring2: &[Coord<f64>], eps: f64) -> bool {
+    let n1 = ring1.len() - 1;
+    let n2 = ring2.len() - 1;
+    if n1 < 2 || n2 < 2 {
+        return false;
+    }
+    for i in 0..n1 {
+        let a1 = ring1[i];
+        let a2 = ring1[(i + 1) % n1];
+        for j in 0..n2 {
+            let b1 = ring2[j];
+            let b2 = ring2[(j + 1) % n2];
+            if edges_intersect_general(a1, a2, b1, b2, eps) {
+                return true;
+            }
+        }
+    }
     false
 }
 
@@ -303,20 +365,117 @@ fn point_in_ring_exclusive(pt: Coord<f64>, ring: &[Coord<f64>]) -> bool {
     wn != 0
 }
 
+fn point_on_segment(pt: Coord<f64>, a: Coord<f64>, b: Coord<f64>, eps: f64) -> bool {
+    let o = (b.x - a.x) * (pt.y - a.y) - (b.y - a.y) * (pt.x - a.x);
+    if o.abs() > eps {
+        return false;
+    }
+    let min_x = a.x.min(b.x) - eps;
+    let max_x = a.x.max(b.x) + eps;
+    let min_y = a.y.min(b.y) - eps;
+    let max_y = a.y.max(b.y) + eps;
+    pt.x >= min_x && pt.x <= max_x && pt.y >= min_y && pt.y <= max_y
+}
+
+fn point_on_ring(pt: Coord<f64>, ring: &[Coord<f64>], eps: f64) -> bool {
+    let n = ring.len() - 1;
+    if n == 0 {
+        return false;
+    }
+    for i in 0..n {
+        if point_on_segment(pt, ring[i], ring[(i + 1) % n], eps) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Check whether two rings (with closing point) are duplicates starting at a
+/// different vertex. Both rings must have the same length and contain the same
+/// sequence of coordinates up to a cyclic rotation.
+fn is_rotated_duplicate(a: &[Coord<f64>], b: &[Coord<f64>]) -> bool {
+    if a.len() != b.len() || a.len() < 2 {
+        return false;
+    }
+    // Rings: last == first, so compare n-1 vertices
+    let n = a.len() - 1;
+    if n == 0 {
+        return false;
+    }
+    for start in 0..n {
+        if a[start] != b[0] {
+            continue;
+        }
+        let mut match_ = true;
+        for i in 0..n {
+            if a[(start + i) % n] != b[i] {
+                match_ = false;
+                break;
+            }
+        }
+        if match_ {
+            return true;
+        }
+    }
+    false
+}
+
 fn check_holes_valid(
     shell: &[Coord<f64>],
     interiors: &[LineString<f64>],
 ) -> Vec<GeometryValidationError> {
     let mut errors = Vec::new();
+
+    // Compute scale-relative epsilon for boundary checks
+    let (mut min_x, mut max_x, mut min_y, mut max_y) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+    for c in shell {
+        min_x = min_x.min(c.x);
+        max_x = max_x.max(c.x);
+        min_y = min_y.min(c.y);
+        max_y = max_y.max(c.y);
+    }
+    let scale = (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
+    let eps = 1e-12 * scale;
+
     for hole in interiors {
-        if let Some(pt) = hole.0.first().copied() {
-            if !point_in_ring_exclusive(pt, shell) {
-                errors.push(GeometryValidationError::HoleOutsideShell);
-            }
+        // Check if hole edges cross the shell boundary (hole not fully inside)
+        if check_rings_intersect(&hole.0[..], shell, eps) {
+            errors.push(GeometryValidationError::HoleOutsideShell);
+            return errors;
+        }
+
+        // A hole touching the shell at ≥ 2 distinct points may disconnect the interior
+        let touch_count = hole
+            .0
+            .iter()
+            .filter(|&&hp| point_on_ring(hp, shell, eps))
+            .count();
+        if touch_count >= 2 {
+            errors.push(GeometryValidationError::DisconnectedInteriorRing);
+            return errors;
+        }
+
+        // If no hole vertex is strictly inside the shell, the hole is entirely outside.
+        // Single-point tangent touches (touch_count == 1) are valid per OGC.
+        let any_inside = hole.0.iter().any(|&hp| point_in_ring_exclusive(hp, shell));
+        if !any_inside {
+            errors.push(GeometryValidationError::HoleOutsideShell);
+            return errors;
         }
     }
     let holes: Vec<&[Coord<f64>]> = interiors.iter().map(|h| &h.0[..]).collect();
     if holes.len() > 1 {
+        // --- hole-hole edge intersection check (disconnected interior) ---
+        for i in 0..holes.len() {
+            for j in (i + 1)..holes.len() {
+                if check_rings_intersect(holes[i], holes[j], eps) {
+                    errors.push(GeometryValidationError::DisconnectedInteriorRing);
+                    return errors;
+                }
+            }
+        }
+
+        // --- nesting check ---
         struct HoleEnv2 {
             idx: usize,
             env: AABB<[f64; 2]>,
@@ -430,8 +589,34 @@ impl GeoValidation for LineString<f64> {
         if ring_has_non_finite(coords) {
             return ValidationResult::invalid(vec![GeometryValidationError::CoordinateNaN]);
         }
+        for i in 1..coords.len() {
+            if coords[i] == coords[i - 1] {
+                return ValidationResult::invalid(vec![GeometryValidationError::RepeatedPoint]);
+            }
+        }
         ValidationResult::valid()
     }
+}
+
+/// Check whether two LineString components have any intersecting edges.
+fn check_line_components_intersect(ls1: &[Coord<f64>], ls2: &[Coord<f64>], eps: f64) -> bool {
+    let n1 = ls1.len();
+    let n2 = ls2.len();
+    if n1 < 2 || n2 < 2 {
+        return false;
+    }
+    for i in 0..n1 - 1 {
+        let a1 = ls1[i];
+        let a2 = ls1[i + 1];
+        for j in 0..n2 - 1 {
+            let b1 = ls2[j];
+            let b2 = ls2[j + 1];
+            if edges_intersect_general(a1, a2, b1, b2, eps) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 impl GeoValidation for MultiLineString<f64> {
@@ -443,6 +628,34 @@ impl GeoValidation for MultiLineString<f64> {
             let r = ls.validate();
             if !r.valid {
                 errors.extend(r.errors);
+            }
+        }
+        // Cross-component intersection check
+        if self.0.len() > 1 {
+            // Compute global scale for epsilon
+            let (mut gmin_x, mut gmax_x, mut gmin_y, mut gmax_y) =
+                (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+            for ls in &self.0 {
+                for c in &ls.0 {
+                    gmin_x = gmin_x.min(c.x);
+                    gmax_x = gmax_x.max(c.x);
+                    gmin_y = gmin_y.min(c.y);
+                    gmax_y = gmax_y.max(c.y);
+                }
+            }
+            let scale = (gmax_x - gmin_x)
+                .abs()
+                .max((gmax_y - gmin_y).abs())
+                .max(1.0);
+            let eps = 1e-12 * scale;
+
+            for i in 0..self.0.len() {
+                for j in (i + 1)..self.0.len() {
+                    if check_line_components_intersect(&self.0[i].0, &self.0[j].0, eps) {
+                        errors.push(GeometryValidationError::NotSimple);
+                        return ValidationResult::invalid(errors);
+                    }
+                }
             }
         }
         if errors.is_empty() {
@@ -464,6 +677,11 @@ impl GeoValidation for Rect<f64> {
         {
             return ValidationResult::invalid(vec![GeometryValidationError::CoordinateNaN]);
         }
+        if (self.max().x - self.min().x).abs() < f64::EPSILON
+            || (self.max().y - self.min().y).abs() < f64::EPSILON
+        {
+            return ValidationResult::invalid(vec![GeometryValidationError::DegenerateExterior]);
+        }
         ValidationResult::valid()
     }
 }
@@ -479,9 +697,11 @@ impl GeoValidation for Triangle<f64> {
         if coords[0] == coords[1] || coords[1] == coords[2] || coords[0] == coords[2] {
             return ValidationResult::invalid(vec![GeometryValidationError::DegenerateExterior]);
         }
-        let area = (coords[1].x - coords[0].x) * (coords[2].y - coords[0].y)
-            - (coords[1].y - coords[0].y) * (coords[2].x - coords[0].x);
-        if area == 0.0 {
+        // Zero or near-zero area (collinear)
+        let area = ((coords[1].x - coords[0].x) * (coords[2].y - coords[0].y)
+            - (coords[1].y - coords[0].y) * (coords[2].x - coords[0].x))
+            .abs();
+        if area < 1e-12 {
             return ValidationResult::invalid(vec![GeometryValidationError::CollinearRing]);
         }
         ValidationResult::valid()
@@ -509,6 +729,22 @@ impl GeoValidation for Polygon<f64> {
                 return ValidationResult::valid();
             }
             return ValidationResult::invalid(errors);
+        }
+
+        let interiors: Vec<&[Coord<f64>]> = self.interiors().iter().map(|h| &h.0[..]).collect();
+
+        // Check for duplicate rings (including rotated-start duplicates)
+        for (i, h1) in interiors.iter().enumerate() {
+            for h2 in interiors.iter().skip(i + 1) {
+                if is_rotated_duplicate(h1, h2) {
+                    errors.push(GeometryValidationError::DuplicatedRings);
+                    return ValidationResult::invalid(errors);
+                }
+            }
+            if is_rotated_duplicate(h1, &self.exterior().0) {
+                errors.push(GeometryValidationError::DuplicatedRings);
+                return ValidationResult::invalid(errors);
+            }
         }
 
         for hole in self.interiors() {
@@ -546,7 +782,47 @@ impl GeoValidation for MultiPolygon<f64> {
         }
 
         let shells: Vec<&[Coord<f64>]> = self.0.iter().map(|p| &p.exterior().0[..]).collect();
+
+        // Check for duplicate shells (including rotated-start duplicates)
+        for i in 0..shells.len() {
+            for j in (i + 1)..shells.len() {
+                if is_rotated_duplicate(shells[i], shells[j]) {
+                    errors.push(GeometryValidationError::DuplicatedRings);
+                    return ValidationResult::invalid(errors);
+                }
+            }
+        }
+
         if shells.len() > 1 {
+            // Compute global scale for intersection epsilon
+            let (mut gmin_x, mut gmax_x, mut gmin_y, mut gmax_y) =
+                (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+            for s in &shells {
+                for c in *s {
+                    gmin_x = gmin_x.min(c.x);
+                    gmax_x = gmax_x.max(c.x);
+                    gmin_y = gmin_y.min(c.y);
+                    gmax_y = gmax_y.max(c.y);
+                }
+            }
+            let scale = (gmax_x - gmin_x)
+                .abs()
+                .max((gmax_y - gmin_y).abs())
+                .max(1.0);
+            let eps = 1e-12 * scale;
+
+            // Cross-ring edge-edge intersection check (must run before nesting
+            // check — partial overlaps can produce false-positive nesting)
+            for i in 0..shells.len() {
+                for j in (i + 1)..shells.len() {
+                    if check_rings_intersect(shells[i], shells[j], eps) {
+                        errors.push(GeometryValidationError::SelfIntersection);
+                        return ValidationResult::invalid(errors);
+                    }
+                }
+            }
+
+            // Nesting check: one shell fully inside another
             struct ShellEnv {
                 idx: usize,
                 env: AABB<[f64; 2]>,
@@ -603,6 +879,39 @@ impl GeoValidation for MultiPolygon<f64> {
     }
 }
 
+trait ValidateDepth {
+    fn validate_at_depth(&self, depth: usize, max_depth: usize) -> ValidationResult;
+}
+
+impl ValidateDepth for Geometry<f64> {
+    fn validate_at_depth(&self, depth: usize, max_depth: usize) -> ValidationResult {
+        match self {
+            Geometry::GeometryCollection(gc) => gc.validate_at_depth(depth, max_depth),
+            _ => self.validate(),
+        }
+    }
+}
+
+impl ValidateDepth for GeometryCollection<f64> {
+    fn validate_at_depth(&self, depth: usize, max_depth: usize) -> ValidationResult {
+        if depth > max_depth {
+            return ValidationResult::invalid(vec![GeometryValidationError::ExcessiveNesting]);
+        }
+        let mut errors = Vec::new();
+        for g in &self.0 {
+            let r = g.validate_at_depth(depth + 1, max_depth);
+            if !r.valid {
+                errors.extend(r.errors);
+            }
+        }
+        if errors.is_empty() {
+            ValidationResult::valid()
+        } else {
+            ValidationResult::invalid(errors)
+        }
+    }
+}
+
 impl GeoValidation for Geometry<f64> {
     type Scalar = f64;
 
@@ -626,18 +935,7 @@ impl GeoValidation for GeometryCollection<f64> {
     type Scalar = f64;
 
     fn validate(&self) -> ValidationResult {
-        let mut errors = Vec::new();
-        for g in &self.0 {
-            let r = g.validate();
-            if !r.valid {
-                errors.extend(r.errors);
-            }
-        }
-        if errors.is_empty() {
-            ValidationResult::valid()
-        } else {
-            ValidationResult::invalid(errors)
-        }
+        self.validate_at_depth(0, 100)
     }
 }
 
@@ -817,6 +1115,34 @@ mod tests {
     }
 
     #[test]
+    fn test_multipolygon_shells_cross() {
+        // Two shells that cross (neither contains the other's first point)
+        let mp = MultiPolygon::new(vec![
+            Polygon::new(
+                LineString::new(vec![
+                    Coord { x: 0.0, y: 3.0 },
+                    Coord { x: 10.0, y: 3.0 },
+                    Coord { x: 10.0, y: 5.0 },
+                    Coord { x: 0.0, y: 5.0 },
+                    Coord { x: 0.0, y: 3.0 },
+                ]),
+                Vec::new(),
+            ),
+            Polygon::new(
+                LineString::new(vec![
+                    Coord { x: 4.0, y: 0.0 },
+                    Coord { x: 6.0, y: 0.0 },
+                    Coord { x: 6.0, y: 8.0 },
+                    Coord { x: 4.0, y: 8.0 },
+                    Coord { x: 4.0, y: 0.0 },
+                ]),
+                Vec::new(),
+            ),
+        ]);
+        assert!(!mp.is_valid());
+    }
+
+    #[test]
     fn test_triangle_valid() {
         let t = Triangle::new(
             Coord { x: 0.0, y: 0.0 },
@@ -865,5 +1191,81 @@ mod tests {
         ]);
         assert!(!gc.is_valid());
         assert_eq!(gc.validate().errors.len(), 1);
+    }
+
+    #[test]
+    fn test_multilinestring_not_simple() {
+        let mls = MultiLineString::new(vec![
+            LineString::new(vec![Coord { x: 0.0, y: 0.0 }, Coord { x: 10.0, y: 10.0 }]),
+            LineString::new(vec![Coord { x: 0.0, y: 10.0 }, Coord { x: 10.0, y: 0.0 }]),
+        ]);
+        let result = mls.validate();
+        assert!(!result.valid);
+        assert!(result
+            .errors
+            .iter()
+            .any(|e| matches!(e, GeometryValidationError::NotSimple)));
+    }
+
+    #[test]
+    fn test_multilinestring_simple() {
+        let mls = MultiLineString::new(vec![
+            LineString::new(vec![Coord { x: 0.0, y: 0.0 }, Coord { x: 10.0, y: 0.0 }]),
+            LineString::new(vec![Coord { x: 0.0, y: 10.0 }, Coord { x: 10.0, y: 10.0 }]),
+        ]);
+        assert!(mls.is_valid());
+    }
+
+    #[test]
+    fn test_linestring_zero_length() {
+        let ls = LineString::new(vec![Coord { x: 1.0, y: 2.0 }, Coord { x: 1.0, y: 2.0 }]);
+        assert!(!ls.is_valid());
+    }
+
+    #[test]
+    fn test_linestring_zero_length_many_coords() {
+        let ls = LineString::new(vec![
+            Coord { x: 3.0, y: 4.0 },
+            Coord { x: 3.0, y: 4.0 },
+            Coord { x: 3.0, y: 4.0 },
+            Coord { x: 3.0, y: 4.0 },
+        ]);
+        assert!(!ls.is_valid());
+    }
+
+    #[test]
+    fn test_hole_edges_cross_shell() {
+        let poly = Polygon::new(
+            LineString::new(vec![
+                Coord { x: 0.0, y: 0.0 },
+                Coord { x: 10.0, y: 0.0 },
+                Coord { x: 10.0, y: 10.0 },
+                Coord { x: 0.0, y: 10.0 },
+                Coord { x: 0.0, y: 0.0 },
+            ]),
+            vec![LineString::new(vec![
+                Coord { x: 5.0, y: 5.0 },
+                Coord { x: 12.0, y: 5.0 },
+                Coord { x: 12.0, y: 8.0 },
+                Coord { x: 5.0, y: 8.0 },
+                Coord { x: 5.0, y: 5.0 },
+            ])],
+        );
+        assert!(!poly.is_valid());
+    }
+
+    #[test]
+    fn test_excessive_nesting() {
+        let inner = Geometry::Point(Point::new(1.0, 2.0));
+        let mut gc = GeometryCollection(vec![inner]);
+        for _ in 0..150 {
+            gc = GeometryCollection(vec![Geometry::GeometryCollection(gc)]);
+        }
+        assert!(!gc.is_valid());
+        assert!(gc
+            .validate()
+            .errors
+            .iter()
+            .any(|e| matches!(e, GeometryValidationError::ExcessiveNesting)));
     }
 }

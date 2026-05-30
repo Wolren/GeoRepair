@@ -5,10 +5,22 @@ pub mod label;
 pub mod prep;
 
 use crate::config::MakeValidConfig;
-use geo::{Geometry, GeometryCollection, LinesIter, MultiPolygon, Polygon};
+use geo::{Coord, Geometry, GeometryCollection, LinesIter, MultiPolygon, Polygon};
 use rstar::{RTree, RTreeObject, AABB};
 use rustc_hash::FxHashSet;
-use spade::Triangulation;
+use spade::{ConstrainedDelaunayTriangulation, Triangulation};
+
+/// Wrap CDT construction in panic catch — spade can panic on degenerate
+/// input (all-collinear rings, coords near f64::MAX).
+fn build_cdt_safe(
+    prepared: &prep::PreparedLines,
+) -> Option<ConstrainedDelaunayTriangulation<Coord<f64>>> {
+    use std::panic::{self, AssertUnwindSafe};
+    match panic::catch_unwind(AssertUnwindSafe(|| cdt::build(prepared))) {
+        Ok(Ok(cdt)) => Some(cdt),
+        _ => None,
+    }
+}
 
 pub(crate) fn fix_polygon(poly: &Polygon<f64>, _config: &MakeValidConfig) -> Geometry<f64> {
     if !poly_has_basic_form(poly) {
@@ -187,7 +199,7 @@ pub fn diagnose_arrange(poly: &Polygon<f64>) -> Option<ArrangeTiming> {
     t.prep_secs = start.elapsed().as_secs_f64();
 
     let start = Instant::now();
-    let cdt = cdt::build(&prepared).ok()?;
+    let cdt = build_cdt_safe(&prepared)?;
     t.cdt_build_secs = start.elapsed().as_secs_f64();
     t.cdt_faces = cdt.num_inner_faces();
 
@@ -245,7 +257,7 @@ pub(crate) fn fix_multi_polygon(
 
 pub(crate) fn fix_from_lines(lines: Vec<geo::Line<f64>>) -> Option<MultiPolygon<f64>> {
     let prepared = prep::prepare_lines(lines).ok()?;
-    let cdt = cdt::build(&prepared).ok()?;
+    let cdt = build_cdt_safe(&prepared)?;
     if cdt.num_inner_faces() == 0 {
         return Some(MultiPolygon::new(Vec::new()));
     }

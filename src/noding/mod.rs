@@ -10,7 +10,30 @@ use geo::{
     Coord, CoordNum, GeoFloat, Geometry, GeometryCollection, Line, LineString, MultiLineString,
 };
 use rstar::{RTree, RTreeObject, AABB};
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
+
+// ── Sealed trait: safe f64 downcast ────────────────────────────────────
+//
+// Only f64 implements NodingFloat.  The unsafe `size_of` + transmute
+// dance is isolated to the dispatch boundary of the two public functions
+// below; inside the f64‑only helpers no transmutes appear.
+
+mod private {
+    use geo::{Coord, GeoFloat};
+
+    pub trait NodingFloat: GeoFloat {
+        /// Deterministic hash from coordinate bits for HashMap keys.
+        fn coord_hash_key(c: &Coord<Self>) -> u64;
+    }
+
+    impl NodingFloat for f64 {
+        fn coord_hash_key(c: &Coord<f64>) -> u64 {
+            c.x.to_bits() ^ c.y.to_bits().rotate_left(32)
+        }
+    }
+}
+
+use private::NodingFloat;
 
 /// Node a line string by removing repeated points and splitting at
 /// self-intersections. Returns a MultiLineString if splitting occurred,
@@ -61,9 +84,9 @@ fn check_self_intersections<T: GeoFloat>(edges: &[Line<T>]) -> bool {
         return false;
     }
 
-    // R-tree spatial index for f64 (compile-time dispatched by size)
+    // f64 path: single transmute at dispatch boundary
     if mem::size_of::<T>() == 8 {
-        let edges_f64: &[Line<f64>] = unsafe { std::mem::transmute(edges) };
+        let edges_f64: &[Line<f64>] = unsafe { mem::transmute(edges) };
         return check_self_intersections_f64(edges_f64, 1e-12);
     }
 
@@ -150,9 +173,36 @@ fn edges_intersect<T: GeoFloat>(e1: &Line<T>, e2: &Line<T>, eps: T) -> bool {
         return o1.signum() != o2.signum() && o3.signum() != o4.signum();
     }
 
+    // Collinear case: check for interval overlap along the shared line
+    if o1.abs() <= eps && o2.abs() <= eps && o3.abs() <= eps && o4.abs() <= eps {
+        return collinear_overlap(e1, e2, eps);
+    }
+
     // Endpoint touching — not considered an intersection for noding purposes
-    // if it's the shared vertex of adjacent edges
     false
+}
+
+/// Check whether two collinear segments overlap along the shared line.
+fn collinear_overlap<T: GeoFloat>(e1: &Line<T>, e2: &Line<T>, eps: T) -> bool {
+    let dx = e1.end.x - e1.start.x;
+    let dy = e1.end.y - e1.start.y;
+    let dot_d = dx * dx + dy * dy;
+    if dot_d <= eps {
+        return false;
+    }
+
+    // Project e2 endpoints onto e1's direction (t parameter along e1)
+    let t2s = ((e2.start.x - e1.start.x) * dx + (e2.start.y - e1.start.y) * dy) / dot_d;
+    let t2e = ((e2.end.x - e1.start.x) * dx + (e2.end.y - e1.start.y) * dy) / dot_d;
+
+    let (t2_min, t2_max) = if t2s < t2e { (t2s, t2e) } else { (t2e, t2s) };
+
+    // Overlap region on [0, 1]
+    let lo = T::zero().max(t2_min);
+    let hi = T::one().min(t2_max);
+
+    // True if overlap covers more than epsilon-length
+    lo + eps < hi
 }
 
 fn orient2d_generic<T: GeoFloat>(a: Coord<T>, b: Coord<T>, c: Coord<T>) -> T {
@@ -167,54 +217,50 @@ fn split_edges_at_intersections<T: GeoFloat>(edges: &[Line<T>]) -> Vec<Line<T>> 
     let one = T::one();
     let zero = T::zero();
 
-    if n >= 64 {
-        // R-tree spatial index for f64 (compile-time dispatched by size)
-        if mem::size_of::<T>() == 8 {
-            let edges_f64: &[Line<f64>] = unsafe { std::mem::transmute(edges) };
-            let mut split_f64: Vec<Vec<f64>> = vec![Vec::new(); n];
-            split_edges_rtree(edges_f64, &mut split_f64, 1e-12);
-            for i in 0..n {
-                for &t in &split_f64[i] {
-                    split_points[i].push(T::from(t).unwrap());
-                }
-            }
-        } else {
-            // Brute force for non-f64 types
-            for i in 0..n {
-                for j in (i + 2)..n {
-                    if i + 1 == j && edges[i].end == edges[j].start {
-                        continue;
-                    }
-                    let (ti, tj, _pt) = match compute_intersection_param(&edges[i], &edges[j], eps)
-                    {
-                        Some(v) => v,
-                        None => continue,
-                    };
-                    if ti > zero && ti < one {
-                        split_points[i].push(ti);
-                    }
-                    if tj > zero && tj < one {
-                        split_points[j].push(tj);
-                    }
-                }
+    if n >= 64 && mem::size_of::<T>() == 8 {
+        // f64 R‑tree path: single transmute at dispatch boundary
+        let edges_f64: &[Line<f64>] = unsafe { mem::transmute(edges) };
+        let mut split_f64: Vec<Vec<f64>> = vec![Vec::new(); n];
+        split_edges_rtree(edges_f64, &mut split_f64, 1e-12);
+        for i in 0..n {
+            for &t in &split_f64[i] {
+                split_points[i].push(T::from(t).unwrap());
             }
         }
     } else {
-        // Brute force for small edge sets
+        // Brute force for small edge sets or non-f64 types
         for i in 0..n {
             for j in (i + 2)..n {
                 if i + 1 == j && edges[i].end == edges[j].start {
                     continue;
                 }
-                let (ti, tj, _pt) = match compute_intersection_param(&edges[i], &edges[j], eps) {
-                    Some(v) => v,
-                    None => continue,
-                };
-                if ti > zero && ti < one {
-                    split_points[i].push(ti);
-                }
-                if tj > zero && tj < one {
-                    split_points[j].push(tj);
+                match compute_intersection_param(&edges[i], &edges[j], eps) {
+                    Some((ti, tj, _pt)) => {
+                        if ti > zero && ti < one {
+                            split_points[i].push(ti);
+                        }
+                        if tj > zero && tj < one {
+                            split_points[j].push(tj);
+                        }
+                    }
+                    None => {
+                        // Check for collinear overlap
+                        let o1 = orient2d_generic(edges[i].start, edges[i].end, edges[j].start);
+                        let o2 = orient2d_generic(edges[i].start, edges[i].end, edges[j].end);
+                        if o1.abs() <= eps && o2.abs() <= eps {
+                            let (p1, p2) = collinear_split_params(&edges[i], &edges[j], eps);
+                            for &t in &p1 {
+                                if t > zero && t < one {
+                                    split_points[i].push(t);
+                                }
+                            }
+                            for &t in &p2 {
+                                if t > zero && t < one {
+                                    split_points[j].push(t);
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -299,6 +345,37 @@ fn split_edges_rtree(edges: &[Line<f64>], split_points: &mut [Vec<f64>], eps: f6
             if j + 1 == i && edges[j].end == edges[i].start {
                 return std::ops::ControlFlow::<(), ()>::Continue(());
             }
+
+            // Collinear overlap (even shared-vertex pairs can overlap)
+            let o1 = orient2d_generic(edges[i].start, edges[i].end, edges[j].start);
+            let o2 = orient2d_generic(edges[i].start, edges[i].end, edges[j].end);
+            if o1.abs() <= eps && o2.abs() <= eps {
+                let (p1, p2) = collinear_split_params(&edges[i], &edges[j], eps);
+                for &t in &p1 {
+                    if t > 0.0 && t < 1.0 {
+                        split_points[i].push(t);
+                    }
+                }
+                for &t in &p2 {
+                    if t > 0.0 && t < 1.0 {
+                        split_points[j].push(t);
+                    }
+                }
+                return std::ops::ControlFlow::<(), ()>::Continue(());
+            }
+
+            // Pre-filter: edges that share any vertex cannot produce a proper
+            // interior crossing, so skip the more expensive
+            // `compute_intersection_param`.  Catches the heavy spoke/star‑burst
+            // patterns where O(n²) pairs all meet at a single vertex.
+            if edges[i].start == edges[j].start
+                || edges[i].start == edges[j].end
+                || edges[i].end == edges[j].start
+                || edges[i].end == edges[j].end
+            {
+                return std::ops::ControlFlow::<(), ()>::Continue(());
+            }
+
             if let Some((ti, tj, _pt)) = compute_intersection_param(&edges[i], &edges[j], eps) {
                 if ti > 0.0 && ti < 1.0 {
                     split_points[i].push(ti);
@@ -321,6 +398,47 @@ fn interpolate<T: GeoFloat>(e: Line<T>, t: T) -> Coord<T> {
 
 fn dist2<T: GeoFloat>(a: Coord<T>, b: Coord<T>) -> T {
     (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y)
+}
+
+/// For two collinear segments, compute split t-parameters where one edge's
+/// endpoint falls strictly inside the other. Returns `(splits_on_e1, splits_on_e2)`.
+fn collinear_split_params<T: GeoFloat>(e1: &Line<T>, e2: &Line<T>, eps: T) -> (Vec<T>, Vec<T>) {
+    let eps_sq = eps * eps;
+
+    // Project e2 endpoints onto e1's direction
+    let dx1 = e1.end.x - e1.start.x;
+    let dy1 = e1.end.y - e1.start.y;
+    let dot1 = dx1 * dx1 + dy1 * dy1;
+    let (mut p1, mut p2) = (Vec::new(), Vec::new());
+    if dot1 > eps_sq {
+        let t2s = ((e2.start.x - e1.start.x) * dx1 + (e2.start.y - e1.start.y) * dy1) / dot1;
+        let t2e = ((e2.end.x - e1.start.x) * dx1 + (e2.end.y - e1.start.y) * dy1) / dot1;
+        let (zero, one) = (T::zero(), T::one());
+        if t2s > eps && t2s < one - eps {
+            p1.push(t2s);
+        }
+        if t2e > eps && t2e < one - eps {
+            p1.push(t2e);
+        }
+    }
+
+    // Project e1 endpoints onto e2's direction
+    let dx2 = e2.end.x - e2.start.x;
+    let dy2 = e2.end.y - e2.start.y;
+    let dot2 = dx2 * dx2 + dy2 * dy2;
+    if dot2 > eps_sq {
+        let t1s = ((e1.start.x - e2.start.x) * dx2 + (e1.start.y - e2.start.y) * dy2) / dot2;
+        let t1e = ((e1.end.x - e2.start.x) * dx2 + (e1.end.y - e2.start.y) * dy2) / dot2;
+        let (zero, one) = (T::zero(), T::one());
+        if t1s > eps && t1s < one - eps {
+            p2.push(t1s);
+        }
+        if t1e > eps && t1e < one - eps {
+            p2.push(t1e);
+        }
+    }
+
+    (p1, p2)
 }
 
 fn compute_intersection_param<T: GeoFloat>(
@@ -348,9 +466,24 @@ fn compute_intersection_param<T: GeoFloat>(
 
 /// Reconnect split edges into continuous linestrings by chaining touching edges.
 fn reconnect_edges<T: GeoFloat>(edges: Vec<Line<T>>) -> Vec<LineString<T>> {
+    let n = edges.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    if n == 1 {
+        return vec![LineString::new(vec![edges[0].start, edges[0].end])];
+    }
+
+    // f64 path: single transmute at dispatch boundary
+    if mem::size_of::<T>() == 8 {
+        let e_f64: Vec<Line<f64>> = unsafe { mem::transmute(edges) };
+        let r = reconnect_edges_f64(e_f64);
+        return unsafe { mem::transmute(r) };
+    }
+
+    // Generic fallback: O(n²) original approach for non-f64 types
     let mut remaining: Vec<Line<T>> = edges;
     let mut result = Vec::new();
-
     while !remaining.is_empty() {
         let mut chain: Vec<Coord<T>> = Vec::new();
         let first = remaining.swap_remove(0);
@@ -382,28 +515,133 @@ fn reconnect_edges<T: GeoFloat>(edges: Vec<Line<T>>) -> Vec<LineString<T>> {
     result
 }
 
-/// Node a multi line string by fixing each component.
-pub(crate) fn node_multi_line_string<T: GeoFloat>(mls: &MultiLineString<T>) -> Geometry<T> {
-    let lines: Vec<LineString<T>> = mls
-        .0
-        .iter()
-        .filter_map(|ls| {
-            match node_line_string(ls) {
-                Geometry::LineString(fixed) => Some(fixed),
-                Geometry::MultiLineString(ml) => {
-                    // Flatten: merge all sub-linestrings into one vector
-                    Some(LineString::new(
-                        ml.0.iter().flat_map(|l| l.0.iter().copied()).collect(),
-                    ))
-                }
-                _ => None,
+/// O(n) chain reconstruction via HashMap from endpoint → edge index.
+/// No unsafety — pure f64 code using the sealed NodingFloat trait.
+fn reconnect_edges_f64(edges: Vec<Line<f64>>) -> Vec<LineString<f64>> {
+    let n = edges.len();
+
+    let mut start_map: FxHashMap<u64, Vec<usize>> = FxHashMap::default();
+    let mut end_map: FxHashMap<u64, Vec<usize>> = FxHashMap::default();
+    for i in 0..n {
+        start_map
+            .entry(NodingFloat::coord_hash_key(&edges[i].start))
+            .or_default()
+            .push(i);
+        end_map
+            .entry(NodingFloat::coord_hash_key(&edges[i].end))
+            .or_default()
+            .push(i);
+    }
+
+    let mut used = vec![false; n];
+    let mut result = Vec::new();
+
+    for start_idx in 0..n {
+        if used[start_idx] {
+            continue;
+        }
+
+        let mut chain: Vec<Coord<f64>> = Vec::new();
+        chain.push(edges[start_idx].start);
+        chain.push(edges[start_idx].end);
+        used[start_idx] = true;
+
+        // Extend chain from its last vertex (matches old swap_remove rev-scan order)
+        loop {
+            let last_key = NodingFloat::coord_hash_key(&chain[chain.len() - 1]);
+
+            // Check forward start-matches (high index first, matching old rev() scan)
+            let fwd: Option<usize> = start_map.get(&last_key).and_then(|cands| {
+                cands
+                    .iter()
+                    .copied()
+                    .rev()
+                    .find(|&idx| !used[idx] && edges[idx].start == *chain.last().unwrap())
+            });
+            if let Some(idx) = fwd {
+                chain.push(edges[idx].end);
+                used[idx] = true;
+                continue;
             }
-        })
-        .collect();
-    if lines.is_empty() {
-        empty()
+
+            // Check backward end-matches (edge whose end == chain's last vertex)
+            let bwd: Option<usize> = end_map.get(&last_key).and_then(|cands| {
+                cands
+                    .iter()
+                    .copied()
+                    .rev()
+                    .find(|&idx| !used[idx] && edges[idx].end == *chain.last().unwrap())
+            });
+            if let Some(idx) = bwd {
+                chain.push(edges[idx].start);
+                used[idx] = true;
+                continue;
+            }
+
+            break;
+        }
+
+        if chain.len() >= 2 {
+            result.push(LineString::new(chain));
+        }
+    }
+
+    result
+}
+
+/// Node a multi line string by fixing each component and noding
+/// across components (inter-component intersections are split).
+pub(crate) fn node_multi_line_string<T: GeoFloat>(mls: &MultiLineString<T>) -> Geometry<T> {
+    // Clean each component and build a flat edge list for cross-component noding
+    let mut cleaned: Vec<LineString<T>> = Vec::new();
+    let mut all_edges: Vec<Line<T>> = Vec::new();
+
+    for ls in &mls.0 {
+        let coords: Vec<Coord<T>> =
+            ls.0.iter()
+                .copied()
+                .filter(|c| c.x.is_finite() && c.y.is_finite())
+                .collect();
+        if coords.len() < 2 {
+            continue;
+        }
+        let deduped = remove_consecutive_duplicates(&coords);
+        if deduped.len() < 2 {
+            continue;
+        }
+
+        cleaned.push(LineString::new(deduped.clone()));
+
+        for w in deduped.windows(2) {
+            all_edges.push(Line::new(w[0], w[1]));
+        }
+    }
+
+    if all_edges.is_empty() {
+        return empty();
+    }
+
+    // Check for intersections across ALL components (intra + inter)
+    if check_self_intersections(&all_edges) {
+        let split_edges = split_edges_at_intersections(&all_edges);
+        if split_edges.is_empty() {
+            return empty();
+        }
+        let linestrings = reconnect_edges(split_edges);
+        if linestrings.is_empty() {
+            return empty();
+        }
+        if linestrings.len() == 1 {
+            return Geometry::LineString(linestrings.into_iter().next().unwrap());
+        }
+        return Geometry::MultiLineString(MultiLineString::new(linestrings));
+    }
+
+    // No inter-component intersections — return per-component cleaned result
+    if cleaned.len() == 1 {
+        Geometry::LineString(cleaned.into_iter().next().unwrap())
     } else {
-        Geometry::MultiLineString(MultiLineString::new(lines))
+        Geometry::MultiLineString(MultiLineString::new(cleaned))
     }
 }
 
@@ -507,7 +745,7 @@ mod tests {
     fn test_edges_intersect_collinear_overlap() {
         let e1 = Line::new(Coord { x: 0.0, y: 0.0 }, Coord { x: 2.0, y: 0.0 });
         let e2 = Line::new(Coord { x: 1.0, y: 0.0 }, Coord { x: 3.0, y: 0.0 });
-        assert!(!edges_intersect(&e1, &e2, 1e-12)); // Collinear not detected as crossing
+        assert!(edges_intersect(&e1, &e2, 1e-12)); // Collinear overlap detected as intersection
     }
 
     #[test]

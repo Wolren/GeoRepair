@@ -50,7 +50,57 @@ fn basic_cleanup(ring: &LineString<f64>) -> Option<Vec<Coord<f64>>> {
     if deduped.len() < 4 {
         return None;
     }
+
+    // Remove near-collinear spikes (deviation < 1e-10 * coordinate scale)
+    remove_spikes(&mut deduped);
+
+    if deduped.len() < 4 {
+        return None;
+    }
     Some(deduped)
+}
+
+/// Remove vertices whose perpendicular distance to the line between their
+/// neighbors is below a scale-relative threshold (near-collinear spikes).
+fn remove_spikes(coords: &mut Vec<Coord<f64>>) {
+    if coords.len() < 4 {
+        return;
+    }
+
+    // Compute coordinate scale
+    let (mut min_x, mut max_x, mut min_y, mut max_y) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+    for &c in coords.iter() {
+        min_x = min_x.min(c.x);
+        max_x = max_x.max(c.x);
+        min_y = min_y.min(c.y);
+        max_y = max_y.max(c.y);
+    }
+    let scale = (max_x - min_x).max(max_y - min_y).max(1.0);
+    let spike_eps = 1e-10 * scale;
+
+    let mut i = 1;
+    while i < coords.len() - 1 {
+        let prev = coords[i - 1];
+        let curr = coords[i];
+        let next = coords[i + 1];
+
+        // Perpendicular distance of curr from the line (prev, next)
+        // cross(prev->curr, prev->next) gives twice the signed triangle area
+        let cross = (curr.x - prev.x) * (next.y - prev.y) - (curr.y - prev.y) * (next.x - prev.x);
+        let len2 = (next.x - prev.x) * (next.x - prev.x) + (next.y - prev.y) * (next.y - prev.y);
+        let deviation = if len2 > 0.0 {
+            cross.abs() / len2.sqrt()
+        } else {
+            0.0
+        };
+
+        if deviation < spike_eps {
+            coords.remove(i);
+            // Stay at same index — re-check with new neighbors
+        } else {
+            i += 1;
+        }
+    }
 }
 
 fn remove_consecutive_duplicates(coords: &[Coord<f64>]) -> Vec<Coord<f64>> {

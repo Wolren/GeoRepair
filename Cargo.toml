@@ -3,7 +3,7 @@ name = "geo-repair"
 description = "Fix invalid GIS geometries using optimal algorithms per type: CDT arrangement for polygons, noding for lines, structure method as fast path"
 version = "0.1.0"
 license = "Apache-2.0"
-repository = "https://github.com/georust/geo-repair"
+repository = "https://github.com/Wolren/geo-repair"
 keywords = ["gis", "geo", "geospatial", "validation", "repair"]
 categories = ["science::geo"]
 edition = "2024"
@@ -31,6 +31,7 @@ geo = { version = "0.33", default-features = false }
 spade = { version = "2.15", optional = true }
 rstar = { version = "0.12" }
 rayon = { version = "1.12", optional = true }
+log = { version = "0.4", default-features = false }
 
 robust = "1.2"
 thiserror = "2.0"

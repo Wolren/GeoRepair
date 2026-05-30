@@ -8,6 +8,7 @@ use geo::{Coord, Geometry, LineString, LinesIter, MultiPolygon, Polygon, Winding
 use rstar::{RTree, RTreeObject, AABB};
 
 use crate::config::MakeValidConfig;
+use log::warn;
 
 pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geometry<f64>> {
     // Fast path: valid polygons can return immediately. Use a total-verts limit
@@ -35,6 +36,7 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
     let shell_rings = match fix_ring::repair_ring(poly.exterior()) {
         Some(rings) => rings,
         None => {
+            warn!("Structure: shell ring repair failed, falling back to CDT arrange");
             #[cfg(feature = "arrange")]
             if !poly.exterior().0.is_empty() {
                 return Some(crate::arrange::fix_polygon(poly, config));
@@ -106,6 +108,7 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
     }
 
     if result_polys.is_empty() {
+        warn!("Structure: subtract/merge produced no result polygons");
         #[cfg(not(feature = "arrange"))]
         return None;
         #[cfg(feature = "arrange")]

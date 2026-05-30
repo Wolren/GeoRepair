@@ -6,6 +6,7 @@ use geo::{
 use crate::config::{MakeValidConfig, PolyMethod};
 use crate::noding::{node_line_string, remove_consecutive_duplicates};
 use crate::validation::{GeoValidation, ValidationResult};
+use log::warn;
 
 pub trait MakeValid {
     type Scalar: GeoFloat;
@@ -253,9 +254,10 @@ impl MakeValid for Polygon<f64> {
             PolyMethod::Structure => {
                 structure_fix(self, config).unwrap_or_else(|| empty_geom::<f64>())
             }
-            PolyMethod::Auto => {
-                structure_fix(self, config).unwrap_or_else(|| arrange_or_empty(self, config))
-            }
+            PolyMethod::Auto => structure_fix(self, config).unwrap_or_else(|| {
+                warn!("Auto mode: structure_fix returned None, falling back to CDT arrange");
+                arrange_or_empty(self, config)
+            }),
         }
     }
 }
