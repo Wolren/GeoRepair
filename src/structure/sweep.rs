@@ -3,7 +3,7 @@ use rstar::{RTree, RTreeObject, AABB};
 
 /// Edge with 2D bounding envelope for R-tree spatial indexing.
 struct EdgeEnvelope {
-    index: usize,
+    index: u32,
     envelope: AABB<[f64; 2]>,
 }
 
@@ -40,7 +40,7 @@ pub(crate) fn has_self_intersections(coords: &[Coord<f64>], eps: f64) -> bool {
 
     let edges: Vec<EdgeEnvelope> = (0..n_edges)
         .map(|i| EdgeEnvelope {
-            index: i,
+            index: i as u32,
             envelope: edge_envelope(coords, i),
         })
         .collect();
@@ -50,7 +50,7 @@ pub(crate) fn has_self_intersections(coords: &[Coord<f64>], eps: f64) -> bool {
     for i in 0..n_edges {
         let query_env = edge_envelope(coords, i);
         let result = tree.locate_in_envelope_intersecting_int(&query_env, |candidate| {
-            let j = candidate.index;
+            let j = candidate.index as usize;
             if j <= i {
                 return std::ops::ControlFlow::Continue(());
             }

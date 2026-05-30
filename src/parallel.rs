@@ -90,6 +90,36 @@ pub fn par_fix_polygon_batch(
         .collect()
 }
 
+/// Process polygons from an iterator in chunks — peak memory is bounded by
+/// `chunk_size` polygons. Useful for streaming large datasets without loading
+/// everything into memory at once. Results preserve input order.
+#[cfg(any(feature = "arrange", feature = "structure"))]
+pub fn par_fix_polygon_batch_chunked<I>(
+    iter: I,
+    chunk_size: usize,
+    config: &MakeValidConfig,
+) -> Vec<Geometry<f64>>
+where
+    I: Iterator<Item = Polygon<f64>>,
+{
+    let chunk_size = chunk_size.max(1);
+    let mut results = Vec::new();
+    let mut chunk: Vec<Polygon<f64>> = Vec::with_capacity(chunk_size);
+    for poly in iter {
+        chunk.push(poly);
+        if chunk.len() == chunk_size {
+            let refs: Vec<&Polygon<f64>> = chunk.iter().collect();
+            results.extend(par_fix_polygon_batch(&refs, config));
+            chunk.clear();
+        }
+    }
+    if !chunk.is_empty() {
+        let refs: Vec<&Polygon<f64>> = chunk.iter().collect();
+        results.extend(par_fix_polygon_batch(&refs, config));
+    }
+    results
+}
+
 #[cfg(not(any(feature = "arrange", feature = "structure")))]
 pub fn par_fix_collection<T: GeoFloat + Send + Sync>(
     gc: &GeometryCollection<T>,

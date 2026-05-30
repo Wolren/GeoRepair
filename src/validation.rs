@@ -2,6 +2,7 @@ use geo::{
     Coord, GeoFloat, Geometry, GeometryCollection, Line, LineString, MultiLineString, MultiPoint,
     MultiPolygon, Point, Polygon, Rect, Triangle,
 };
+use rstar::{RTree, RTreeObject, AABB};
 use thiserror::Error;
 
 #[derive(Error, Clone, Debug, PartialEq)]
@@ -152,14 +153,78 @@ fn check_ring_validity(ring: &[Coord<f64>], is_exterior: bool) -> Vec<GeometryVa
     }
 
     let eps = 1e-12 * scale;
-    for i in 0..n {
-        for j in i + 2..n {
-            if i == 0 && j == n - 1 {
-                continue;
-            }
-            if check_edge_pair_intersection(ring, i, j, eps) {
+    struct EdgeEnv {
+        idx: u32,
+        env: AABB<[f64; 2]>,
+    }
+    impl RTreeObject for EdgeEnv {
+        type Envelope = AABB<[f64; 2]>;
+        fn envelope(&self) -> Self::Envelope {
+            self.env
+        }
+    }
+    if n > 64 {
+        let mut edges = Vec::with_capacity(n);
+        for i in 0..n {
+            let (lo_x, hi_x) = if ring[i].x < ring[(i + 1) % n].x {
+                (ring[i].x, ring[(i + 1) % n].x)
+            } else {
+                (ring[(i + 1) % n].x, ring[i].x)
+            };
+            let (lo_y, hi_y) = if ring[i].y < ring[(i + 1) % n].y {
+                (ring[i].y, ring[(i + 1) % n].y)
+            } else {
+                (ring[(i + 1) % n].y, ring[i].y)
+            };
+            let ext = (hi_x - lo_x).abs().max((hi_y - lo_y).abs()).max(1.0) * 1e-10;
+            edges.push(EdgeEnv {
+                idx: i as u32,
+                env: AABB::from_corners([lo_x - ext, lo_y - ext], [hi_x + ext, hi_y + ext]),
+            });
+        }
+        let tree = RTree::bulk_load(edges);
+        for i in 0..n {
+            let (lo_x, hi_x) = if ring[i].x < ring[(i + 1) % n].x {
+                (ring[i].x, ring[(i + 1) % n].x)
+            } else {
+                (ring[(i + 1) % n].x, ring[i].x)
+            };
+            let (lo_y, hi_y) = if ring[i].y < ring[(i + 1) % n].y {
+                (ring[i].y, ring[(i + 1) % n].y)
+            } else {
+                (ring[(i + 1) % n].y, ring[i].y)
+            };
+            let ext = (hi_x - lo_x).abs().max((hi_y - lo_y).abs()).max(1.0) * 1e-10;
+            let env = AABB::from_corners([lo_x - ext, lo_y - ext], [hi_x + ext, hi_y + ext]);
+            let found = tree.locate_in_envelope_intersecting_int(&env, |c| {
+                let j = c.idx as usize;
+                if j <= i {
+                    return std::ops::ControlFlow::Continue(());
+                }
+                if i.abs_diff(j) <= 1 || (i == 0 && j == n - 1) {
+                    return std::ops::ControlFlow::Continue(());
+                }
+                if check_edge_pair_intersection(ring, i, j, eps) {
+                    std::ops::ControlFlow::Break(())
+                } else {
+                    std::ops::ControlFlow::<(), ()>::Continue(())
+                }
+            });
+            if found.is_break() {
                 errors.push(GeometryValidationError::SelfIntersection);
                 return errors;
+            }
+        }
+    } else {
+        for i in 0..n {
+            for j in i + 2..n {
+                if i == 0 && j == n - 1 {
+                    continue;
+                }
+                if check_edge_pair_intersection(ring, i, j, eps) {
+                    errors.push(GeometryValidationError::SelfIntersection);
+                    return errors;
+                }
             }
         }
     }
@@ -251,13 +316,50 @@ fn check_holes_valid(
         }
     }
     let holes: Vec<&[Coord<f64>]> = interiors.iter().map(|h| &h.0[..]).collect();
-    for (i, h1) in holes.iter().enumerate() {
-        for h2 in holes.iter().skip(i + 1) {
-            if let Some(pt) = h2.first().copied() {
-                if point_in_ring_exclusive(pt, h1) {
-                    errors.push(GeometryValidationError::NestedHoles);
-                    return errors;
+    if holes.len() > 1 {
+        struct HoleEnv2 {
+            idx: usize,
+            env: AABB<[f64; 2]>,
+        }
+        impl RTreeObject for HoleEnv2 {
+            type Envelope = AABB<[f64; 2]>;
+            fn envelope(&self) -> Self::Envelope {
+                self.env
+            }
+        }
+        let mut envs = Vec::with_capacity(holes.len());
+        for (i, h) in holes.iter().enumerate() {
+            let first = h.first().map(|c| (c.x, c.y)).unwrap_or((0.0, 0.0));
+            let (mut min_x, mut max_x, mut min_y, mut max_y) = (first.0, first.0, first.1, first.1);
+            for c in *h {
+                min_x = min_x.min(c.x);
+                max_x = max_x.max(c.x);
+                min_y = min_y.min(c.y);
+                max_y = max_y.max(c.y);
+            }
+            envs.push(HoleEnv2 {
+                idx: i,
+                env: AABB::from_corners([min_x, min_y], [max_x, max_y]),
+            });
+        }
+        let tree = RTree::bulk_load(envs);
+        for (i, h2) in holes.iter().enumerate() {
+            let Some(pt) = h2.first().copied() else {
+                continue;
+            };
+            let query = AABB::from_corners([pt.x, pt.y], [pt.x, pt.y]);
+            let mut overlaps = false;
+            let _ = tree.locate_in_envelope_intersecting_int(&query, |c| {
+                if c.idx != i && point_in_ring_exclusive(pt, holes[c.idx]) {
+                    overlaps = true;
+                    std::ops::ControlFlow::Break(())
+                } else {
+                    std::ops::ControlFlow::<(), ()>::Continue(())
                 }
+            });
+            if overlaps {
+                errors.push(GeometryValidationError::NestedHoles);
+                return errors;
             }
         }
     }
@@ -444,13 +546,51 @@ impl GeoValidation for MultiPolygon<f64> {
         }
 
         let shells: Vec<&[Coord<f64>]> = self.0.iter().map(|p| &p.exterior().0[..]).collect();
-        for (i, s1) in shells.iter().enumerate() {
-            for s2 in shells.iter().skip(i + 1) {
-                if let Some(pt) = s2.first().copied() {
-                    if point_in_ring_exclusive(pt, s1) {
-                        errors.push(GeometryValidationError::NestedHoles);
-                        return ValidationResult::invalid(errors);
+        if shells.len() > 1 {
+            struct ShellEnv {
+                idx: usize,
+                env: AABB<[f64; 2]>,
+            }
+            impl RTreeObject for ShellEnv {
+                type Envelope = AABB<[f64; 2]>;
+                fn envelope(&self) -> Self::Envelope {
+                    self.env
+                }
+            }
+            let mut envs = Vec::with_capacity(shells.len());
+            for (i, s) in shells.iter().enumerate() {
+                let first = s.first().map(|c| (c.x, c.y)).unwrap_or((0.0, 0.0));
+                let (mut min_x, mut max_x, mut min_y, mut max_y) =
+                    (first.0, first.0, first.1, first.1);
+                for c in *s {
+                    min_x = min_x.min(c.x);
+                    max_x = max_x.max(c.x);
+                    min_y = min_y.min(c.y);
+                    max_y = max_y.max(c.y);
+                }
+                envs.push(ShellEnv {
+                    idx: i,
+                    env: AABB::from_corners([min_x, min_y], [max_x, max_y]),
+                });
+            }
+            let tree = RTree::bulk_load(envs);
+            for (i, s2) in shells.iter().enumerate() {
+                let Some(pt) = s2.first().copied() else {
+                    continue;
+                };
+                let query = AABB::from_corners([pt.x, pt.y], [pt.x, pt.y]);
+                let mut overlaps = false;
+                let _ = tree.locate_in_envelope_intersecting_int(&query, |c| {
+                    if c.idx != i && point_in_ring_exclusive(pt, shells[c.idx]) {
+                        overlaps = true;
+                        std::ops::ControlFlow::Break(())
+                    } else {
+                        std::ops::ControlFlow::<(), ()>::Continue(())
                     }
+                });
+                if overlaps {
+                    errors.push(GeometryValidationError::NestedHoles);
+                    return ValidationResult::invalid(errors);
                 }
             }
         }

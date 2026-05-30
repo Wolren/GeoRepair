@@ -6,6 +6,7 @@ pub mod prep;
 
 use crate::config::MakeValidConfig;
 use geo::{Geometry, GeometryCollection, LinesIter, MultiPolygon, Polygon};
+use rstar::{RTree, RTreeObject, AABB};
 use rustc_hash::FxHashSet;
 use spade::Triangulation;
 
@@ -87,12 +88,48 @@ pub(crate) fn holes_are_valid(poly: &Polygon<f64>) -> bool {
         }
     }
     let holes: Vec<_> = poly.interiors().iter().map(|h| &h.0).collect();
-    for (i, h1) in holes.iter().enumerate() {
-        for h2 in holes.iter().skip(i + 1) {
+    if holes.len() > 1 {
+        struct HoleEnv {
+            idx: usize,
+            env: AABB<[f64; 2]>,
+        }
+        impl RTreeObject for HoleEnv {
+            type Envelope = AABB<[f64; 2]>;
+            fn envelope(&self) -> Self::Envelope {
+                self.env
+            }
+        }
+        let mut envs = Vec::with_capacity(holes.len());
+        for (i, h) in holes.iter().enumerate() {
+            let first = h.first().map(|c| (c.x, c.y)).unwrap_or((0.0, 0.0));
+            let (mut min_x, mut max_x, mut min_y, mut max_y) = (first.0, first.0, first.1, first.1);
+            for c in *h {
+                min_x = min_x.min(c.x);
+                max_x = max_x.max(c.x);
+                min_y = min_y.min(c.y);
+                max_y = max_y.max(c.y);
+            }
+            envs.push(HoleEnv {
+                idx: i,
+                env: AABB::from_corners([min_x, min_y], [max_x, max_y]),
+            });
+        }
+        let tree = RTree::bulk_load(envs);
+        for (i, h2) in holes.iter().enumerate() {
             let Some(pt) = h2.first().copied() else {
                 continue;
             };
-            if point_in_ring_exclusive(pt, h1) {
+            let query = AABB::from_corners([pt.x, pt.y], [pt.x, pt.y]);
+            let mut overlaps = false;
+            let _ = tree.locate_in_envelope_intersecting_int(&query, |c| {
+                if c.idx != i && point_in_ring_exclusive(pt, holes[c.idx]) {
+                    overlaps = true;
+                    std::ops::ControlFlow::Break(())
+                } else {
+                    std::ops::ControlFlow::<(), ()>::Continue(())
+                }
+            });
+            if overlaps {
                 return false;
             }
         }

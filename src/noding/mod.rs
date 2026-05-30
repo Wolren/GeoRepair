@@ -4,9 +4,12 @@
 //! 1. Removing invalid/repeated coordinates
 //! 2. Noding self-intersections by splitting crossing edges
 
+use std::mem;
+
 use geo::{
     Coord, CoordNum, GeoFloat, Geometry, GeometryCollection, Line, LineString, MultiLineString,
 };
+use rstar::{RTree, RTreeObject, AABB};
 use rustc_hash::FxHashSet;
 
 /// Node a line string by removing repeated points and splitting at
@@ -57,84 +60,80 @@ fn check_self_intersections<T: GeoFloat>(edges: &[Line<T>]) -> bool {
     if edges.len() < 3 {
         return false;
     }
-    // Grid spatial index: assign each edge to cells, only check pairs sharing a cell
-    let mut min_x = edges[0].start.x;
-    let mut max_x = edges[0].start.x;
-    let mut min_y = edges[0].start.y;
-    let mut max_y = edges[0].start.y;
-    for e in edges {
-        min_x = min_x.min(e.start.x).min(e.end.x);
-        max_x = max_x.max(e.start.x).max(e.end.x);
-        min_y = min_y.min(e.start.y).min(e.end.y);
-        max_y = max_y.max(e.start.y).max(e.end.y);
-    }
-    let range_x = max_x - min_x;
-    let range_y = max_y - min_y;
-    // Use sqrt(n) cells per dimension, clamped to [1, 64]
-    let n_cells = (edges.len() as f64).sqrt().ceil() as usize;
-    let n_cells = n_cells.clamp(1, 64);
-    let cell_w = if range_x > T::zero() {
-        range_x / T::from(n_cells).unwrap()
-    } else {
-        T::one()
-    };
-    let cell_h = if range_y > T::zero() {
-        range_y / T::from(n_cells).unwrap()
-    } else {
-        T::one()
-    };
 
-    let mut cell_edges: Vec<Vec<usize>> = vec![Vec::new(); n_cells * n_cells];
-    for (i, e) in edges.iter().enumerate() {
-        let cx1 = (((e.start.x - min_x) / cell_w).floor())
-            .to_usize()
-            .unwrap_or(0)
-            .min(n_cells - 1);
-        let cy1 = (((e.start.y - min_y) / cell_h).floor())
-            .to_usize()
-            .unwrap_or(0)
-            .min(n_cells - 1);
-        let cx2 = (((e.end.x - min_x) / cell_w).floor())
-            .to_usize()
-            .unwrap_or(0)
-            .min(n_cells - 1);
-        let cy2 = (((e.end.y - min_y) / cell_h).floor())
-            .to_usize()
-            .unwrap_or(0)
-            .min(n_cells - 1);
-        let x0 = cx1.min(cx2);
-        let x1 = cx1.max(cx2);
-        let y0 = cy1.min(cy2);
-        let y1 = cy1.max(cy2);
-        for cy in y0..=y1 {
-            for cx in x0..=x1 {
-                cell_edges[cy * n_cells + cx].push(i);
+    // R-tree spatial index for f64 (compile-time dispatched by size)
+    if mem::size_of::<T>() == 8 {
+        let edges_f64: &[Line<f64>] = unsafe { std::mem::transmute(edges) };
+        return check_self_intersections_f64(edges_f64, 1e-12);
+    }
+
+    // Generic fallback: brute force for non-f64 types
+    for i in 0..edges.len() {
+        for j in (i + 2)..edges.len() {
+            if edges_intersect(&edges[i], &edges[j], eps) {
+                return true;
             }
         }
     }
+    false
+}
 
-    let mut visited = vec![false; edges.len() * edges.len()];
-    for cell in &cell_edges {
-        for ai in 0..cell.len() {
-            for bi in (ai + 1)..cell.len() {
-                let i = cell[ai];
-                let j = cell[bi];
-                // Skip adjacent edges that share a vertex
-                if i + 1 == j && edges[i].end == edges[j].start {
-                    continue;
-                }
-                if j + 1 == i && edges[j].end == edges[i].start {
-                    continue;
-                }
-                let key = i * edges.len() + j;
-                if visited[key] {
-                    continue;
-                }
-                visited[key] = true;
-                if edges_intersect(&edges[i], &edges[j], eps) {
-                    return true;
-                }
+fn check_self_intersections_f64(edges: &[Line<f64>], eps: f64) -> bool {
+    let n = edges.len();
+    if n < 3 {
+        return false;
+    }
+
+    #[derive(Clone, Copy)]
+    struct EdgeEnv {
+        idx: usize,
+        env: AABB<[f64; 2]>,
+    }
+    impl RTreeObject for EdgeEnv {
+        type Envelope = AABB<[f64; 2]>;
+        fn envelope(&self) -> Self::Envelope {
+            self.env
+        }
+    }
+
+    let envs: Vec<EdgeEnv> = edges
+        .iter()
+        .enumerate()
+        .map(|(i, e)| EdgeEnv {
+            idx: i,
+            env: AABB::from_corners(
+                [e.start.x.min(e.end.x), e.start.y.min(e.end.y)],
+                [e.start.x.max(e.end.x), e.start.y.max(e.end.y)],
+            ),
+        })
+        .collect();
+    let tree = RTree::bulk_load(envs);
+
+    for i in 0..n {
+        let e = &edges[i];
+        let query = AABB::from_corners(
+            [e.start.x.min(e.end.x), e.start.y.min(e.end.y)],
+            [e.start.x.max(e.end.x), e.start.y.max(e.end.y)],
+        );
+        let result = tree.locate_in_envelope_intersecting_int(&query, |c| {
+            let j = c.idx;
+            if j <= i {
+                return std::ops::ControlFlow::Continue(());
             }
+            if i + 1 == j && edges[i].end == edges[j].start {
+                return std::ops::ControlFlow::Continue(());
+            }
+            if j + 1 == i && edges[j].end == edges[i].start {
+                return std::ops::ControlFlow::Continue(());
+            }
+            if edges_intersect(&edges[i], &edges[j], eps) {
+                std::ops::ControlFlow::Break(())
+            } else {
+                std::ops::ControlFlow::Continue(())
+            }
+        });
+        if result.is_break() {
+            return true;
         }
     }
     false
@@ -169,83 +168,21 @@ fn split_edges_at_intersections<T: GeoFloat>(edges: &[Line<T>]) -> Vec<Line<T>> 
     let zero = T::zero();
 
     if n >= 64 {
-        // Grid-accelerated spatial index for large edge sets
-        let mut min_x = edges[0].start.x;
-        let mut max_x = edges[0].start.x;
-        let mut min_y = edges[0].start.y;
-        let mut max_y = edges[0].start.y;
-        for e in edges {
-            min_x = min_x.min(e.start.x).min(e.end.x);
-            max_x = max_x.max(e.start.x).max(e.end.x);
-            min_y = min_y.min(e.start.y).min(e.end.y);
-            max_y = max_y.max(e.start.y).max(e.end.y);
-        }
-        let range_x = max_x - min_x;
-        let range_y = max_y - min_y;
-        let n_cells = (n as f64).sqrt().ceil() as usize;
-        let n_cells = n_cells.clamp(1, 64);
-        let cell_w = if range_x > zero {
-            range_x / T::from(n_cells).unwrap()
-        } else {
-            T::one()
-        };
-        let cell_h = if range_y > zero {
-            range_y / T::from(n_cells).unwrap()
-        } else {
-            T::one()
-        };
-
-        let mut cell_edges: Vec<Vec<usize>> = vec![Vec::new(); n_cells * n_cells];
-        for (i, e) in edges.iter().enumerate() {
-            let cx1 = ((e.start.x - min_x) / cell_w)
-                .floor()
-                .to_usize()
-                .unwrap_or(0)
-                .min(n_cells - 1);
-            let cy1 = ((e.start.y - min_y) / cell_h)
-                .floor()
-                .to_usize()
-                .unwrap_or(0)
-                .min(n_cells - 1);
-            let cx2 = ((e.end.x - min_x) / cell_w)
-                .floor()
-                .to_usize()
-                .unwrap_or(0)
-                .min(n_cells - 1);
-            let cy2 = ((e.end.y - min_y) / cell_h)
-                .floor()
-                .to_usize()
-                .unwrap_or(0)
-                .min(n_cells - 1);
-            let x0 = cx1.min(cx2);
-            let x1 = cx1.max(cx2);
-            let y0 = cy1.min(cy2);
-            let y1 = cy1.max(cy2);
-            for cy in y0..=y1 {
-                for cx in x0..=x1 {
-                    cell_edges[cy * n_cells + cx].push(i);
+        // R-tree spatial index for f64 (compile-time dispatched by size)
+        if mem::size_of::<T>() == 8 {
+            let edges_f64: &[Line<f64>] = unsafe { std::mem::transmute(edges) };
+            let mut split_f64: Vec<Vec<f64>> = vec![Vec::new(); n];
+            split_edges_rtree(edges_f64, &mut split_f64, 1e-12);
+            for i in 0..n {
+                for &t in &split_f64[i] {
+                    split_points[i].push(T::from(t).unwrap());
                 }
             }
-        }
-
-        let mut checked: FxHashSet<(usize, usize)> = FxHashSet::default();
-        for cell in &cell_edges {
-            if cell.len() < 2 {
-                continue;
-            }
-            let mut sorted = cell.clone();
-            sorted.sort_unstable();
-            for ii in 0..sorted.len() {
-                let i = sorted[ii];
-                for jj in (ii + 1)..sorted.len() {
-                    let j = sorted[jj];
-                    if !checked.insert((i, j)) {
-                        continue;
-                    }
+        } else {
+            // Brute force for non-f64 types
+            for i in 0..n {
+                for j in (i + 2)..n {
                     if i + 1 == j && edges[i].end == edges[j].start {
-                        continue;
-                    }
-                    if j + 1 == i && edges[j].end == edges[i].start {
                         continue;
                     }
                     let (ti, tj, _pt) = match compute_intersection_param(&edges[i], &edges[j], eps)
@@ -310,6 +247,69 @@ fn split_edges_at_intersections<T: GeoFloat>(edges: &[Line<T>]) -> Vec<Line<T>> 
     }
 
     result
+}
+
+fn split_edges_rtree(edges: &[Line<f64>], split_points: &mut [Vec<f64>], eps: f64) {
+    let n = edges.len();
+
+    #[derive(Clone, Copy)]
+    struct EdgeEnv {
+        idx: usize,
+        env: AABB<[f64; 2]>,
+    }
+    impl RTreeObject for EdgeEnv {
+        type Envelope = AABB<[f64; 2]>;
+        fn envelope(&self) -> Self::Envelope {
+            self.env
+        }
+    }
+
+    let envs: Vec<EdgeEnv> = edges
+        .iter()
+        .enumerate()
+        .map(|(i, e)| EdgeEnv {
+            idx: i,
+            env: AABB::from_corners(
+                [e.start.x.min(e.end.x), e.start.y.min(e.end.y)],
+                [e.start.x.max(e.end.x), e.start.y.max(e.end.y)],
+            ),
+        })
+        .collect();
+    let tree = RTree::bulk_load(envs);
+
+    let mut checked: FxHashSet<(usize, usize)> = FxHashSet::default();
+
+    for i in 0..n {
+        let e = &edges[i];
+        let query = AABB::from_corners(
+            [e.start.x.min(e.end.x), e.start.y.min(e.end.y)],
+            [e.start.x.max(e.end.x), e.start.y.max(e.end.y)],
+        );
+        let _ = tree.locate_in_envelope_intersecting_int(&query, |c| {
+            let j = c.idx;
+            if j <= i {
+                return std::ops::ControlFlow::<(), ()>::Continue(());
+            }
+            if !checked.insert((i, j)) {
+                return std::ops::ControlFlow::<(), ()>::Continue(());
+            }
+            if i + 1 == j && edges[i].end == edges[j].start {
+                return std::ops::ControlFlow::<(), ()>::Continue(());
+            }
+            if j + 1 == i && edges[j].end == edges[i].start {
+                return std::ops::ControlFlow::<(), ()>::Continue(());
+            }
+            if let Some((ti, tj, _pt)) = compute_intersection_param(&edges[i], &edges[j], eps) {
+                if ti > 0.0 && ti < 1.0 {
+                    split_points[i].push(ti);
+                }
+                if tj > 0.0 && tj < 1.0 {
+                    split_points[j].push(tj);
+                }
+            }
+            std::ops::ControlFlow::<(), ()>::Continue(())
+        });
+    }
 }
 
 fn interpolate<T: GeoFloat>(e: Line<T>, t: T) -> Coord<T> {

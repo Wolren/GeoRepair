@@ -12,7 +12,7 @@ rust-version = "1.95"
 [features]
 default = ["arrange", "structure", "parallel", "simd", "io-geojson", "io-wkt"]
 arrange = ["dep:spade", "geo/spade"]
-structure = ["dep:rstar"]
+structure = []
 parallel = ["dep:rayon", "geo/multithreading"]
 simd = []
 bench-geos = ["dep:geos", "geos/static", "load-shp"]
@@ -29,7 +29,7 @@ ffi = ["io-wkb"]
 [dependencies]
 geo = { version = "0.33", default-features = false }
 spade = { version = "2.15", optional = true }
-rstar = { version = "0.12", optional = true }
+rstar = { version = "0.12" }
 rayon = { version = "1.12", optional = true }
 
 robust = "1.2"
@@ -52,11 +52,9 @@ features = ["geo-types"]
 optional = true
 
 [dev-dependencies]
-approx = "0.5"
 wkt = { version = "0.14", features = ["geo-types"] }
 criterion = { version = "0.8", features = ["html_reports"] }
 proptest = "1.11"
-rstest = "0.26"
 [[bench]]
 name = "bench"
 harness = false
@@ -69,6 +67,16 @@ harness = false
 name = "criterion"
 harness = false
 required-features = ["bench-criterion"]
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+
+[profile.bench]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
 
 [patch.crates-io]
 geos-src = { path = "patches/geos-src" }

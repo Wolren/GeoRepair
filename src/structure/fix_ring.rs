@@ -115,122 +115,11 @@ fn has_self_intersections_bruteforce(coords: &[Coord<f64>], eps: f64) -> bool {
     false
 }
 
-/// O(n log n) expected via uniform spatial grid — for large rings
-fn has_self_intersections_grid(coords: &[Coord<f64>], eps: f64) -> bool {
-    let n = coords.len();
-    let n_edges = n - 1;
-
-    // Compute bounding box
-    let mut min_x = f64::MAX;
-    let mut max_x = f64::MIN;
-    let mut min_y = f64::MAX;
-    let mut max_y = f64::MIN;
-    for c in coords {
-        min_x = min_x.min(c.x);
-        max_x = max_x.max(c.x);
-        min_y = min_y.min(c.y);
-        max_y = max_y.max(c.y);
-    }
-
-    let eps = 1e-12;
-    let dx = max_x - min_x;
-    let dy = max_y - min_y;
-
-    // Degenerate bbox: fall back to brute force
-    if dx < eps || dy < eps {
-        return has_self_intersections_bruteforce(coords, eps);
-    }
-
-    // Grid size: sqrt(n) × sqrt(n), at least 4, at most 256
-    let grid_dim = (n_edges as f64).sqrt().ceil() as usize;
-    let grid_dim = grid_dim.max(4).min(256);
-    let cell_w = dx / grid_dim as f64;
-    let cell_h = dy / grid_dim as f64;
-
-    // Grid: each cell stores list of edge indices
-    let mut grid: Vec<Vec<usize>> = vec![Vec::new(); grid_dim * grid_dim];
-
-    for ei in 0..n_edges {
-        let a = coords[ei];
-        let b = coords[ei + 1];
-        let lo = (a.x.min(b.x) - min_x) / cell_w;
-        let hi = (a.x.max(b.x) - min_x) / cell_w;
-        let min_cx = (lo.floor() as isize).max(0) as usize;
-        let max_cx = (hi.ceil() as isize - 1).min(grid_dim as isize - 1).max(0) as usize;
-        let lo = (a.y.min(b.y) - min_y) / cell_h;
-        let hi = (a.y.max(b.y) - min_y) / cell_h;
-        let min_cy = (lo.floor() as isize).max(0) as usize;
-        let max_cy = (hi.ceil() as isize - 1).min(grid_dim as isize - 1).max(0) as usize;
-
-        for cx in min_cx..=max_cx {
-            for cy in min_cy..=max_cy {
-                grid[cx + cy * grid_dim].push(ei);
-            }
-        }
-    }
-
-    // Parallel cell processing — each cell's edge pairs are independent
-    #[cfg(feature = "parallel")]
-    {
-        use rayon::prelude::*;
-        grid.par_iter()
-            .any(|cell| cell_has_intersection(coords, cell, n_edges, eps))
-    }
-    #[cfg(not(feature = "parallel"))]
-    {
-        let mut checked: FxHashSet<(usize, usize)> = FxHashSet::default();
-        for cell in &grid {
-            if cell.len() < 2 {
-                continue;
-            }
-            let mut sorted = cell.clone();
-            sorted.sort_unstable();
-            for ii in 0..sorted.len() {
-                let ei = sorted[ii];
-                for jj in (ii + 1)..sorted.len() {
-                    let ej = sorted[jj];
-                    if !checked.insert((ei, ej)) {
-                        continue;
-                    }
-                    if ei.abs_diff(ej) <= 1 || (ei == 0 && ej == n_edges - 1) {
-                        continue;
-                    }
-                    if check_edge_pair(coords, ei, ej, eps) {
-                        return true;
-                    }
-                }
-            }
-        }
-        false
-    }
-}
-
-/// Check a single grid cell for intersecting edge pairs.
-fn cell_has_intersection(coords: &[Coord<f64>], cell: &[usize], n_edges: usize, eps: f64) -> bool {
-    if cell.len() < 2 {
-        return false;
-    }
-    let mut sorted = cell.to_vec();
-    sorted.sort_unstable();
-    for ii in 0..sorted.len() {
-        let ei = sorted[ii];
-        for jj in (ii + 1)..sorted.len() {
-            let ej = sorted[jj];
-            if ei.abs_diff(ej) <= 1 || (ei == 0 && ej == n_edges - 1) {
-                continue;
-            }
-            if check_edge_pair(coords, ei, ej, eps) {
-                return true;
-            }
-        }
-    }
-    false
-}
-
 /// Check a single pair of edges for any type of intersection.
 /// Uses a single batch of 4 orient2d calls (SIMD) for ALL sub-checks.
 #[inline(always)]
 pub(crate) fn check_edge_pair(coords: &[Coord<f64>], i: usize, j: usize, eps: f64) -> bool {
+    assert!(i + 1 < coords.len() && j + 1 < coords.len());
     let a1 = coords[i];
     let a2 = coords[i + 1];
     let b1 = coords[j];
@@ -368,7 +257,7 @@ fn edges_from_coords(coords: &[Coord<f64>]) -> Vec<Line<f64>> {
 
 fn split_edges(edges: &[Line<f64>]) -> Vec<Line<f64>> {
     let n = edges.len();
-    let mut split_points: Vec<Vec<(f64, Coord<f64>)>> = vec![Vec::new(); n];
+    let mut split_points: Vec<SmallVec<[(f64, Coord<f64>); 2]>> = vec![SmallVec::new(); n];
 
     // Scale epsilon with coordinate magnitude so that near-parallel detection
     // works correctly for large coordinates (e.g. UTM at 5 million scale).
@@ -392,7 +281,7 @@ fn split_edges(edges: &[Line<f64>]) -> Vec<Line<f64>> {
     let mut result = Vec::new();
     for i in 0..n {
         let e = edges[i];
-        let mut pts: Vec<(f64, Coord<f64>)> = std::mem::take(&mut split_points[i]);
+        let mut pts = std::mem::take(&mut split_points[i]);
         pts.sort_by(|(a, _), (b, _)| a.partial_cmp(b).unwrap());
         pts.dedup_by(|(a, _), (b, _)| (*a - *b).abs() < eps_param);
         let mut prev_pt = e.start;
@@ -411,7 +300,7 @@ fn split_edges(edges: &[Line<f64>]) -> Vec<Line<f64>> {
 
 fn split_edges_bruteforce(
     edges: &[Line<f64>],
-    split_points: &mut [Vec<(f64, Coord<f64>)>],
+    split_points: &mut [SmallVec<[(f64, Coord<f64>); 2]>],
     eps: f64,
 ) {
     let n = edges.len();
@@ -446,7 +335,11 @@ fn split_edges_bruteforce(
     }
 }
 
-fn split_edges_grid(edges: &[Line<f64>], split_points: &mut [Vec<(f64, Coord<f64>)>], eps: f64) {
+fn split_edges_grid(
+    edges: &[Line<f64>],
+    split_points: &mut [SmallVec<[(f64, Coord<f64>); 2]>],
+    eps: f64,
+) {
     let n = edges.len();
     let grid = build_edge_grid(edges);
 
@@ -1076,22 +969,22 @@ fn label_interior_faces(
         interior.remove(&fi);
     }
 
-    // Faces missed by BFS (share only vertices, not edges) or misclassified
-    // as exterior by the largest-bbox heuristic — verify ALL faces via
-    // winding number on the input ring.
-    for (fi, face) in faces.iter().enumerate() {
-        if interior.contains(&fi) {
-            continue;
-        }
-
+    // Faces missed by BFS (share only vertices, not edges) — verify
+    // unvisited faces via winding number on the input ring.
+    // Skipped when BFS reached all faces AND the exterior choice was
+    // correct (large-bbox heuristic can fail for self-intersecting rings).
+    if visited.len() < n_faces || {
+        // Verify BFS exterior choice — if centroid is inside the input ring,
+        // labels are flipped and we need the second pass.
+        let ext_face = &faces[exterior];
         let (mut cx, mut cy) = (0.0f64, 0.0f64);
-        for &(_, vi) in face {
+        for &(_, vi) in ext_face {
             let p = verts[vi];
             cx += p.x;
             cy += p.y;
         }
-        cx /= face.len() as f64;
-        cy /= face.len() as f64;
+        cx /= ext_face.len() as f64;
+        cy /= ext_face.len() as f64;
 
         let mut wn = 0i32;
         for i in 0..input_ring.len() - 1 {
@@ -1105,8 +998,37 @@ fn label_interior_faces(
                 wn -= 1;
             }
         }
-        if wn % 2 != 0 {
-            interior.insert(fi);
+        wn % 2 != 0 // odd → BFS exterior is actually inside → labels flipped
+    } {
+        for (fi, face) in faces.iter().enumerate() {
+            if interior.contains(&fi) {
+                continue;
+            }
+
+            let (mut cx, mut cy) = (0.0f64, 0.0f64);
+            for &(_, vi) in face {
+                let p = verts[vi];
+                cx += p.x;
+                cy += p.y;
+            }
+            cx /= face.len() as f64;
+            cy /= face.len() as f64;
+
+            let mut wn = 0i32;
+            for i in 0..input_ring.len() - 1 {
+                let a = input_ring[i];
+                let b = input_ring[i + 1];
+                if a.y <= cy {
+                    if b.y > cy && orient2d(a, b, Coord { x: cx, y: cy }) > 0.0 {
+                        wn += 1;
+                    }
+                } else if b.y <= cy && orient2d(a, b, Coord { x: cx, y: cy }) < 0.0 {
+                    wn -= 1;
+                }
+            }
+            if wn % 2 != 0 {
+                interior.insert(fi);
+            }
         }
     }
 

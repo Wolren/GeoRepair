@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::{BufWriter, Read, Write};
 
-use geo::{Coord, Geometry, LineString, Polygon};
+use geo::{Coord, Geometry, LineString, MultiPolygon, Polygon};
 
 /// Compute signed area of a closed ring (positive = CCW).
 /// The ring should be closed (first == last).
@@ -143,6 +143,122 @@ pub fn load_bin(path: &str) -> Vec<Polygon<f64>> {
         polys.push(Polygon::new(ext, holes));
     }
     polys
+}
+
+/// Streaming shapefile reader — yields polygons one at a time without loading
+/// the entire file into memory. Uses the shapefile crate's built-in geo-types
+/// conversion for ring-to-polygon grouping.
+#[cfg(feature = "load-shp")]
+pub fn load_shp_stream(path: &str) -> impl Iterator<Item = Polygon<f64>> {
+    let reader = shapefile::Reader::from_path(path).unwrap();
+    LoadShpStream {
+        reader,
+        buf: Vec::new(),
+    }
+}
+
+#[cfg(feature = "load-shp")]
+struct LoadShpStream {
+    reader: shapefile::Reader<std::io::BufReader<std::fs::File>, std::io::BufReader<std::fs::File>>,
+    buf: Vec<Polygon<f64>>,
+}
+
+#[cfg(feature = "load-shp")]
+impl Iterator for LoadShpStream {
+    type Item = Polygon<f64>;
+
+    fn next(&mut self) -> Option<Polygon<f64>> {
+        if let Some(p) = self.buf.pop() {
+            return Some(p);
+        }
+        loop {
+            match self.reader.iter_shapes_and_records().next() {
+                None => return None,
+                Some(Ok((shape, _))) => {
+                    if let shapefile::Shape::Polygon(poly) = shape {
+                        let mp: Result<MultiPolygon<f64>, _> = poly.try_into();
+                        if let Ok(mp) = mp {
+                            let mut members = mp.0;
+                            if let Some(first) = members.pop() {
+                                self.buf = members;
+                                return Some(first);
+                            }
+                        }
+                    }
+                }
+                Some(Err(_)) => continue,
+            }
+        }
+    }
+}
+
+/// Streaming binary reader — yields polygons one at a time without loading
+/// the entire file into memory. Matches the `load_bin` wire format.
+pub fn load_bin_stream(path: &str) -> impl Iterator<Item = Polygon<f64>> {
+    let file = std::fs::File::open(path).unwrap();
+    let reader = std::io::BufReader::new(file);
+    LoadBinStream {
+        reader,
+        header_read: false,
+        total_polys: 0,
+        polys_yielded: 0,
+    }
+}
+
+struct LoadBinStream {
+    reader: std::io::BufReader<std::fs::File>,
+    header_read: bool,
+    total_polys: u32,
+    polys_yielded: u32,
+}
+
+fn read_u32<R: std::io::Read>(r: &mut R) -> u32 {
+    let mut buf = [0u8; 4];
+    r.read_exact(&mut buf).unwrap();
+    u32::from_le_bytes(buf)
+}
+
+fn read_f64<R: std::io::Read>(r: &mut R) -> f64 {
+    let mut buf = [0u8; 8];
+    r.read_exact(&mut buf).unwrap();
+    f64::from_le_bytes(buf)
+}
+
+fn read_ring<R: std::io::Read>(r: &mut R) -> LineString<f64> {
+    let n = read_u32(r) as usize;
+    let mut coords = Vec::with_capacity(n);
+    for _ in 0..n {
+        coords.push(Coord {
+            x: read_f64(r),
+            y: read_f64(r),
+        });
+    }
+    LineString::new(coords)
+}
+
+impl Iterator for LoadBinStream {
+    type Item = Polygon<f64>;
+
+    fn next(&mut self) -> Option<Polygon<f64>> {
+        if !self.header_read {
+            self.total_polys = read_u32(&mut self.reader);
+            self.header_read = true;
+            if self.total_polys == 0 {
+                return None;
+            }
+        }
+        if self.polys_yielded >= self.total_polys {
+            return None;
+        }
+        self.polys_yielded += 1;
+        let ext = read_ring(&mut self.reader);
+        let n_holes = read_u32(&mut self.reader) as usize;
+        let mut holes = Vec::with_capacity(n_holes);
+        for _ in 0..n_holes {
+            holes.push(read_ring(&mut self.reader));
+        }
+        Some(Polygon::new(ext, holes))
+    }
 }
 
 // ---------------------------------------------------------------------------

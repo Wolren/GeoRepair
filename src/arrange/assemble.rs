@@ -1,5 +1,6 @@
 use geo::coordinate_position::{coord_pos_relative_to_ring, CoordPos};
 use geo::{LineString, MultiPolygon, Polygon, Winding};
+use rstar::{RTree, RTreeObject, AABB};
 
 fn shoelace_sum(ring: &geo::LineString<f64>) -> f64 {
     let mut sum = 0.0;
@@ -40,15 +41,52 @@ pub(crate) fn assemble_polygons(rings: Vec<geo::LineString<f64>>) -> geo::MultiP
 
     let mut polygons: Vec<(LineString<f64>, Vec<LineString<f64>>)> =
         exteriors.into_iter().map(|ext| (ext, Vec::new())).collect();
-    let mut unassigned_holes: Vec<LineString<f64>> = Vec::new();
 
+    struct ExtEnv {
+        idx: usize,
+        env: AABB<[f64; 2]>,
+    }
+    impl RTreeObject for ExtEnv {
+        type Envelope = AABB<[f64; 2]>;
+        fn envelope(&self) -> Self::Envelope {
+            self.env
+        }
+    }
+    let ext_tree = {
+        let mut envs = Vec::with_capacity(polygons.len());
+        for (i, (ext, _)) in polygons.iter().enumerate() {
+            let first = ext.0.first().map(|c| (c.x, c.y)).unwrap_or((0.0, 0.0));
+            let (mut min_x, mut max_x, mut min_y, mut max_y) = (first.0, first.0, first.1, first.1);
+            for c in &ext.0 {
+                min_x = min_x.min(c.x);
+                max_x = max_x.max(c.x);
+                min_y = min_y.min(c.y);
+                max_y = max_y.max(c.y);
+            }
+            envs.push(ExtEnv {
+                idx: i,
+                env: AABB::from_corners([min_x, min_y], [max_x, max_y]),
+            });
+        }
+        RTree::bulk_load(envs)
+    };
+
+    let mut unassigned_holes: Vec<LineString<f64>> = Vec::new();
     'next_hole: for hole in &holes {
         for pt in &hole.0 {
-            for (ext, ext_holes) in &mut polygons {
-                if coord_pos_relative_to_ring(*pt, ext) == CoordPos::Inside {
-                    ext_holes.push(hole.clone());
-                    continue 'next_hole;
+            let query = AABB::from_corners([pt.x, pt.y], [pt.x, pt.y]);
+            let mut found = None;
+            let _ = ext_tree.locate_in_envelope_intersecting_int(&query, |c| {
+                if coord_pos_relative_to_ring(*pt, &polygons[c.idx].0) == CoordPos::Inside {
+                    found = Some(c.idx);
+                    std::ops::ControlFlow::Break(())
+                } else {
+                    std::ops::ControlFlow::<(), ()>::Continue(())
                 }
+            });
+            if let Some(idx) = found {
+                polygons[idx].1.push(hole.clone());
+                continue 'next_hole;
             }
         }
         unassigned_holes.push(hole.clone());

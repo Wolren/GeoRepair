@@ -5,6 +5,7 @@ pub mod subtract;
 pub mod sweep;
 
 use geo::{Coord, Geometry, LineString, LinesIter, MultiPolygon, Polygon, Winding};
+use rstar::{RTree, RTreeObject, AABB};
 
 use crate::config::MakeValidConfig;
 
@@ -142,41 +143,68 @@ fn resolve_nesting(holes: &[LineString<f64>]) -> (Vec<LineString<f64>>, Vec<Poly
     // Build parent relationship: hole[j] is inside hole[i] → parent_of[j] = Some(i)
     let n = holes.len();
 
-    #[cfg(feature = "parallel")]
-    let parent_of: Vec<Option<usize>> = {
-        use rayon::prelude::*;
-        (0..n)
-            .into_par_iter()
-            .map(|j| {
-                let pt = holes[j].0.first().copied()?;
-                for i in 0..n {
-                    if i == j {
-                        continue;
-                    }
-                    if point_in_ring_exclusive(pt, &holes[i].0) {
-                        return Some(i);
-                    }
-                }
-
-                None
-            })
-            .collect()
-    };
-    #[cfg(not(feature = "parallel"))]
-    let mut parent_of: Vec<Option<usize>> = {
-        let mut p = vec![None; n];
-        for i in 0..n {
-            for j in 0..n {
-                if i == j {
-                    continue;
-                }
-                if p[j].is_some() {
-                    continue;
-                }
-                if !holes[j].0.is_empty() && point_in_ring_exclusive(holes[j].0[0], &holes[i].0) {
-                    p[j] = Some(i);
-                }
+    // Precompute bbox + area for each hole, then build R-tree for O(log n) lookup
+    #[derive(Clone, Copy)]
+    struct HoleEnv {
+        idx: usize,
+        env: AABB<[f64; 2]>,
+        area: f64,
+    }
+    impl RTreeObject for HoleEnv {
+        type Envelope = AABB<[f64; 2]>;
+        fn envelope(&self) -> Self::Envelope {
+            self.env
+        }
+    }
+    fn hole_area_signed(ring: &[Coord<f64>]) -> f64 {
+        let mut s = 0.0;
+        for w in ring.windows(2) {
+            s += w[0].x * w[1].y - w[1].x * w[0].y;
+        }
+        s / 2.0
+    }
+    let envs: Vec<HoleEnv> = holes
+        .iter()
+        .enumerate()
+        .filter_map(|(i, h)| {
+            let first = h.0.first()?;
+            let (mut min_x, mut max_x, mut min_y, mut max_y) = (first.x, first.x, first.y, first.y);
+            for c in &h.0 {
+                min_x = min_x.min(c.x);
+                max_x = max_x.max(c.x);
+                min_y = min_y.min(c.y);
+                max_y = max_y.max(c.y);
             }
+            Some(HoleEnv {
+                idx: i,
+                env: AABB::from_corners([min_x, min_y], [max_x, max_y]),
+                area: hole_area_signed(&h.0).abs(),
+            })
+        })
+        .collect();
+    let tree = RTree::bulk_load(envs);
+
+    let parent_of: Vec<Option<usize>> = {
+        let mut p = vec![None; n];
+        for j in 0..n {
+            let pt = match holes[j].0.first() {
+                Some(pt) => *pt,
+                None => continue,
+            };
+            let query = AABB::from_corners([pt.x, pt.y], [pt.x, pt.y]);
+            let mut best: Option<usize> = None;
+            let mut best_area = f64::MAX;
+            let _ = tree.locate_in_envelope_intersecting_int(&query, |c| {
+                if c.idx == j {
+                    return std::ops::ControlFlow::<(), ()>::Continue(());
+                }
+                if point_in_ring_exclusive(pt, &holes[c.idx].0) && c.area < best_area {
+                    best_area = c.area;
+                    best = Some(c.idx);
+                }
+                std::ops::ControlFlow::<(), ()>::Continue(())
+            });
+            p[j] = best;
         }
         p
     };

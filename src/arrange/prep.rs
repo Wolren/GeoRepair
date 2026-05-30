@@ -6,6 +6,7 @@ use crate::error::MakeValidError;
 use crate::orient::{orient2d, orient2d_fast};
 use crate::snap;
 use geo::{Coord, Line};
+use rstar::{RTree, RTreeObject, AABB};
 
 #[derive(Debug)]
 pub(crate) struct PreparedLines {
@@ -289,38 +290,15 @@ fn compute_overlaps(lines: &[Line<f64>], mc1: &MonoChain, mc2: &MonoChain) -> bo
     rec_overlaps(lines, mc1, mc1.start, mc1.end, mc2, mc2.start, mc2.end)
 }
 
-fn build_chain_grid(
-    chains: &[MonoChain],
-) -> (FxHashMap<(i64, i64), Vec<usize>>, f64, f64, f64, f64) {
-    let nc = chains.len();
-    let mut min_x = f64::MAX;
-    let mut min_y = f64::MAX;
-    let mut max_x = f64::MIN;
-    let mut max_y = f64::MIN;
-    for mc in chains {
-        min_x = min_x.min(mc.min_x);
-        min_y = min_y.min(mc.min_y);
-        max_x = max_x.max(mc.max_x);
-        max_y = max_y.max(mc.max_y);
+struct ChainEnv {
+    idx: usize,
+    env: AABB<[f64; 2]>,
+}
+impl RTreeObject for ChainEnv {
+    type Envelope = AABB<[f64; 2]>;
+    fn envelope(&self) -> Self::Envelope {
+        self.env
     }
-    let scale = ((max_x - min_x) + (max_y - min_y)).max(1e-12);
-    let cell_size = (scale / (nc as f64).sqrt()).max(1e-12);
-    let inv_cell = 1.0 / cell_size;
-
-    let mut grid: FxHashMap<(i64, i64), Vec<usize>> =
-        FxHashMap::with_capacity_and_hasher(nc * 2, Default::default());
-    for (ci, mc) in chains.iter().enumerate() {
-        let ix0 = ((mc.min_x - min_x) * inv_cell).floor() as i64;
-        let iy0 = ((mc.min_y - min_y) * inv_cell).floor() as i64;
-        let ix1 = ((mc.max_x - min_x) * inv_cell).floor() as i64;
-        let iy1 = ((mc.max_y - min_y) * inv_cell).floor() as i64;
-        for ix in ix0..=ix1 {
-            for iy in iy0..=iy1 {
-                grid.entry((ix, iy)).or_default().push(ci);
-            }
-        }
-    }
-    (grid, cell_size, min_x, min_y, inv_cell)
 }
 
 pub(crate) fn has_no_intersections(lines: &[Line<f64>]) -> bool {
@@ -344,60 +322,133 @@ pub(crate) fn has_no_intersections(lines: &[Line<f64>]) -> bool {
         return true;
     }
 
-    let (grid, _cell_size, _min_x, _min_y, _inv_cell) = build_chain_grid(&chains);
+    // Try fast grid path; fall back to R-tree if any cell gets too dense
+    let grid_result = has_no_intersections_grid(&chains, lines);
+    if let Some(result) = grid_result {
+        return result;
+    }
+
+    // Fallback: R-tree
+    let envs: Vec<ChainEnv> = chains
+        .iter()
+        .enumerate()
+        .map(|(i, mc)| ChainEnv {
+            idx: i,
+            env: AABB::from_corners([mc.min_x, mc.min_y], [mc.max_x, mc.max_y]),
+        })
+        .collect();
+    let tree = RTree::bulk_load(envs);
 
     let do_parallel = nc >= 200;
 
     #[cfg(feature = "parallel")]
     if do_parallel {
         use rayon::prelude::*;
+        use std::ops::ControlFlow;
         let found = AtomicBool::new(false);
-        let grid_vec: Vec<_> = grid.into_iter().collect();
-        grid_vec.par_iter().for_each(|(_, cell_chains)| {
+        (0..nc).into_par_iter().for_each(|i| {
             if found.load(Ordering::Relaxed) {
                 return;
             }
-            let nc = cell_chains.len();
-            if nc <= 1 {
-                return;
-            }
-            for ii in 0..nc {
-                let ci = cell_chains[ii];
-                let mc1 = &chains[ci];
-                for jj in (ii + 1)..nc {
-                    if found.load(Ordering::Relaxed) {
-                        return;
-                    }
-                    let cj = cell_chains[jj];
-                    let mc2 = &chains[cj];
-                    if compute_overlaps(lines, mc1, mc2) {
-                        found.store(true, Ordering::Relaxed);
-                        return;
-                    }
+            let mc1 = &chains[i];
+            let q = AABB::from_corners([mc1.min_x, mc1.min_y], [mc1.max_x, mc1.max_y]);
+            let res = tree.locate_in_envelope_intersecting_int(&q, |c| {
+                if found.load(Ordering::Relaxed) {
+                    return ControlFlow::Break(());
                 }
+                let j = c.idx;
+                if j <= i {
+                    return ControlFlow::Continue(());
+                }
+                if compute_overlaps(lines, mc1, &chains[j]) {
+                    found.store(true, Ordering::Relaxed);
+                    ControlFlow::Break(())
+                } else {
+                    ControlFlow::Continue(())
+                }
+            });
+            if res.is_break() && !found.load(Ordering::Relaxed) {
+                found.store(true, Ordering::Relaxed);
             }
         });
         return !found.load(Ordering::Relaxed);
     }
 
-    for (_, cell_chains) in &grid {
-        let nc = cell_chains.len();
-        if nc <= 1 {
-            continue;
+    use std::ops::ControlFlow;
+    for i in 0..nc {
+        let mc1 = &chains[i];
+        let q = AABB::from_corners([mc1.min_x, mc1.min_y], [mc1.max_x, mc1.max_y]);
+        let result = tree.locate_in_envelope_intersecting_int(&q, |c| {
+            let j = c.idx;
+            if j <= i {
+                return ControlFlow::Continue(());
+            }
+            if compute_overlaps(lines, mc1, &chains[j]) {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        });
+        if result.is_break() {
+            return false;
         }
-        for ii in 0..nc {
-            let ci = cell_chains[ii];
-            let mc1 = &chains[ci];
-            for jj in (ii + 1)..nc {
-                let cj = cell_chains[jj];
-                let mc2 = &chains[cj];
-                if compute_overlaps(lines, mc1, mc2) {
-                    return false;
+    }
+    true
+}
+
+/// Fast grid path for `has_no_intersections`. Returns `None` if the grid is
+/// too dense, triggering the R-tree fallback.
+fn has_no_intersections_grid(chains: &[MonoChain], lines: &[Line<f64>]) -> Option<bool> {
+    let nc = chains.len();
+    let mut min_x = f64::MAX;
+    let mut max_x = f64::MIN;
+    let mut min_y = f64::MAX;
+    let mut max_y = f64::MIN;
+    for mc in chains {
+        min_x = min_x.min(mc.min_x);
+        max_x = max_x.max(mc.max_x);
+        min_y = min_y.min(mc.min_y);
+        max_y = max_y.max(mc.max_y);
+    }
+    let scale = (max_x - min_x).max(max_y - min_y);
+    if scale <= 0.0 {
+        return Some(true);
+    }
+
+    let cell_size = scale / (nc as f64).sqrt().ceil();
+    let cell_size = cell_size.max(f64::EPSILON);
+    let nx = ((max_x - min_x) / cell_size).ceil() as usize;
+    let ny = ((max_y - min_y) / cell_size).ceil() as usize;
+    let grid_cells = nx.max(1) * ny.max(1);
+
+    let mut cell_chains: Vec<Vec<usize>> = vec![Vec::new(); grid_cells];
+    for (i, mc) in chains.iter().enumerate() {
+        let x0 = ((mc.min_x - min_x) / cell_size) as isize;
+        let x1 = ((mc.max_x - min_x) / cell_size) as isize;
+        let y0 = ((mc.min_y - min_y) / cell_size) as isize;
+        let y1 = ((mc.max_y - min_y) / cell_size) as isize;
+        for cy in y0.max(0)..(y1 + 1).min(ny as isize) {
+            for cx in x0.max(0)..(x1 + 1).min(nx as isize) {
+                let cell = &mut cell_chains[cy as usize * nx + cx as usize];
+                cell.push(i);
+                if cell.len() > 64 {
+                    return None; // too dense → fall back to R-tree
                 }
             }
         }
     }
-    true
+
+    for cell in &cell_chains {
+        for ii in 0..cell.len() {
+            let mc1 = &chains[cell[ii]];
+            for jj in (ii + 1)..cell.len() {
+                if compute_overlaps(lines, mc1, &chains[cell[jj]]) {
+                    return Some(false);
+                }
+            }
+        }
+    }
+    Some(true)
 }
 
 pub(crate) fn odd_even_filter(lines: &mut Vec<Line<f64>>) {
@@ -524,113 +575,72 @@ fn segment_intersection(
     Some(vec![p_start, p_end])
 }
 
-struct SegGrid {
-    cells: Vec<Vec<usize>>,
-}
-
-impl SegGrid {
-    fn build(lines: &[Line<f64>]) -> SegGrid {
-        let n = lines.len();
-        if n == 0 {
-            return SegGrid { cells: Vec::new() };
-        }
-        let (mut min_x, mut max_x) = (f64::MAX, f64::MIN);
-        let (mut min_y, mut max_y) = (f64::MAX, f64::MIN);
-        let mut total_len = 0.0f64;
-        for line in lines {
-            min_x = min_x.min(line.start.x).min(line.end.x);
-            max_x = max_x.max(line.start.x).max(line.end.x);
-            min_y = min_y.min(line.start.y).min(line.end.y);
-            max_y = max_y.max(line.start.y).max(line.end.y);
-            let dx = line.end.x - line.start.x;
-            let dy = line.end.y - line.start.y;
-            total_len += (dx * dx + dy * dy).sqrt();
-        }
-        let avg_len = total_len / n as f64;
-        let cell_size = if avg_len.is_finite() && avg_len > 1e-12 {
-            avg_len * 2.0
-        } else {
-            let span = (max_x - min_x).max(max_y - min_y);
-            if span > 1e-12 {
-                (span / 100.0).max(1e-8)
-            } else {
-                return SegGrid {
-                    cells: vec![(0..n).collect()],
-                };
-            }
-        };
-        let pad = cell_size * 1e-4;
-        let x_span = (max_x - min_x + pad).max(0.0);
-        let y_span = (max_y - min_y + pad).max(0.0);
-        let cols = ((x_span / cell_size).ceil() as usize).max(1);
-        let rows = ((y_span / cell_size).ceil() as usize).max(1);
-        let mut cells = vec![Vec::new(); cols * rows];
-
-        for (i, line) in lines.iter().enumerate() {
-            let x1 = line.start.x.min(line.end.x);
-            let x2 = line.start.x.max(line.end.x);
-            let y1 = line.start.y.min(line.end.y);
-            let y2 = line.start.y.max(line.end.y);
-            let cx_min = ((x1 - min_x) / cell_size).floor() as usize;
-            let cx_max = ((x2 - min_x) / cell_size).floor() as usize;
-            let cy_min = ((y1 - min_y) / cell_size).floor() as usize;
-            let cy_max = ((y2 - min_y) / cell_size).floor() as usize;
-            for cy in cy_min.min(rows - 1)..=cy_max.min(rows - 1) {
-                let start = cy * cols;
-                let row_end = start + cx_max.min(cols - 1);
-                for idx in start + cx_min.min(cols - 1)..=row_end {
-                    cells[idx].push(i);
-                }
-            }
-        }
-        SegGrid { cells }
-    }
-}
-
 fn split_segments(lines: Vec<Line<f64>>) -> Result<Vec<Line<f64>>, MakeValidError> {
     let n = lines.len();
     let mut split_points: Vec<Vec<(f64, Coord<f64>)>> = vec![Vec::new(); n];
 
-    let grid = SegGrid::build(&lines);
-    let mut seen = FxHashSet::default();
-
-    for cell in &grid.cells {
-        if cell.len() < 2 {
-            continue;
+    struct SegEnv {
+        idx: usize,
+        env: AABB<[f64; 2]>,
+    }
+    impl RTreeObject for SegEnv {
+        type Envelope = AABB<[f64; 2]>;
+        fn envelope(&self) -> Self::Envelope {
+            self.env
         }
-        for idx_a in 0..cell.len() {
-            let i = cell[idx_a];
-            let li = &lines[i];
-            for idx_b in (idx_a + 1)..cell.len() {
-                let j = cell[idx_b];
-                if j <= i {
-                    continue;
-                }
-                let key = (i as u64) << 32 | (j as u64);
-                if !seen.insert(key) {
-                    continue;
-                }
-                let lj = &lines[j];
-                if let Some(pts) = segment_intersection(li.start, li.end, lj.start, lj.end) {
-                    for pt in pts {
-                        let is_end_i = (pt == li.start) || (pt == li.end);
-                        if !is_end_i {
-                            let ti = project_param(li, pt);
-                            if ti > 0.0 && ti < 1.0 {
-                                split_points[i].push((ti, pt));
-                            }
+    }
+    let envs: Vec<SegEnv> = lines
+        .iter()
+        .enumerate()
+        .map(|(i, l)| SegEnv {
+            idx: i,
+            env: AABB::from_corners(
+                [l.start.x.min(l.end.x), l.start.y.min(l.end.y)],
+                [l.start.x.max(l.end.x), l.start.y.max(l.end.y)],
+            ),
+        })
+        .collect();
+    let tree = RTree::bulk_load(envs);
+    let mut seen = FxHashSet::default();
+    use std::ops::ControlFlow;
+
+    for i in 0..n {
+        let li = &lines[i];
+        let lo_x = li.start.x.min(li.end.x);
+        let hi_x = li.start.x.max(li.end.x);
+        let lo_y = li.start.y.min(li.end.y);
+        let hi_y = li.start.y.max(li.end.y);
+        let query = AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]);
+        let _ = tree.locate_in_envelope_intersecting_int(&query, |c| {
+            let j = c.idx;
+            if j <= i {
+                return ControlFlow::<(), ()>::Continue(());
+            }
+            let key = (i as u64) << 32 | (j as u64);
+            if !seen.insert(key) {
+                return ControlFlow::<(), ()>::Continue(());
+            }
+            let lj = &lines[j];
+            if let Some(pts) = segment_intersection(li.start, li.end, lj.start, lj.end) {
+                for pt in pts {
+                    let is_end_i = (pt == li.start) || (pt == li.end);
+                    if !is_end_i {
+                        let ti = project_param(li, pt);
+                        if ti > 0.0 && ti < 1.0 {
+                            split_points[i].push((ti, pt));
                         }
-                        let is_end_j = (pt == lj.start) || (pt == lj.end);
-                        if !is_end_j {
-                            let tj = project_param(lj, pt);
-                            if tj > 0.0 && tj < 1.0 {
-                                split_points[j].push((tj, pt));
-                            }
+                    }
+                    let is_end_j = (pt == lj.start) || (pt == lj.end);
+                    if !is_end_j {
+                        let tj = project_param(lj, pt);
+                        if tj > 0.0 && tj < 1.0 {
+                            split_points[j].push((tj, pt));
                         }
                     }
                 }
             }
-        }
+            ControlFlow::<(), ()>::Continue(())
+        });
     }
 
     let eps_param = 1e-14;
