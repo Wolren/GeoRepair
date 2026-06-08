@@ -44,6 +44,9 @@ fn geometry_from_wkb(data: *const u8, len: usize) -> Result<Geometry<f64>, Strin
     if data.is_null() {
         return Err("null pointer".to_string());
     }
+    if len == 0 || len > isize::MAX as usize {
+        return Err("invalid length".to_string());
+    }
     let buf = unsafe { std::slice::from_raw_parts(data, len) };
     let wkb_geom = wkb::reader::read_wkb(buf).map_err(|e| format!("WKB parse error: {e}"))?;
     let geo_geom = geo_traits::to_geo::ToGeoGeometry::to_geometry(&wkb_geom);
@@ -95,6 +98,8 @@ pub extern "C" fn geo_repair_make_valid_with_config(
             _ => crate::PolyMethod::Auto,
         },
         fill_rule: Default::default(),
+        crs: None,
+        target_crs: None,
     };
     let fixed = geom.make_valid_with_config(&config);
     match geometry_to_wkb(&fixed) {

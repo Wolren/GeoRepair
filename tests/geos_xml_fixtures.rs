@@ -1,4 +1,4 @@
-use geo::Geometry;
+use geo::{Geometry, Point};
 use geo_repair::MakeValid;
 
 #[path = "common/mod.rs"]
@@ -52,9 +52,11 @@ fn xml_linestring_valid() {
 fn xml_linestring_collapsed_to_point() {
     let g = geom_from_wkt("LINESTRING (0 0, 0 0)");
     let result = g.make_valid_with_config(&cfg_auto());
-    // GEOS returns POINT even with keepCollapsed=false by default
-    // Our implementation returns empty GC for zero-length by default since keep_collapsed defaults to false
-    assert_is_empty(&result);
+    assert_eq!(
+        result,
+        Geometry::Point(Point::new(0.0, 0.0)),
+        "collapsed linestring should preserve Point (GEOS compat)"
+    );
 }
 
 // ---------------------------------------------------------------------------

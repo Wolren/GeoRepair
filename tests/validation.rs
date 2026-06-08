@@ -162,7 +162,8 @@ fn test_linestring_single_point_drop() {
     let result = ls.make_valid();
     assert_eq!(
         result,
-        Geometry::GeometryCollection(GeometryCollection(Vec::new()))
+        Geometry::Point(Point::new(1.0, 2.0)),
+        "single-point linestring should preserve Point (GEOS compat)"
     );
 }
 
@@ -243,7 +244,14 @@ fn test_multilinestring_valid() {
         Coord { x: 1.0, y: 1.0 },
     ])]);
     let result = mls.make_valid();
-    assert_eq!(result, Geometry::MultiLineString(mls));
+    assert_eq!(
+        result,
+        Geometry::LineString(LineString::new(vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 1.0, y: 1.0 },
+        ])),
+        "single-element MultiLineString unwraps to LineString (GEOS compat)"
+    );
 }
 
 // ---------------------------------------------------------------------------

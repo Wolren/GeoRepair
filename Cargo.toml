@@ -12,13 +12,13 @@ rust-version = "1.95"
 [features]
 default = ["arrange", "structure", "parallel", "simd", "io-geojson", "io-wkt"]
 arrange = ["dep:spade", "geo/spade"]
-structure = []
+structure = ["simd"]
 parallel = ["dep:rayon", "geo/multithreading"]
 simd = []
 bench-geos = ["dep:geos", "geos/static", "load-shp"]
 bench-criterion = []
 load-shp = ["dep:shapefile"]
-io-geojson = ["dep:geojson", "dep:serde_json", "serde_json/arbitrary_precision"]
+io-geojson = ["dep:geojson", "serde_json/arbitrary_precision"]
 io-wkt = ["dep:wkt"]
 io-wkb = ["dep:wkb", "dep:geo-traits"]
 io-csv = ["dep:csv"]
@@ -41,7 +41,7 @@ mimalloc = { version = "0.1", default-features = false, optional = true }
 geos = { version = "11.1", optional = true, features = ["v3_8_0"] }
 
 geojson = { version = "1.0", features = ["geo-types"], optional = true }
-serde_json = { version = "1.0", optional = true }
+serde_json = "1.0"
 wkt = { version = "0.14", features = ["geo-types"], optional = true }
 wkb = { version = "0.9", optional = true }
 geo-traits = { version = "0.3", optional = true }

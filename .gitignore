@@ -31,3 +31,6 @@ Desktop.ini
 *.prof
 *.gcov
 /benches/real_world/
+
+# Vendored cargo patches (previously committed)
+/patches/

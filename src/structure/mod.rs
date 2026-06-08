@@ -62,7 +62,7 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
     }
 
     // Fix holes — each hole may produce multiple rings (parallel via rayon)
-    #[cfg(feature = "parallel")]
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     let hole_rings_cw: Vec<LineString<f64>> = {
         use rayon::prelude::*;
         let mut hole_results: Vec<Vec<LineString<f64>>> = poly
@@ -76,7 +76,7 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
             .map(ensure_cw)
             .collect()
     };
-    #[cfg(not(feature = "parallel"))]
+    #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
     let hole_rings_cw: Vec<LineString<f64>> = {
         let mut hole_rings: Vec<LineString<f64>> = Vec::new();
         for h in poly.interiors() {
@@ -124,6 +124,7 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
     }
 
     let result = if result_polys.len() == 1 {
+        // Safe: len==1 verified above on local Vec
         Geometry::Polygon(result_polys.into_iter().next().unwrap())
     } else {
         Geometry::MultiPolygon(MultiPolygon::new(merge::merge_shells(result_polys).0))
@@ -221,13 +222,13 @@ fn resolve_nesting(holes: &[LineString<f64>]) -> (Vec<LineString<f64>>, Vec<Poly
     };
 
     // Compute containment depth for each hole via topological sort
-    #[cfg(feature = "parallel")]
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     let mut depth: Vec<usize> = (0..n)
         .map(|i| if parent_of[i].is_none() { 1 } else { 0 })
         .collect();
-    #[cfg(not(feature = "parallel"))]
+    #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
     let mut depth = vec![0usize; n];
-    #[cfg(not(feature = "parallel"))]
+    #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
     for i in 0..n {
         if parent_of[i].is_none() {
             depth[i] = 1;
@@ -299,11 +300,8 @@ fn ensure_cw(mut ring: LineString<f64>) -> LineString<f64> {
 /// return a Point or LineString instead of empty.
 fn handle_collapse_result(
     exterior: &LineString<f64>,
-    config: &MakeValidConfig,
+    _config: &MakeValidConfig,
 ) -> Option<Geometry<f64>> {
-    if !config.keep_collapsed {
-        return None;
-    }
     let coords: Vec<Coord<f64>> = exterior
         .0
         .iter()

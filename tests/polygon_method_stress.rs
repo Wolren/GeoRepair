@@ -296,6 +296,7 @@ fn test_explicit_default_config() {
         poly_method: PolyMethod::Auto,
         keep_collapsed: false,
         fill_rule: geo::algorithm::bool_ops::FillRule::EvenOdd,
+        ..Default::default()
     };
     let poly = Polygon::new(
         LineString::new(vec![
@@ -318,6 +319,7 @@ fn test_arrange_explicit() {
         poly_method: PolyMethod::Arrange,
         keep_collapsed: false,
         fill_rule: geo::algorithm::bool_ops::FillRule::EvenOdd,
+        ..Default::default()
     };
     let poly = Polygon::new(
         LineString::new(vec![
@@ -340,6 +342,7 @@ fn test_structure_explicit() {
         poly_method: PolyMethod::Structure,
         keep_collapsed: false,
         fill_rule: geo::algorithm::bool_ops::FillRule::EvenOdd,
+        ..Default::default()
     };
     let poly = Polygon::new(
         LineString::new(vec![

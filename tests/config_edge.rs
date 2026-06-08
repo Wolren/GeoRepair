@@ -289,7 +289,11 @@ fn test_linestring_single_point_keep_collapsed() {
         );
 
         let r2 = ls.make_valid_with_config(&cfg(method, false));
-        assert_empty(&r2);
+        assert_eq!(
+            r2,
+            Geometry::Point(Point::new(5.0, 5.0)),
+            "collapsed geometry always preserved (GEOS compat)"
+        );
     }
 }
 
@@ -367,7 +371,7 @@ fn test_linestring_dedup_to_single_keep_collapsed_false() {
         Coord { x: 0.0, y: 0.0 },
         Coord { x: 0.0, y: 0.0 },
     ]);
-    assert_empty(&ls.make_valid());
+    assert_eq!(ls.make_valid(), Geometry::Point(Point::new(0.0, 0.0)));
 }
 
 #[test]
@@ -476,7 +480,11 @@ fn test_multilinestring_mixed() {
     ]);
     let result = mls.make_valid();
     assert_not_empty(&result);
-    assert!(matches!(result, Geometry::MultiLineString(_)));
+    assert!(
+        matches!(result, Geometry::LineString(_)),
+        "single collapsed-down linestring should unwrap to LineString, got {:?}",
+        result
+    );
 }
 
 #[test]
@@ -856,6 +864,7 @@ fn test_config_explicit_construction() {
         keep_collapsed: true,
         poly_method: PolyMethod::Arrange,
         fill_rule: geo::algorithm::bool_ops::FillRule::NonZero,
+        ..Default::default()
     };
     assert!(config.keep_collapsed);
     assert_eq!(config.poly_method, PolyMethod::Arrange);

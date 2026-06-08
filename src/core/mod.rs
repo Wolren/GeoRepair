@@ -1,6 +1,8 @@
 use geo::algorithm::bool_ops::FillRule;
 use thiserror::Error;
 
+use crate::crs::Crs;
+
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
@@ -10,6 +12,13 @@ pub struct MakeValidConfig {
     pub keep_collapsed: bool,
     pub poly_method: PolyMethod,
     pub fill_rule: FillRule,
+    /// CRS of the input geometry.
+    /// When set, used for CRS-aware tolerance and metadata preservation.
+    pub crs: Option<Crs>,
+    /// Target output CRS.
+    /// When set, geometries are transformed to this CRS after repair
+    /// via PROJ (requires the `proj` feature).
+    pub target_crs: Option<Crs>,
 }
 
 impl Default for MakeValidConfig {
@@ -18,6 +27,8 @@ impl Default for MakeValidConfig {
             keep_collapsed: false,
             poly_method: PolyMethod::Auto,
             fill_rule: FillRule::EvenOdd,
+            crs: None,
+            target_crs: None,
         }
     }
 }
@@ -55,8 +66,12 @@ pub enum MakeValidError {
 
     #[error("unsupported format: {0}")]
     UnsupportedFormat(String),
+
+    #[error("CRS error: {0}")]
+    CrsError(String),
 }
 
+#[cfg(feature = "arrange")]
 impl From<spade::InsertionError> for MakeValidError {
     fn from(e: spade::InsertionError) -> Self {
         match e {

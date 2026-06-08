@@ -508,7 +508,11 @@ fn geos_linestring_nan_collapse() {
         Coord { x: 0.0, y: 0.0 },
     ]));
     let result = g.make_valid_with_config(&cfg_auto());
-    assert_is_empty(&result);
+    assert_eq!(
+        result,
+        Geometry::Point(Point::new(0.0, 0.0)),
+        "NaN collapse to single point should preserve Point (GEOS compat)"
+    );
 }
 
 // ---------------------------------------------------------------------------

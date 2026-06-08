@@ -4,6 +4,7 @@
 use std::time::Instant;
 
 use geo::{Coord, Geometry, Line, LineString, MultiLineString, Polygon};
+#[cfg(feature = "parallel")]
 use geo_repair::parallel::par_fix_polygon_batch;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 
@@ -56,10 +57,16 @@ fn run_ser(polys: &[Polygon<f64>], cfg: &MakeValidConfig) -> f64 {
     t0.elapsed().as_secs_f64()
 }
 
+#[cfg(feature = "parallel")]
 fn run_par(polys: &[&Polygon<f64>], cfg: &MakeValidConfig) -> f64 {
     let t0 = Instant::now();
     let _ = par_fix_polygon_batch(polys, cfg);
     t0.elapsed().as_secs_f64()
+}
+
+#[cfg(not(feature = "parallel"))]
+fn run_par(_polys: &[&Polygon<f64>], _cfg: &MakeValidConfig) -> f64 {
+    0.0
 }
 
 fn run_line_ser(items: &[Geometry<f64>], cfg: &MakeValidConfig) -> f64 {
@@ -70,6 +77,7 @@ fn run_line_ser(items: &[Geometry<f64>], cfg: &MakeValidConfig) -> f64 {
     t0.elapsed().as_secs_f64()
 }
 
+#[cfg(feature = "parallel")]
 fn run_line_par(items: &[Geometry<f64>], cfg: &MakeValidConfig) -> f64 {
     use rayon::prelude::*;
     let t0 = Instant::now();
@@ -78,6 +86,11 @@ fn run_line_par(items: &[Geometry<f64>], cfg: &MakeValidConfig) -> f64 {
         .map(|g| g.make_valid_with_config(cfg))
         .collect();
     t0.elapsed().as_secs_f64()
+}
+
+#[cfg(not(feature = "parallel"))]
+fn run_line_par(_items: &[Geometry<f64>], _cfg: &MakeValidConfig) -> f64 {
+    0.0
 }
 
 fn make_line(coords: [(f64, f64); 2]) -> Geometry<f64> {

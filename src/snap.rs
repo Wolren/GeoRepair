@@ -5,7 +5,7 @@
 
 use geo::{Coord, Line};
 
-const DEFAULT_GRID: f64 = 1e-10;
+pub const DEFAULT_GRID: f64 = 1e-10;
 
 /// Snap a coordinate to a grid of the given resolution.
 #[inline]

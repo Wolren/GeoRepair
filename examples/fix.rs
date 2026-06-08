@@ -25,7 +25,8 @@
 //!   cargo run --release --example fix --features "load-shp" -- data.shp out.geojson --no-fix
 
 use geo::{Coord, Geometry, Polygon};
-use geo_repair::io::load;
+use geo_repair::io;
+#[cfg(feature = "parallel")]
 use geo_repair::parallel::par_fix_polygon_batch;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 use std::env;
@@ -82,11 +83,11 @@ fn write_geometry_json(f: &mut dyn Write, g: &Geometry<f64>) -> std::io::Result<
 
 fn load_polys(path: &str) -> Vec<Polygon<f64>> {
     if path.ends_with(".bin") {
-        load::load_bin(path).unwrap_or_else(|e| panic!("Failed to load {path}: {e}"))
+        io::load_bin(path).unwrap_or_else(|e| panic!("Failed to load {path}: {e}"))
     } else if path.ends_with(".shp") {
         #[cfg(feature = "load-shp")]
         {
-            load::load_shp(path)
+            io::load_shp(path).unwrap_or_else(|e| panic!("Failed to load {path}: {e}"))
         }
         #[cfg(not(feature = "load-shp"))]
         {
@@ -154,8 +155,8 @@ fn print_diagnose(polys: &[Polygon<f64>], fixed: &[Geometry<f64>], indices: &[us
         }
         eprintln!(
             "  Our area: {:.0}  Output polys: {}",
-            load::geo_area(&our),
-            load::count_sub_polys(&our)
+            io::geo_area(&our),
+            io::count_sub_polys(&our)
         );
         use geo::validation::Validation;
         eprintln!("  OGC valid: {:?}", our.check_validation().is_ok());
@@ -325,7 +326,13 @@ fn main() {
         };
         let subset: Vec<&Polygon<f64>> = active_indices.iter().map(|&i| &polys[i]).collect();
         let t0 = Instant::now();
+        #[cfg(feature = "parallel")]
         let results = par_fix_polygon_batch(&subset, &cfg);
+        #[cfg(not(feature = "parallel"))]
+        let results: Vec<Geometry<f64>> = subset
+            .iter()
+            .map(|p| p.make_valid_with_config(&cfg))
+            .collect();
         eprintln!(
             "  Fixed {} polys in {:.3}s ({:.1}µs/poly)",
             subset.len(),
@@ -379,8 +386,8 @@ fn main() {
                 write!(f, ",").unwrap();
             }
             let g = &fixed[pos];
-            let input_area = load::polygon_area(&polys[actual_idx]);
-            let output_area = load::geo_area(g);
+            let input_area = io::polygon_area(&polys[actual_idx]);
+            let output_area = io::geo_area(g);
             let ratio = if input_area > 0.0 {
                 output_area / input_area
             } else {
@@ -413,7 +420,7 @@ fn main() {
         #[cfg(not(feature = "bench-geos"))]
         let valid: Vec<bool> = vec![true; fixed.len()];
         let crs_ref = crs.as_deref();
-        load::export_geojson(&polys, &fixed, &valid, &out_path, crs_ref).unwrap();
+        io::export_geojson(&polys, &fixed, &valid, &out_path, crs_ref).unwrap();
     }
     let meta = std::fs::metadata(&out_path).unwrap();
     eprintln!(

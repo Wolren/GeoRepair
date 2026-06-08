@@ -12,11 +12,13 @@ use geo::{
 use rstar::{RTree, RTreeObject, AABB};
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::orient::orient2d as orient2d_robust;
+
 // ── Sealed trait: safe f64 downcast ────────────────────────────────────
 //
-// Only f64 implements NodingFloat.  The unsafe `size_of` + transmute
-// dance is isolated to the dispatch boundary of the two public functions
-// below; inside the f64‑only helpers no transmutes appear.
+// Only f64 and f32 implement NodingFloat.  Inside the f64‑only helpers no
+// unsafe code appears — safe `.to_f64()` conversions are used at the
+// dispatch boundary.
 
 mod private {
     use geo::{Coord, GeoFloat};
@@ -39,12 +41,12 @@ mod private {
     }
 }
 
-use private::NodingFloat;
+pub(crate) use private::NodingFloat;
 
 /// Node a line string by removing repeated points and splitting at
 /// self-intersections. Returns a MultiLineString if splitting occurred,
 /// or a single LineString otherwise.
-pub(crate) fn node_line_string<T: GeoFloat>(ls: &LineString<T>) -> Geometry<T> {
+pub(crate) fn node_line_string<T: NodingFloat>(ls: &LineString<T>) -> Geometry<T> {
     let coords: Vec<Coord<T>> =
         ls.0.iter()
             .copied()
@@ -90,13 +92,27 @@ fn check_self_intersections<T: GeoFloat>(edges: &[Line<T>]) -> bool {
         return false;
     }
 
-    // f64 path: single transmute at dispatch boundary
-    if mem::size_of::<T>() == 8 {
-        let edges_f64: &[Line<f64>] = unsafe { mem::transmute(edges) };
-        return check_self_intersections_f64(edges_f64, 1e-12);
+    // R‑tree path for large edge sets (safe conversion, no transmute)
+    if edges.len() >= 64 {
+        let edges_f64: Vec<Line<f64>> = edges
+            .iter()
+            .map(|l| {
+                Line::new(
+                    Coord {
+                        x: l.start.x.to_f64().unwrap(),
+                        y: l.start.y.to_f64().unwrap(),
+                    },
+                    Coord {
+                        x: l.end.x.to_f64().unwrap(),
+                        y: l.end.y.to_f64().unwrap(),
+                    },
+                )
+            })
+            .collect();
+        return check_self_intersections_f64(&edges_f64, 1e-12);
     }
 
-    // Generic fallback: brute force for non-f64 types
+    // Generic fallback: brute force for smaller edge sets
     for i in 0..edges.len() {
         for j in (i + 2)..edges.len() {
             if edges_intersect(&edges[i], &edges[j], eps) {
@@ -169,6 +185,33 @@ fn check_self_intersections_f64(edges: &[Line<f64>], eps: f64) -> bool {
 }
 
 fn edges_intersect<T: GeoFloat>(e1: &Line<T>, e2: &Line<T>, eps: T) -> bool {
+    // For f64, use robust orient2d (Shewchuk's algorithm)
+    // to avoid false negatives with near-collinear edges at large coordinates.
+    if mem::size_of::<T>() == 8 {
+        return edges_intersect_f64_robust(
+            &Line::new(
+                Coord {
+                    x: e1.start.x.to_f64().unwrap(),
+                    y: e1.start.y.to_f64().unwrap(),
+                },
+                Coord {
+                    x: e1.end.x.to_f64().unwrap(),
+                    y: e1.end.y.to_f64().unwrap(),
+                },
+            ),
+            &Line::new(
+                Coord {
+                    x: e2.start.x.to_f64().unwrap(),
+                    y: e2.start.y.to_f64().unwrap(),
+                },
+                Coord {
+                    x: e2.end.x.to_f64().unwrap(),
+                    y: e2.end.y.to_f64().unwrap(),
+                },
+            ),
+            eps.to_f64().unwrap(),
+        );
+    }
     let o1 = orient2d_generic(e1.start, e1.end, e2.start);
     let o2 = orient2d_generic(e1.start, e1.end, e2.end);
     let o3 = orient2d_generic(e2.start, e2.end, e1.start);
@@ -185,6 +228,24 @@ fn edges_intersect<T: GeoFloat>(e1: &Line<T>, e2: &Line<T>, eps: T) -> bool {
     }
 
     // Endpoint touching — not considered an intersection for noding purposes
+    false
+}
+
+/// Robust intersection test for f64 edges using Shewchuk's orient2d.
+fn edges_intersect_f64_robust(e1: &Line<f64>, e2: &Line<f64>, eps: f64) -> bool {
+    let o1 = orient2d_robust(e1.start, e1.end, e2.start);
+    let o2 = orient2d_robust(e1.start, e1.end, e2.end);
+    let o3 = orient2d_robust(e2.start, e2.end, e1.start);
+    let o4 = orient2d_robust(e2.start, e2.end, e1.end);
+
+    if o1.abs() > eps && o2.abs() > eps && o3.abs() > eps && o4.abs() > eps {
+        return o1.signum() != o2.signum() && o3.signum() != o4.signum();
+    }
+
+    if o1.abs() <= eps && o2.abs() <= eps && o3.abs() <= eps && o4.abs() <= eps {
+        return collinear_overlap(e1, e2, eps);
+    }
+
     false
 }
 
@@ -223,11 +284,25 @@ fn split_edges_at_intersections<T: GeoFloat>(edges: &[Line<T>]) -> Vec<Line<T>> 
     let one = T::one();
     let zero = T::zero();
 
-    if n >= 64 && mem::size_of::<T>() == 8 {
-        // f64 R‑tree path: single transmute at dispatch boundary
-        let edges_f64: &[Line<f64>] = unsafe { mem::transmute(edges) };
+    if n >= 64 {
+        // R‑tree path: safe conversion, no transmute
+        let edges_f64: Vec<Line<f64>> = edges
+            .iter()
+            .map(|l| {
+                Line::new(
+                    Coord {
+                        x: l.start.x.to_f64().unwrap(),
+                        y: l.start.y.to_f64().unwrap(),
+                    },
+                    Coord {
+                        x: l.end.x.to_f64().unwrap(),
+                        y: l.end.y.to_f64().unwrap(),
+                    },
+                )
+            })
+            .collect();
         let mut split_f64: Vec<Vec<f64>> = vec![Vec::new(); n];
-        split_edges_rtree(edges_f64, &mut split_f64, 1e-12);
+        split_edges_rtree(&edges_f64, &mut split_f64, 1e-12);
         for i in 0..n {
             for &t in &split_f64[i] {
                 split_points[i].push(T::from(t).unwrap());
@@ -353,8 +428,8 @@ fn split_edges_rtree(edges: &[Line<f64>], split_points: &mut [Vec<f64>], eps: f6
             }
 
             // Collinear overlap (even shared-vertex pairs can overlap)
-            let o1 = orient2d_generic(edges[i].start, edges[i].end, edges[j].start);
-            let o2 = orient2d_generic(edges[i].start, edges[i].end, edges[j].end);
+            let o1 = orient2d_robust(edges[i].start, edges[i].end, edges[j].start);
+            let o2 = orient2d_robust(edges[i].start, edges[i].end, edges[j].end);
             if o1.abs() <= eps && o2.abs() <= eps {
                 let (p1, p2) = collinear_split_params(&edges[i], &edges[j], eps);
                 for &t in &p1 {
@@ -471,7 +546,8 @@ fn compute_intersection_param<T: GeoFloat>(
 }
 
 /// Reconnect split edges into continuous linestrings by chaining touching edges.
-fn reconnect_edges<T: GeoFloat>(edges: Vec<Line<T>>) -> Vec<LineString<T>> {
+/// Uses the O(n) HashMap-based approach directly (no transmutes).
+fn reconnect_edges<T: NodingFloat>(edges: Vec<Line<T>>) -> Vec<LineString<T>> {
     let n = edges.len();
     if n == 0 {
         return Vec::new();
@@ -479,53 +555,7 @@ fn reconnect_edges<T: GeoFloat>(edges: Vec<Line<T>>) -> Vec<LineString<T>> {
     if n == 1 {
         return vec![LineString::new(vec![edges[0].start, edges[0].end])];
     }
-
-    // f64 path: transmute via size check
-    if mem::size_of::<T>() == 8 {
-        let e_f64: Vec<Line<f64>> = unsafe { mem::transmute(edges) };
-        let r = reconnect_edges_by_key(e_f64);
-        return unsafe { mem::transmute(r) };
-    }
-
-    // f32 path: same HashMap approach
-    if mem::size_of::<T>() == 4 {
-        let e_f32: Vec<Line<f32>> = unsafe { mem::transmute(edges) };
-        let r = reconnect_edges_by_key(e_f32);
-        return unsafe { mem::transmute(r) };
-    }
-
-    // Generic fallback: O(n²) for unknown types
-    let mut remaining: Vec<Line<T>> = edges;
-    let mut result = Vec::new();
-    while !remaining.is_empty() {
-        let mut chain: Vec<Coord<T>> = Vec::new();
-        let first = remaining.swap_remove(0);
-        chain.push(first.start);
-        chain.push(first.end);
-
-        let mut changed = true;
-        while changed {
-            changed = false;
-            for i in (0..remaining.len()).rev() {
-                let last = *chain.last().unwrap();
-                if remaining[i].start == last {
-                    chain.push(remaining[i].end);
-                    remaining.swap_remove(i);
-                    changed = true;
-                } else if remaining[i].end == last {
-                    chain.push(remaining[i].start);
-                    remaining.swap_remove(i);
-                    changed = true;
-                }
-            }
-        }
-
-        if chain.len() >= 2 {
-            result.push(LineString::new(chain));
-        }
-    }
-
-    result
+    reconnect_edges_by_key(edges)
 }
 
 /// O(n) chain reconstruction via HashMap from endpoint → edge index.

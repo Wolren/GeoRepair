@@ -3,7 +3,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::core::MakeValidError;
-use crate::orient::{orient2d, orient2d_fast};
+use crate::orient::orient2d;
 use crate::snap;
 use geo::{Coord, Line};
 use rstar::{RTree, RTreeObject, AABB};
@@ -249,10 +249,10 @@ fn rec_overlaps(
         }
         let li = &lines[i];
         let lj = &lines[j];
-        let o1 = orient2d_fast(li.start, li.end, lj.start);
-        let o2 = orient2d_fast(li.start, li.end, lj.end);
-        let o3 = orient2d_fast(lj.start, lj.end, li.start);
-        let o4 = orient2d_fast(lj.start, lj.end, li.end);
+        let o1 = orient2d(li.start, li.end, lj.start);
+        let o2 = orient2d(li.start, li.end, lj.end);
+        let o3 = orient2d(lj.start, lj.end, li.start);
+        let o4 = orient2d(lj.start, lj.end, li.end);
         return (o1 > 0.0) != (o2 > 0.0) && (o3 > 0.0) != (o4 > 0.0);
     }
 
@@ -339,21 +339,21 @@ pub(crate) fn has_no_intersections(lines: &[Line<f64>]) -> bool {
         .collect();
     let tree = RTree::bulk_load(envs);
 
-    let do_parallel = nc >= 200;
+    let _do_parallel = nc >= 200;
 
-    #[cfg(feature = "parallel")]
-    if do_parallel {
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    if _do_parallel {
         use rayon::prelude::*;
         use std::ops::ControlFlow;
         let found = AtomicBool::new(false);
         (0..nc).into_par_iter().for_each(|i| {
-            if found.load(Ordering::Relaxed) {
+            if found.load(Ordering::Acquire) {
                 return;
             }
             let mc1 = &chains[i];
             let q = AABB::from_corners([mc1.min_x, mc1.min_y], [mc1.max_x, mc1.max_y]);
             let res = tree.locate_in_envelope_intersecting_int(&q, |c| {
-                if found.load(Ordering::Relaxed) {
+                if found.load(Ordering::Acquire) {
                     return ControlFlow::Break(());
                 }
                 let j = c.idx;
@@ -361,17 +361,17 @@ pub(crate) fn has_no_intersections(lines: &[Line<f64>]) -> bool {
                     return ControlFlow::Continue(());
                 }
                 if compute_overlaps(lines, mc1, &chains[j]) {
-                    found.store(true, Ordering::Relaxed);
+                    found.store(true, Ordering::Release);
                     ControlFlow::Break(())
                 } else {
                     ControlFlow::Continue(())
                 }
             });
-            if res.is_break() && !found.load(Ordering::Relaxed) {
-                found.store(true, Ordering::Relaxed);
+            if res.is_break() && !found.load(Ordering::Acquire) {
+                found.store(true, Ordering::Release);
             }
         });
-        return !found.load(Ordering::Relaxed);
+        return !found.load(Ordering::Acquire);
     }
 
     use std::ops::ControlFlow;

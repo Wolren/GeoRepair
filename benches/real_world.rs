@@ -16,12 +16,13 @@ use std::io::Write;
 use std::path::Path;
 use std::time::Instant;
 
-use geo::{Coord, Polygon};
+use geo::{Coord, Geometry, Polygon};
 use geo_repair::arrange::validate_polygon;
 use geo_repair::io::load_bin;
 #[cfg(feature = "load-shp")]
 use geo_repair::io::load_shp;
 use geo_repair::orient::orient2d;
+#[cfg(feature = "parallel")]
 use geo_repair::parallel::par_fix_polygon_batch;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 #[cfg(feature = "bench-geos")]
@@ -154,7 +155,7 @@ fn load_polys(path: &str) -> Vec<Polygon<f64>> {
         .unwrap_or("");
     match ext {
         #[cfg(feature = "load-shp")]
-        "shp" => load_shp(path),
+        "shp" => load_shp(path).unwrap(),
         "bin" => load_bin(path).unwrap_or_else(|e| {
             panic!("Failed to load {path}: {e}");
         }),
@@ -302,8 +303,13 @@ fn main() {
         poly_method: PolyMethod::Structure,
         ..Default::default()
     };
-    #[allow(unused_variables)]
+    #[cfg(feature = "parallel")]
     let results = par_fix_polygon_batch(&invalid_polys, &cfg);
+    #[cfg(not(feature = "parallel"))]
+    let results: Vec<Geometry<f64>> = invalid_polys
+        .iter()
+        .map(|p| p.make_valid_with_config(&cfg))
+        .collect();
     let stru_total = t0.elapsed().as_secs_f64();
 
     // Pre-compute WKT once for all results and input polys
@@ -370,7 +376,13 @@ fn main() {
         ..Default::default()
     };
     let all_polys: Vec<&Polygon<f64>> = (0..full_n).map(|i| &polys[i]).collect();
+    #[cfg(feature = "parallel")]
     let _full_results = par_fix_polygon_batch(&all_polys, &cfg);
+    #[cfg(not(feature = "parallel"))]
+    let _full_results: Vec<Geometry<f64>> = all_polys
+        .iter()
+        .map(|p| p.make_valid_with_config(&cfg))
+        .collect();
     let full_stru = t0.elapsed().as_secs_f64();
 
     let (geos_setup, full_geos, full_geos_total): (f64, f64, f64);

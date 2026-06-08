@@ -4,7 +4,7 @@ use geo::{
 };
 
 use crate::core::{MakeValidConfig, PolyMethod};
-use crate::noding::{node_line_string, remove_consecutive_duplicates};
+use crate::noding::{node_line_string, remove_consecutive_duplicates, NodingFloat};
 use crate::validation::{GeoValidation, ValidationResult};
 use log::warn;
 
@@ -17,7 +17,7 @@ pub trait MakeValid {
 
     fn make_valid_with_config(&self, config: &MakeValidConfig) -> Geometry<Self::Scalar>;
 
-    #[cfg(feature = "parallel")]
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     fn par_make_valid(&self) -> Geometry<Self::Scalar>
     where
         Self: Send + Sync,
@@ -25,7 +25,7 @@ pub trait MakeValid {
         self.par_make_valid_with_config(&MakeValidConfig::default())
     }
 
-    #[cfg(feature = "parallel")]
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     fn par_make_valid_with_config(&self, _config: &MakeValidConfig) -> Geometry<Self::Scalar>
     where
         Self: Send + Sync,
@@ -102,10 +102,10 @@ impl<T: GeoFloat> MakeValid for Line<T> {
 // LineString
 // ---------------------------------------------------------------------------
 
-impl<T: GeoFloat> MakeValid for LineString<T> {
+impl<T: NodingFloat> MakeValid for LineString<T> {
     type Scalar = T;
 
-    fn make_valid_with_config(&self, config: &MakeValidConfig) -> Geometry<T> {
+    fn make_valid_with_config(&self, _config: &MakeValidConfig) -> Geometry<T> {
         let coords: Vec<Coord<T>> = self
             .0
             .iter()
@@ -116,11 +116,11 @@ impl<T: GeoFloat> MakeValid for LineString<T> {
             return empty_geom();
         }
         let deduped = remove_consecutive_duplicates(&coords);
-        if deduped.len() < 2 {
-            if config.keep_collapsed && deduped.len() == 1 {
-                return Geometry::Point(Point(deduped[0]));
-            }
+        if deduped.is_empty() {
             return empty_geom();
+        }
+        if deduped.len() == 1 {
+            return Geometry::Point(Point(deduped[0]));
         }
         node_line_string(&LineString::new(deduped))
     }
@@ -130,23 +130,46 @@ impl<T: GeoFloat> MakeValid for LineString<T> {
 // MultiLineString
 // ---------------------------------------------------------------------------
 
-impl<T: GeoFloat> MakeValid for MultiLineString<T> {
+impl<T: NodingFloat> MakeValid for MultiLineString<T> {
     type Scalar = T;
 
     fn make_valid_with_config(&self, config: &MakeValidConfig) -> Geometry<T> {
-        let lines: Vec<LineString<T>> = self
-            .0
-            .iter()
-            .flat_map(|ls| match ls.make_valid_with_config(config) {
-                Geometry::LineString(ls) => vec![ls],
-                Geometry::MultiLineString(mls) => mls.0,
-                _ => Vec::new(),
-            })
-            .collect();
-        if lines.is_empty() {
-            empty_geom()
-        } else {
-            Geometry::MultiLineString(MultiLineString::new(lines))
+        let mut points: Vec<Point<T>> = Vec::new();
+        let mut lines: Vec<LineString<T>> = Vec::new();
+        for ls in &self.0 {
+            match ls.make_valid_with_config(config) {
+                Geometry::Point(p) => points.push(p),
+                Geometry::LineString(l) => lines.push(l),
+                Geometry::MultiLineString(mls) => lines.extend(mls.0),
+                _ => {}
+            }
+        }
+        match (points.len(), lines.len()) {
+            (0, 0) => empty_geom(),
+            (_, 0) => {
+                if points.len() == 1 {
+                    Geometry::Point(points.into_iter().next().unwrap())
+                } else {
+                    Geometry::MultiPoint(MultiPoint::new(points))
+                }
+            }
+            (0, _) => {
+                if lines.len() == 1 {
+                    Geometry::LineString(lines.into_iter().next().unwrap())
+                } else {
+                    Geometry::MultiLineString(MultiLineString::new(lines))
+                }
+            }
+            _ => {
+                let mut geoms: Vec<Geometry<T>> =
+                    lines.into_iter().map(Geometry::LineString).collect();
+                if points.len() == 1 {
+                    geoms.push(Geometry::Point(points.into_iter().next().unwrap()));
+                } else {
+                    geoms.push(Geometry::MultiPoint(MultiPoint::new(points)));
+                }
+                Geometry::GeometryCollection(GeometryCollection(geoms))
+            }
         }
     }
 }
@@ -290,13 +313,14 @@ impl MakeValid for MultiPolygon<f64> {
             return empty_geom::<f64>();
         }
         if shells.len() == 1 {
+            // Safe: len==1 verified above on local Vec
             return Geometry::Polygon(shells.into_iter().next().unwrap());
         }
         let mp = MultiPolygon::new(shells);
         Geometry::MultiPolygon(geo::algorithm::bool_ops::unary_union(&mp))
     }
 
-    #[cfg(feature = "parallel")]
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     fn par_make_valid_with_config(&self, config: &MakeValidConfig) -> Geometry<f64> {
         crate::parallel::par_fix_multi_polygon(self, config)
     }
@@ -311,7 +335,7 @@ impl MakeValid for Geometry<f64> {
     type Scalar = f64;
 
     fn make_valid_with_config(&self, config: &MakeValidConfig) -> Geometry<f64> {
-        match self {
+        let geom = match self {
             Geometry::Point(g) => g.make_valid_with_config(config),
             Geometry::Line(g) => g.make_valid_with_config(config),
             Geometry::LineString(g) => g.make_valid_with_config(config),
@@ -322,12 +346,13 @@ impl MakeValid for Geometry<f64> {
             Geometry::GeometryCollection(g) => g.make_valid_with_config(config),
             Geometry::Rect(g) => g.make_valid_with_config(config),
             Geometry::Triangle(g) => g.make_valid_with_config(config),
-        }
+        };
+        apply_target_crs(geom, config)
     }
 
-    #[cfg(feature = "parallel")]
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     fn par_make_valid_with_config(&self, config: &MakeValidConfig) -> Geometry<f64> {
-        match self {
+        let geom = match self {
             Geometry::Point(g) => g.par_make_valid_with_config(config),
             Geometry::Line(g) => g.par_make_valid_with_config(config),
             Geometry::LineString(g) => g.par_make_valid_with_config(config),
@@ -338,8 +363,23 @@ impl MakeValid for Geometry<f64> {
             Geometry::GeometryCollection(g) => g.par_make_valid_with_config(config),
             Geometry::Rect(g) => g.par_make_valid_with_config(config),
             Geometry::Triangle(g) => g.par_make_valid_with_config(config),
+        };
+        apply_target_crs(geom, config)
+    }
+}
+
+/// Post-repair: transform to target CRS if configured.
+fn apply_target_crs(geom: Geometry<f64>, _config: &MakeValidConfig) -> Geometry<f64> {
+    #[cfg(feature = "proj")]
+    if let (Some(ref src_crs), Some(ref dst_crs)) = (&config.crs, &config.target_crs) {
+        if src_crs != dst_crs {
+            match crate::crs::transform_geometry(&geom, src_crs, dst_crs) {
+                Ok(g) => return g,
+                Err(e) => log::warn!("CRS transform failed (keeping original): {e}"),
+            }
         }
     }
+    geom
 }
 
 #[cfg(not(any(feature = "arrange", feature = "structure")))]
@@ -408,7 +448,7 @@ impl MakeValid for GeometryCollection<f64> {
         }
     }
 
-    #[cfg(feature = "parallel")]
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     fn par_make_valid_with_config(&self, config: &MakeValidConfig) -> Geometry<f64> {
         crate::parallel::par_fix_collection(self, config)
     }
