@@ -1,9 +1,13 @@
+#![cfg_attr(feature = "simd-portable", feature(portable_simd))]
 pub mod core;
+pub mod crs;
+pub mod feature;
 pub mod io;
 pub mod make_valid;
 pub mod orient;
 pub mod snap;
 pub mod validation;
+pub mod zm;
 
 #[cfg(feature = "arrange")]
 pub mod arrange;
@@ -13,16 +17,22 @@ pub mod structure;
 
 #[cfg(feature = "ffi")]
 pub mod ffi;
-#[cfg(feature = "parallel")]
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 pub mod parallel;
 #[cfg(feature = "simd")]
 pub mod simd;
 
 pub use core::{MakeValidConfig, MakeValidError, PolyMethod};
-pub use io::load_geometries;
+pub use crs::Crs;
+pub use feature::Feature;
+pub use io::{
+    export_features, export_geometries, export_geometries_with_crs, load_features, load_geometries,
+    load_geometries_with_crs,
+};
 pub use make_valid::MakeValid;
 #[cfg(any(feature = "arrange", feature = "structure"))]
 pub use make_valid::ValidateAndFix;
+pub use snap::{snap_coord, snap_coord_default, snap_line, snap_lines, DEFAULT_GRID};
 pub use validation::{GeoValidation, GeometryValidationError, ValidationResult};
 
 #[cfg(feature = "mimalloc")]

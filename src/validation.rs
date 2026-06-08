@@ -46,6 +46,12 @@ pub enum GeometryValidationError {
     #[error("Geometry contains duplicate rings")]
     DuplicatedRings,
 
+    #[error("MultiPoint contains duplicate points")]
+    MultiPointDuplicatePoints,
+
+    #[error("MultiLineString contains duplicate linestrings")]
+    MultiLineStringDuplicateLines,
+
     #[error("Line has zero length (start == end at {0:?})")]
     ZeroLengthLine(Coord<f64>),
 
@@ -564,6 +570,18 @@ impl GeoValidation for MultiPoint<f64> {
                 errors.extend(r.errors);
             }
         }
+        // OGC Simple Features: MultiPoint must not contain duplicate points
+        if self.0.len() > 1 {
+            let mut seen: rustc_hash::FxHashSet<(u64, u64)> =
+                rustc_hash::FxHashSet::with_capacity_and_hasher(self.0.len(), Default::default());
+            for p in &self.0 {
+                let key = (p.x().to_bits(), p.y().to_bits());
+                if !seen.insert(key) {
+                    errors.push(GeometryValidationError::MultiPointDuplicatePoints);
+                    break;
+                }
+            }
+        }
         if errors.is_empty() {
             ValidationResult::valid()
         } else {
@@ -645,6 +663,20 @@ impl GeoValidation for MultiLineString<f64> {
             let r = ls.validate();
             if !r.valid {
                 errors.extend(r.errors);
+            }
+        }
+        // OGC Simple Features: MultiLineString must not contain duplicate linestrings
+        if self.0.len() > 1 {
+            for i in 0..self.0.len() {
+                for j in (i + 1)..self.0.len() {
+                    if self.0[i].0 == self.0[j].0 {
+                        errors.push(GeometryValidationError::MultiLineStringDuplicateLines);
+                        // Report only once
+                        if !errors.is_empty() {
+                            return ValidationResult::invalid(errors);
+                        }
+                    }
+                }
             }
         }
         // Cross-component intersection check

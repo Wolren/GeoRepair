@@ -5,18 +5,19 @@
 
 #![cfg(feature = "bench-geos")]
 
-use geo::Polygon;
-use geo_repair::io::load::{geo_area, signed_area};
+use geo::{Geometry, Polygon};
 #[cfg(feature = "load-shp")]
 use geo_repair::io::load_shp;
+use geo_repair::io::{geo_area, signed_area};
+#[cfg(feature = "parallel")]
 use geo_repair::parallel::par_fix_polygon_batch;
-use geo_repair::{MakeValidConfig, PolyMethod};
+use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 use geos::Geom;
 use wkt::ToWkt;
 
 #[test]
 fn alaska_all_polys_geos_valid_and_area_preserved() {
-    let polys = load_shp("benches/real_world/alaska.shp");
+    let polys = load_shp("benches/real_world/alaska.shp").unwrap();
     eprintln!("Total Alaska polys loaded: {}", polys.len());
 
     let cfg = MakeValidConfig {
@@ -24,7 +25,13 @@ fn alaska_all_polys_geos_valid_and_area_preserved() {
         ..Default::default()
     };
     let all_refs: Vec<&Polygon<f64>> = polys.iter().collect();
+    #[cfg(feature = "parallel")]
     let results = par_fix_polygon_batch(&all_refs, &cfg);
+    #[cfg(not(feature = "parallel"))]
+    let results: Vec<Geometry<f64>> = all_refs
+        .iter()
+        .map(|p| p.make_valid_with_config(&cfg))
+        .collect();
 
     let mut total_invalid = 0usize;
     let mut area_failures = 0usize;

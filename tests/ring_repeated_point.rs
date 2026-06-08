@@ -88,7 +88,11 @@ fn test_all_repeated_points_becomes_empty() {
         Coord { x: 0.0, y: 0.0 },
     ]);
     let result = ls.make_valid_with_config(&cfg_auto());
-    assert!(matches!(result, Geometry::GeometryCollection(gc) if gc.0.is_empty()));
+    assert_eq!(
+        result,
+        Geometry::Point(Point::new(0.0, 0.0)),
+        "all-repeated points collapse to Point (GEOS compat)"
+    );
 }
 
 // ---------------------------------------------------------------------------

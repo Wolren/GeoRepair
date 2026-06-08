@@ -4,7 +4,7 @@ pub(crate) fn classify_holes(
     shell: &LineString<f64>,
     holes: &[LineString<f64>],
 ) -> (Vec<LineString<f64>>, Vec<LineString<f64>>) {
-    #[cfg(feature = "parallel")]
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     {
         use rayon::prelude::*;
         let shell_bbox = bbox(shell);
@@ -32,7 +32,7 @@ pub(crate) fn classify_holes(
         }
         (inner, outer)
     }
-    #[cfg(not(feature = "parallel"))]
+    #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
     {
         let mut inner = Vec::new();
         let mut outer = Vec::new();

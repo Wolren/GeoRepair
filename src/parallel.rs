@@ -5,6 +5,7 @@ use rayon::prelude::*;
 
 use crate::core::MakeValidConfig;
 use crate::make_valid::MakeValid;
+use crate::noding::NodingFloat;
 
 pub fn par_fix_multi_point<T: GeoFloat + Send + Sync>(
     mp: &MultiPoint<T>,
@@ -29,7 +30,7 @@ pub fn par_fix_multi_point<T: GeoFloat + Send + Sync>(
     }
 }
 
-pub fn par_fix_multi_line_string<T: GeoFloat + Send + Sync>(
+pub fn par_fix_multi_line_string<T: NodingFloat + Send + Sync>(
     mls: &MultiLineString<T>,
     config: &MakeValidConfig,
 ) -> Geometry<T> {
@@ -70,6 +71,7 @@ pub fn par_fix_multi_polygon(mp: &MultiPolygon<f64>, config: &MakeValidConfig) -
         return Geometry::GeometryCollection(GeometryCollection(Vec::new()));
     }
     if shells.len() == 1 {
+        // Safe: len==1 verified above on local Vec
         return Geometry::Polygon(shells.into_iter().next().unwrap());
     }
     let mp = MultiPolygon::new(shells);

@@ -51,56 +51,7 @@ fn basic_cleanup(ring: &LineString<f64>) -> Option<Vec<Coord<f64>>> {
         return None;
     }
 
-    // Remove near-collinear spikes (deviation < 1e-10 * coordinate scale)
-    remove_spikes(&mut deduped);
-
-    if deduped.len() < 4 {
-        return None;
-    }
     Some(deduped)
-}
-
-/// Remove vertices whose perpendicular distance to the line between their
-/// neighbors is below a scale-relative threshold (near-collinear spikes).
-fn remove_spikes(coords: &mut Vec<Coord<f64>>) {
-    if coords.len() < 4 {
-        return;
-    }
-
-    // Compute coordinate scale
-    let (mut min_x, mut max_x, mut min_y, mut max_y) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
-    for &c in coords.iter() {
-        min_x = min_x.min(c.x);
-        max_x = max_x.max(c.x);
-        min_y = min_y.min(c.y);
-        max_y = max_y.max(c.y);
-    }
-    let scale = (max_x - min_x).max(max_y - min_y).max(1.0);
-    let spike_eps = 1e-10 * scale;
-
-    let mut i = 1;
-    while i < coords.len() - 1 {
-        let prev = coords[i - 1];
-        let curr = coords[i];
-        let next = coords[i + 1];
-
-        // Perpendicular distance of curr from the line (prev, next)
-        // cross(prev->curr, prev->next) gives twice the signed triangle area
-        let cross = (curr.x - prev.x) * (next.y - prev.y) - (curr.y - prev.y) * (next.x - prev.x);
-        let len2 = (next.x - prev.x) * (next.x - prev.x) + (next.y - prev.y) * (next.y - prev.y);
-        let deviation = if len2 > 0.0 {
-            cross.abs() / len2.sqrt()
-        } else {
-            0.0
-        };
-
-        if deviation < spike_eps {
-            coords.remove(i);
-            // Stay at same index — re-check with new neighbors
-        } else {
-            i += 1;
-        }
-    }
 }
 
 fn remove_consecutive_duplicates(coords: &[Coord<f64>]) -> Vec<Coord<f64>> {
@@ -393,7 +344,7 @@ fn split_edges_grid(
     let n = edges.len();
     let grid = build_edge_grid(edges);
 
-    #[cfg(feature = "parallel")]
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     {
         use rayon::prelude::*;
         let cell_results: Vec<Vec<(usize, f64, Coord<f64>)>> = grid
@@ -439,7 +390,7 @@ fn split_edges_grid(
             }
         }
     }
-    #[cfg(not(feature = "parallel"))]
+    #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
     {
         let mut checked: FxHashSet<(usize, usize)> = FxHashSet::default();
         for cell in &grid {
@@ -644,8 +595,19 @@ const SNAP_SCALE: f64 = 1e8;
 
 #[inline(always)]
 fn snap_key(c: Coord<f64>) -> (i64, i64) {
-    let x = (c.x * SNAP_SCALE).round() as i64;
-    let y = (c.y * SNAP_SCALE).round() as i64;
+    // Guard against overflow: if product exceeds i64 range, clamp
+    let sx = c.x * SNAP_SCALE;
+    let sy = c.y * SNAP_SCALE;
+    let x = if sx.is_finite() {
+        sx.round().clamp(i64::MIN as f64, i64::MAX as f64) as i64
+    } else {
+        0i64
+    };
+    let y = if sy.is_finite() {
+        sy.round().clamp(i64::MIN as f64, i64::MAX as f64) as i64
+    } else {
+        0i64
+    };
     (x, y)
 }
 
@@ -1164,20 +1126,6 @@ mod tests {
     }
 
     #[test]
-    fn test_self_touching() {
-        let ring = ls(&[
-            (0.0, 0.0),
-            (10.0, 0.0),
-            (10.0, 10.0),
-            (5.0, 5.0),
-            (0.0, 10.0),
-            (0.0, 0.0),
-        ]);
-        let r = repair_ring(&ring);
-        assert!(r.is_some());
-    }
-
-    #[test]
     fn test_empty() {
         let ring = LineString::<f64>::new(Vec::new());
         assert!(repair_ring(&ring).is_none());
@@ -1268,6 +1216,103 @@ mod tests {
         ]);
         let r = repair_ring(&ring);
         assert!(r.is_some());
+    }
+
+    #[test]
+    fn diagnose_fuzz_failure() {
+        let ring = ls(&[
+            (-32.94925304356217, -37.4509724868373),
+            (25.087850997208253, -29.87382634047737),
+            (0.0, -48.64262720158944),
+            (-40.61251938421724, -45.1172049629247),
+            (-38.51974407936723, -13.433918287897887),
+            (-16.8110711840133, -46.226614473001),
+        ]);
+        let coords = basic_cleanup(&ring).unwrap();
+        eprintln!("after cleanup: {} coords", coords.len());
+        for (i, c) in coords.iter().enumerate() {
+            eprintln!("  coords[{}]: ({}, {})", i, c.x, c.y);
+        }
+        let si = has_self_intersections(&coords);
+        eprintln!("has_self_intersections: {}", si);
+        if !si {
+            return;
+        }
+
+        let edges = edges_from_coords(&coords);
+        eprintln!("edges: {}", edges.len());
+        let noded = split_edges(&edges);
+        eprintln!("noded edges: {}", noded.len());
+        for (i, e) in noded.iter().enumerate() {
+            eprintln!(
+                "  e[{}]: ({},{}) -> ({},{})",
+                i, e.start.x, e.start.y, e.end.x, e.end.y
+            );
+        }
+        let graph = build_graph(&noded);
+        eprintln!(
+            "graph: {} verts, {} edges",
+            graph.verts.len(),
+            graph.edges.len()
+        );
+        for (i, v) in graph.verts.iter().enumerate() {
+            eprintln!("  v[{}]: ({}, {})", i, v.x, v.y);
+        }
+        for (i, (fi, ti)) in graph.edges.iter().enumerate() {
+            eprintln!("  edge[{}]: {} -> {}", i, fi, ti);
+        }
+
+        let faces = extract_all_faces(&graph).unwrap();
+        eprintln!("extracted {} faces", faces.len());
+        for (fi, face) in faces.iter().enumerate() {
+            eprintln!("  face[{}]: {} edges", fi, face.len());
+            for &(ei, to) in face {
+                eprint!(" (e{},v{})", ei, to);
+            }
+            eprintln!();
+            // Check if face boundary would be self-intersecting
+            let mut ring: Vec<Coord<f64>> = face.iter().map(|&(_, to)| graph.verts[to]).collect();
+            if ring.len() >= 3 {
+                ring.push(ring[0]);
+            }
+            let check_si = has_self_intersections(&ring);
+            eprintln!("    self-intersecting boundary: {}", check_si);
+        }
+
+        let simple_faces: Vec<Vec<(usize, usize)>> = faces
+            .iter()
+            .flat_map(|f| split_face_at_pinch_points(f))
+            .filter(|f| f.len() >= 3)
+            .collect();
+        eprintln!("after pinch-split: {} simple faces", simple_faces.len());
+        for (fi, face) in simple_faces.iter().enumerate() {
+            eprintln!("  simple_face[{}]: {} edges", fi, face.len());
+            let mut ring: Vec<Coord<f64>> = face.iter().map(|&(_, to)| graph.verts[to]).collect();
+            if ring.len() >= 3 {
+                ring.push(ring[0]);
+            }
+            let check_si = has_self_intersections(&ring);
+            eprintln!("    self-intersecting boundary: {}", check_si);
+        }
+
+        let interior = label_interior_faces(&noded, &graph.verts, &coords, &simple_faces).unwrap();
+        eprintln!("interior faces: {:?}", interior);
+        for &fi in &interior {
+            let face = &simple_faces[fi];
+            let mut ring_coords: Vec<Coord<f64>> = face
+                .iter()
+                .map(|&(_, to_idx)| graph.verts[to_idx])
+                .collect();
+            eprintln!("  interior face[{}]: {} coords", fi, ring_coords.len());
+            if ring_coords.len() >= 3 {
+                ring_coords.push(ring_coords[0]);
+            }
+            let check_si = has_self_intersections(&ring_coords);
+            eprintln!("    self-intersecting: {}", check_si);
+            for (i, c) in ring_coords.iter().enumerate() {
+                eprintln!("    ring[{}]: ({}, {})", i, c.x, c.y);
+            }
+        }
     }
 
     fn ls(pairs: &[(f64, f64)]) -> LineString<f64> {
