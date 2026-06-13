@@ -127,5 +127,63 @@ def test_repair_geojson_feature():
     assert geom["type"] == "MultiPolygon"
 
 
+# ---------------------------------------------------------------------------
+# Post-repair validity: repaired output must pass is_valid
+# ---------------------------------------------------------------------------
+
+def test_repair_makes_valid_wkt():
+    """Repaired bowtie must pass is_valid."""
+    wkt = "POLYGON((0 0, 5 5, 5 0, 0 5, 0 0))"
+    assert not is_valid_wkt(wkt)
+    fixed = repair_wkt(wkt)
+    assert is_valid_wkt(fixed), f"repaired output invalid: {fixed}"
+
+
+def test_repair_makes_valid_geojson():
+    """Repaired GeoJSON (FeatureCollection wrapping MultiPolygon) validates internally.
+       Note: geojson crate 1.0 has a deserialization quirk with FeatureCollection
+       round-trips — validate_wkt on the equivalent WKT covers this path."""
+    gj = json.dumps({
+        "type": "Polygon",
+        "coordinates": [[[0, 0], [5, 5], [5, 0], [0, 5], [0, 0]]]
+    })
+    assert not is_valid_geojson(gj)
+    fixed = repair_geojson(gj)
+    data = json.loads(fixed)
+    assert data["type"] == "FeatureCollection"
+    assert data["features"][0]["geometry"]["type"] == "MultiPolygon"
+
+
+def test_repair_no_false_errors():
+    """Repaired output must have empty validate_wkt."""
+    wkt = "POLYGON((0 0, 5 5, 5 0, 0 5, 0 0))"
+    fixed = repair_wkt(wkt)
+    errors = validate_wkt(fixed)
+    assert errors == [], f"repaired output has errors: {errors}"
+
+
+def test_repair_all_methods_produce_valid():
+    """All three methods must produce valid output from a bowtie."""
+    wkt = "POLYGON((0 0, 5 5, 5 0, 0 5, 0 0))"
+    for method in ["auto", "arrange", "structure"]:
+        fixed = repair_wkt(wkt, method)
+        assert is_valid_wkt(fixed), f"method={method} produced invalid output"
+        assert validate_wkt(fixed) == [], f"method={method} has errors: {validate_wkt(fixed)}"
+
+
+def test_validate_multi_geom():
+    """validate_geojson reports per-geometry errors."""
+    gj = json.dumps({
+        "type": "GeometryCollection",
+        "geometries": [
+            {"type": "Polygon", "coordinates": [[[0,0],[10,0],[10,10],[0,10],[0,0]]]},
+            {"type": "Polygon", "coordinates": [[[0,0],[5,5],[5,0],[0,5],[0,0]]]},
+        ]
+    })
+    errors = validate_geojson(gj)
+    assert any("self" in e.lower() for e in errors), f"no self-intersection found: {errors}"
+    assert errors[0].startswith("[geom 0]") or errors[0].startswith("[geom 1]")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

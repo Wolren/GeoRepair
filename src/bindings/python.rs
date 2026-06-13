@@ -55,7 +55,7 @@ fn repair_geojson(geojson_str: &str, method: Option<&str>) -> PyResult<String> {
                 bbox: None,
                 geometry: Some(geojson::Geometry::from(g)),
                 id: None,
-                properties: None,
+                properties: Some(serde_json::Map::new()),
                 foreign_members: None,
             })
             .collect(),
