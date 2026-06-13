@@ -322,27 +322,54 @@ only; Z/M are carried alongside and re-merged on export.
 | `proj` | CRS transformation support (placeholder) | no |
 | `serde` | Geometry serde support | no |
 | `ffi` | C-compatible FFI API (implies `io-wkb`) | no |
+| `python` | Python bindings via PyO3 + maturin | no |
 | `bench-geos` | GEOS comparison benchmarks | no |
 | `load-shp` | Shapefile loading | no |
 
-## FFI / Python
+## Python bindings
+
+```bash
+pip install geo_repair          # from PyPI (once published)
+# or build from source:
+pip install maturin
+python -m maturin build --features python
+pip install target/wheels/geo_repair-*.whl
+```
+
+```python
+import geo_repair
+
+# WKT input/output
+geo_repair.repair_wkt("POLYGON((0 0, 5 5, 5 0, 0 5, 0 0))")
+# -> 'MULTIPOLYGON(((0 5,0 0,2.5 2.5,0 5)),((5 5,2.5 2.5,5 0,5 5)))'
+
+# GeoJSON input/output (Feature, FeatureCollection, or bare Geometry)
+geo_repair.repair_geojson('{"type":"Polygon","coordinates":...}')
+
+# Choose method (auto, arrange, structure)
+geo_repair.repair_wkt("...", "structure")
+```
+
+## C FFI
 
 Enable the `ffi` feature for a C-compatible API using WKB:
 
 ```c
+#include "geo_repair.h"
+
 GeoRepairResult result = geo_repair_make_valid(wkb_data, wkb_len);
-geo_repair_free_result(result);
+if (result.success) {
+    // use result.wkb_data / result.wkb_len
+}
+geo_repair_free_result(&result);
 ```
 
-Meant for QGIS Python scripts and PyO3/maturin bindings.
+The `GeoRepairResult` struct and function signatures are in `src/bindings/ffi.rs`.
 
 ## Known limitations
 
 ### Correctness
 
-- **Structure fast path may produce invalid output** on polygons with complex hole nesting
-  or specific self-touching patterns. When `bench-geos` is enabled, the benchmark checks
-  results against GEOS; on production data, you should verify.
 - **CDT arranger may panic** on certain degenerate inputs (all-collinear exterior rings,
   coordinates near `f64::MAX`). This is a known problem with `spade`.
 - **OGC compliance is a key goal but not yet formally certified.** The validation module
