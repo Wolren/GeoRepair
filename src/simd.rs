@@ -364,11 +364,89 @@ pub(crate) fn point_in_ring_exclusive(pt: Coord<f64>, coords: &[Coord<f64>]) -> 
 }
 
 // ============================================================================
-// Scalar fallback (non-x86_64, no portable SIMD)
+// aarch64 NEON intrinsics (f64×2)
 // ============================================================================
 
 #[cfg(not(feature = "simd-portable"))]
-#[cfg(not(target_arch = "x86_64"))]
+#[cfg(target_arch = "aarch64")]
+pub(crate) fn orient2d_batch_4(
+    pa: &[Coord<f64>; 4],
+    pb: &[Coord<f64>; 4],
+    pc: &[Coord<f64>; 4],
+) -> [f64; 4] {
+    unsafe {
+        use std::arch::aarch64::*;
+        let mut out = [0.0f64; 4];
+        for ch in 0..2 {
+            let pax = vld1q_f64(&pa[ch * 2].x as *const f64);
+            let pay = vld1q_f64(&pa[ch * 2].y as *const f64);
+            let pbx = vld1q_f64(&pb[ch * 2].x as *const f64);
+            let pby = vld1q_f64(&pb[ch * 2].y as *const f64);
+            let pcx = vld1q_f64(&pc[ch * 2].x as *const f64);
+            let pcy = vld1q_f64(&pc[ch * 2].y as *const f64);
+
+            let dx = vsubq_f64(pbx, pax);
+            let dy1 = vsubq_f64(pcy, pay);
+            let term1 = vmulq_f64(dx, dy1);
+
+            let dy2 = vsubq_f64(pby, pay);
+            let dx2 = vsubq_f64(pcx, pax);
+            let term2 = vmulq_f64(dy2, dx2);
+
+            let result = vsubq_f64(term1, term2);
+            vst1q_f64(&mut out[ch * 2] as *mut f64, result);
+        }
+        out
+    }
+}
+
+// ============================================================================
+// WASM SIMD128 intrinsics (f64×2 via v128)
+// ============================================================================
+
+#[cfg(not(feature = "simd-portable"))]
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn orient2d_batch_4(
+    pa: &[Coord<f64>; 4],
+    pb: &[Coord<f64>; 4],
+    pc: &[Coord<f64>; 4],
+) -> [f64; 4] {
+    unsafe {
+        use std::arch::wasm32::*;
+        let mut out = [0.0f64; 4];
+        for ch in 0..2 {
+            let pax = v128_load(&pa[ch * 2].x as *const f64 as *const v128);
+            let pay = v128_load(&pa[ch * 2].y as *const f64 as *const v128);
+            let pbx = v128_load(&pb[ch * 2].x as *const f64 as *const v128);
+            let pby = v128_load(&pb[ch * 2].y as *const f64 as *const v128);
+            let pcx = v128_load(&pc[ch * 2].x as *const f64 as *const v128);
+            let pcy = v128_load(&pc[ch * 2].y as *const f64 as *const v128);
+
+            let dx = f64x2_sub(pbx, pax);
+            let dy1 = f64x2_sub(pcy, pay);
+            let term1 = f64x2_mul(dx, dy1);
+
+            let dy2 = f64x2_sub(pby, pay);
+            let dx2 = f64x2_sub(pcx, pax);
+            let term2 = f64x2_mul(dy2, dx2);
+
+            let result = f64x2_sub(term1, term2);
+            v128_store(&mut out[ch * 2] as *mut f64 as *mut v128, result);
+        }
+        out
+    }
+}
+
+// ============================================================================
+// Scalar fallback (non-x86_64, no portable SIMD, no aarch64, no WASM32)
+// ============================================================================
+
+#[cfg(not(feature = "simd-portable"))]
+#[cfg(not(any(
+    target_arch = "x86_64",
+    target_arch = "aarch64",
+    target_arch = "wasm32"
+)))]
 pub(crate) fn orient2d_batch_4(
     pa: &[Coord<f64>; 4],
     pb: &[Coord<f64>; 4],

@@ -2,57 +2,169 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
-    branches: [main]
+    branches: [master]
 
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -Dwarnings
 
 jobs:
-  check:
-    runs-on: ubuntu-latest
+  # ===========================================================================
+  # Linux — full test matrix (all features)
+  # ===========================================================================
+  linux:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        features:
+          - "arrange,structure,simd,parallel"
+          - "arrange,structure,simd,parallel,io-all,serde,ffi,python"
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo check --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,ffi"
-
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,ffi"
-
-  test-no-defaults:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --no-default-features --features "arrange,structure"
-
-  test-serde:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo check --features "serde"
-
-  clippy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          components: clippy
-      - run: cargo clippy --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,ffi"
+          toolchain: stable
+      - name: Check
+        run: cargo check --features "${{ matrix.features }}"
+      - name: Test
+        run: cargo test --features "${{ matrix.features }}"
 
-  rustdoc:
-    runs-on: ubuntu-latest
+  # ===========================================================================
+  # Windows — test core features
+  # ===========================================================================
+  windows:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        features:
+          - "arrange,structure,simd,parallel"
+          - "arrange,structure,simd,parallel,io-all,serde,ffi,python"
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo doc --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,ffi,serde"
-        env:
-          RUSTDOCFLAGS: -D warnings
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+      - name: Check
+        run: cargo check --features "${{ matrix.features }}"
+      - name: Test
+        run: cargo test --features "${{ matrix.features }}"
+
+  # ===========================================================================
+  # macOS — test core features on ARM + x86_64
+  # ===========================================================================
+  macos-arm:
+    runs-on: macos-latest  # Apple Silicon (aarch64)
+    strategy:
+      matrix:
+        features:
+          - "arrange,structure,simd,parallel"
+          - "arrange,structure,simd,parallel,io-all,serde,ffi"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+      - name: Check
+        run: cargo check --features "${{ matrix.features }}"
+      - name: Test
+        run: cargo test --features "${{ matrix.features }}"
+
+  macos-x64:
+    runs-on: macos-13  # Intel (x86_64)
+    strategy:
+      matrix:
+        features:
+          - "arrange,structure,simd,parallel"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+      - name: Test
+        run: cargo test --features "${{ matrix.features }}"
+
+  # ===========================================================================
+  # WASM — compile check only (no tests)
+  # ===========================================================================
+  wasm:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: wasm32-unknown-unknown
+      - name: Check (core)
+        run: cargo check --target wasm32-unknown-unknown --no-default-features --features "arrange,structure,simd"
+      - name: Check (+ I/O)
+        run: cargo check --target wasm32-unknown-unknown --no-default-features --features "arrange,structure,simd,io-geojson,io-wkt,io-wkb,serde"
+      - name: Check (FFI must fail)
+        run: |
+          if cargo check --target wasm32-unknown-unknown --features "ffi,arrange" --no-default-features 2>/dev/null; then
+            echo "FFI on WASM should have failed!"; exit 1
+          else
+            echo "Expected compile error for FFI on WASM: OK"
+          fi
+      - name: Check (python must fail)
+        run: |
+          if cargo check --target wasm32-unknown-unknown --features "python,arrange" --no-default-features 2>/dev/null; then
+            echo "Python on WASM should have failed!"; exit 1
+          else
+            echo "Expected compile error for Python on WASM: OK"
+          fi
+
+  # ===========================================================================
+  # Python bindings — build wheel + run tests
+  # ===========================================================================
+  python:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+      - name: Install maturin
+        run: pip install maturin
+      - name: Build wheel
+        run: python -m maturin build --features "arrange,structure,simd,parallel,python" --out target/wheels
+      - name: Install wheel
+        run: pip install target/wheels/geo_repair-*.whl
+      - name: Test
+        run: python -m pytest tests/test_python.py -v
+
+  # ===========================================================================
+  # Lints
+  # ===========================================================================
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      - name: Format check
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --features "arrange,structure,simd,parallel,io-all,serde,ffi" -- -D warnings
+      - name: Doc check
+        run: cargo doc --features "arrange,structure,simd,parallel,io-all,serde,ffi" --no-deps
+
+  # ===========================================================================
+  # Benchmarks — manual trigger only (they take long)
+  # ===========================================================================
+  bench:
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+      - name: Install conda GEOS
+        run: |
+          conda install -c conda-forge geos --yes
+      - name: Bench
+        run: cargo bench --features "arrange,structure,bench-geos" --bench real_world
