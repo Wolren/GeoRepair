@@ -1,8 +1,8 @@
 use std::path::Path;
 
 use geo::Geometry;
-use geozero::wkb::{Wkb, WkbDialect, WkbWriter};
-use geozero::{GeozeroGeometry, ToGeo};
+use geo_traits::to_geo::ToGeoGeometry;
+use wkb::reader::read_wkb;
 
 use crate::core::MakeValidError;
 use crate::zm::count_coords;
@@ -67,7 +67,7 @@ pub fn export_geopackage(
 ) -> Result<(), MakeValidError> {
     use rusqlite::Connection;
 
-    let db_exists = Path::new(path).exists();
+    let _db_exists = Path::new(path).exists();
     let conn =
         Connection::open(path).map_err(|e| MakeValidError::IoError(format!("open GPKG: {e}")))?;
 
@@ -255,20 +255,16 @@ fn parse_gpkg_blob(data: &[u8]) -> Result<Geometry<f64>, MakeValidError> {
         return Err(MakeValidError::ParseError("truncated GPKG blob".into()));
     }
 
-    let wkb_data = data[offset..].to_vec();
-    let wkb = Wkb(wkb_data);
-    wkb.to_geo()
-        .map_err(|e| MakeValidError::ParseError(format!("GPKG WKB: {e}")))
+    let wkb_geom = read_wkb(&data[offset..])
+        .map_err(|e| MakeValidError::ParseError(format!("GPKG WKB parse: {e}")))?;
+    let geo_geom: Geometry<f64> = wkb_geom.to_geometry();
+    Ok(geo_geom)
 }
 
 /// Encode a geo Geometry into a GeoPackageBinary blob.
 fn encode_gpkg_blob(geom: &Geometry<f64>, _has_z: bool) -> Result<Vec<u8>, MakeValidError> {
-    let mut wkb_buf = Vec::new();
-    {
-        let mut wkb_writer = WkbWriter::new(&mut wkb_buf, WkbDialect::Wkb);
-        geom.process_geom(&mut wkb_writer)
-            .map_err(|e| MakeValidError::ParseError(format!("WKB encode: {e}")))?;
-    }
+    let wkb_buf = crate::io::wkb::encode_wkb_2d(geom)
+        .map_err(|e| MakeValidError::ParseError(format!("WKB encode: {e}")))?;
 
     let mut blob = Vec::with_capacity(5 + wkb_buf.len());
     blob.push(0u8);

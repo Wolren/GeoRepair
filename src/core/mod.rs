@@ -7,17 +7,24 @@ use crate::crs::Crs;
 // Config
 // ---------------------------------------------------------------------------
 
+/// Configuration for [`MakeValid`](crate::MakeValid) repair operations.
+///
+/// Controls polygon method selection, fill rule, CRS handling, and
+/// whether collapsed geometries are preserved.
 #[derive(Clone, Debug)]
 pub struct MakeValidConfig {
+    /// If true, keep collapsed/degenerate geometries instead of dropping them.
     pub keep_collapsed: bool,
+    /// Polygon repair method selection (Auto, Structure, Arrange).
     pub poly_method: PolyMethod,
+    /// Fill rule for polygon repair (EvenOdd or NonZero).
     pub fill_rule: FillRule,
     /// CRS of the input geometry.
     /// When set, used for CRS-aware tolerance and metadata preservation.
     pub crs: Option<Crs>,
     /// Target output CRS.
     /// When set, geometries are transformed to this CRS after repair
-    /// via PROJ (requires the `proj` feature).
+    /// (requires the `proj` feature, not yet available).
     pub target_crs: Option<Crs>,
 }
 
@@ -33,6 +40,11 @@ impl Default for MakeValidConfig {
     }
 }
 
+/// Polygon repair method selection.
+///
+/// - [`Auto`](PolyMethod::Auto): tries Structure fast path first; falls back to Arrange CDT.
+/// - [`Structure`](PolyMethod::Structure): boolean-operation-based structural repair (fast).
+/// - [`Arrange`](PolyMethod::Arrange): Constrained Delaunay Triangulation (robust).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PolyMethod {
     Auto,
@@ -44,6 +56,10 @@ pub enum PolyMethod {
 // Errors
 // ---------------------------------------------------------------------------
 
+/// Errors that can occur during I/O and repair operations.
+///
+/// Returned by format-agnostic load/export functions and repair operations
+/// that interact with external systems (file I/O, triangulation, CRS).
 #[derive(Error, Clone, Debug)]
 pub enum MakeValidError {
     #[error("coordinate value is NaN at index {idx}")]

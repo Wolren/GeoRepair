@@ -5,6 +5,9 @@ use geo::{
 use rstar::{RTree, RTreeObject, AABB};
 use thiserror::Error;
 
+/// Errors reported by OGC geometry validation.
+///
+/// Each variant corresponds to an OGC Simple Features validity rule.
 #[derive(Error, Clone, Debug, PartialEq)]
 pub enum GeometryValidationError {
     #[error("Coordinate is NaN")]
@@ -62,6 +65,10 @@ pub enum GeometryValidationError {
     ExcessiveNesting,
 }
 
+/// Result of an OGC validity check.
+///
+/// Contains the overall valid/invalid status and a list of detailed
+/// [`GeometryValidationError`] entries describing each violation found.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ValidationResult {
     pub valid: bool,
@@ -84,6 +91,11 @@ impl ValidationResult {
     }
 }
 
+/// Trait for OGC geometry validation.
+///
+/// Implemented for all geometry types. Call [`validate`](GeoValidation::validate)
+/// to get a [`ValidationResult`] with all violations, or
+/// [`is_valid`](GeoValidation::is_valid) for a quick boolean check.
 pub trait GeoValidation {
     type Scalar: GeoFloat;
 
@@ -626,8 +638,50 @@ impl GeoValidation for LineString<f64> {
                 return ValidationResult::invalid(vec![GeometryValidationError::RepeatedPoint]);
             }
         }
+        // OGC Simple Features: LineString must be simple (no self-intersection)
+        if check_linestring_self_intersection(coords) {
+            return ValidationResult::invalid(vec![GeometryValidationError::NotSimple]);
+        }
         ValidationResult::valid()
     }
+}
+
+/// Check if a non-closed LineString has self-intersecting segments.
+fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool {
+    let n = coords.len() - 1;
+    if n < 3 {
+        return false;
+    }
+    let scale = {
+        let mut min_x = f64::MAX;
+        let mut max_x = f64::MIN;
+        let mut min_y = f64::MAX;
+        let mut max_y = f64::MIN;
+        for c in coords {
+            min_x = min_x.min(c.x);
+            max_x = max_x.max(c.x);
+            min_y = min_y.min(c.y);
+            max_y = max_y.max(c.y);
+        }
+        (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0)
+    };
+    let eps = 1e-12 * scale;
+
+    for i in 0..n {
+        let a1 = coords[i];
+        let a2 = coords[i + 1];
+        for j in i + 2..n {
+            if j == 0 {
+                continue;
+            }
+            let b1 = coords[j];
+            let b2 = coords[j + 1];
+            if edges_intersect_general(a1, a2, b1, b2, eps) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Check whether two LineString components have any intersecting edges.
@@ -948,6 +1002,13 @@ impl ValidateDepth for GeometryCollection<f64> {
             let r = g.validate_at_depth(depth + 1, max_depth);
             if !r.valid {
                 errors.extend(r.errors);
+            }
+        }
+        for i in 0..self.0.len() {
+            for j in (i + 1)..self.0.len() {
+                if self.0[i] == self.0[j] {
+                    errors.push(GeometryValidationError::DuplicatedRings);
+                }
             }
         }
         if errors.is_empty() {
@@ -1313,5 +1374,221 @@ mod tests {
             .errors
             .iter()
             .any(|e| matches!(e, GeometryValidationError::ExcessiveNesting)));
+    }
+
+    #[test]
+    fn test_pinch_point() {
+        let poly = Polygon::new(
+            LineString::new(vec![
+                Coord { x: 0.0, y: 0.0 },
+                Coord { x: 10.0, y: 0.0 },
+                Coord { x: 10.0, y: 10.0 },
+                Coord { x: 5.0, y: 5.0 },
+                Coord { x: 10.0, y: 0.0 },
+                Coord { x: 0.0, y: 0.0 },
+            ]),
+            Vec::new(),
+        );
+        let result = poly.validate();
+        assert!(result
+            .errors
+            .iter()
+            .any(|e| matches!(e, GeometryValidationError::PinchPoint)));
+    }
+
+    #[test]
+    fn test_nested_holes() {
+        let poly = Polygon::new(
+            LineString::new(vec![
+                Coord { x: 0.0, y: 0.0 },
+                Coord { x: 50.0, y: 0.0 },
+                Coord { x: 50.0, y: 50.0 },
+                Coord { x: 0.0, y: 50.0 },
+                Coord { x: 0.0, y: 0.0 },
+            ]),
+            vec![
+                LineString::new(vec![
+                    Coord { x: 5.0, y: 5.0 },
+                    Coord { x: 45.0, y: 5.0 },
+                    Coord { x: 45.0, y: 45.0 },
+                    Coord { x: 5.0, y: 45.0 },
+                    Coord { x: 5.0, y: 5.0 },
+                ]),
+                LineString::new(vec![
+                    Coord { x: 10.0, y: 10.0 },
+                    Coord { x: 20.0, y: 10.0 },
+                    Coord { x: 20.0, y: 20.0 },
+                    Coord { x: 10.0, y: 20.0 },
+                    Coord { x: 10.0, y: 10.0 },
+                ]),
+            ],
+        );
+        assert!(poly
+            .validate()
+            .errors
+            .iter()
+            .any(|e| matches!(e, GeometryValidationError::NestedHoles)));
+    }
+
+    #[test]
+    fn test_disconnected_interior_ring() {
+        let poly = Polygon::new(
+            LineString::new(vec![
+                Coord { x: 0.0, y: 0.0 },
+                Coord { x: 50.0, y: 0.0 },
+                Coord { x: 50.0, y: 50.0 },
+                Coord { x: 0.0, y: 50.0 },
+                Coord { x: 0.0, y: 0.0 },
+            ]),
+            vec![
+                LineString::new(vec![
+                    Coord { x: 5.0, y: 5.0 },
+                    Coord { x: 45.0, y: 5.0 },
+                    Coord { x: 45.0, y: 45.0 },
+                    Coord { x: 5.0, y: 45.0 },
+                    Coord { x: 5.0, y: 5.0 },
+                ]),
+                LineString::new(vec![
+                    Coord { x: 8.0, y: 8.0 },
+                    Coord { x: 12.0, y: 8.0 },
+                    Coord { x: 12.0, y: 12.0 },
+                    Coord { x: 8.0, y: 12.0 },
+                    Coord { x: 8.0, y: 8.0 },
+                ]),
+            ],
+        );
+        let errors = &poly.validate().errors;
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, GeometryValidationError::NestedHoles))
+                || errors
+                    .iter()
+                    .any(|e| matches!(e, GeometryValidationError::DisconnectedInteriorRing)),
+            "expected NestedHoles or DisconnectedInteriorRing, got: {errors:?}",
+        );
+    }
+
+    #[test]
+    fn test_wrong_orientation_shell_cw() {
+        let poly = Polygon::new(
+            LineString::new(vec![
+                Coord { x: 0.0, y: 0.0 },
+                Coord { x: 0.0, y: 10.0 },
+                Coord { x: 10.0, y: 10.0 },
+                Coord { x: 10.0, y: 0.0 },
+                Coord { x: 0.0, y: 0.0 },
+            ]),
+            Vec::new(),
+        );
+        assert!(poly
+            .validate()
+            .errors
+            .iter()
+            .any(|e| matches!(e, GeometryValidationError::WrongOrientation)));
+    }
+
+    #[test]
+    fn test_repeated_point_in_ring() {
+        let poly = Polygon::new(
+            LineString::new(vec![
+                Coord { x: 0.0, y: 0.0 },
+                Coord { x: 10.0, y: 0.0 },
+                Coord { x: 10.0, y: 10.0 },
+                Coord { x: 10.0, y: 10.0 },
+                Coord { x: 0.0, y: 10.0 },
+                Coord { x: 0.0, y: 0.0 },
+            ]),
+            Vec::new(),
+        );
+        assert!(poly
+            .validate()
+            .errors
+            .iter()
+            .any(|e| matches!(e, GeometryValidationError::RepeatedPoint)));
+    }
+
+    #[test]
+    fn test_duplicated_rings() {
+        let poly = Polygon::new(
+            LineString::new(vec![
+                Coord { x: 0.0, y: 0.0 },
+                Coord { x: 20.0, y: 0.0 },
+                Coord { x: 20.0, y: 20.0 },
+                Coord { x: 0.0, y: 20.0 },
+                Coord { x: 0.0, y: 0.0 },
+            ]),
+            vec![
+                LineString::new(vec![
+                    Coord { x: 5.0, y: 5.0 },
+                    Coord { x: 5.0, y: 15.0 },
+                    Coord { x: 15.0, y: 15.0 },
+                    Coord { x: 15.0, y: 5.0 },
+                    Coord { x: 5.0, y: 5.0 },
+                ]),
+                LineString::new(vec![
+                    Coord { x: 5.0, y: 5.0 },
+                    Coord { x: 5.0, y: 15.0 },
+                    Coord { x: 15.0, y: 15.0 },
+                    Coord { x: 15.0, y: 5.0 },
+                    Coord { x: 5.0, y: 5.0 },
+                ]),
+            ],
+        );
+        assert!(!poly.is_valid());
+        assert!(poly
+            .validate()
+            .errors
+            .iter()
+            .any(|e| matches!(e, GeometryValidationError::DuplicatedRings)));
+    }
+
+    #[test]
+    fn test_multipoint_duplicate_points() {
+        let mp = MultiPoint::new(vec![
+            Point::new(1.0, 2.0),
+            Point::new(3.0, 4.0),
+            Point::new(1.0, 2.0),
+        ]);
+        assert!(!mp.is_valid());
+        assert!(mp
+            .validate()
+            .errors
+            .iter()
+            .any(|e| matches!(e, GeometryValidationError::MultiPointDuplicatePoints)));
+    }
+
+    #[test]
+    fn test_multilinestring_duplicate_lines() {
+        let mls = MultiLineString::new(vec![
+            LineString::new(vec![Coord { x: 0.0, y: 0.0 }, Coord { x: 10.0, y: 10.0 }]),
+            LineString::new(vec![Coord { x: 0.0, y: 0.0 }, Coord { x: 10.0, y: 10.0 }]),
+        ]);
+        assert!(!mls.is_valid());
+        assert!(mls
+            .validate()
+            .errors
+            .iter()
+            .any(|e| matches!(e, GeometryValidationError::MultiLineStringDuplicateLines)));
+    }
+
+    #[test]
+    fn test_degenerate_exterior_collinear_x() {
+        let poly = Polygon::new(
+            LineString::new(vec![
+                Coord { x: 0.0, y: 0.0 },
+                Coord { x: 10.0, y: 0.0 },
+                Coord { x: 20.0, y: 0.0 },
+                Coord { x: 30.0, y: 0.0 },
+                Coord { x: 0.0, y: 0.0 },
+            ]),
+            Vec::new(),
+        );
+        assert!(!poly.is_valid());
+        assert!(poly
+            .validate()
+            .errors
+            .iter()
+            .any(|e| matches!(e, GeometryValidationError::DegenerateExterior)));
     }
 }

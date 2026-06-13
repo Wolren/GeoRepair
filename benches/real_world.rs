@@ -8,8 +8,16 @@
 //! Supported: .bin (custom binary), .shp (shapefile)
 //!
 //! Run with:
-//!   $env:Path = "C:\Users\Wildbot\miniconda3\Library\bin;$env:Path"
-//!   cargo bench --features bench-geos --bench real_world
+//!   scripts/bench-geos.ps1          # Windows — auto-detects conda GEOS
+//!   scripts/bench-geos.sh           # Linux/macOS — auto-detects system GEOS
+//!
+//! Or manually:
+//!   cargo bench --features bench-geos --bench real_world "benches/real_world/data_0.bin"
+//!
+//! Prerequisites: GEOS must be installed on the system.
+//!   conda install -c conda-forge geos   # Windows
+//!   sudo apt install libgeos-dev        # Debian/Ubuntu
+//!   brew install geos                   # macOS
 
 use std::env;
 use std::io::Write;
@@ -169,7 +177,7 @@ fn main() {
     // Resolve input file: env var BENCH_FILE, or first CLI arg, or default
     let path = env::var("BENCH_FILE")
         .ok()
-        .or_else(|| env::args().nth(1))
+        .or_else(|| env::args().skip(1).find(|a| !a.starts_with("--")))
         .unwrap_or_else(|| "benches/real_world/data_0.bin".into());
     eprintln!("Dataset: {path}");
 

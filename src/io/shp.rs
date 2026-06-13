@@ -21,6 +21,7 @@ use shapefile::dbase::FieldValue;
 #[cfg(feature = "load-shp")]
 use std::path::Path;
 
+/// Signed area of a closed ring (positive = CCW).
 pub fn signed_area(ring: &[Coord<f64>]) -> f64 {
     let mut s = 0.0;
     for w in ring.windows(2) {
@@ -29,10 +30,12 @@ pub fn signed_area(ring: &[Coord<f64>]) -> f64 {
     s / 2.0
 }
 
+/// Area of a polygon (absolute value).
 pub fn polygon_area(p: &Polygon<f64>) -> f64 {
     signed_area(&p.exterior().0).abs()
 }
 
+/// Area of a geometry (Polygon or MultiPolygon sum).
 pub fn geo_area(g: &Geometry<f64>) -> f64 {
     match g {
         Geometry::Polygon(p) => polygon_area(p),
@@ -41,6 +44,7 @@ pub fn geo_area(g: &Geometry<f64>) -> f64 {
     }
 }
 
+/// Count sub-polygons in a geometry (1 for Polygon, N for MultiPolygon).
 pub fn count_sub_polys(g: &Geometry<f64>) -> usize {
     match g {
         Geometry::Polygon(_) => 1,
@@ -49,11 +53,7 @@ pub fn count_sub_polys(g: &Geometry<f64>) -> usize {
     }
 }
 
-/// Load polygons from a shapefile.
-///
-/// Reads only Polygon shapes; Point and PolyLine shapes are skipped.
-/// Returns polygons constructed from the shapefile rings using
-/// signed-area winding direction to distinguish exterior vs holes.
+/// Load polygons from a shapefile (Polygon shapes only).
 #[cfg(feature = "load-shp")]
 pub fn load_shp(path: &str) -> Result<Vec<Polygon<f64>>, shapefile::Error> {
     let mut reader = shapefile::Reader::from_path(path)?;
@@ -476,10 +476,10 @@ pub fn export_shp(geoms: &[Geometry<f64>], path: &str, crs: Option<&Crs>) -> std
             }
             Geometry::Triangle(t) => {
                 let pts = vec![
-                    Point::new(t.0.x, t.0.y),
-                    Point::new(t.1.x, t.1.y),
-                    Point::new(t.2.x, t.2.y),
-                    Point::new(t.0.x, t.0.y),
+                    Point::new(t.v1().x, t.v1().y),
+                    Point::new(t.v2().x, t.v2().y),
+                    Point::new(t.v3().x, t.v3().y),
+                    Point::new(t.v1().x, t.v1().y),
                 ];
                 let shape = shapefile::Polygon::new(PolygonRing::Outer(pts));
                 writer
@@ -672,10 +672,10 @@ pub fn export_shp_features(
             }
             Geometry::Triangle(t) => {
                 let pts = vec![
-                    Point::new(t.0.x, t.0.y),
-                    Point::new(t.1.x, t.1.y),
-                    Point::new(t.2.x, t.2.y),
-                    Point::new(t.0.x, t.0.y),
+                    Point::new(t.v1().x, t.v1().y),
+                    Point::new(t.v2().x, t.v2().y),
+                    Point::new(t.v3().x, t.v3().y),
+                    Point::new(t.v1().x, t.v1().y),
                 ];
                 let shp = shapefile::Polygon::new(PolygonRing::Outer(pts));
                 writer

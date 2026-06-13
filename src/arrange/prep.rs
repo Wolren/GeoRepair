@@ -1,6 +1,4 @@
 use rustc_hash::{FxHashMap, FxHashSet};
-#[cfg(feature = "parallel")]
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::core::MakeValidError;
 use crate::orient::orient2d;
@@ -345,15 +343,15 @@ pub(crate) fn has_no_intersections(lines: &[Line<f64>]) -> bool {
     if _do_parallel {
         use rayon::prelude::*;
         use std::ops::ControlFlow;
-        let found = AtomicBool::new(false);
+        let found = std::sync::atomic::AtomicBool::new(false);
         (0..nc).into_par_iter().for_each(|i| {
-            if found.load(Ordering::Acquire) {
+            if found.load(std::sync::atomic::Ordering::Acquire) {
                 return;
             }
             let mc1 = &chains[i];
             let q = AABB::from_corners([mc1.min_x, mc1.min_y], [mc1.max_x, mc1.max_y]);
             let res = tree.locate_in_envelope_intersecting_int(&q, |c| {
-                if found.load(Ordering::Acquire) {
+                if found.load(std::sync::atomic::Ordering::Acquire) {
                     return ControlFlow::Break(());
                 }
                 let j = c.idx;
@@ -361,17 +359,17 @@ pub(crate) fn has_no_intersections(lines: &[Line<f64>]) -> bool {
                     return ControlFlow::Continue(());
                 }
                 if compute_overlaps(lines, mc1, &chains[j]) {
-                    found.store(true, Ordering::Release);
+                    found.store(true, std::sync::atomic::Ordering::Release);
                     ControlFlow::Break(())
                 } else {
                     ControlFlow::Continue(())
                 }
             });
-            if res.is_break() && !found.load(Ordering::Acquire) {
-                found.store(true, Ordering::Release);
+            if res.is_break() && !found.load(std::sync::atomic::Ordering::Acquire) {
+                found.store(true, std::sync::atomic::Ordering::Release);
             }
         });
-        return !found.load(Ordering::Acquire);
+        return !found.load(std::sync::atomic::Ordering::Acquire);
     }
 
     use std::ops::ControlFlow;
@@ -1092,7 +1090,6 @@ mod tests {
     #[test]
     fn diagnose_many_holes() {
         use geo::LinesIter;
-        use std::time::Instant;
 
         let mut wkt = String::from("POLYGON ((0 0, 100 0, 100 100, 0 100, 0 0)");
         for i in 0..10 {
@@ -1113,56 +1110,21 @@ mod tests {
             geo::Geometry::Polygon(p) => p,
             _ => panic!("nope"),
         };
-        println!(
-            "diagnose: ext {} coords, {} holes",
-            poly.exterior().0.len(),
-            poly.interiors().len()
-        );
 
         let lines: Vec<_> = poly.lines_iter().collect();
-        println!("lines: {}", lines.len());
 
         // warmup
         for _ in 0..100 {
             let _ = has_no_intersections(&lines);
         }
 
-        let start = Instant::now();
-        for _ in 0..1000 {
-            std::hint::black_box(has_no_intersections(&lines));
-        }
-        let d = start.elapsed();
-        println!("has_no_intersections x1000: {:?}, per: {:?}", d, d / 1000);
-
-        let start = Instant::now();
-        for _ in 0..1000 {
-            let _ = std::hint::black_box(poly.clone());
-        }
-        let d = start.elapsed();
-        println!("poly.clone x1000: {:?}, per: {:?}", d, d / 1000);
-
-        let start = Instant::now();
-        for _ in 0..1000 {
-            let _ = std::hint::black_box(crate::arrange::poly_has_basic_form(&poly));
-        }
-        let d = start.elapsed();
-        println!("poly_has_basic_form x1000: {:?}, per: {:?}", d, d / 1000);
-
-        // Does has_no_intersections return true?
-        let hni = has_no_intersections(&lines);
-        println!("has_no_intersections returned: {hni}");
-
         let config = crate::core::MakeValidConfig {
             poly_method: crate::core::PolyMethod::Arrange,
             ..Default::default()
         };
 
-        // full fix_polygon
-        let start = Instant::now();
         for _ in 0..1000 {
             std::hint::black_box(crate::arrange::fix_polygon(&poly, &config));
         }
-        let d = start.elapsed();
-        println!("fix_polygon x1000: {:?}, per: {:?}", d, d / 1000);
     }
 }

@@ -5,15 +5,46 @@
 ![MSRV](https://img.shields.io/badge/rustc-1.95+-ab6000.svg)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://github.com/georust/geo-repair?tab=License-1-ov-file)
 
-**Fix invalid GIS geometries** - detects and repairs broken polygons, lines, and points.
+**Fix invalid GIS geometries** — detects and repairs broken polygons, lines, and points
+with per-type optimal algorithms. Aims for **OGC Simple Features compliance**.
 
-> **⚠️ EXPERIMENTAL - NOT PRODUCTION-READY**
->
-> This crate is **pre-1.0, actively developed, and potentially unstable**. It aims to eventually
-> produce OGC-compliant output for all valid inputs, but it may fail on edge cases, produce
-> unexpected results, or panic. The API will change. Use at your own risk.
->
-> **When it works, it's fast. When it doesn't, it fails loudly.** See [known limitations](#known-limitations).
+## Getting started
+
+```toml
+[dependencies]
+geo-repair = "0.1"
+```
+
+Minimal load → validate → repair → export pipeline:
+
+```rust
+use geo_repair::{MakeValid, GeoValidation, load_geometries, export_geometries};
+
+let geoms = load_geometries("input.geojson")?;                        // load
+let valid: Vec<_> = geoms.iter().all(|g| g.is_valid());               // quick check
+let fixed: Vec<_> = geoms.iter().map(|g| g.make_valid()).collect();   // repair
+export_geometries(&fixed, "output.geojson")?;                          // export
+```
+
+Detailed validation with repair:
+
+```rust
+use geo_repair::{MakeValid, GeoValidation, ValidateAndFix};
+
+// Validate and fix in one step (GEOS-compatible pipeline)
+let (result, fixed) = polygon.validate_and_fix();
+if !result.valid {
+    for err in &result.errors {
+        eprintln!("  Violation: {err}");
+    }
+}
+
+// Fix only if invalid, return Result
+match polygon.validate_or_fix() {
+    Ok(g) => { /* polygon was valid or fix succeeded */ }
+    Err((errors, _)) => { /* still invalid despite repair */ }
+}
+```
 
 ## What it does
 
@@ -26,7 +57,7 @@ Real-world GIS data often has problems:
 - NaN or infinite coordinates
 - Collapsed/degenerate polygons (zero area, colinear)
 
-`geo-repair` detects these problems (custom OGC-style validation) and fixes them - picking
+`geo-repair` detects these problems (OGC-style validation) and fixes them, picking
 different algorithms per geometry type:
 
 | Geometry | What happens |
@@ -34,9 +65,47 @@ different algorithms per geometry type:
 | `Polygon` / `MultiPolygon` | Two repair strategies, selected by [`PolyMethod`](https://docs.rs/geo-repair/latest/geo_repair/enum.PolyMethod.html) |
 | `LineString` / `MultiLineString` | Self-intersection noding, NaN filtering, duplicate removal |
 | `Line` | Zero-length and NaN detection |
-| `Point` / `MultiPoint` | NaN/infinite coordinate filtering |
+| `Point` / `MultiPoint` | NaN/infinite coordinate filtering, duplicate removal |
 | `Rect` / `Triangle` | Basic degeneracy checks |
 | `GeometryCollection` | Recursive repair of children |
+
+## Validation (OGC Simple Features)
+
+The [`GeoValidation`](https://docs.rs/geo-repair/latest/geo_repair/trait.GeoValidation.html) trait checks
+18 OGC validity rules:
+
+| Rule | Applies to |
+|------|-----------|
+| Coordinate finiteness | All geometries |
+| Ring closure | Polygon rings |
+| Ring minimum vertices (≥4) | Polygon rings |
+| Ring self-intersection | Polygon rings |
+| Pinch points (non-consecutive duplicates) | Rings |
+| Hole containment (inside shell) | Polygon |
+| No nested holes | Polygon |
+| Interior ring connectivity | Polygon |
+| Ring orientation (exterior CCW, interior CW) | Polygon |
+| Non-collinear rings | Polygon |
+| Consecutive duplicates | Lines/rings |
+| Duplicate rings | Polygon |
+| Duplicate points | MultiPoint |
+| Duplicate lines | MultiLineString |
+| Non-zero-length lines | Line |
+| Non-degenerate exterior | Polygon |
+| Simplicity (no interior intersections) | LineString, MultiLineString |
+| Nesting depth limit | GeometryCollection |
+
+```rust
+use geo_repair::{GeoValidation, is_valid, validate};
+
+// Boolean check
+if !geom.is_valid() { /* ... */ }
+
+// Convenience functions
+if !is_valid(&geom) { /* ... */ }
+let result = validate(&geom);
+println!("Errors: {:?}", result.errors);
+```
 
 ## Polygon repair strategies
 
@@ -48,6 +117,43 @@ The two polygon algorithms work differently:
 | **Structure** (fast path) | Planar graph extraction → face walking → winding-number assembly | 10–100× faster for valid/simple inputs. No external deps. | Falls back on complex topologies (many holes, nested self-intersections). |
 
 **Auto** (default) tries Structure first, then falls back to Arrange.
+
+### Repair configuration
+
+```rust
+use geo_repair::{MakeValidConfig, PolyMethod, MakeValid};
+
+let config = MakeValidConfig {
+    poly_method: PolyMethod::Arrange,
+    keep_collapsed: false,
+    ..Default::default()
+};
+let fixed = geom.make_valid_with_config(&config);
+```
+
+## Coordinate Reference Systems (CRS)
+
+The [`Crs`](https://docs.rs/geo-repair/latest/geo_repair/struct.Crs.html) type stores CRS metadata
+and can be attached to geometries or features for round-tripping through I/O formats
+that support it (GeoJSON foreign members, WKT, Shapefile, GeoPackage).
+
+```rust
+use geo_repair::Crs;
+
+let crs = Crs::from_epsg(4326);
+let fixed = geom.make_valid_with_config(&MakeValidConfig {
+    crs: Some(crs),
+    ..Default::default()
+});
+```
+
+CRS-aware tolerance heuristics:
+- Geographic (lon/lat): `1e-10` degrees
+- Projected (metres): `1e-6` metres
+- Unknown: `1e-12`
+
+The `target_crs` field on [`MakeValidConfig`](https://docs.rs/geo-repair/latest/geo_repair/struct.MakeValidConfig.html)
+enables post-repair CRS transformation when the `proj` feature is available (not yet backed by a PROJ dependency).
 
 ## Performance
 
@@ -76,7 +182,6 @@ Structure parallel batch on a production GIS dataset. GEOS setup (WKT→geom): +
 | Star-burst 500sp | **753 µs** | **357 µs** | GEOS **2.1×** |
 | Spoke wheel 500sp | **862 µs** | **366 µs** | GEOS **2.4×** |
 
-
 Run yourself:
 
 ```shell
@@ -86,41 +191,67 @@ cargo bench
 # Criterion benchmarks (requires bench-criterion)
 cargo bench --features bench-criterion --bench criterion
 
-# Real-world dataset (includes bundled GEOS via bench-geos feature)
-$env:BENCH_FILE = "path/to/data.bin"
+# Real-world dataset (GEOS comparison via bench-geos feature)
+scripts/bench-geos.ps1          # Windows — auto-detects conda GEOS
+# or manually:
+$env:BENCH_FILE = "benches/real_world/data_0.bin"
 cargo bench --features bench-geos --bench real_world
 ```
 
-GEOS is bundled via [`geos-src`](https://crates.io/crates/geos-src) and compiled
-statically with MSVC optimization fixes - no system install needed. Requires
-CMake and a C++ compiler.
+> **Tip**: Use `scripts/bench-geos.ps1` (Windows) or `scripts/bench-geos.sh` (Unix) to
+> automatically detect and configure GEOS before running the benchmark.
+
+#### GEOS setup
+
+Requires GEOS installed on the system (for benchmark comparisons only).
+
+**Windows (conda)** — install, then use the script or set paths manually:
+
+```shell
+conda install -c conda-forge geos
+./scripts/bench-geos.ps1
+```
+
+**Linux/macOS** — use your system package manager:
+
+```shell
+# Debian/Ubuntu
+sudo apt install libgeos-dev
+./scripts/bench-geos.sh
+# macOS (Homebrew)
+brew install geos
+./scripts/bench-geos.sh
+```
 
 ### Parallelism
 
 Use the `parallel` feature (enabled by default) for multi-core polygon repair via `rayon`.
 Two levels of parallelism:
 
-**Batch level** - spreads independent polygons across worker threads:
-- `par_fix_polygon_batch` - batch polygon repair
-- `par_make_valid` / `par_make_valid_with_config` - trait methods on multi-geometry types
-- `MultiPolygon`, `MultiLineString`, `MultiPoint`, `GeometryCollection` - each child in parallel
+**Batch-level** — spreads independent polygons across worker threads:
+- `par_fix_polygon_batch` — batch polygon repair
+- `par_make_valid` / `par_make_valid_with_config` — trait methods on multi-geometry types
+- `MultiPolygon`, `MultiLineString`, `MultiPoint`, `GeometryCollection` — each child in parallel
 
-**Intra-polygon** - parallel hot loops inside a single polygon's repair:
+**Intra-polygon** — parallel hot loops inside a single polygon's repair:
 - Structure hole fixing (`structure/mod.rs`)
 - Structure parent-of / nesting resolution (`structure/mod.rs`)
 - Hole containment classification (`classify.rs`)
 - Grid-cell edge-edge intersection testing (`fix_ring.rs`, >500 cells)
 - Monotone-chain self-intersection check (`arrange/prep.rs`, ≥200 chains)
 
-The Arrange (CDT) path has limited intra-polygon parallelism (monotone chains only). Structure has the most breadth. Batch-level parallelism is always additive - no oversubscription concern because the intra-polygon loops only fire for large inputs, while the batch path uses the same global `rayon` thread pool.
+The Arrange (CDT) path has limited intra-polygon parallelism (monotone chains only). Structure
+has the most breadth. Batch-level parallelism is always additive — no oversubscription concern
+because the intra-polygon loops only fire for large inputs, while the batch path uses the same
+global `rayon` thread pool.
 
 ### SIMD
 
 Use the `simd` feature (enabled by default) for AVX2-accelerated orientation tests:
 
-- `orient2d_batch` - processes 4 orientation tests at once (256-bit vectors)
-- `is_ring_ccw_simd` - batch winding detection
-- `point_in_ring_exclusive` - AVX2-accelerated winding-number point-in-ring test
+- `orient2d_batch` — processes 4 orientation tests at once (256-bit vectors)
+- `is_ring_ccw_simd` — batch winding detection
+- `point_in_ring_exclusive` — AVX2-accelerated winding-number point-in-ring test
 
 Roughly 1.5–3× faster on large rings (≥100 vertices) than scalar iteration. When coordinates
 are near-collinear or extreme, it falls back to Shewchuk adaptive-precision arithmetic (the
@@ -131,38 +262,47 @@ The following are SIMD-accelerated:
 - Point-in-ring containment tests (hole classification)
 - Batch orientation tests in the CDT flow
 
-## Known limitations
+### Streaming via chunked API
 
-### Correctness
+`par_fix_polygon_batch_chunked` processes an iterator in fixed-size batches, bounding peak
+memory to `chunk_size` polygons. Pair with `load_shp_stream` or `load_bin_stream` for lazy
+file reading — only one chunk is in memory at a time.
 
-- **Structure fast path may produce invalid output** on polygons with complex hole nesting
-  or specific self-touching patterns. When `bench-geos` is enabled, the benchmark checks
-  results against GEOS; on production data, you should verify.
-- **CDT arranger may panic** on certain degenerate inputs (all-collinear exterior rings,
-  coordinates near `f64::MAX`). This is a known problem with `spade`.
-- **OGC compliance is not guaranteed.** The validation module checks OGC predicates (ring
-  closure, self-intersection, hole containment, orientation), but repair output is not
-  formally verified against the OGC Simple Features spec.
-- **2D only.** Z and M coordinates are stripped during processing.
+## I/O format support
 
-### Performance
+| Format | Load | Export | Features | Z/M | CRS |
+|--------|------|--------|----------|-----|-----|
+| **GeoJSON** (.geojson/.json) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **WKT** (.wkt) | ✓ | ✓ | — | — | ✓ |
+| **WKB** (.wkb) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **CSV+WKT** (.csv) | ✓ | ✓ | — | — | — |
+| **Shapefile** (.shp) | ✓ | ✓ | ✓ | — | ✓ |
+| **GeoPackage** (.gpkg) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **GML** (.gml/.xml) | ✓ | ✓ | ✓ | — | ✓ |
+| **Binary** (.bin) | ✓ | ✓ | — | — | — |
 
-- **Large polygons (10k+ vertices)** are expensive in both modes. Structure uses an R-tree
-  (O(n log n) expected) for intersection detection, but worst-case radial geometries
-  (e.g., star-bursts, spoke wheels) still generate O(n²) candidate pairs.
-  Consider simplifying or tiling very large polygons first.
-- **Hole-heavy polygons** (50+ holes) stress the structure algorithm's classification phase.
-  The containment checks between holes are accelerated with an R-tree (O(n log n) expected).
-- **Streaming via chunked API.** `par_fix_polygon_batch_chunked` processes an
-  iterator in fixed-size batches, bounding peak memory to `chunk_size` polygons.
-  Pair with `load_shp_stream` or `load_bin_stream` for lazy file reading - only
-  one chunk is in memory at a time.
+Format auto-detection via file extension. Load with `load_geometries`, export with
+`export_geometries`. Feature-attribute-persisting variants (`load_features`,
+`export_features`) also available.
 
-### Portability
+### Feature attributes
 
-- `simd` requires `avx2` (x86-64, Haswell or newer). ARM NEON and WASM SIMD are not supported.
-- `arrange` requires `spade`, which has its own constraints (no WASM).
-- Windows needs the GEOS DLL on PATH for `bench-geos`.
+```rust
+use geo_repair::{load_features, export_features, MakeValid};
+
+let mut features = load_features("input.geojson")?;
+for f in &mut features {
+    f.geometry = f.geometry.make_valid();
+}
+export_features("output.geojson", &features)?;
+```
+
+### Z and M coordinates
+
+Z and M values are preserved through load/repair/export when using the
+[`ZmGeometry`](https://docs.rs/geo-repair/latest/geo_repair/zm/struct.ZmGeometry.html) API
+or feature-level I/O functions. The core `make_valid` pipeline operates on 2D coordinates
+only; Z/M are carried alongside and re-merged on export.
 
 ## Features
 
@@ -176,6 +316,10 @@ The following are SIMD-accelerated:
 | `io-wkt` | WKT load/export | yes |
 | `io-wkb` | WKB load/export | no |
 | `io-csv` | CSV+WKT column load | no |
+| `io-gpkg` | GeoPackage load/export (requires SQLite) | no |
+| `io-gml` | GML load/export (requires XML parser) | no |
+| `io-all` | Enables all I/O formats | no |
+| `proj` | CRS transformation support (placeholder) | no |
 | `serde` | Geometry serde support | no |
 | `ffi` | C-compatible FFI API (implies `io-wkb`) | no |
 | `bench-geos` | GEOS comparison benchmarks | no |
@@ -192,12 +336,42 @@ geo_repair_free_result(result);
 
 Meant for QGIS Python scripts and PyO3/maturin bindings.
 
+## Known limitations
+
+### Correctness
+
+- **Structure fast path may produce invalid output** on polygons with complex hole nesting
+  or specific self-touching patterns. When `bench-geos` is enabled, the benchmark checks
+  results against GEOS; on production data, you should verify.
+- **CDT arranger may panic** on certain degenerate inputs (all-collinear exterior rings,
+  coordinates near `f64::MAX`). This is a known problem with `spade`.
+- **OGC compliance is a key goal but not yet formally certified.** The validation module
+  checks 18 OGC predicates. The repair module aims to produce OGC-valid output but is not
+  formally verified against the full Simple Features spec. Missing rules tracked on GitHub.
+- **GeometryCollection cross-component intersection** is not validated.
+- **Z/M coordinate consistency** is not validated.
+
+### Performance
+
+- **Large polygons (10k+ vertices)** are expensive in both modes. Structure uses an R-tree
+  (O(n log n) expected) for intersection detection, but worst-case radial geometries
+  (e.g., star-bursts, spoke wheels) still generate O(n²) candidate pairs.
+  Consider simplifying or tiling very large polygons first.
+- **Hole-heavy polygons** (50+ holes) stress the structure algorithm's classification phase.
+  The containment checks between holes are accelerated with an R-tree (O(n log n) expected).
+
+### Portability
+
+- `simd` requires `avx2` (x86-64, Haswell or newer). ARM NEON and WASM SIMD are not supported.
+- `arrange` requires `spade`, which has its own constraints (no WASM).
+- `bench-geos` requires a system GEOS installation — see [GEOS setup](#geos-setup).
+
 ## Ecosystem
 
 - Uses `geo` 0.33 types natively
-- Re-exports `geo::MakeValid` as `GeoMakeValid`
+- Re-exports `geo::MakeValid` as `MakeValid`
 - Optional `serde` support
-- Standard georust format crates: `geojson`, `wkt`, `wkb`, `shapefile`
+- Standard georust format crates: `geojson`, `wkt`, `wkb`, `shapefile`, `rusqlite`, `quick-xml`
 
 ## License
 

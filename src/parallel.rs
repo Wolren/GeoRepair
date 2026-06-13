@@ -1,5 +1,6 @@
 use geo::{
-    GeoFloat, Geometry, GeometryCollection, MultiLineString, MultiPoint, MultiPolygon, Polygon,
+    GeoFloat, Geometry, GeometryCollection, LineString, MultiLineString, MultiPoint, MultiPolygon,
+    Point, Polygon,
 };
 use rayon::prelude::*;
 
@@ -34,22 +35,46 @@ pub fn par_fix_multi_line_string<T: NodingFloat + Send + Sync>(
     mls: &MultiLineString<T>,
     config: &MakeValidConfig,
 ) -> Geometry<T> {
-    let lines = mls
+    let mut points: Vec<Point<T>> = Vec::new();
+    let mut lines: Vec<LineString<T>> = Vec::new();
+    for g in mls
         .0
         .par_iter()
         .map(|ls| ls.make_valid_with_config(config))
-        .filter_map(|g| {
-            if let Geometry::LineString(ls) = g {
-                Some(ls)
+        .collect::<Vec<_>>()
+    {
+        match g {
+            Geometry::Point(p) => points.push(p),
+            Geometry::LineString(l) => lines.push(l),
+            Geometry::MultiLineString(mls) => lines.extend(mls.0),
+            _ => {}
+        }
+    }
+    match (points.len(), lines.len()) {
+        (0, 0) => Geometry::GeometryCollection(GeometryCollection(Vec::new())),
+        (_, 0) => {
+            if points.len() == 1 {
+                Geometry::Point(points.into_iter().next().unwrap())
             } else {
-                None
+                Geometry::MultiPoint(MultiPoint::new(points))
             }
-        })
-        .collect::<Vec<_>>();
-    if lines.is_empty() {
-        Geometry::GeometryCollection(GeometryCollection(Vec::new()))
-    } else {
-        Geometry::MultiLineString(MultiLineString::new(lines))
+        }
+        (0, _) => {
+            if lines.len() == 1 {
+                Geometry::LineString(lines.into_iter().next().unwrap())
+            } else {
+                Geometry::MultiLineString(MultiLineString::new(lines))
+            }
+        }
+        _ => {
+            let mut geoms: Vec<Geometry<T>> = lines.into_iter().map(Geometry::LineString).collect();
+            if points.len() == 1 {
+                geoms.push(Geometry::Point(points.into_iter().next().unwrap()));
+            } else {
+                geoms.push(Geometry::MultiPoint(MultiPoint::new(points)));
+            }
+            Geometry::GeometryCollection(GeometryCollection(geoms))
+        }
     }
 }
 

@@ -8,6 +8,15 @@ use crate::noding::{node_line_string, remove_consecutive_duplicates, NodingFloat
 use crate::validation::{GeoValidation, ValidationResult};
 use log::warn;
 
+/// Trait for repairing invalid geometries.
+///
+/// Implemented for all geometry types. Returns a valid geometry (possibly
+/// empty or decomposed into a [`GeometryCollection`]) when the input
+/// violates OGC Simple Features rules.
+///
+/// Use [`make_valid`](MakeValid::make_valid) with default config, or
+/// [`make_valid_with_config`](MakeValid::make_valid_with_config) for
+/// fine-grained control over the repair strategy.
 pub trait MakeValid {
     type Scalar: GeoFloat;
 
@@ -50,6 +59,7 @@ impl<T: GeoFloat> MakeValid for Point<T> {
         if c.x.is_finite() && c.y.is_finite() {
             Geometry::Point(*self)
         } else {
+            warn!("Point::make_valid: NaN coordinate ({:?})", c);
             empty_geom()
         }
     }
@@ -63,13 +73,27 @@ impl<T: GeoFloat> MakeValid for MultiPoint<T> {
     type Scalar = T;
 
     fn make_valid_with_config(&self, _config: &MakeValidConfig) -> Geometry<T> {
+        use rustc_hash::FxHashSet;
+        let mut seen: FxHashSet<(u64, u64)> = FxHashSet::default();
         let points: Vec<Point<T>> = self
             .0
             .iter()
             .copied()
-            .filter(|p| p.0.x.is_finite() && p.0.y.is_finite())
+            .filter(|p| {
+                let x_ok = p.0.x.is_finite();
+                let y_ok = p.0.y.is_finite();
+                if !(x_ok && y_ok) {
+                    return false;
+                }
+                let key = (
+                    p.0.x.to_f64().unwrap().to_bits(),
+                    p.0.y.to_f64().unwrap().to_bits(),
+                );
+                seen.insert(key)
+            })
             .collect();
         if points.is_empty() {
+            warn!("MultiPoint::make_valid: no valid points after filtering");
             empty_geom()
         } else {
             Geometry::MultiPoint(MultiPoint::new(points))
@@ -93,6 +117,10 @@ impl<T: GeoFloat> MakeValid for Line<T> {
         if ok {
             Geometry::Line(*self)
         } else {
+            warn!(
+                "Line::make_valid: degenerate or NaN ({:?} -> {:?})",
+                self.start, self.end
+            );
             empty_geom()
         }
     }
@@ -113,10 +141,12 @@ impl<T: NodingFloat> MakeValid for LineString<T> {
             .filter(|c| c.x.is_finite() && c.y.is_finite())
             .collect();
         if coords.is_empty() {
+            warn!("LineString::make_valid: all coords filtered (NaN/Inf)");
             return empty_geom();
         }
         let deduped = remove_consecutive_duplicates(&coords);
         if deduped.is_empty() {
+            warn!("LineString::make_valid: all coords consecutive duplicates");
             return empty_geom();
         }
         if deduped.len() == 1 {
@@ -187,6 +217,11 @@ impl<T: GeoFloat> MakeValid for Rect<T> {
         if min_ok && max_ok {
             Geometry::Rect(*self)
         } else {
+            warn!(
+                "Rect::make_valid: NaN coordinate ({:?}, {:?})",
+                self.min(),
+                self.max()
+            );
             empty_geom()
         }
     }
@@ -204,15 +239,18 @@ impl MakeValid for Triangle<f64> {
         let coords = [self.v1(), self.v2(), self.v3()];
         for c in coords {
             if !c.x.is_finite() || !c.y.is_finite() {
+                warn!("Triangle::make_valid: NaN coordinate ({:?})", c);
                 return empty_geom();
             }
         }
         let (a, b, c) = (coords[0], coords[1], coords[2]);
         if a == b || b == c || a == c {
+            warn!("Triangle::make_valid: degenerate (duplicate vertices)");
             return empty_geom();
         }
         let area = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
         if area == 0.0 {
+            warn!("Triangle::make_valid: collinear (zero area)");
             return empty_geom();
         }
         let poly = Polygon::new(LineString::new(vec![a, b, c, a]), Vec::new());
@@ -228,15 +266,18 @@ impl<T: GeoFloat> MakeValid for Triangle<T> {
         let coords = [self.v1(), self.v2(), self.v3()];
         for c in coords {
             if !c.x.is_finite() || !c.y.is_finite() {
+                warn!("Triangle::make_valid: NaN coordinate ({:?})", c);
                 return empty_geom();
             }
         }
         let (a, b, c) = (coords[0], coords[1], coords[2]);
         if a == b || b == c || a == c {
+            warn!("Triangle::make_valid: degenerate (duplicate vertices)");
             return empty_geom();
         }
         let area = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
         if area == T::zero() {
+            warn!("Triangle::make_valid: collinear (zero area)");
             return empty_geom();
         }
         let poly = Polygon::new(LineString::new(vec![a, b, c, a]), Vec::new());
@@ -369,9 +410,10 @@ impl MakeValid for Geometry<f64> {
 }
 
 /// Post-repair: transform to target CRS if configured.
-fn apply_target_crs(geom: Geometry<f64>, _config: &MakeValidConfig) -> Geometry<f64> {
+#[allow(unused_variables)]
+fn apply_target_crs(geom: Geometry<f64>, config: &MakeValidConfig) -> Geometry<f64> {
     #[cfg(feature = "proj")]
-    if let (Some(ref src_crs), Some(ref dst_crs)) = (&config.crs, &config.target_crs) {
+    if let (Some(src_crs), Some(dst_crs)) = (&config.crs, &config.target_crs) {
         if src_crs != dst_crs {
             match crate::crs::transform_geometry(&geom, src_crs, dst_crs) {
                 Ok(g) => return g,
@@ -391,7 +433,10 @@ impl<T: GeoFloat> MakeValid for Geometry<T> {
             Geometry::Point(g) => g.make_valid_with_config(config),
             Geometry::Line(g) => g.make_valid_with_config(config),
             Geometry::LineString(g) => g.make_valid_with_config(config),
-            Geometry::Polygon(_) | Geometry::MultiPolygon(_) => empty_geom(),
+            Geometry::Polygon(_) | Geometry::MultiPolygon(_) => {
+                warn!("Geometry::make_valid: Polygon/MultiPolygon repair requires 'arrange' or 'structure' feature");
+                empty_geom()
+            }
             Geometry::MultiPoint(g) => g.make_valid_with_config(config),
             Geometry::MultiLineString(g) => g.make_valid_with_config(config),
             Geometry::GeometryCollection(g) => g.make_valid_with_config(config),

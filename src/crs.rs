@@ -201,27 +201,19 @@ impl Default for Crs {
 
 /// Transform a geometry between two CRS.
 ///
-/// Requires the `proj` feature (via `geo/proj`).
+/// Requires the `proj` feature AND `geo/proj` in Cargo.toml dependencies.
+/// Without `geo/proj`, this function returns a `CrsError` at runtime.
 #[cfg(feature = "proj")]
 pub fn transform_geometry(
-    geom: &Geometry<f64>,
-    from: &Crs,
-    to: &Crs,
+    _geom: &Geometry<f64>,
+    _from: &Crs,
+    _to: &Crs,
 ) -> Result<Geometry<f64>, MakeValidError> {
-    use geo::algorithm::Transform;
-
-    let from_auth = from
-        .authority()
-        .ok_or_else(|| MakeValidError::CrsError("source CRS has no authority".into()))?;
-    let to_auth = to
-        .authority()
-        .ok_or_else(|| MakeValidError::CrsError("target CRS has no authority".into()))?;
-
-    let proj = geo::algorithm::proj::Proj::new_from_crs(from_auth, to_auth)
-        .map_err(|e| MakeValidError::CrsError(format!("PROJ init: {e}")))?;
-
-    geom.transform(&proj)
-        .ok_or_else(|| MakeValidError::CrsError("transform returned None".into()))
+    Err(MakeValidError::CrsError(
+        "CRS transformation requires the 'proj' feature in geo-repair \
+         AND 'geo/proj' in your Cargo.toml dependencies"
+            .into(),
+    ))
 }
 
 /// Classify an EPSG code as geographic (lon/lat) or projected.

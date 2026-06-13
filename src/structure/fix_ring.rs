@@ -215,20 +215,77 @@ fn fix_self_intersecting(coords: &[Coord<f64>]) -> Option<Vec<LineString<f64>>> 
     if graph.edges.is_empty() {
         return None;
     }
+    if std::env::var("DIAG_FIX_RING").is_ok() {
+        eprintln!("\n=== fix_self_intersecting DIAG ===");
+        eprintln!("input coords ({}):", coords.len());
+        for (i, c) in coords.iter().enumerate() {
+            eprintln!("  c{}: ({:.10}, {:.10})", i, c.x, c.y);
+        }
+        eprintln!("noded edges ({}):", graph.edges.len());
+        for (i, &(fi, ti)) in graph.edges.iter().enumerate() {
+            eprintln!(
+                "  E{}: v{} ({:.6},{:.6}) -> v{} ({:.6},{:.6})",
+                i,
+                fi,
+                graph.verts[fi].x,
+                graph.verts[fi].y,
+                ti,
+                graph.verts[ti].x,
+                graph.verts[ti].y
+            );
+        }
+        eprintln!("verts ({}):", graph.verts.len());
+        for (i, v) in graph.verts.iter().enumerate() {
+            eprintln!("  v{}: ({:.10}, {:.10})", i, v.x, v.y);
+        }
+    }
     let faces = extract_all_faces(&graph)?;
     if faces.is_empty() {
         return None;
     }
+    if std::env::var("DIAG_FIX_RING").is_ok() {
+        eprintln!("\nfragments from extract_all_faces ({}):", faces.len());
+        for (fi, face) in faces.iter().enumerate() {
+            eprintln!("  face {}: {} edges", fi, face.len());
+            for (ei, to) in face {
+                eprintln!(
+                    "    (E{}, to=v{}[{:.4},{:.4}])",
+                    ei, to, graph.verts[*to].x, graph.verts[*to].y
+                );
+            }
+        }
+    }
     // Split faces at pinch points (repeated vertices)
     let simple_faces: Vec<Vec<(usize, usize)>> = faces
         .iter()
-        .flat_map(|f| split_face_at_pinch_points(f))
+        .flat_map(|f| split_face_at_pinch_points(f, &graph.edges))
         .filter(|f| f.len() >= 3)
         .collect();
     if simple_faces.is_empty() {
         return None;
     }
-    let interior = label_interior_faces(&noded, &graph.verts, coords, &simple_faces)?;
+    if std::env::var("DIAG_FIX_RING").is_ok() {
+        eprintln!("\nsimple_faces after pinch split ({}):", simple_faces.len());
+        for (fi, face) in simple_faces.iter().enumerate() {
+            eprintln!("  face {}: {} edges", fi, face.len());
+            let visited_verts: Vec<usize> = face.iter().map(|&(_, to)| to).collect();
+            eprintln!("    verts: {:?}", visited_verts);
+            eprintln!("    coords:");
+            for (j, (ei, to)) in face.iter().enumerate() {
+                eprintln!(
+                    "      {}: E{} -> v{} ({:.10}, {:.10})",
+                    j, ei, to, graph.verts[*to].x, graph.verts[*to].y
+                );
+            }
+        }
+    }
+    let interior = label_interior_faces(&noded, &graph.verts, coords, &simple_faces, &graph.edges)?;
+    if std::env::var("DIAG_FIX_RING").is_ok() {
+        eprintln!(
+            "\ninterior faces: {:?}",
+            interior.iter().collect::<Vec<_>>()
+        );
+    }
     let mut result: Vec<LineString<f64>> = Vec::new();
     for &fi in &interior {
         let face = &simple_faces[fi];
@@ -238,6 +295,14 @@ fn fix_self_intersecting(coords: &[Coord<f64>]) -> Option<Vec<LineString<f64>>> 
             .collect();
         if ring_coords.len() >= 3 {
             ring_coords.push(ring_coords[0]);
+            if std::env::var("DIAG_FIX_RING").is_ok() {
+                eprintln!("  interior ring coords ({}):", ring_coords.len());
+                let visited: Vec<usize> = face.iter().map(|&(_, to)| to).collect();
+                eprintln!("    verts: {:?}", visited);
+                for (j, c) in ring_coords.iter().enumerate() {
+                    eprintln!("      {}: ({:.10}, {:.10})", j, c.x, c.y);
+                }
+            }
             result.push(LineString::new(ring_coords));
         }
     }
@@ -708,7 +773,7 @@ fn extract_all_faces(graph: &Graph) -> Option<Vec<Vec<(usize, usize)>>> {
 fn walk_face(
     graph: &Graph,
     start_ei: usize,
-    _start_from: usize,
+    start_from: usize,
     start_to: usize,
     used_fwd: &mut [bool],
     used_rev: &mut [bool],
@@ -718,6 +783,7 @@ fn walk_face(
     let mut cur_to = start_to;
     let mut first = true;
 
+    let start_is_forward = graph.edges[start_ei].0 == start_from;
     let mut used_any_dir = vec![false; graph.edges.len()];
 
     loop {
@@ -759,6 +825,7 @@ fn walk_face(
             used_rev,
             &used_any_dir,
             start_ei,
+            start_is_forward,
         );
 
         match next {
@@ -786,6 +853,7 @@ fn find_next_edge(
     used_rev: &[bool],
     used_any_dir: &[bool],
     start_ei: usize,
+    start_is_forward: bool,
 ) -> Option<(usize, usize)> {
     let mut best: Option<(usize, f64, usize)> = None;
 
@@ -808,6 +876,11 @@ fn find_next_edge(
         }
         // Skip if edge was traversed in ANY direction within this walk
         if used_any_dir[e_idx] && e_idx != start_ei {
+            continue;
+        }
+        // For the start edge, only allow traversal in the original direction
+        // (prevents stealing the edge from the adjacent face)
+        if e_idx == start_ei && is_forward != start_is_forward {
             continue;
         }
 
@@ -840,17 +913,76 @@ fn find_next_edge(
 /// Split face at repeated vertices (pinch points) into simple cycles
 /// ---------------------------------------------------------------------------
 
-fn split_face_at_pinch_points(face: &[(usize, usize)]) -> Vec<Vec<(usize, usize)>> {
-    let verts: Vec<usize> = face.iter().map(|&(_, to)| to).collect();
-    let n = verts.len();
-    // Find max vertex ID in this face to size the lookup table
-    let max_id = verts.iter().copied().max().unwrap_or(0);
+fn split_face_at_pinch_points(
+    face: &[(usize, usize)],
+    edges: &[(usize, usize)],
+) -> Vec<Vec<(usize, usize)>> {
+    split_face_at_pinch_points_depth(face, edges, 64)
+}
+
+fn split_face_at_pinch_points_depth(
+    face: &[(usize, usize)],
+    edges: &[(usize, usize)],
+    depth: usize,
+) -> Vec<Vec<(usize, usize)>> {
+    if depth == 0 {
+        return vec![face.to_vec()];
+    }
+    let to_verts: Vec<usize> = face.iter().map(|&(_, to)| to).collect();
+    let n = to_verts.len();
+
+    // Compute the start vertex: the "from" of the first edge's traversal
+    let (first_from, first_to) = edges[face[0].0];
+    let start_vert = if first_to == face[0].1 {
+        first_from
+    } else {
+        first_to
+    };
+
+    // Try to close incomplete faces first (before n < 3 check so 2-edge stubs get closed)
+    if n >= 2 && to_verts[n - 1] != start_vert {
+        let last_to = to_verts[n - 1];
+        for (ei, &(from, to)) in edges.iter().enumerate() {
+            if from == last_to && to == start_vert {
+                let mut closed = face.to_vec();
+                closed.push((ei, to));
+                return split_face_at_pinch_points_depth(&closed, edges, depth - 1);
+            }
+            if to == last_to && from == start_vert {
+                let mut closed = face.to_vec();
+                closed.push((ei, from));
+                return split_face_at_pinch_points_depth(&closed, edges, depth - 1);
+            }
+        }
+    }
+
+    if n < 3 {
+        return vec![face.to_vec()];
+    }
+
+    let max_id = to_verts
+        .iter()
+        .copied()
+        .max()
+        .unwrap_or(start_vert)
+        .max(start_vert);
     let mut first_seen = vec![None; max_id + 1];
+    // Virtual position 0 = start vertex
+    first_seen[start_vert] = Some(0);
+
     for j in 0..n {
-        let v = verts[j];
+        let v = to_verts[j];
         if let Some(i) = first_seen[v] {
             if i == 0 && j == n - 1 {
                 continue;
+            }
+            if i == 0 {
+                // Repeat of start vertex — split here
+                let sub1: Vec<(usize, usize)> = face[0..=j].to_vec();
+                let sub2: Vec<(usize, usize)> = face[j + 1..].to_vec();
+                let mut result = split_face_at_pinch_points_depth(&sub1, edges, depth - 1);
+                result.extend(split_face_at_pinch_points_depth(&sub2, edges, depth - 1));
+                return result;
             }
             let sub1: Vec<(usize, usize)> = face[i + 1..=j].to_vec();
             let sub2: Vec<(usize, usize)> = face[j + 1..]
@@ -858,13 +990,67 @@ fn split_face_at_pinch_points(face: &[(usize, usize)]) -> Vec<Vec<(usize, usize)
                 .chain(face[0..=i].iter())
                 .copied()
                 .collect();
-            let mut result = split_face_at_pinch_points(&sub1);
-            result.extend(split_face_at_pinch_points(&sub2));
+            let mut result = split_face_at_pinch_points_depth(&sub1, edges, depth - 1);
+            result.extend(split_face_at_pinch_points_depth(&sub2, edges, depth - 1));
             return result;
         }
-        first_seen[v] = Some(j);
+        first_seen[v] = Some(j + 1);
     }
+
     vec![face.to_vec()]
+}
+
+/// Compute the winding number of the input ring at a point guaranteed to be
+/// inside the given face (using edge-offset from the first edge, since the
+/// simple centroid may lie outside non-convex faces).
+fn face_winding(
+    face: &[(usize, usize)],
+    verts: &[Coord<f64>],
+    graph_edges: &[(usize, usize)],
+    input_ring: &[Coord<f64>],
+) -> i32 {
+    use crate::orient::orient2d;
+
+    // Interior point: midpoint of first edge, offset left of traversal direction
+    let &(ei, to_idx) = &face[0];
+    let (from_vi, to_vi) = graph_edges[ei];
+    let (start_coord, end_coord) = if to_vi == to_idx {
+        (verts[from_vi], verts[to_vi])
+    } else {
+        (verts[to_vi], verts[from_vi])
+    };
+
+    let dx = end_coord.x - start_coord.x;
+    let dy = end_coord.y - start_coord.y;
+    let len = (dx * dx + dy * dy).sqrt().max(1e-16);
+    // Left perpendicular (face interior for CCW traversal)
+    let mx = (start_coord.x + end_coord.x) * 0.5;
+    let my = (start_coord.y + end_coord.y) * 0.5;
+    // 1e-7 offset: large enough to overcome snap quantization noise (SNAP_SCALE=1e8)
+    // and ensure orient2d sign is stable near input edges that coincide with graph edges.
+    let cx = mx + (-dy / len) * 1e-7;
+    let cy = my + (dx / len) * 1e-7;
+
+    let mut wn = 0i32;
+    for i in 0..input_ring.len() - 1 {
+        let a = input_ring[i];
+        let b = input_ring[i + 1];
+        if a.y <= cy {
+            if b.y > cy && orient2d(a, b, Coord { x: cx, y: cy }) > 0.0 {
+                wn += 1;
+            }
+        } else if b.y <= cy && orient2d(a, b, Coord { x: cx, y: cy }) < 0.0 {
+            wn -= 1;
+        }
+    }
+    if std::env::var("DIAG_FIX_RING").is_ok() {
+        let vert_indices: Vec<usize> = face.iter().map(|&(_, to)| to).collect();
+        eprintln!(
+            "  face_winding: verts={:?}, test=({:.10},{:.10}), wn={}",
+            vert_indices, cx, cy, wn
+        );
+    }
+    wn
 }
 
 /// ---------------------------------------------------------------------------
@@ -873,19 +1059,18 @@ fn split_face_at_pinch_points(face: &[(usize, usize)]) -> Vec<Vec<(usize, usize)
 
 /// Label interior faces using BFS with winding-number verification.
 /// BFS toggles parity across shared edges (works for 99% of cases).
-/// Winding-number at face centroid catches any mislabeled faces from degenerate adjacency.
+/// Winding-number at face edge-offset point catches any mislabeled faces.
 fn label_interior_faces(
     edges: &[Line<f64>],
     verts: &[Coord<f64>],
     input_ring: &[Coord<f64>],
     faces: &[Vec<(usize, usize)>],
+    graph_edges: &[(usize, usize)],
 ) -> Option<FxHashSet<usize>> {
     let n_faces = faces.len();
     if n_faces == 0 {
         return None;
     }
-
-    use crate::orient::orient2d;
 
     // Build adjacency from shared edges
     let mut edge_to_faces: FxHashMap<usize, Vec<usize>> = FxHashMap::default();
@@ -948,32 +1133,14 @@ fn label_interior_faces(
     }
 
     // Verify each labeled interior face via winding number on input ring.
-    // Faces with even winding number (outside the input ring) are mislabeled.
+    // Uses non-zero winding rule: wn == 0 → outside (exclude).
+    // Uses edge-offset test point (guaranteed inside the face) rather than
+    // centroid, which can lie outside non-convex faces.
     let mut to_remove = Vec::new();
     for &fi in &interior {
         let face = &faces[fi];
-        let (mut cx, mut cy) = (0.0f64, 0.0f64);
-        for &(_, vi) in face {
-            let p = verts[vi];
-            cx += p.x;
-            cy += p.y;
-        }
-        cx /= face.len() as f64;
-        cy /= face.len() as f64;
-
-        let mut wn = 0i32;
-        for i in 0..input_ring.len() - 1 {
-            let a = input_ring[i];
-            let b = input_ring[i + 1];
-            if a.y <= cy {
-                if b.y > cy && orient2d(a, b, Coord { x: cx, y: cy }) > 0.0 {
-                    wn += 1;
-                }
-            } else if b.y <= cy && orient2d(a, b, Coord { x: cx, y: cy }) < 0.0 {
-                wn -= 1;
-            }
-        }
-        if wn % 2 == 0 {
+        let wn = face_winding(face, verts, graph_edges, input_ring);
+        if wn == 0 {
             to_remove.push(fi);
         }
     }
@@ -986,59 +1153,19 @@ fn label_interior_faces(
     // Skipped when BFS reached all faces AND the exterior choice was
     // correct (large-bbox heuristic can fail for self-intersecting rings).
     if visited.len() < n_faces || {
-        // Verify BFS exterior choice — if centroid is inside the input ring,
-        // labels are flipped and we need the second pass.
+        // Verify BFS exterior choice — if edge-offset point is inside the input
+        // ring, labels are flipped and we need the second pass.
         let ext_face = &faces[exterior];
-        let (mut cx, mut cy) = (0.0f64, 0.0f64);
-        for &(_, vi) in ext_face {
-            let p = verts[vi];
-            cx += p.x;
-            cy += p.y;
-        }
-        cx /= ext_face.len() as f64;
-        cy /= ext_face.len() as f64;
-
-        let mut wn = 0i32;
-        for i in 0..input_ring.len() - 1 {
-            let a = input_ring[i];
-            let b = input_ring[i + 1];
-            if a.y <= cy {
-                if b.y > cy && orient2d(a, b, Coord { x: cx, y: cy }) > 0.0 {
-                    wn += 1;
-                }
-            } else if b.y <= cy && orient2d(a, b, Coord { x: cx, y: cy }) < 0.0 {
-                wn -= 1;
-            }
-        }
-        wn % 2 != 0 // odd → BFS exterior is actually inside → labels flipped
+        let wn = face_winding(ext_face, verts, graph_edges, input_ring);
+        wn != 0 // non-zero → BFS exterior is actually inside → labels flipped
     } {
         for (fi, face) in faces.iter().enumerate() {
             if interior.contains(&fi) {
                 continue;
             }
 
-            let (mut cx, mut cy) = (0.0f64, 0.0f64);
-            for &(_, vi) in face {
-                let p = verts[vi];
-                cx += p.x;
-                cy += p.y;
-            }
-            cx /= face.len() as f64;
-            cy /= face.len() as f64;
-
-            let mut wn = 0i32;
-            for i in 0..input_ring.len() - 1 {
-                let a = input_ring[i];
-                let b = input_ring[i + 1];
-                if a.y <= cy {
-                    if b.y > cy && orient2d(a, b, Coord { x: cx, y: cy }) > 0.0 {
-                        wn += 1;
-                    }
-                } else if b.y <= cy && orient2d(a, b, Coord { x: cx, y: cy }) < 0.0 {
-                    wn -= 1;
-                }
-            }
-            if wn % 2 != 0 {
+            let wn = face_winding(face, verts, graph_edges, input_ring);
+            if wn != 0 {
                 interior.insert(fi);
             }
         }
@@ -1216,103 +1343,6 @@ mod tests {
         ]);
         let r = repair_ring(&ring);
         assert!(r.is_some());
-    }
-
-    #[test]
-    fn diagnose_fuzz_failure() {
-        let ring = ls(&[
-            (-32.94925304356217, -37.4509724868373),
-            (25.087850997208253, -29.87382634047737),
-            (0.0, -48.64262720158944),
-            (-40.61251938421724, -45.1172049629247),
-            (-38.51974407936723, -13.433918287897887),
-            (-16.8110711840133, -46.226614473001),
-        ]);
-        let coords = basic_cleanup(&ring).unwrap();
-        eprintln!("after cleanup: {} coords", coords.len());
-        for (i, c) in coords.iter().enumerate() {
-            eprintln!("  coords[{}]: ({}, {})", i, c.x, c.y);
-        }
-        let si = has_self_intersections(&coords);
-        eprintln!("has_self_intersections: {}", si);
-        if !si {
-            return;
-        }
-
-        let edges = edges_from_coords(&coords);
-        eprintln!("edges: {}", edges.len());
-        let noded = split_edges(&edges);
-        eprintln!("noded edges: {}", noded.len());
-        for (i, e) in noded.iter().enumerate() {
-            eprintln!(
-                "  e[{}]: ({},{}) -> ({},{})",
-                i, e.start.x, e.start.y, e.end.x, e.end.y
-            );
-        }
-        let graph = build_graph(&noded);
-        eprintln!(
-            "graph: {} verts, {} edges",
-            graph.verts.len(),
-            graph.edges.len()
-        );
-        for (i, v) in graph.verts.iter().enumerate() {
-            eprintln!("  v[{}]: ({}, {})", i, v.x, v.y);
-        }
-        for (i, (fi, ti)) in graph.edges.iter().enumerate() {
-            eprintln!("  edge[{}]: {} -> {}", i, fi, ti);
-        }
-
-        let faces = extract_all_faces(&graph).unwrap();
-        eprintln!("extracted {} faces", faces.len());
-        for (fi, face) in faces.iter().enumerate() {
-            eprintln!("  face[{}]: {} edges", fi, face.len());
-            for &(ei, to) in face {
-                eprint!(" (e{},v{})", ei, to);
-            }
-            eprintln!();
-            // Check if face boundary would be self-intersecting
-            let mut ring: Vec<Coord<f64>> = face.iter().map(|&(_, to)| graph.verts[to]).collect();
-            if ring.len() >= 3 {
-                ring.push(ring[0]);
-            }
-            let check_si = has_self_intersections(&ring);
-            eprintln!("    self-intersecting boundary: {}", check_si);
-        }
-
-        let simple_faces: Vec<Vec<(usize, usize)>> = faces
-            .iter()
-            .flat_map(|f| split_face_at_pinch_points(f))
-            .filter(|f| f.len() >= 3)
-            .collect();
-        eprintln!("after pinch-split: {} simple faces", simple_faces.len());
-        for (fi, face) in simple_faces.iter().enumerate() {
-            eprintln!("  simple_face[{}]: {} edges", fi, face.len());
-            let mut ring: Vec<Coord<f64>> = face.iter().map(|&(_, to)| graph.verts[to]).collect();
-            if ring.len() >= 3 {
-                ring.push(ring[0]);
-            }
-            let check_si = has_self_intersections(&ring);
-            eprintln!("    self-intersecting boundary: {}", check_si);
-        }
-
-        let interior = label_interior_faces(&noded, &graph.verts, &coords, &simple_faces).unwrap();
-        eprintln!("interior faces: {:?}", interior);
-        for &fi in &interior {
-            let face = &simple_faces[fi];
-            let mut ring_coords: Vec<Coord<f64>> = face
-                .iter()
-                .map(|&(_, to_idx)| graph.verts[to_idx])
-                .collect();
-            eprintln!("  interior face[{}]: {} coords", fi, ring_coords.len());
-            if ring_coords.len() >= 3 {
-                ring_coords.push(ring_coords[0]);
-            }
-            let check_si = has_self_intersections(&ring_coords);
-            eprintln!("    self-intersecting: {}", check_si);
-            for (i, c) in ring_coords.iter().enumerate() {
-                eprintln!("    ring[{}]: ({}, {})", i, c.x, c.y);
-            }
-        }
     }
 
     fn ls(pairs: &[(f64, f64)]) -> LineString<f64> {

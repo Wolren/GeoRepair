@@ -398,3 +398,159 @@ proptest! {
         assert_not_empty(&result);
     }
 }
+#[cfg(test)]
+mod diag_all_methods_fail {
+    use geo::validation::Validation;
+    use geo::{Coord, LineString, Polygon};
+    use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
+
+    #[test]
+    fn diagnose_all_methods_fail() {
+        let coords = vec![
+            Coord {
+                x: 33.298685125309,
+                y: 25.64285228568552,
+            },
+            Coord {
+                x: 16.056374168398353,
+                y: 41.82073196346561,
+            },
+            Coord {
+                x: 5.2001056860635515,
+                y: -1.4935771193319936,
+            },
+            Coord {
+                x: 40.0953181621632,
+                y: 49.30127327981244,
+            },
+            Coord {
+                x: -30.63143192804603,
+                y: 22.339142189433932,
+            },
+            Coord {
+                x: 17.726542485814562,
+                y: -29.738377616718996,
+            },
+        ];
+        let mut ring = coords.clone();
+        if ring.first() != ring.last() {
+            ring.push(ring[0]);
+        }
+        let n_verts = ring.len();
+        let poly = Polygon::new(LineString::new(ring), Vec::new());
+
+        println!("=== Input polygon ({} vertices) ===", n_verts);
+
+        let ring = poly.exterior().0.clone();
+        for (i, c) in ring.iter().enumerate() {
+            println!("  V{}: ({}, {})", i, c.x, c.y);
+        }
+        println!("Input valid: {:?}", poly.check_validation());
+        println!();
+
+        // Also test the 4-coord version (first proptest minimal failure)
+        {
+            let coords4 = vec![
+                Coord {
+                    x: 33.298685125309,
+                    y: 25.64285228568552,
+                },
+                Coord {
+                    x: 16.056374168398353,
+                    y: 41.82073196346561,
+                },
+                Coord {
+                    x: 5.2001056860635515,
+                    y: -1.4935771193319936,
+                },
+                Coord {
+                    x: 40.0953181621632,
+                    y: 49.30127327981244,
+                },
+            ];
+            let mut ring4 = coords4;
+            if ring4.first() != ring4.last() {
+                ring4.push(ring4[0]);
+            }
+            let poly4 = Polygon::new(LineString::new(ring4), Vec::new());
+            println!("=== 4-coord version ===");
+            println!("  Input valid: {:?}", poly4.check_validation());
+            for method in &[PolyMethod::Auto, PolyMethod::Arrange, PolyMethod::Structure] {
+                let cfg = MakeValidConfig {
+                    poly_method: method.clone(),
+                    ..Default::default()
+                };
+                let result = poly4.make_valid_with_config(&cfg);
+                println!(
+                    "  {:?}: valid={}",
+                    method,
+                    result.check_validation().is_ok()
+                );
+            }
+            println!();
+        }
+
+        for method in &[PolyMethod::Auto, PolyMethod::Arrange, PolyMethod::Structure] {
+            let config = MakeValidConfig {
+                poly_method: method.clone(),
+                ..Default::default()
+            };
+            let result = poly.make_valid_with_config(&config);
+            let valid = result.check_validation();
+            println!("=== {:?} ===", method);
+            println!("Output valid: {:?}", valid);
+            println!("Output type: {:?}", result);
+            match result {
+                geo::Geometry::Polygon(p) => {
+                    let ext = p.exterior();
+                    println!("  Exterior: {} vertices", ext.0.len());
+                    for (i, c) in ext.0.iter().enumerate() {
+                        println!("    V{}: ({}, {})", i, c.x, c.y);
+                    }
+                    println!("  Interiors: {}", p.interiors().len());
+                    for (h, ring) in p.interiors().iter().enumerate() {
+                        println!("    Hole {}: {} vertices", h, ring.0.len());
+                    }
+                }
+                geo::Geometry::MultiPolygon(mp) => {
+                    for (i, p) in mp.0.iter().enumerate() {
+                        let ext = p.exterior();
+                        let in_ring = ext.0.clone();
+                        println!("  Poly {}: {} vertices", i, in_ring.len());
+                        for (j, c) in in_ring.iter().enumerate() {
+                            println!("    V{}: ({}, {})", j, c.x, c.y);
+                        }
+                        println!("    Holes: {}", p.interiors().len());
+                    }
+                }
+                geo::Geometry::GeometryCollection(gc) => {
+                    println!("  GeometryCollection with {} items", gc.0.len());
+                    for (i, g) in gc.0.iter().enumerate() {
+                        println!("    Item {}: {:?}", i, g);
+                    }
+                }
+                other => {
+                    println!("  Other: {:?}", other);
+                }
+            }
+            println!();
+        }
+
+        println!("=== Structure direct call ===");
+        {
+            let g = poly.make_valid_with_config(&MakeValidConfig {
+                poly_method: PolyMethod::Structure,
+                ..Default::default()
+            });
+            println!("  OK: {}", g.check_validation().is_ok());
+        }
+        println!("=== Arrange direct call ===");
+        {
+            let g = poly.make_valid_with_config(&MakeValidConfig {
+                poly_method: PolyMethod::Arrange,
+                ..Default::default()
+            });
+            println!("  OK: {}", g.check_validation().is_ok());
+        }
+    }
+}
