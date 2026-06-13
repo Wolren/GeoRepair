@@ -42,10 +42,12 @@ pub mod noding;
 pub mod structure;
 
 #[cfg(feature = "ffi")]
+#[path = "bindings/ffi.rs"]
 pub mod ffi;
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 pub mod parallel;
 #[cfg(feature = "python")]
+#[path = "bindings/python.rs"]
 pub mod python;
 #[cfg(feature = "simd")]
 pub mod simd;
