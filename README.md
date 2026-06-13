@@ -393,9 +393,17 @@ The `GeoRepairResult` struct and function signatures are in `src/bindings/ffi.rs
 
 ### Portability
 
-- `simd` requires `avx2` (x86-64, Haswell or newer). ARM NEON and WASM SIMD are not supported.
-- `arrange` requires `spade`, which has its own constraints (no WASM).
-- `bench-geos` requires a system GEOS installation — see [GEOS setup](#geos-setup).
+| Platform | Core¹ | SIMD | I/O² | Parallel | Python |
+|----------|-------|------|------|----------|--------|
+| x86_64 Windows/Linux/macOS | ✓ | ✓ AVX2³ | ✓ | ✓ | ✓ |
+| aarch64 macOS/Linux | ✓ | scalar | ✓ | ✓ | ✓ |
+| WASM32 | ✓ | scalar | ✗ | ✗ | ✗ |
+
+¹ `arrange` + `structure` features. ² `io-*` features (GeoJSON, WKT, WKB, etc.).
+³ Enable with `RUSTFLAGS="-C target-cpu=native"` at build time.
+Fallback to scalar on CPUs without AVX2 or non-x86_64 targets.
+
+- `bench-geos` requires a system GEOS installation (conda recommended).
 
 ## Ecosystem
 
