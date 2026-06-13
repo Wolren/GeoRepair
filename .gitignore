@@ -35,3 +35,4 @@ Desktop.ini
 
 # Vendored cargo patches (removed from history via git-filter-repo)
 /patches/
+__pycache__/
