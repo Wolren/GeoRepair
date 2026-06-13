@@ -45,6 +45,8 @@ pub mod structure;
 pub mod ffi;
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 pub mod parallel;
+#[cfg(feature = "python")]
+pub mod python;
 #[cfg(feature = "simd")]
 pub mod simd;
 

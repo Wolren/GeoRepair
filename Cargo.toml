@@ -29,6 +29,7 @@ io-all = ["io-geojson", "io-wkt", "io-wkb", "io-csv", "io-gpkg", "io-gml", "io-k
 proj = []
 serde = ["geo/serde"]
 ffi = ["io-wkb"]
+python = ["dep:pyo3", "io-wkt", "io-geojson"]
 
 [dependencies]
 geo = { version = "0.33", default-features = false }
@@ -53,6 +54,7 @@ rusqlite = { version = "0.40", optional = true }
 shapefile = { version = "0.8", features = ["geo-types"], optional = true }
 geos = { version = "11.1", optional = true, features = ["v3_8_0"] }
 mimalloc = { version = "0.1", default-features = false, optional = true }
+pyo3 = { version = "0.27", features = ["extension-module"], optional = true }
 
 [dev-dependencies]
 wkt = { version = "0.14", features = ["geo-types"] }
