@@ -5,22 +5,54 @@
 //! Structure fast path; for lines uses noding; for points simply filters
 //! NaN/Inf coordinates.
 //!
-//! # Quick start
+//! # Platform support
 //!
-//! ```ignore
-//! use geo_repair::MakeValid;
-//! use geo::{Geometry, Point};
-//!
-//! let geom = Geometry::Point(Point::new(1.0, 2.0));
-//! let fixed = geom.make_valid();
+//! ```text
+//!                 Core¹  SIMD     I/O²    Parallel  Python   C FFI
+//! x86_64 (all OS) ✓      AVX2³   ✓       ✓         ✓        ✓
+//! aarch64         ✓      scalar  ✓       ✓         ✓        ✓
+//! WASM32          ✓      scalar  ✗       ✗         ✗        ✗
 //! ```
 //!
-//! OGC Simple Features compliance is a key goal. The validation module
-//! checks core rules (ring closure, orientation, self-intersection,
-//! hole containment, etc.). The repair module fixes violations.
-//!
-//! Supported I/O formats: GeoJSON, WKT, WKB, CSV+WKT, Shapefile,
-//! GeoPackage (.gpkg), GML (.gml/.xml), and a custom binary format (.bin).
+//! ¹ `arrange` + `structure` features are always available.
+//! ² `io-*` features require std::fs and are not available on WASM.
+//! ³ Enable with `RUSTFLAGS="-C target-cpu=native"`; scalar fallback otherwise.
+
+// Platform compatibility checks — produce clear errors for unsupported combos.
+#[cfg(all(feature = "python", target_arch = "wasm32"))]
+compile_error!("Python bindings (feature = \"python\") are not supported on WASM32. PyO3 requires a native CPython runtime.");
+#[cfg(all(feature = "ffi", target_arch = "wasm32"))]
+compile_error!("C FFI (feature = \"ffi\") is not supported on WASM32. Use the Rust API directly.");
+#[cfg(all(feature = "parallel", target_arch = "wasm32"))]
+compile_error!(
+    "Parallel (feature = \"parallel\") is not supported on WASM32. Rayon requires OS threads."
+);
+#[cfg(all(feature = "bench-geos", target_arch = "wasm32"))]
+compile_error!("GEOS benchmarks (feature = \"bench-geos\") are not supported on WASM32. GEOS is a native C++ library.");
+#[cfg(all(
+    feature = "python",
+    not(any(feature = "arrange", feature = "structure"))
+))]
+compile_error!(
+    "Python bindings require at least one repair backend. Enable 'arrange' or 'structure' feature."
+);
+
+// # Quick start
+//
+// ```ignore
+// use geo_repair::MakeValid;
+// use geo::{Geometry, Point};
+//
+// let geom = Geometry::Point(Point::new(1.0, 2.0));
+// let fixed = geom.make_valid();
+// ```
+//
+// OGC Simple Features compliance is a key goal. The validation module
+// checks core rules (ring closure, orientation, self-intersection,
+// hole containment, etc.). The repair module fixes violations.
+//
+// Supported I/O formats: GeoJSON, WKT, WKB, CSV+WKT, Shapefile,
+// GeoPackage (.gpkg), GML (.gml/.xml), and a custom binary format (.bin).
 
 pub mod core;
 pub mod crs;
