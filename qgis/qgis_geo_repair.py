@@ -35,8 +35,8 @@ if _script_dir:
 from qgis.core import (
     QgsProcessingAlgorithm, QgsProcessingParameterFeatureSource,
     QgsProcessingParameterEnum, QgsProcessingParameterBoolean,
-    QgsProcessingParameterFileDestination, QgsProcessingFeatureSink,
-    QgsProcessing,
+    QgsProcessingParameterFileDestination, QgsFeatureSink,
+    QgsProcessing, QgsGeometry, QgsFeature, QgsFields,
 )
 from qgis.PyQt.QtCore import QCoreApplication
 
