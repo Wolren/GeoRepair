@@ -36,3 +36,6 @@ Desktop.ini
 # Vendored cargo patches (removed from history via git-filter-repo)
 /patches/
 __pycache__/
+
+# Python wheels (build artifacts)
+*.whl
