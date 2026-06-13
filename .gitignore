@@ -1,6 +1,7 @@
 # Rust / Cargo
 /target/
 Cargo.lock
+*.rlib
 
 # Local environment config (machine-specific paths)
 .cargo/
@@ -32,5 +33,5 @@ Desktop.ini
 *.gcov
 /benches/real_world/
 
-# Vendored cargo patches (previously committed)
+# Vendored cargo patches (removed from history via git-filter-repo)
 /patches/
