@@ -348,6 +348,10 @@ geo_repair.repair_geojson('{"type":"Polygon","coordinates":...}')
 
 # Choose method (auto, arrange, structure)
 geo_repair.repair_wkt("...", "structure")
+
+# Validate only — no repair
+geo_repair.is_valid_wkt("POINT(1 2)")     # -> True
+geo_repair.validate_wkt("POLYGON(...)")   # -> ['Ring has self-intersections']
 ```
 
 ## C FFI

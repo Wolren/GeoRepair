@@ -5,6 +5,7 @@ use geojson::GeoJson;
 use pyo3::prelude::*;
 use wkt::{ToWkt, Wkt};
 
+use crate::validation::GeoValidation;
 use crate::{MakeValid, MakeValidConfig, PolyMethod};
 
 #[pymodule]
@@ -12,6 +13,10 @@ use crate::{MakeValid, MakeValidConfig, PolyMethod};
 fn geo_repair_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(repair_wkt, m)?)?;
     m.add_function(wrap_pyfunction!(repair_geojson, m)?)?;
+    m.add_function(wrap_pyfunction!(validate_wkt, m)?)?;
+    m.add_function(wrap_pyfunction!(validate_geojson, m)?)?;
+    m.add_function(wrap_pyfunction!(is_valid_wkt, m)?)?;
+    m.add_function(wrap_pyfunction!(is_valid_geojson, m)?)?;
     Ok(())
 }
 
@@ -100,4 +105,69 @@ fn extract_geometries(gj: GeoJson) -> Vec<Geometry<f64>> {
         }
     }
     geoms
+}
+
+// ---------------------------------------------------------------------------
+// Validation helpers (shared by WKT and GeoJSON)
+// ---------------------------------------------------------------------------
+
+fn parse_wkt_geom(wkt_str: &str) -> PyResult<Geometry<f64>> {
+    let wkt = Wkt::from_str(wkt_str).map_err(|e| {
+        PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("WKT parse error: {e}"))
+    })?;
+    wkt.try_into()
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("{e}")))
+}
+
+fn validation_errors(geom: &Geometry<f64>) -> Vec<String> {
+    let result = geom.validate();
+    result.errors.iter().map(|e| format!("{e}")).collect()
+}
+
+// ---------------------------------------------------------------------------
+// validate_wkt / validate_geojson — full validation error list
+// ---------------------------------------------------------------------------
+
+#[pyfunction]
+#[pyo3(signature = (wkt_str))]
+fn validate_wkt(wkt_str: &str) -> PyResult<Vec<String>> {
+    let geom = parse_wkt_geom(wkt_str)?;
+    Ok(validation_errors(&geom))
+}
+
+#[pyfunction]
+#[pyo3(signature = (geojson_str))]
+fn validate_geojson(geojson_str: &str) -> PyResult<Vec<String>> {
+    let gj: GeoJson = serde_json::from_str(geojson_str).map_err(|e| {
+        PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("GeoJSON parse error: {e}"))
+    })?;
+    let geoms = extract_geometries(gj);
+    let mut errors = Vec::new();
+    for (i, g) in geoms.iter().enumerate() {
+        for e in validation_errors(g) {
+            errors.push(format!("[geom {i}] {e}"));
+        }
+    }
+    Ok(errors)
+}
+
+// ---------------------------------------------------------------------------
+// is_valid_wkt / is_valid_geojson — boolean check
+// ---------------------------------------------------------------------------
+
+#[pyfunction]
+#[pyo3(signature = (wkt_str))]
+fn is_valid_wkt(wkt_str: &str) -> PyResult<bool> {
+    let geom = parse_wkt_geom(wkt_str)?;
+    Ok(geom.is_valid())
+}
+
+#[pyfunction]
+#[pyo3(signature = (geojson_str))]
+fn is_valid_geojson(geojson_str: &str) -> PyResult<bool> {
+    let gj: GeoJson = serde_json::from_str(geojson_str).map_err(|e| {
+        PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("GeoJSON parse error: {e}"))
+    })?;
+    let geoms = extract_geometries(gj);
+    Ok(geoms.iter().all(|g| g.is_valid()))
 }

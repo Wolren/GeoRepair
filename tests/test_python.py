@@ -1,7 +1,37 @@
 """Tests for geo_repair Python bindings."""
 import json
 import pytest
-from geo_repair import repair_wkt, repair_geojson
+from geo_repair import repair_wkt, repair_geojson, is_valid_wkt, is_valid_geojson, validate_wkt, validate_geojson
+
+
+def test_is_valid_wkt_point():
+    assert is_valid_wkt("POINT(1 2)") is True
+
+
+def test_is_valid_wkt_bowtie():
+    assert is_valid_wkt("POLYGON((0 0, 5 5, 5 0, 0 5, 0 0))") is False
+
+
+def test_is_valid_geojson():
+    gj = json.dumps({"type": "Polygon", "coordinates": [[[0,0],[10,0],[10,10],[0,10],[0,0]]]})
+    assert is_valid_geojson(gj) is True
+
+
+def test_validate_wkt_bowtie():
+    errors = validate_wkt("POLYGON((0 0, 5 5, 5 0, 0 5, 0 0))")
+    assert len(errors) > 0
+    assert any("self" in e.lower() for e in errors)
+
+
+def test_validate_wkt_valid():
+    errors = validate_wkt("POINT(1 2)")
+    assert len(errors) == 0
+
+
+def test_validate_geojson():
+    gj = json.dumps({"type": "Polygon", "coordinates": [[[0,0],[5,5],[5,0],[0,5],[0,0]]]})
+    errors = validate_geojson(gj)
+    assert len(errors) > 0
 
 
 def test_repair_wkt_valid_point():
