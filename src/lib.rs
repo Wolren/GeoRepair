@@ -18,24 +18,15 @@
 //! ² `io-*` features require std::fs and are not available on WASM.
 //! ³ Enable with `RUSTFLAGS="-C target-cpu=native"`; scalar fallback otherwise.
 
-// Platform compatibility checks — produce clear errors for unsupported combos.
+// Platform compatibility checks — graceful degradation for most features.
+// Features that silently exclude themselves (parallel on WASM, ffi on WASM)
+// are already gated with cfg(not(target_arch = "wasm32")) and compile fine.
+// Only truly impossible combos produce a compile error.
+
 #[cfg(all(feature = "python", target_arch = "wasm32"))]
 compile_error!("Python bindings (feature = \"python\") are not supported on WASM32. PyO3 requires a native CPython runtime.");
-#[cfg(all(feature = "ffi", target_arch = "wasm32"))]
-compile_error!("C FFI (feature = \"ffi\") is not supported on WASM32. Use the Rust API directly.");
-#[cfg(all(feature = "parallel", target_arch = "wasm32"))]
-compile_error!(
-    "Parallel (feature = \"parallel\") is not supported on WASM32. Rayon requires OS threads."
-);
 #[cfg(all(feature = "bench-geos", target_arch = "wasm32"))]
 compile_error!("GEOS benchmarks (feature = \"bench-geos\") are not supported on WASM32. GEOS is a native C++ library.");
-#[cfg(all(
-    feature = "python",
-    not(any(feature = "arrange", feature = "structure"))
-))]
-compile_error!(
-    "Python bindings require at least one repair backend. Enable 'arrange' or 'structure' feature."
-);
 
 // # Quick start
 //

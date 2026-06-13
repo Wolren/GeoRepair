@@ -223,33 +223,46 @@ pub(crate) fn orient2d_batch_4(
     pc: &[Coord<f64>; 4],
 ) -> [f64; 4] {
     #[cfg(target_feature = "avx")]
-    unsafe {
-        use std::arch::x86_64::*;
-        let pbx = _mm256_setr_pd(pb[0].x, pb[1].x, pb[2].x, pb[3].x);
-        let pax = _mm256_setr_pd(pa[0].x, pa[1].x, pa[2].x, pa[3].x);
-        let pcy = _mm256_setr_pd(pc[0].y, pc[1].y, pc[2].y, pc[3].y);
-        let pay = _mm256_setr_pd(pa[0].y, pa[1].y, pa[2].y, pa[3].y);
-        let pby = _mm256_setr_pd(pb[0].y, pb[1].y, pb[2].y, pb[3].y);
-        let pcx = _mm256_setr_pd(pc[0].x, pc[1].x, pc[2].x, pc[3].x);
-
-        let dx = _mm256_sub_pd(pbx, pax);
-        let dy = _mm256_sub_pd(pcy, pay);
-        let term1 = _mm256_mul_pd(dx, dy);
-
-        let dy2 = _mm256_sub_pd(pby, pay);
-        let dx2 = _mm256_sub_pd(pcx, pax);
-        let term2 = _mm256_mul_pd(dy2, dx2);
-
-        let result = _mm256_sub_pd(term1, term2);
-
-        let mut out = [0.0f64; 4];
-        _mm256_storeu_pd(out.as_mut_ptr(), result);
-        out
+    if std::is_x86_feature_detected!("avx") {
+        unsafe {
+            return orient2d_batch_4_avx(pa, pb, pc);
+        }
     }
-    #[cfg(not(target_feature = "avx"))]
-    {
-        scalar_orient2d_batch(pa, pb, pc)
-    }
+    scalar_orient2d_batch(pa, pb, pc)
+}
+
+#[cfg(all(
+    not(feature = "simd-portable"),
+    target_feature = "avx",
+    target_arch = "x86_64"
+))]
+#[target_feature(enable = "avx")]
+unsafe fn orient2d_batch_4_avx(
+    pa: &[Coord<f64>; 4],
+    pb: &[Coord<f64>; 4],
+    pc: &[Coord<f64>; 4],
+) -> [f64; 4] {
+    use std::arch::x86_64::*;
+    let pbx = _mm256_setr_pd(pb[0].x, pb[1].x, pb[2].x, pb[3].x);
+    let pax = _mm256_setr_pd(pa[0].x, pa[1].x, pa[2].x, pa[3].x);
+    let pcy = _mm256_setr_pd(pc[0].y, pc[1].y, pc[2].y, pc[3].y);
+    let pay = _mm256_setr_pd(pa[0].y, pa[1].y, pa[2].y, pa[3].y);
+    let pby = _mm256_setr_pd(pb[0].y, pb[1].y, pb[2].y, pb[3].y);
+    let pcx = _mm256_setr_pd(pc[0].x, pc[1].x, pc[2].x, pc[3].x);
+
+    let dx = _mm256_sub_pd(pbx, pax);
+    let dy = _mm256_sub_pd(pcy, pay);
+    let term1 = _mm256_mul_pd(dx, dy);
+
+    let dy2 = _mm256_sub_pd(pby, pay);
+    let dx2 = _mm256_sub_pd(pcx, pax);
+    let term2 = _mm256_mul_pd(dy2, dx2);
+
+    let result = _mm256_sub_pd(term1, term2);
+
+    let mut out = [0.0f64; 4];
+    _mm256_storeu_pd(out.as_mut_ptr(), result);
+    out
 }
 
 #[cfg(all(not(feature = "simd-portable"), target_arch = "x86_64"))]
@@ -258,55 +271,61 @@ pub(crate) fn is_ring_ccw_simd(coords: &[Coord<f64>]) -> bool {
     if n < 3 {
         return true;
     }
-
-    #[cfg(not(target_feature = "avx"))]
-    {
-        return is_ring_ccw_scalar(coords);
-    }
-
     #[cfg(target_feature = "avx")]
-    {
-        use std::arch::x86_64::*;
-        let origin = Coord { x: 0.0, y: 0.0 };
-        let mut i = 0usize;
-        let mut area = 0.0f64;
-        while i + 4 <= n {
-            let pa = [origin; 4];
-            let pb = [
-                coords[i],
-                coords[(i + 1) % n],
-                coords[(i + 2) % n],
-                coords[(i + 3) % n],
-            ];
-            let pc = [
-                coords[(i + 1) % n],
-                coords[(i + 2) % n],
-                coords[(i + 3) % n],
-                coords[(i + 4) % n],
-            ];
-            let batch = unsafe {
-                let pax = _mm256_setzero_pd();
-                let pay = _mm256_setzero_pd();
-                let pbx = _mm256_set_pd(pb[0].x, pb[1].x, pb[2].x, pb[3].x);
-                let pby = _mm256_set_pd(pb[0].y, pb[1].y, pb[2].y, pb[3].y);
-                let pcx = _mm256_set_pd(pc[0].x, pc[1].x, pc[2].x, pc[3].x);
-                let pcy = _mm256_set_pd(pc[0].y, pc[1].y, pc[2].y, pc[3].y);
-                let term1 = _mm256_mul_pd(pbx, pcy);
-                let term2 = _mm256_mul_pd(pby, pcx);
-                let result = _mm256_sub_pd(term1, term2);
-                let mut out = [0.0f64; 4];
-                _mm256_storeu_pd(out.as_mut_ptr(), result);
-                out
-            };
-            area += batch[0] + batch[1] + batch[2] + batch[3];
-            i += 3;
-        }
-        for j in i..n {
-            let next = (j + 1) % n;
-            area += coords[j].x * coords[next].y - coords[next].x * coords[j].y;
-        }
-        area > 0.0
+    if std::is_x86_feature_detected!("avx") {
+        return unsafe { is_ring_ccw_avx(coords) };
     }
+    is_ring_ccw_scalar(coords)
+}
+
+#[cfg(all(
+    not(feature = "simd-portable"),
+    target_feature = "avx",
+    target_arch = "x86_64"
+))]
+#[target_feature(enable = "avx")]
+unsafe fn is_ring_ccw_avx(coords: &[Coord<f64>]) -> bool {
+    let n = coords.len();
+    use std::arch::x86_64::*;
+    let origin = Coord { x: 0.0, y: 0.0 };
+    let mut i = 0usize;
+    let mut area = 0.0f64;
+    while i + 4 <= n {
+        let pa = [origin; 4];
+        let pb = [
+            coords[i],
+            coords[(i + 1) % n],
+            coords[(i + 2) % n],
+            coords[(i + 3) % n],
+        ];
+        let pc = [
+            coords[(i + 1) % n],
+            coords[(i + 2) % n],
+            coords[(i + 3) % n],
+            coords[(i + 4) % n],
+        ];
+        let batch = {
+            let pax = _mm256_setzero_pd();
+            let pay = _mm256_setzero_pd();
+            let pbx = _mm256_set_pd(pb[0].x, pb[1].x, pb[2].x, pb[3].x);
+            let pby = _mm256_set_pd(pb[0].y, pb[1].y, pb[2].y, pb[3].y);
+            let pcx = _mm256_set_pd(pc[0].x, pc[1].x, pc[2].x, pc[3].x);
+            let pcy = _mm256_set_pd(pc[0].y, pc[1].y, pc[2].y, pc[3].y);
+            let term1 = _mm256_mul_pd(pbx, pcy);
+            let term2 = _mm256_mul_pd(pby, pcx);
+            let result = _mm256_sub_pd(term1, term2);
+            let mut out = [0.0f64; 4];
+            _mm256_storeu_pd(out.as_mut_ptr(), result);
+            out
+        };
+        area += batch[0] + batch[1] + batch[2] + batch[3];
+        i += 3;
+    }
+    for j in i..n {
+        let next = (j + 1) % n;
+        area += coords[j].x * coords[next].y - coords[next].x * coords[j].y;
+    }
+    area > 0.0
 }
 
 #[cfg(all(not(feature = "simd-portable"), target_arch = "x86_64"))]
@@ -331,13 +350,8 @@ pub(crate) fn point_in_ring_exclusive(pt: Coord<f64>, coords: &[Coord<f64>]) -> 
         }
     }
 
-    #[cfg(not(target_feature = "avx"))]
-    {
-        return point_in_ring_scalar_loop(pt, coords, 0..n - 1) != 0;
-    }
-
     #[cfg(target_feature = "avx")]
-    {
+    if std::is_x86_feature_detected!("avx") {
         let mut wn = 0i32;
         let mut i = 0usize;
         while i + 5 <= n {
@@ -359,8 +373,9 @@ pub(crate) fn point_in_ring_exclusive(pt: Coord<f64>, coords: &[Coord<f64>]) -> 
             i += 4;
         }
         wn += point_in_ring_scalar_loop(pt, coords, i..n - 1);
-        wn != 0
+        return wn != 0;
     }
+    point_in_ring_scalar_loop(pt, coords, 0..n - 1) != 0
 }
 
 // ============================================================================
