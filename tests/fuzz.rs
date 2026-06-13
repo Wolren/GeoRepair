@@ -304,6 +304,78 @@ proptest! {
         }
     }
 
+    // -----------------------------------------------------------------------
+    // Property: polygons with holes (fuzz exercise all hole code paths)
+    // -----------------------------------------------------------------------
+
+    fn invariant_valid_polygon_with_holes(
+        shell_coords in proptest::collection::vec(coord_range(-100.0..=100.0), 3..=8),
+        hole_coords in proptest::collection::vec(coord_range(-100.0..=100.0), 3..=8),
+        hole_offset_x in -50.0f64..50.0f64,
+        hole_offset_y in -50.0f64..50.0f64,
+    ) {
+        let mut shell = shell_coords;
+        if shell.first() != shell.last() { shell.push(shell[0]); }
+
+        let mut hole = hole_coords;
+        if hole.first() != hole.last() { hole.push(hole[0]); }
+        let hole_ls = LineString::new(hole.iter().map(|c| Coord {
+            x: c.x + hole_offset_x,
+            y: c.y + hole_offset_y,
+        }).collect());
+
+        let poly = Polygon::new(LineString::new(shell), vec![hole_ls]);
+        let result = poly.make_valid_with_config(&cfg_auto());
+        assert_valid(&result);
+    }
+
+    #[test]
+    fn invariant_valid_multi_hole_polygon(
+        shell_coords in proptest::collection::vec(coord_range(-100.0..=100.0), 3..=8),
+        holes in proptest::collection::vec(
+            (proptest::collection::vec(coord_range(-100.0..=100.0), 3..=6),
+             -50.0f64..50.0f64, -50.0f64..50.0f64),
+            0..=3,
+        ),
+    ) {
+        let mut shell = shell_coords;
+        if shell.first() != shell.last() { shell.push(shell[0]); }
+
+        let interiors: Vec<LineString<f64>> = holes.into_iter()
+            .filter_map(|(coords, ox, oy)| {
+                if coords.is_empty() { return None; }
+                let mut c = coords;
+                if c.first() != c.last() { c.push(c[0]); }
+                Some(LineString::new(c.into_iter().map(|c| Coord {
+                    x: c.x + ox, y: c.y + oy,
+                }).collect()))
+            })
+            .collect();
+
+        let poly = Polygon::new(LineString::new(shell), interiors);
+        let result = poly.make_valid_with_config(&cfg_auto());
+        assert_valid(&result);
+    }
+
+    // -----------------------------------------------------------------------
+    // Property: nested GeometryCollection (depth up to 5)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn invariant_valid_nested_geometry_collection(
+        leaf_points in proptest::collection::vec(point_range(-100.0..=100.0), 0..=3),
+        nest_depth in 0u8..5u8,
+    ) {
+        let mut gc: Geometry<f64> = Geometry::GeometryCollection(GeometryCollection(
+            leaf_points.into_iter().map(Geometry::Point).collect()
+        ));
+        for _ in 0..nest_depth {
+            gc = Geometry::GeometryCollection(GeometryCollection(vec![gc]));
+        }
+        let result = gc.make_valid_with_config(&cfg_auto());
+        assert_valid(&result);
+    }
+
     #[test]
     fn invariant_geometry_collection_with_bowtie(
         points in proptest::collection::vec(point_range(-100.0..=100.0), 0..=3),

@@ -28,9 +28,6 @@ pub enum GeometryValidationError {
     #[error("Holes are nested")]
     NestedHoles,
 
-    #[error("Hole touches shell boundary")]
-    HoleTouchesShell,
-
     #[error("Interior ring is disconnected from shell")]
     DisconnectedInteriorRing,
 

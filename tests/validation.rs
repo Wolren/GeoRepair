@@ -4,7 +4,7 @@ use geo::{
     MultiPolygon, Point, Polygon, Rect, Triangle,
 };
 
-use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
+use geo_repair::{GeoValidation, GeometryValidationError, MakeValid, MakeValidConfig, PolyMethod};
 use wkt::TryFromWkt;
 
 // ---------------------------------------------------------------------------
@@ -1041,4 +1041,259 @@ fn test_validate_or_fix_line_invalid() {
     // NaN line is valid according to geo validation? Or does it fix?
     // Just verify it doesn't panic
     let _ = result;
+}
+
+// ---------------------------------------------------------------------------
+// OGC error variant tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_wrong_orientation_exterior_cw() {
+    // Exterior ring wound clockwise (should be CCW per OGC)
+    let poly = Polygon::new(
+        LineString::new(vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 0.0, y: 10.0 },
+            Coord { x: 10.0, y: 10.0 },
+            Coord { x: 10.0, y: 0.0 },
+            Coord { x: 0.0, y: 0.0 },
+        ]),
+        Vec::new(),
+    );
+    let result = poly.validate();
+    assert!(!result.valid);
+    assert!(result
+        .errors
+        .contains(&GeometryValidationError::WrongOrientation));
+}
+
+#[test]
+fn test_wrong_orientation_interior_ccw() {
+    // Hole wound counter-clockwise (should be CW per OGC)
+    let poly = Polygon::new(
+        LineString::new(vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 10.0, y: 0.0 },
+            Coord { x: 10.0, y: 10.0 },
+            Coord { x: 0.0, y: 10.0 },
+            Coord { x: 0.0, y: 0.0 },
+        ]),
+        vec![LineString::new(vec![
+            Coord { x: 2.0, y: 2.0 },
+            Coord { x: 5.0, y: 2.0 },
+            Coord { x: 5.0, y: 5.0 },
+            Coord { x: 2.0, y: 5.0 },
+            Coord { x: 2.0, y: 2.0 },
+        ])],
+    );
+    let result = poly.validate();
+    assert!(!result.valid);
+    assert!(result
+        .errors
+        .contains(&GeometryValidationError::WrongOrientation));
+}
+
+#[test]
+fn test_nested_holes() {
+    // One hole entirely inside another hole
+    let poly = Polygon::new(
+        LineString::new(vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 10.0, y: 0.0 },
+            Coord { x: 10.0, y: 10.0 },
+            Coord { x: 0.0, y: 10.0 },
+            Coord { x: 0.0, y: 0.0 },
+        ]),
+        vec![
+            LineString::new(vec![
+                Coord { x: 1.0, y: 1.0 },
+                Coord { x: 8.0, y: 1.0 },
+                Coord { x: 8.0, y: 8.0 },
+                Coord { x: 1.0, y: 8.0 },
+                Coord { x: 1.0, y: 1.0 },
+            ]),
+            LineString::new(vec![
+                Coord { x: 2.0, y: 2.0 },
+                Coord { x: 4.0, y: 2.0 },
+                Coord { x: 4.0, y: 4.0 },
+                Coord { x: 2.0, y: 4.0 },
+                Coord { x: 2.0, y: 2.0 },
+            ]),
+        ],
+    );
+    let result = poly.validate();
+    assert!(!result.valid);
+    assert!(result
+        .errors
+        .contains(&GeometryValidationError::NestedHoles));
+}
+
+#[test]
+fn test_disconnected_interior_ring_hole_touches_shell_at_two_points() {
+    // Hole touches shell at 2 distinct vertex points (without collinear edge overlap),
+    // which may disconnect the interior per OGC.
+    let poly = Polygon::new(
+        LineString::new(vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 10.0, y: 0.0 },
+            Coord { x: 10.0, y: 10.0 },
+            Coord { x: 0.0, y: 10.0 },
+            Coord { x: 0.0, y: 0.0 },
+        ]),
+        vec![LineString::new(vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 5.0, y: 2.0 },
+            Coord { x: 10.0, y: 0.0 },
+            Coord { x: 7.0, y: 3.0 },
+            Coord { x: 0.0, y: 0.0 },
+        ])],
+    );
+    let result = poly.validate();
+    assert!(!result.valid);
+    assert!(result
+        .errors
+        .contains(&GeometryValidationError::DisconnectedInteriorRing));
+}
+
+#[test]
+fn test_disconnected_interior_ring_holes_intersect() {
+    // Two holes whose edges cross each other
+    let poly = Polygon::new(
+        LineString::new(vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 10.0, y: 0.0 },
+            Coord { x: 10.0, y: 10.0 },
+            Coord { x: 0.0, y: 10.0 },
+            Coord { x: 0.0, y: 0.0 },
+        ]),
+        vec![
+            LineString::new(vec![
+                Coord { x: 1.0, y: 1.0 },
+                Coord { x: 8.0, y: 1.0 },
+                Coord { x: 8.0, y: 8.0 },
+                Coord { x: 1.0, y: 8.0 },
+                Coord { x: 1.0, y: 1.0 },
+            ]),
+            LineString::new(vec![
+                Coord { x: 3.0, y: 0.5 },
+                Coord { x: 5.0, y: 9.0 },
+                Coord { x: 7.0, y: 0.5 },
+                Coord { x: 3.0, y: 0.5 },
+            ]),
+        ],
+    );
+    let result = poly.validate();
+    assert!(!result.valid);
+    assert!(result
+        .errors
+        .contains(&GeometryValidationError::DisconnectedInteriorRing));
+}
+
+#[test]
+fn test_degenerate_exterior() {
+    // All exterior points lie on a line (zero height)
+    let poly = Polygon::new(
+        LineString::new(vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 5.0, y: 0.0 },
+            Coord { x: 8.0, y: 0.0 },
+            Coord { x: 10.0, y: 0.0 },
+            Coord { x: 0.0, y: 0.0 },
+        ]),
+        Vec::new(),
+    );
+    let result = poly.validate();
+    assert!(!result.valid);
+    assert!(result
+        .errors
+        .contains(&GeometryValidationError::DegenerateExterior));
+}
+
+#[test]
+fn test_duplicated_rings_holes() {
+    // Two holes that are rotated-start duplicates of each other
+    let poly = Polygon::new(
+        LineString::new(vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 10.0, y: 0.0 },
+            Coord { x: 10.0, y: 10.0 },
+            Coord { x: 0.0, y: 10.0 },
+            Coord { x: 0.0, y: 0.0 },
+        ]),
+        vec![
+            LineString::new(vec![
+                Coord { x: 1.0, y: 1.0 },
+                Coord { x: 4.0, y: 1.0 },
+                Coord { x: 4.0, y: 4.0 },
+                Coord { x: 1.0, y: 4.0 },
+                Coord { x: 1.0, y: 1.0 },
+            ]),
+            // Same hole, different start point
+            LineString::new(vec![
+                Coord { x: 4.0, y: 1.0 },
+                Coord { x: 4.0, y: 4.0 },
+                Coord { x: 1.0, y: 4.0 },
+                Coord { x: 1.0, y: 1.0 },
+                Coord { x: 4.0, y: 1.0 },
+            ]),
+        ],
+    );
+    let result = poly.validate();
+    assert!(!result.valid);
+    assert!(result
+        .errors
+        .contains(&GeometryValidationError::DuplicatedRings));
+}
+
+#[test]
+fn test_duplicated_rings_exterior_duplicated_as_hole() {
+    // A hole that duplicates the exterior ring (rotated start)
+    let poly = Polygon::new(
+        LineString::new(vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 10.0, y: 0.0 },
+            Coord { x: 10.0, y: 10.0 },
+            Coord { x: 0.0, y: 10.0 },
+            Coord { x: 0.0, y: 0.0 },
+        ]),
+        vec![LineString::new(vec![
+            Coord { x: 10.0, y: 0.0 },
+            Coord { x: 10.0, y: 10.0 },
+            Coord { x: 0.0, y: 10.0 },
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 10.0, y: 0.0 },
+        ])],
+    );
+    let result = poly.validate();
+    assert!(!result.valid);
+    assert!(result
+        .errors
+        .contains(&GeometryValidationError::DuplicatedRings));
+}
+
+#[test]
+fn test_polygon_with_one_hole_valid() {
+    // A polygon with a single hole entirely inside the shell, correct CW orientation
+    let poly = Polygon::new(
+        LineString::new(vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 10.0, y: 0.0 },
+            Coord { x: 10.0, y: 10.0 },
+            Coord { x: 0.0, y: 10.0 },
+            Coord { x: 0.0, y: 0.0 },
+        ]),
+        vec![LineString::new(vec![
+            Coord { x: 2.0, y: 2.0 },
+            Coord { x: 2.0, y: 5.0 },
+            Coord { x: 5.0, y: 5.0 },
+            Coord { x: 5.0, y: 2.0 },
+            Coord { x: 2.0, y: 2.0 },
+        ])],
+    );
+    let result = poly.validate();
+    assert!(
+        result.valid,
+        "valid polygon with hole should pass validation, got errors: {:?}",
+        result.errors
+    );
 }

@@ -79,5 +79,4 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 
-[patch.crates-io]
-geos-src = { path = "patches/geos-src" }
+
