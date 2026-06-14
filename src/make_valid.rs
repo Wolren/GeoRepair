@@ -146,7 +146,6 @@ impl<T: NodingFloat> MakeValid for LineString<T> {
         }
         let deduped = remove_consecutive_duplicates(&coords);
         if deduped.is_empty() {
-            warn!("LineString::make_valid: all coords consecutive duplicates");
             return empty_geom();
         }
         if deduped.len() == 1 {
@@ -410,10 +409,9 @@ impl MakeValid for Geometry<f64> {
 }
 
 /// Post-repair: transform to target CRS if configured.
-#[allow(unused_variables)]
-fn apply_target_crs(geom: Geometry<f64>, config: &MakeValidConfig) -> Geometry<f64> {
+fn apply_target_crs(geom: Geometry<f64>, _config: &MakeValidConfig) -> Geometry<f64> {
     #[cfg(feature = "proj")]
-    if let (Some(src_crs), Some(dst_crs)) = (&config.crs, &config.target_crs) {
+    if let (Some(ref src_crs), Some(ref dst_crs)) = (&config.crs, &config.target_crs) {
         if src_crs != dst_crs {
             match crate::crs::transform_geometry(&geom, src_crs, dst_crs) {
                 Ok(g) => return g,

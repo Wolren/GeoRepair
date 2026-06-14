@@ -1,62 +1,13 @@
 #![cfg_attr(feature = "simd-portable", feature(portable_simd))]
-//! Repair invalid GIS geometries using per-type optimal algorithms.
-//!
-//! For polygons uses Constrained Delaunay Triangulation (Arrange) or
-//! Structure fast path; for lines uses noding; for points simply filters
-//! NaN/Inf coordinates.
-//!
-//! # Platform support
-//!
-//! ```text
-//!                 Core¹  SIMD     I/O²    Parallel  Python   C FFI
-//! x86_64 (all OS) ✓      AVX2³   ✓       ✓         ✓        ✓
-//! aarch64         ✓      scalar  ✓       ✓         ✓        ✓
-//! WASM32          ✓      scalar  ✗       ✗         ✗        ✗
-//! ```
-//!
-//! ¹ `arrange` + `structure` features are always available.
-//! ² `io-*` features require std::fs and are not available on WASM.
-//! ³ Enable with `RUSTFLAGS="-C target-cpu=native"`; scalar fallback otherwise.
-
-// Platform compatibility checks — graceful degradation for most features.
-// Features that silently exclude themselves (parallel on WASM, ffi on WASM)
-// are already gated with cfg(not(target_arch = "wasm32")) and compile fine.
-// Only truly impossible combos produce a compile error.
-
-#[cfg(all(feature = "python", target_arch = "wasm32"))]
-compile_error!("Python bindings (feature = \"python\") are not supported on WASM32. PyO3 requires a native CPython runtime.");
-#[cfg(all(feature = "bench-geos", target_arch = "wasm32"))]
-compile_error!("GEOS benchmarks (feature = \"bench-geos\") are not supported on WASM32. GEOS is a native C++ library.");
-
-// # Quick start
-//
-// ```ignore
-// use geo_repair::MakeValid;
-// use geo::{Geometry, Point};
-//
-// let geom = Geometry::Point(Point::new(1.0, 2.0));
-// let fixed = geom.make_valid();
-// ```
-//
-// OGC Simple Features compliance is a key goal. The validation module
-// checks core rules (ring closure, orientation, self-intersection,
-// hole containment, etc.). The repair module fixes violations.
-//
-// Supported I/O formats: GeoJSON, WKT, WKB, CSV+WKT, Shapefile,
-// GeoPackage (.gpkg), GML (.gml/.xml), and a custom binary format (.bin).
-
 pub mod core;
 pub mod crs;
 pub mod feature;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod io;
 pub mod make_valid;
 pub mod orient;
 pub mod snap;
 pub mod validation;
 pub mod zm;
-
-use geo::Geometry;
 
 #[cfg(feature = "arrange")]
 pub mod arrange;
@@ -65,7 +16,6 @@ pub mod noding;
 pub mod structure;
 
 #[cfg(feature = "ffi")]
-#[path = "bindings/ffi.rs"]
 pub mod ffi;
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 pub mod parallel;
@@ -75,41 +25,22 @@ pub mod python;
 #[cfg(feature = "simd")]
 pub mod simd;
 
-/// Configuration for geometry repair (method selection, CRS, etc.).
 pub use core::{MakeValidConfig, MakeValidError, PolyMethod};
-/// Coordinate Reference System representation.
 pub use crs::Crs;
-/// A GIS feature with geometry, attributes, CRS, and Z/M values.
 pub use feature::Feature;
-/// Load geometries from any supported format (auto-detected by extension).
-/// Not available on wasm32 targets.
-#[cfg(not(target_arch = "wasm32"))]
 pub use io::{
     export_features, export_geometries, export_geometries_with_crs, load_features, load_geometries,
     load_geometries_with_crs,
 };
-/// Trait for repairing invalid geometries.
 pub use make_valid::MakeValid;
 #[cfg(any(feature = "arrange", feature = "structure"))]
 /// Combines validation and repair in a single step, returning errors for
 /// violations that could not be automatically repaired.
 pub use make_valid::ValidateAndFix;
-/// Coordinate snapping utilities for grid-based deduplication.
 pub use snap::{snap_coord, snap_coord_default, snap_line, snap_lines, DEFAULT_GRID};
-/// OGC geometry validation traits and types.
 pub use validation::{GeoValidation, GeometryValidationError, ValidationResult};
 
-/// Check whether a geometry is OGC-valid (convenience wrapper).
-pub fn is_valid(geom: &Geometry<f64>) -> bool {
-    geom.is_valid()
-}
-
-/// Validate a geometry and return detailed error information.
-pub fn validate(geom: &Geometry<f64>) -> ValidationResult {
-    geom.validate()
-}
-
-#[cfg(all(feature = "mimalloc", not(target_arch = "wasm32")))]
+#[cfg(feature = "mimalloc")]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 

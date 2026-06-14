@@ -14,11 +14,6 @@ use geo::{Coord, LineString, Polygon};
 ///   - For each interior ring:
 ///     - u32 LE: number of coords
 ///     - f64 LE × N: coord pairs
-/// Load polygons from a custom binary format.
-///
-/// Format: u32 LE polygon count, then for each polygon: exterior ring
-/// (u32 LE coord count, f64 LE × N coords), interior ring count, then
-/// each interior ring in the same format.
 pub fn load_bin(path: &str) -> Result<Vec<Polygon<f64>>, String> {
     let mut buf = Vec::new();
     File::open(path)
@@ -77,8 +72,6 @@ pub fn load_bin(path: &str) -> Result<Vec<Polygon<f64>>, String> {
     Ok(polys)
 }
 
-/// Streaming binary reader — yields polygons one at a time
-/// without loading the entire file into memory.
 pub fn load_bin_stream(path: &str) -> impl Iterator<Item = Polygon<f64>> {
     let file = std::fs::File::open(path).unwrap_or_else(|e| panic!("Cannot open {path}: {e}"));
     let reader = std::io::BufReader::new(file);

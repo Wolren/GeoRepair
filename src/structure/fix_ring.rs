@@ -1345,6 +1345,103 @@ mod tests {
         assert!(r.is_some());
     }
 
+    #[test]
+    fn diagnose_fuzz_failure() {
+        let ring = ls(&[
+            (-32.94925304356217, -37.4509724868373),
+            (25.087850997208253, -29.87382634047737),
+            (0.0, -48.64262720158944),
+            (-40.61251938421724, -45.1172049629247),
+            (-38.51974407936723, -13.433918287897887),
+            (-16.8110711840133, -46.226614473001),
+        ]);
+        let coords = basic_cleanup(&ring).unwrap();
+        eprintln!("after cleanup: {} coords", coords.len());
+        for (i, c) in coords.iter().enumerate() {
+            eprintln!("  coords[{}]: ({}, {})", i, c.x, c.y);
+        }
+        let si = has_self_intersections(&coords);
+        eprintln!("has_self_intersections: {}", si);
+        if !si {
+            return;
+        }
+
+        let edges = edges_from_coords(&coords);
+        eprintln!("edges: {}", edges.len());
+        let noded = split_edges(&edges);
+        eprintln!("noded edges: {}", noded.len());
+        for (i, e) in noded.iter().enumerate() {
+            eprintln!(
+                "  e[{}]: ({},{}) -> ({},{})",
+                i, e.start.x, e.start.y, e.end.x, e.end.y
+            );
+        }
+        let graph = build_graph(&noded);
+        eprintln!(
+            "graph: {} verts, {} edges",
+            graph.verts.len(),
+            graph.edges.len()
+        );
+        for (i, v) in graph.verts.iter().enumerate() {
+            eprintln!("  v[{}]: ({}, {})", i, v.x, v.y);
+        }
+        for (i, (fi, ti)) in graph.edges.iter().enumerate() {
+            eprintln!("  edge[{}]: {} -> {}", i, fi, ti);
+        }
+
+        let faces = extract_all_faces(&graph).unwrap();
+        eprintln!("extracted {} faces", faces.len());
+        for (fi, face) in faces.iter().enumerate() {
+            eprintln!("  face[{}]: {} edges", fi, face.len());
+            for &(ei, to) in face {
+                eprint!(" (e{},v{})", ei, to);
+            }
+            eprintln!();
+            // Check if face boundary would be self-intersecting
+            let mut ring: Vec<Coord<f64>> = face.iter().map(|&(_, to)| graph.verts[to]).collect();
+            if ring.len() >= 3 {
+                ring.push(ring[0]);
+            }
+            let check_si = has_self_intersections(&ring);
+            eprintln!("    self-intersecting boundary: {}", check_si);
+        }
+
+        let simple_faces: Vec<Vec<(usize, usize)>> = faces
+            .iter()
+            .flat_map(|f| split_face_at_pinch_points(f))
+            .filter(|f| f.len() >= 3)
+            .collect();
+        eprintln!("after pinch-split: {} simple faces", simple_faces.len());
+        for (fi, face) in simple_faces.iter().enumerate() {
+            eprintln!("  simple_face[{}]: {} edges", fi, face.len());
+            let mut ring: Vec<Coord<f64>> = face.iter().map(|&(_, to)| graph.verts[to]).collect();
+            if ring.len() >= 3 {
+                ring.push(ring[0]);
+            }
+            let check_si = has_self_intersections(&ring);
+            eprintln!("    self-intersecting boundary: {}", check_si);
+        }
+
+        let interior = label_interior_faces(&noded, &graph.verts, &coords, &simple_faces).unwrap();
+        eprintln!("interior faces: {:?}", interior);
+        for &fi in &interior {
+            let face = &simple_faces[fi];
+            let mut ring_coords: Vec<Coord<f64>> = face
+                .iter()
+                .map(|&(_, to_idx)| graph.verts[to_idx])
+                .collect();
+            eprintln!("  interior face[{}]: {} coords", fi, ring_coords.len());
+            if ring_coords.len() >= 3 {
+                ring_coords.push(ring_coords[0]);
+            }
+            let check_si = has_self_intersections(&ring_coords);
+            eprintln!("    self-intersecting: {}", check_si);
+            for (i, c) in ring_coords.iter().enumerate() {
+                eprintln!("    ring[{}]: ({}, {})", i, c.x, c.y);
+            }
+        }
+    }
+
     fn ls(pairs: &[(f64, f64)]) -> LineString<f64> {
         LineString::new(pairs.iter().map(|&(x, y)| Coord { x, y }).collect())
     }

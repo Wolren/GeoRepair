@@ -3,7 +3,7 @@ use std::io::{BufWriter, Write};
 use std::str::FromStr;
 
 use geo::Geometry;
-use wkt::{ToWkt, Wkt};
+use wkt::Wkt;
 
 use crate::core::MakeValidError;
 use crate::Crs;
@@ -21,12 +21,10 @@ fn strip_srid_prefix(content: &str) -> (&str, Option<i32>) {
     (trimmed, None)
 }
 
-/// Load WKT geometry file. Supports optional `SRID=...;` prefix.
 pub fn load_wkt(path: &str) -> Result<Vec<Geometry<f64>>, MakeValidError> {
     load_wkt_with_crs(path).map(|(geoms, _)| geoms)
 }
 
-/// Load WKT geometry file and extract CRS from `SRID=...;` prefix.
 pub fn load_wkt_with_crs(path: &str) -> Result<(Vec<Geometry<f64>>, Option<Crs>), MakeValidError> {
     let content =
         std::fs::read_to_string(path).map_err(|e| MakeValidError::IoError(e.to_string()))?;
@@ -42,12 +40,10 @@ pub fn load_wkt_with_crs(path: &str) -> Result<(Vec<Geometry<f64>>, Option<Crs>)
     Ok((extract_geometries(geom), crs))
 }
 
-/// Write geometries as WKT (one per line). Optionally prepended with `SRID=...;`.
 pub fn export_wkt(geometries: &[Geometry<f64>], path: &str) -> Result<(), MakeValidError> {
     export_wkt_with_crs(geometries, path, None)
 }
 
-/// Write geometries as WKT with optional SRID prefix from CRS.
 pub fn export_wkt_with_crs(
     geometries: &[Geometry<f64>],
     path: &str,
@@ -61,7 +57,7 @@ pub fn export_wkt_with_crs(
     let mut writer = BufWriter::new(file);
     for geom in geometries {
         write!(writer, "{srid_prefix}").map_err(|e| MakeValidError::IoError(e.to_string()))?;
-        let wkt = geom.to_wkt();
+        let wkt: Wkt<f64> = Wkt::from(geom.clone());
         write!(writer, "{wkt}").map_err(|e| MakeValidError::IoError(e.to_string()))?;
         writeln!(writer).map_err(|e| MakeValidError::IoError(e.to_string()))?;
     }

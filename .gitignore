@@ -33,9 +33,5 @@ Desktop.ini
 *.gcov
 /benches/real_world/
 
-# Vendored cargo patches (removed from history via git-filter-repo)
+# Vendored cargo patches (previously committed)
 /patches/
-__pycache__/
-
-# Python wheels (build artifacts)
-*.whl

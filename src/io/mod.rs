@@ -15,8 +15,6 @@ pub mod geojson;
 pub mod geopackage;
 #[cfg(feature = "io-gml")]
 pub mod gml;
-#[cfg(feature = "io-kml")]
-pub mod kml;
 pub mod shp;
 #[cfg(feature = "io-wkb")]
 pub mod wkb;
@@ -32,8 +30,6 @@ pub use self::geojson::{
     export_geojson_rfc7946, export_geojson_with_crs, export_geojson_with_crs_zm, load_geojson,
     load_geojson_features, load_geojson_with_crs, load_geojson_zm,
 };
-#[cfg(feature = "io-kml")]
-pub use self::kml::{export_kml, export_kml_with_crs, load_kml};
 pub use self::shp::count_sub_polys;
 pub use self::shp::export_geojson;
 pub use self::shp::geo_area;
@@ -170,21 +166,8 @@ pub fn load_geometries_with_crs(
                 ))
             }
         }
-        "kml" => {
-            #[cfg(feature = "io-kml")]
-            {
-                let geoms = kml::load_kml(path)?;
-                Ok((geoms, None))
-            }
-            #[cfg(not(feature = "io-kml"))]
-            {
-                Err(MakeValidError::UnsupportedFormat(
-                    "KML support requires 'io-kml' feature".into(),
-                ))
-            }
-        }
         _ => Err(MakeValidError::UnsupportedFormat(format!(
-            "unsupported format: .{ext} (supported: .shp, .bin, .geojson, .json, .wkt, .wkb, .csv, .gpkg, .gml, .xml, .kml)"
+            "unsupported format: .{ext} (supported: .shp, .bin, .geojson, .json, .wkt, .wkb, .csv, .gpkg, .gml, .xml)"
         ))),
     }
 }
@@ -341,18 +324,6 @@ pub fn export_geometries_with_crs(
                 ))
             }
         }
-        "kml" => {
-            #[cfg(feature = "io-kml")]
-            {
-                kml::export_kml_with_crs(geoms, path, crs)
-            }
-            #[cfg(not(feature = "io-kml"))]
-            {
-                Err(MakeValidError::UnsupportedFormat(
-                    "KML export requires 'io-kml' feature".into(),
-                ))
-            }
-        }
         "csv" => {
             #[cfg(feature = "io-csv")]
             {
@@ -379,7 +350,7 @@ pub fn export_geometries_with_crs(
             }
         }
         _ => Err(MakeValidError::UnsupportedFormat(format!(
-            "unsupported export format: .{ext} (supported: .geojson, .json, .wkt, .wkb, .csv, .shp, .gpkg, .gml, .xml, .kml)"
+            "unsupported export format: .{ext} (supported: .geojson, .json, .wkt, .wkb, .csv, .shp, .gpkg, .gml, .xml)"
         ))),
     }
 }

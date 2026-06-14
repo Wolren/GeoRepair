@@ -522,30 +522,6 @@ fn rt_gml_geometrycollection() {
 }
 
 #[test]
-#[cfg_attr(not(feature = "io-kml"), ignore)]
-fn rt_kml_multipoint() {
-    roundtrip_geom_eq("kml", &test_multipoint(), None);
-}
-
-#[test]
-#[cfg_attr(not(feature = "io-kml"), ignore)]
-fn rt_kml_multilinestring() {
-    roundtrip_geom_eq("kml", &test_multilinestring(), None);
-}
-
-#[test]
-#[cfg_attr(not(feature = "io-kml"), ignore)]
-fn rt_kml_multipolygon() {
-    roundtrip_geom_eq("kml", &test_multipolygon(), None);
-}
-
-#[test]
-#[cfg_attr(not(feature = "io-kml"), ignore)]
-fn rt_kml_geometrycollection() {
-    roundtrip_geom_eq("kml", &test_geometrycollection(), None);
-}
-
-#[test]
 #[cfg_attr(not(feature = "load-shp"), ignore)]
 fn rt_shp_multipoint() {
     // SHP flattens MultiPoint into individual Point records
@@ -612,14 +588,6 @@ fn rt_gml_lossy_types() {
 }
 
 #[test]
-#[cfg_attr(not(feature = "io-kml"), ignore)]
-fn rt_kml_lossy_types() {
-    roundtrip_geom_lossy("kml", &test_line());
-    roundtrip_geom_lossy("kml", &test_triangle());
-    roundtrip_geom_lossy("kml", &test_rect());
-}
-
-#[test]
 #[cfg_attr(not(feature = "load-shp"), ignore)]
 fn rt_shp_lossy_types() {
     roundtrip_geom_lossy("shp", &test_line());
@@ -666,12 +634,6 @@ fn rt_gpkg_linestring() {
 #[cfg_attr(not(feature = "io-gml"), ignore)]
 fn rt_gml_linestring() {
     roundtrip_geom_eq("gml", &test_linestring(), None);
-}
-
-#[test]
-#[cfg_attr(not(feature = "io-kml"), ignore)]
-fn rt_kml_linestring() {
-    roundtrip_geom_eq("kml", &test_linestring(), None);
 }
 
 #[test]
@@ -958,17 +920,6 @@ fn rt_gml_crs_export() {
     cleanup_path(&path);
 }
 
-#[test]
-#[cfg_attr(not(feature = "io-kml"), ignore)]
-fn rt_kml_crs_export() {
-    let path = unique_path("kml");
-    let path_str = path.to_str().unwrap();
-    assert!(export_geometries_with_crs(&[test_point()], path_str, test_crs().as_ref()).is_ok());
-    let (loaded, _crs) = load_geometries_with_crs(path_str).unwrap();
-    assert!(!loaded.is_empty(), ".kml: no geometries loaded");
-    cleanup_path(&path);
-}
-
 // ==============================================================
 // Error cases: corrupted and empty files
 // ==============================================================
@@ -1029,12 +980,6 @@ fn rt_edge_large_coordinates_gml() {
 }
 
 #[test]
-#[cfg_attr(not(feature = "io-kml"), ignore)]
-fn rt_edge_large_coordinates_kml() {
-    roundtrip_geom("kml", &test_large_coords(), None);
-}
-
-#[test]
 #[cfg_attr(not(feature = "load-shp"), ignore)]
 fn rt_edge_large_coordinates_shp() {
     roundtrip_geom("shp", &test_large_coords(), None);
@@ -1075,12 +1020,6 @@ fn rt_edge_many_coords_gml() {
 }
 
 #[test]
-#[cfg_attr(not(feature = "io-kml"), ignore)]
-fn rt_edge_many_coords_kml() {
-    roundtrip_geom_lossy("kml", &test_many_coords());
-}
-
-#[test]
 #[cfg_attr(not(feature = "load-shp"), ignore)]
 fn rt_edge_many_coords_shp() {
     roundtrip_geom_lossy("shp", &test_many_coords());
@@ -1110,19 +1049,6 @@ fn rt_edge_empty_geometrycollection_gpkg() {
     let path_str = path.to_str().unwrap();
     let result = export_geometries_with_crs(&[gc], path_str, None);
     // GPKG may or may not support empty GC — at minimum should not panic
-    if let Ok(()) = result {
-        let _ = load_geometries(path_str);
-    }
-    cleanup_path(&path);
-}
-
-#[test]
-#[cfg_attr(not(feature = "io-kml"), ignore)]
-fn rt_edge_empty_geometrycollection_kml() {
-    let gc = Geometry::GeometryCollection(GeometryCollection(vec![]));
-    let path = unique_path("kml");
-    let path_str = path.to_str().unwrap();
-    let result = export_geometries_with_crs(&[gc], path_str, None);
     if let Ok(()) = result {
         let _ = load_geometries(path_str);
     }
@@ -1232,17 +1158,6 @@ fn rt_gpkg_crs_export_polygon() {
 #[cfg_attr(not(feature = "io-gml"), ignore)]
 fn rt_gml_crs_export_polygon() {
     let path = unique_path("gml");
-    let path_str = path.to_str().unwrap();
-    assert!(export_geometries_with_crs(&[test_geom()], path_str, test_crs().as_ref()).is_ok());
-    let (loaded, _crs) = load_geometries_with_crs(path_str).unwrap();
-    assert!(!loaded.is_empty());
-    cleanup_path(&path);
-}
-
-#[test]
-#[cfg_attr(not(feature = "io-kml"), ignore)]
-fn rt_kml_crs_export_polygon() {
-    let path = unique_path("kml");
     let path_str = path.to_str().unwrap();
     assert!(export_geometries_with_crs(&[test_geom()], path_str, test_crs().as_ref()).is_ok());
     let (loaded, _crs) = load_geometries_with_crs(path_str).unwrap();
@@ -1788,39 +1703,4 @@ fn rt_error_corrupted_shp() {
     let result = load_geometries(path_str);
     assert!(result.is_err(), "Expected error for corrupted .shp file");
     cleanup_shp(&stem);
-}
-
-// ==============================================================
-// KML-specific edge cases
-// ==============================================================
-
-#[test]
-#[cfg_attr(not(feature = "io-kml"), ignore)]
-fn rt_edge_minimal_point_kml() {
-    roundtrip_geom_eq("kml", &Geometry::Point(Point::new(0.0, 0.0)), None);
-}
-
-#[test]
-#[cfg_attr(not(feature = "io-kml"), ignore)]
-fn rt_edge_minimal_linestring_kml() {
-    let ls = Geometry::LineString(LineString::new(vec![(0.0, 0.0).into(), (1.0, 1.0).into()]));
-    roundtrip_geom_eq("kml", &ls, None);
-}
-
-#[test]
-#[cfg_attr(not(feature = "io-kml"), ignore)]
-fn rt_edge_negative_kml() {
-    let neg = Geometry::Point(Point::new(-180.0, -90.0));
-    roundtrip_geom_eq("kml", &neg, None);
-}
-
-#[test]
-#[cfg_attr(not(feature = "io-kml"), ignore)]
-fn rt_error_corrupted_kml() {
-    let path = unique_path("kml");
-    let path_str = path.to_str().unwrap();
-    std::fs::write(&path, "<not><valid></kml>").unwrap();
-    let result = load_geometries(path_str);
-    assert!(result.is_err(), "Expected error for corrupted .kml file");
-    cleanup_path(&path);
 }

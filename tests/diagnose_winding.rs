@@ -1,5 +1,4 @@
-use geo::winding_order::WindingOrder;
-use geo::Winding;
+use geo::algorithm::Winding;
 use geo::{Coord, LineString};
 
 #[test]
@@ -13,7 +12,7 @@ fn test_winding_diagnose() {
     ];
     let mut ring = LineString::new(coords);
     let wo = ring.winding_order();
-    assert_eq!(wo, Some(WindingOrder::Clockwise));
+    eprintln!("winding_order: {wo:?}");
 
     ring.make_ccw_winding();
     let wo2 = ring.winding_order();

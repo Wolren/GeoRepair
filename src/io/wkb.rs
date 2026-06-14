@@ -27,12 +27,10 @@ const WKB_GEOMETRY_COLLECTION: u32 = 7;
 const WKB_Z_FLAG: u32 = 0x80000000;
 const WKB_M_FLAG: u32 = 0x40000000;
 
-/// Load WKB geometry file.
 pub fn load_wkb(path: &str) -> Result<Vec<Geometry<f64>>, MakeValidError> {
     load_wkb_with_crs(path).map(|(geoms, _)| geoms)
 }
 
-/// Load WKB geometry file and extract SRID as CRS (EWKB format).
 pub fn load_wkb_with_crs(path: &str) -> Result<(Vec<Geometry<f64>>, Option<Crs>), MakeValidError> {
     let mut buf = Vec::new();
     File::open(path)
@@ -50,7 +48,6 @@ pub fn load_wkb_with_crs(path: &str) -> Result<(Vec<Geometry<f64>>, Option<Crs>)
     Ok((extract_geometries(geo_geom), crs))
 }
 
-/// Load WKB with Z/M coordinate preservation.
 pub fn load_wkb_zm(path: &str) -> Result<(Vec<ZmGeometry>, Option<Crs>), MakeValidError> {
     let mut buf = Vec::new();
     File::open(path)
@@ -67,12 +64,10 @@ pub fn load_wkb_zm(path: &str) -> Result<(Vec<ZmGeometry>, Option<Crs>), MakeVal
     Ok((extract_geometries_zm(geo_geom, zm), crs))
 }
 
-/// Export geometries as WKB (one per file, concatenated).
 pub fn export_wkb(geometries: &[Geometry<f64>], path: &str) -> Result<(), MakeValidError> {
     export_wkb_with_crs(geometries, path, None)
 }
 
-/// Export geometries as WKB with optional EWKB SRID prefix.
 pub fn export_wkb_with_crs(
     geometries: &[Geometry<f64>],
     path: &str,
@@ -88,7 +83,6 @@ pub fn export_wkb_with_crs(
     )
 }
 
-/// Export geometries as WKB with Z/M values and optional EWKB SRID.
 pub fn export_wkb_zm_with_crs(
     geometries: &[ZmGeometry],
     path: &str,
@@ -344,15 +338,6 @@ fn write_wkb_geometry(buf: &mut Vec<u8>, zm_geom: &ZmGeometry) -> Result<usize, 
     }
 
     Ok(buf.len() - start)
-}
-
-/// Encode a 2D geometry to standard little-endian WKB bytes.
-/// Used by the GeoPackage module for GPKG blob encoding.
-pub(crate) fn encode_wkb_2d(geom: &Geometry<f64>) -> Result<Vec<u8>, String> {
-    let zm_geom = ZmGeometry::with_zm(geom.clone(), vec![]);
-    let mut buf = Vec::new();
-    write_wkb_geometry(&mut buf, &zm_geom)?;
-    Ok(buf)
 }
 
 fn wkb_type_code(geom: &Geometry<f64>, has_z: bool, has_m: bool) -> u32 {
