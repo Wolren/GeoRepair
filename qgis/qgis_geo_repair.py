@@ -29,7 +29,7 @@ from qgis.core import (
     QgsProcessingAlgorithm, QgsProcessingParameterFeatureSource,
     QgsProcessingParameterEnum, QgsProcessingParameterBoolean,
     QgsProcessingParameterFeatureSink, QgsFeatureSink,
-    QgsProcessing, QgsGeometry,
+    QgsProcessing, QgsGeometry, QgsApplication,
 )
 from qgis.PyQt.QtCore import QCoreApplication
 
@@ -45,11 +45,6 @@ class GeoRepairAlgo(QgsProcessingAlgorithm):
     def shortHelpString(self):
         return self.tr(
             "Repair invalid geometries using the Rust geo-repair engine.\n\n"
-            "Methods:\n"
-            "  Auto – Structure fast path, falls back to Arrangement\n"
-            "  Structure – boolean-operation based (fast)\n"
-            "  Arrange – CDT triangulation (robust)\n\n"
-            "Invalid features are counted, diagnosed, and repaired.\n\n"
             "Modes:\n"
             "  Diagnose + Repair – reports all errors then fixes them (default)\n"
             "  Diagnose only    – reports errors without modifying\n"
@@ -68,7 +63,6 @@ class GeoRepairAlgo(QgsProcessingAlgorithm):
             ["Diagnose + Repair", "Diagnose only", "Repair only"], defaultValue=0))
         self.addParameter(QgsProcessingParameterEnum("METHOD", "Method",
             ["Auto", "Structure", "Arrange"], defaultValue=0))
-        self.addParameter(QgsProcessingParameterBoolean("KEEP", "Keep collapsed", False))
         self.addParameter(QgsProcessingParameterFeatureSink("OUTPUT", "Output layer"))
 
     def processAlgorithm(self, params, ctx, fb):
@@ -81,24 +75,26 @@ class GeoRepairAlgo(QgsProcessingAlgorithm):
                   src.wkbType(), src.sourceCrs())
         tot = src.featureCount()
         ms = ["auto", "structure", "arrange"]
-        diagnose = mode in (0, 1)
-        repair = mode in (0, 2)
+        diag = mode in (0, 1)
+        fix = mode in (0, 2)
         bad = 0
-        diag_log = []
+        last_pct = -1
 
         for i, f in enumerate(src.getFeatures()):
-            if fb.isCanceled(): break
+            if fb.isCanceled():
+                snk.addFeature(f, QgsFeatureSink.FastInsert)
+                break
+
             g = f.geometry()
             if g and not g.isEmpty():
                 wkt = g.asWkt()
+
                 if not geo_repair.is_valid_wkt(wkt):
                     bad += 1
-                    if diagnose:
+                    if diag:
                         errs = geo_repair.validate_wkt(wkt)
-                        diag_log.append({"fid": f.id(), "errors": errs})
-                        if bad <= 20:
-                            fb.pushWarning(f"  FID {f.id()}: {', '.join(errs)}")
-                    if repair:
+                        fb.pushWarning(f"  FID {f.id()}: {', '.join(errs[:3])}")
+                    if fix:
                         try:
                             fixed = geo_repair.repair_wkt(wkt, ms[midx])
                             fg = QgsGeometry.fromWkt(fixed)
@@ -106,12 +102,16 @@ class GeoRepairAlgo(QgsProcessingAlgorithm):
                                 f.setGeometry(fg)
                         except Exception:
                             pass
-            snk.addFeature(f, QgsFeatureSink.FastInsert)
-            if i % 100 == 0: fb.setProgress(int(i / tot * 100))
 
-        fb.pushInfo(f"{bad} invalid features out of {tot}")
-        if diagnose and bad > 20:
-            fb.pushInfo(f"  (first 20 shown above, {bad} total — see log tab)")
+            snk.addFeature(f, QgsFeatureSink.FastInsert)
+
+            pct = int(i / tot * 100)
+            if pct != last_pct:
+                last_pct = pct
+                fb.setProgress(pct)
+                QgsApplication.processEvents()
+
+        fb.pushInfo(f"Done — {bad} invalid features out of {tot}")
         return {"OUTPUT": dst}
 
 
