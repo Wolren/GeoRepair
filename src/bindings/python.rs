@@ -20,6 +20,7 @@ fn geo_repair_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(is_valid_geojson, m)?)?;
     m.add_function(wrap_pyfunction!(repair_wkt_batch, m)?)?;
     m.add_function(wrap_pyfunction!(validate_wkt_batch, m)?)?;
+    m.add_function(wrap_pyfunction!(repair_validate_wkt_batch, m)?)?;
     Ok(())
 }
 
@@ -221,4 +222,35 @@ fn is_valid_geojson(geojson_str: &str) -> PyResult<bool> {
     })?;
     let geoms = extract_geometries(gj);
     Ok(geoms.iter().all(|g| g.is_valid()))
+}
+
+// ---------------------------------------------------------------------------
+// repair_validate_wkt_batch — single Rust call for both repair + validate
+// ---------------------------------------------------------------------------
+
+#[pyfunction]
+#[pyo3(signature = (wkts, method = None))]
+fn repair_validate_wkt_batch(
+    wkts: Vec<String>,
+    method: Option<&str>,
+) -> PyResult<Vec<(String, bool, Vec<String>)>> {
+    let config = make_config(method);
+    let mut results = Vec::with_capacity(wkts.len());
+    for wkt_str in wkts {
+        match (|| -> PyResult<(String, bool, Vec<String>)> {
+            let wkt = Wkt::from_str(&wkt_str)
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("{e}")))?;
+            let geom: Geometry<f64> = wkt
+                .try_into()
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("{e}")))?;
+            let is_valid = geom.is_valid();
+            let errors = validation_errors(&geom);
+            let fixed = geom.make_valid_with_config(&config);
+            Ok((fixed.wkt_string(), is_valid, errors))
+        })() {
+            Ok(r) => results.push(r),
+            Err(e) => results.push((wkt_str.to_string(), false, vec![format!("{e}")])),
+        }
+    }
+    Ok(results)
 }
