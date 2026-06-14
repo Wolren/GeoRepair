@@ -96,10 +96,16 @@ class GeoRepairAlgo(QgsProcessingAlgorithm):
                 return {"OUTPUT": ""}
 
             if mode != 2:
-                bad = sum(1 for v, _ in diags if not v)
+                bad = 0
+                warned = 0
                 for i, (valid, errors) in enumerate(diags):
-                    if not valid and i < 20:
-                        fb.pushWarning(f"  Feature {i}: {', '.join(errors[:3])}")
+                    if not valid:
+                        bad += 1
+                        if warned < 20:
+                            fb.pushWarning(f"  Feature {i}: {', '.join(errors[:3])}")
+                            warned += 1
+                    if i % 500 == 0:
+                        QgsApplication.processEvents()
                 fb.pushInfo(f"Done — {bad} invalid features out of {count}")
             else:
                 fb.pushInfo(f"Done — repaired {count} features")

@@ -355,10 +355,6 @@ fn repair_file_to_file(
     #[allow(deprecated)] progress: Option<Py<PyAny>>,
 ) -> PyResult<(usize, Vec<(bool, Vec<String>)>)> {
     let config = make_config(method);
-    let mut features = crate::io::load_features(input_path)
-        .map_err(|e| PyValueError::new_err(format!("Failed to load {}: {e}", input_path)))?;
-    let count = features.len();
-    let mut diags = Vec::with_capacity(count);
     let report = |pct: f64| {
         if let Some(ref cb) = progress {
             Python::attach(|py| {
@@ -367,8 +363,14 @@ fn repair_file_to_file(
         }
     };
 
-    report(5.0);
+    // Load with progress mapped to 0-5% of overall
+    let load_report = |pct: f64| report(pct * 0.05);
+    let mut features = crate::io::load_features_with_progress(input_path, Some(&load_report))
+        .map_err(|e| PyValueError::new_err(format!("Failed to load {}: {e}", input_path)))?;
+    let count = features.len();
+    let mut diags = Vec::with_capacity(count);
 
+    // Process (5-75%)
     if mode == "validate" {
         for (i, feat) in features.iter().enumerate() {
             let is_valid = feat.geometry.is_valid();
@@ -399,9 +401,10 @@ fn repair_file_to_file(
         }
     }
 
+    // Export with progress mapped to 80-100% of overall
     report(80.0);
-
-    crate::io::export_features(&features, output_path)
+    let export_report = |pct: f64| report(80.0 + pct * 0.2);
+    crate::io::export_features_with_progress(&features, output_path, Some(&export_report))
         .map_err(|e| PyValueError::new_err(format!("Failed to write {}: {e}", output_path)))?;
 
     report(100.0);

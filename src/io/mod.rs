@@ -79,7 +79,7 @@ pub fn load_geometries_with_crs(
         "shp" => {
             #[cfg(feature = "load-shp")]
             {
-                load_shp_features(path)
+                load_shp_features(path, None)
                     .map_err(|e| MakeValidError::IoError(e.to_string()))
                     .map(|features| {
                         let crs = features.first().and_then(|f| f.crs.clone());
@@ -188,6 +188,13 @@ pub fn load_geometries_with_crs(
 /// Currently supported: .geojson/.json (attributes and Z/M preserved),
 /// .wkb (Z/M preserved where available).
 pub fn load_features(path: &str) -> Result<Vec<Feature>, MakeValidError> {
+    load_features_with_progress(path, None)
+}
+
+pub fn load_features_with_progress(
+    path: &str,
+    progress: Option<&dyn Fn(f64)>,
+) -> Result<Vec<Feature>, MakeValidError> {
     let ext = Path::new(path)
         .extension()
         .and_then(|e| e.to_str())
@@ -212,12 +219,13 @@ pub fn load_features(path: &str) -> Result<Vec<Feature>, MakeValidError> {
             let shp_str = shp_path
                 .to_str()
                 .ok_or_else(|| MakeValidError::UnsupportedFormat("Invalid path encoding".into()))?;
-            load_features(shp_str)
+            load_features_with_progress(shp_str, progress)
         }
         "shp" => {
             #[cfg(feature = "load-shp")]
             {
-                load_shp_features(path).map_err(|e| MakeValidError::IoError(e.to_string()))
+                load_shp_features(path, progress)
+                    .map_err(|e| MakeValidError::IoError(e.to_string()))
             }
             #[cfg(not(feature = "load-shp"))]
             {
@@ -376,6 +384,15 @@ pub fn export_geometries_with_crs(
 
 /// Export features (with attributes and Z/M) to the specified format.
 pub fn export_features(features: &[Feature], path: &str) -> Result<(), MakeValidError> {
+    export_features_with_progress(features, path, None)
+}
+
+/// Export features with optional progress callback.
+pub fn export_features_with_progress(
+    features: &[Feature],
+    path: &str,
+    progress: Option<&dyn Fn(f64)>,
+) -> Result<(), MakeValidError> {
     let ext = Path::new(path)
         .extension()
         .and_then(|e| e.to_str())
@@ -400,13 +417,13 @@ pub fn export_features(features: &[Feature], path: &str) -> Result<(), MakeValid
             let shp_str = shp_path
                 .to_str()
                 .ok_or_else(|| MakeValidError::UnsupportedFormat("Invalid path encoding".into()))?;
-            export_features(features, shp_str)
+            export_features_with_progress(features, shp_str, progress)
         }
         "shp" => {
             #[cfg(feature = "load-shp")]
             {
                 let crs = features.first().and_then(|f| f.crs.as_ref());
-                shp::export_shp_features(features, path, crs)
+                shp::export_shp_features(features, path, crs, progress)
                     .map_err(|e| MakeValidError::IoError(e.to_string()))
             }
             #[cfg(not(feature = "load-shp"))]

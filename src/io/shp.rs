@@ -169,7 +169,20 @@ pub fn load_shp_geometries(path: &str) -> Result<Vec<Geometry<f64>>, shapefile::
 ///
 /// Reads all shape types, `.dbf` attributes, and `.prj` CRS sidecar.
 #[cfg(feature = "load-shp")]
-pub fn load_shp_features(path: &str) -> Result<Vec<Feature>, shapefile::Error> {
+fn dbf_record_count(shp_path: &Path) -> Option<usize> {
+    use std::io::Read;
+    let dbf_path = shp_path.with_extension("dbf");
+    let mut f = std::fs::File::open(&dbf_path).ok()?;
+    let mut header = [0u8; 8];
+    f.read_exact(&mut header).ok()?;
+    let count = u32::from_le_bytes([header[4], header[5], header[6], header[7]]);
+    Some(count as usize)
+}
+
+pub fn load_shp_features(
+    path: &str,
+    progress: Option<&dyn Fn(f64)>,
+) -> Result<Vec<Feature>, shapefile::Error> {
     use serde_json::Map;
 
     let path = Path::new(path);
@@ -188,8 +201,9 @@ pub fn load_shp_features(path: &str) -> Result<Vec<Feature>, shapefile::Error> {
         }
     };
     let mut features = Vec::new();
+    let estimated_count = dbf_record_count(path);
 
-    for result in reader.iter_shapes_and_records() {
+    for (i, result) in reader.iter_shapes_and_records().enumerate() {
         let (shape, record) = match result {
             Ok(v) => v,
             Err(shapefile::Error::IoError(e))
@@ -214,6 +228,13 @@ pub fn load_shp_features(path: &str) -> Result<Vec<Feature>, shapefile::Error> {
                 Some(properties)
             };
             features.push(Feature::with_all(geom, props, crs.clone(), Vec::new()));
+        }
+        if let Some(ref cb) = progress {
+            if let Some(total) = estimated_count {
+                if total > 0 && i % 100 == 0 {
+                    cb((i as f64 / total as f64) * 100.0);
+                }
+            }
         }
     }
 
@@ -547,6 +568,7 @@ pub fn export_shp_features(
     features: &[Feature],
     path: &str,
     crs: Option<&Crs>,
+    progress: Option<&dyn Fn(f64)>,
 ) -> std::io::Result<()> {
     use std::collections::BTreeMap;
     use std::convert::TryFrom;
@@ -603,7 +625,8 @@ pub fn export_shp_features(
     let mut writer = shapefile::Writer::from_path(&shp_path, builder)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
-    for feature in features {
+    let total = features.len();
+    for (i, feature) in features.iter().enumerate() {
         let mut record = Record::default();
         if let Some(ref props) = feature.properties {
             for (name, _) in &schema {
@@ -716,6 +739,12 @@ pub fn export_shp_features(
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
             }
             Geometry::GeometryCollection(_) => {}
+        }
+
+        if let Some(ref cb) = progress {
+            if total > 0 && i % 100 == 0 {
+                cb((i as f64 / total as f64) * 100.0);
+            }
         }
     }
 
