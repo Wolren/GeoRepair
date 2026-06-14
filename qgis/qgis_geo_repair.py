@@ -67,7 +67,6 @@ class GeoRepairAlgo(QgsProcessingAlgorithm):
 
     def processAlgorithm(self, params, ctx, fb):
         import geo_repair
-
         src = self.parameterAsSource(params, "INPUT", ctx)
         mode = self.parameterAsEnum(params, "MODE", ctx)
         midx = self.parameterAsEnum(params, "METHOD", ctx)
@@ -77,41 +76,50 @@ class GeoRepairAlgo(QgsProcessingAlgorithm):
         ms = ["auto", "structure", "arrange"]
         diag = mode in (0, 1)
         fix = mode in (0, 2)
-        bad = 0
-        last_pct = -1
 
+        # Collect all features + WKTs first
+        features = []
+        wkts = []
         for i, f in enumerate(src.getFeatures()):
-            if fb.isCanceled():
-                snk.addFeature(f, QgsFeatureSink.FastInsert)
-                break
-
+            if fb.isCanceled(): break
+            features.append(f)
             g = f.geometry()
-            if g and not g.isEmpty():
-                wkt = g.asWkt()
+            wkts.append(g.asWkt() if g and not g.isEmpty() else "")
+            if i % 1000 == 0: QgsApplication.processEvents()
 
-                if not geo_repair.is_valid_wkt(wkt):
-                    bad += 1
-                    if diag:
-                        errs = geo_repair.validate_wkt(wkt)
-                        fb.pushWarning(f"  FID {f.id()}: {', '.join(errs[:3])}")
-                    if fix:
-                        try:
-                            fixed = geo_repair.repair_wkt(wkt, ms[midx])
-                            fg = QgsGeometry.fromWkt(fixed)
-                            if fg and not fg.isEmpty():
-                                f.setGeometry(fg)
-                        except Exception:
-                            pass
+        # Single batch call to Rust
+        fb.pushInfo(f"Processing {len(features)} features...")
+        QgsApplication.processEvents()
 
-            snk.addFeature(f, QgsFeatureSink.FastInsert)
+        if diag:
+            val_results = geo_repair.validate_wkt_batch(wkts)
+            bad_indices = [i for i, (valid, _) in enumerate(val_results) if not valid]
+            bad_count = len(bad_indices)
+            for idx in bad_indices[:20]:
+                fb.pushWarning(f"  FID {features[idx].id()}: "
+                    f"{', '.join(val_results[idx][1][:3])}")
+            fb.pushInfo(f"Diagnosis: {bad_count} invalid features out of {tot}")
+            QgsApplication.processEvents()
 
-            pct = int(i / tot * 100)
-            if pct != last_pct:
-                last_pct = pct
-                fb.setProgress(pct)
-                QgsApplication.processEvents()
+        if fix:
+            fixed_wkts = geo_repair.repair_wkt_batch(wkts, ms[midx])
+            QgsApplication.processEvents()
+            for i, f in enumerate(features):
+                if i < len(fixed_wkts):
+                    fg = QgsGeometry.fromWkt(fixed_wkts[i])
+                    if fg and not fg.isEmpty():
+                        f.setGeometry(fg)
+                snk.addFeature(f, QgsFeatureSink.FastInsert)
+                if i % 100 == 0:
+                    fb.setProgress(int(i / tot * 100))
+                    QgsApplication.processEvents()
+        else:
+            for i, f in enumerate(features):
+                snk.addFeature(f, QgsFeatureSink.FastInsert)
+                if i % 100 == 0:
+                    fb.setProgress(int(i / tot * 100))
+                    QgsApplication.processEvents()
 
-        fb.pushInfo(f"Done — {bad} invalid features out of {tot}")
         return {"OUTPUT": dst}
 
 

@@ -3,6 +3,7 @@ use std::str::FromStr;
 use geo::Geometry;
 use geojson::GeoJson;
 use pyo3::prelude::*;
+use pyo3::types::PyList;
 use wkt::{ToWkt, Wkt};
 
 use crate::validation::GeoValidation;
@@ -17,6 +18,8 @@ fn geo_repair_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(validate_geojson, m)?)?;
     m.add_function(wrap_pyfunction!(is_valid_wkt, m)?)?;
     m.add_function(wrap_pyfunction!(is_valid_geojson, m)?)?;
+    m.add_function(wrap_pyfunction!(repair_wkt_batch, m)?)?;
+    m.add_function(wrap_pyfunction!(validate_wkt_batch, m)?)?;
     Ok(())
 }
 
@@ -105,6 +108,54 @@ fn extract_geometries(gj: GeoJson) -> Vec<Geometry<f64>> {
         }
     }
     geoms
+}
+
+// ---------------------------------------------------------------------------
+// Batch functions — process many WKT strings in a single Rust call
+// ---------------------------------------------------------------------------
+
+#[pyfunction]
+#[pyo3(signature = (wkts, method = None))]
+fn repair_wkt_batch(wkts: Vec<String>, method: Option<&str>) -> PyResult<Vec<String>> {
+    let config = make_config(method);
+    let mut results = Vec::with_capacity(wkts.len());
+    for wkt_str in wkts {
+        match (|| -> PyResult<String> {
+            let wkt = Wkt::from_str(&wkt_str)
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("{e}")))?;
+            let geom: Geometry<f64> = wkt
+                .try_into()
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("{e}")))?;
+            let fixed = geom.make_valid_with_config(&config);
+            Ok(fixed.wkt_string())
+        })() {
+            Ok(r) => results.push(r),
+            Err(_) => results.push(wkt_str.to_string()),
+        }
+    }
+    Ok(results)
+}
+
+#[pyfunction]
+#[pyo3(signature = (wkts))]
+fn validate_wkt_batch(wkts: Vec<String>) -> PyResult<Vec<(bool, Vec<String>)>> {
+    let mut results = Vec::with_capacity(wkts.len());
+    for wkt_str in wkts {
+        match (|| -> PyResult<(bool, Vec<String>)> {
+            let wkt = Wkt::from_str(&wkt_str)
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("{e}")))?;
+            let geom: Geometry<f64> = wkt
+                .try_into()
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("{e}")))?;
+            let valid = geom.is_valid();
+            let errors = validation_errors(&geom);
+            Ok((valid, errors))
+        })() {
+            Ok(r) => results.push(r),
+            Err(_) => results.push((false, vec!["Parse error".into()])),
+        }
+    }
+    Ok(results)
 }
 
 // ---------------------------------------------------------------------------
