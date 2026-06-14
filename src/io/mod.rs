@@ -69,6 +69,13 @@ pub fn load_geometries_with_crs(
         .unwrap_or_default();
 
     match ext.as_str() {
+        "dbf" | "shx" => {
+            let shp_path = Path::new(path).with_extension("shp");
+            let shp_str = shp_path.to_str().ok_or_else(|| {
+                MakeValidError::UnsupportedFormat("Invalid path encoding".into())
+            })?;
+            load_geometries_with_crs(shp_str)
+        }
         "shp" => {
             #[cfg(feature = "load-shp")]
             {
@@ -200,12 +207,17 @@ pub fn load_features(path: &str) -> Result<Vec<Feature>, MakeValidError> {
                 ))
             }
         }
+        "dbf" | "shx" => {
+            let shp_path = Path::new(path).with_extension("shp");
+            let shp_str = shp_path
+                .to_str()
+                .ok_or_else(|| MakeValidError::UnsupportedFormat("Invalid path encoding".into()))?;
+            load_features(shp_str)
+        }
         "shp" => {
             #[cfg(feature = "load-shp")]
             {
-                let geoms = load_shp_geometries(path)
-                    .map_err(|e| MakeValidError::IoError(e.to_string()))?;
-                Ok(geoms.into_iter().map(|g| Feature::new(g)).collect())
+                load_shp_features(path).map_err(|e| MakeValidError::IoError(e.to_string()))
             }
             #[cfg(not(feature = "load-shp"))]
             {
@@ -336,6 +348,13 @@ pub fn export_geometries_with_crs(
                 ))
             }
         }
+        "dbf" | "shx" => {
+            let shp_path = Path::new(path).with_extension("shp");
+            let shp_str = shp_path.to_str().ok_or_else(|| {
+                MakeValidError::UnsupportedFormat("Invalid path encoding".into())
+            })?;
+            export_geometries_with_crs(geoms, shp_str, crs)
+        }
         "shp" => {
             #[cfg(feature = "load-shp")]
             {
@@ -376,6 +395,13 @@ pub fn export_features(features: &[Feature], path: &str) -> Result<(), MakeValid
                 ))
             }
         }
+        "dbf" | "shx" => {
+            let shp_path = Path::new(path).with_extension("shp");
+            let shp_str = shp_path
+                .to_str()
+                .ok_or_else(|| MakeValidError::UnsupportedFormat("Invalid path encoding".into()))?;
+            export_features(features, shp_str)
+        }
         "shp" => {
             #[cfg(feature = "load-shp")]
             {
@@ -404,6 +430,19 @@ pub fn export_features(features: &[Feature], path: &str) -> Result<(), MakeValid
             {
                 Err(MakeValidError::UnsupportedFormat(
                     "WKB export requires 'io-wkb' feature".into(),
+                ))
+            }
+        }
+        "gpkg" => {
+            #[cfg(feature = "io-gpkg")]
+            {
+                let crs = features.first().and_then(|f| f.crs.as_ref());
+                geopackage::export_geopackage_features(features, path, crs)
+            }
+            #[cfg(not(feature = "io-gpkg"))]
+            {
+                Err(MakeValidError::UnsupportedFormat(
+                    "GeoPackage export requires 'io-gpkg' feature".into(),
                 ))
             }
         }

@@ -117,6 +117,7 @@ impl Crs {
     pub fn from_prj_wkt(wkt: &str) -> Option<Self> {
         let needle = "AUTHORITY";
         let mut pos = 0;
+        let mut result: Option<Self> = None;
         while let Some(start) = wkt[pos..].find(needle) {
             let seg = &wkt[pos + start + needle.len()..];
             let seg = seg.trim_start().strip_prefix('[')?;
@@ -126,14 +127,16 @@ impl Crs {
             let rest = rest.trim_start().strip_prefix('"')?;
             let (code_str, _) = rest.split_once('"')?;
             if let Ok(code) = code_str.parse::<u32>() {
-                return Some(Self {
+                // Keep the LAST authority found — the deepest (CRS-level)
+                // AUTHORITY is outermost in the WKT hierarchy and appears last.
+                result = Some(Self {
                     authority: Some(format!("{org}:{code}")),
                     is_geographic: org == "EPSG" && epsg_is_geographic(code),
                 });
             }
             pos = start + 1;
         }
-        None
+        result
     }
 
     /// Generate an OGC-standard WKT string suitable for `.prj` files.

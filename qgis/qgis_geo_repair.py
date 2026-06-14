@@ -9,27 +9,13 @@
 3. Wheel auto-installs on first run. Manual: pip install <folder>/geo_repair-*.whl
 """
 
-import sys, subprocess, json, importlib
-from pathlib import Path
-
-try:
-    _dir = Path(__file__).parent
-except NameError:
-    _dir = None
-
-if _dir:
-    whl = next(iter(_dir.glob("geo_repair-*.whl")), None)
-    if whl and importlib.util.find_spec("geo_repair") is None:
-        try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", str(whl), "--no-deps"])
-        except Exception:
-            pass
-
+import sys, os
 from qgis.core import (
     QgsProcessingAlgorithm, QgsProcessingParameterFeatureSource,
-    QgsProcessingParameterEnum, QgsProcessingParameterBoolean,
-    QgsProcessingParameterFeatureSink, QgsFeatureSink,
-    QgsProcessing, QgsGeometry, QgsApplication,
+    QgsProcessingParameterEnum,
+    QgsProcessingParameterVectorDestination, QgsFeatureSink,
+    QgsProcessing, QgsProcessingContext,
+    QgsGeometry, QgsApplication, QgsFeatureRequest, Qgis,
 )
 from qgis.PyQt.QtCore import QCoreApplication
 
@@ -63,58 +49,96 @@ class GeoRepairAlgo(QgsProcessingAlgorithm):
             ["Diagnose + Repair", "Diagnose only", "Repair only"], defaultValue=0))
         self.addParameter(QgsProcessingParameterEnum("METHOD", "Method",
             ["Auto", "Structure", "Arrange"], defaultValue=0))
-        self.addParameter(QgsProcessingParameterFeatureSink("OUTPUT", "Output layer"))
+        self.addParameter(QgsProcessingParameterVectorDestination("OUTPUT", "Output layer"))
 
     def processAlgorithm(self, params, ctx, fb):
         import geo_repair
+        try:
+            _NO_CHECK = Qgis.InvalidGeometryCheck.NoCheck
+        except AttributeError:
+            _NO_CHECK = QgsProcessingContext.InvalidGeometryCheck.NoCheck
+        try:
+            ctx.setInvalidGeometryCheck(_NO_CHECK)
+        except (AttributeError, TypeError):
+            pass
+
         src = self.parameterAsSource(params, "INPUT", ctx)
         mode = self.parameterAsEnum(params, "MODE", ctx)
         midx = self.parameterAsEnum(params, "METHOD", ctx)
-        snk, dst = self.parameterAsSink(params, "OUTPUT", ctx, src.fields(),
-                  src.wkbType(), src.sourceCrs())
-        tot = src.featureCount()
         ms = ["auto", "structure", "arrange"]
-        fix = mode in (0, 2)
-        bad = 0
+        rust_modes = ["both", "validate", "repair"]
 
-        # Phase 1/3: load (0→30%)
-        fb.setProgress(0)
-        fb.pushInfo(f"[1/3] Loading {tot} features...")
-        QgsApplication.processEvents()
-        feats, wkts = [], []
-        for i, f in enumerate(src.getFeatures()):
-            if fb.isCanceled(): break
-            feats.append(f); g = f.geometry()
-            wkts.append(g.asWkt() if g and not g.isEmpty() else "")
-            if i % 5000 == 0:
-                fb.pushInfo(f"  Loaded {i}/{tot}")
+        from qgis.core import QgsProcessingUtils
+        raw = self.parameterAsString(params, "INPUT", ctx) or ""
+        layer = QgsProcessingUtils.mapLayerFromString(raw, ctx)
+        src_path = layer.source().split("|")[0].split("?")[0] if layer else ""
+        if src_path and os.path.splitext(src_path)[1].lower() in (".dbf", ".shx"):
+            shp = os.path.splitext(src_path)[0] + ".shp"
+            if os.path.isfile(shp):
+                src_path = shp
+        use_file = bool(src_path) and os.path.isfile(src_path)
+
+        if use_file:
+            output_path = self.parameterAsOutputLayer(params, "OUTPUT", ctx)
+            fb.pushInfo("Processing via Rust engine...")
+
+            def on_progress(pct):
+                fb.setProgress(int(pct))
                 QgsApplication.processEvents()
-        tot = len(feats); fb.setProgress(30)
+                if fb.isCanceled():
+                    raise RuntimeError("Canceled by user")
 
-        # Phase 2/3: Rust batch (30→50%)
-        fb.pushInfo(f"[2/3] Processing {tot} geometries...")
-        QgsApplication.processEvents()
-        results = geo_repair.repair_validate_wkt_batch(wkts, ms[midx])
-        fb.setProgress(50)
+            try:
+                count, diags = geo_repair.repair_file_to_file(
+                    src_path, output_path, ms[midx], rust_modes[mode], on_progress)
+            except RuntimeError:
+                fb.reportError("Canceled")
+                return {"OUTPUT": ""}
 
-        # Phase 3/3: write output (50→100%)
-        fb.pushInfo("[3/3] Writing output...")
-        for i, f in enumerate(feats):
-            if i < len(results):
-                fixed_wkt, valid, errors = results[i]
+            if mode != 2:
+                bad = sum(1 for v, _ in diags if not v)
+                for i, (valid, errors) in enumerate(diags):
+                    if not valid and i < 20:
+                        fb.pushWarning(f"  Feature {i}: {', '.join(errors[:3])}")
+                fb.pushInfo(f"Done — {bad} invalid features out of {count}")
+            else:
+                fb.pushInfo(f"Done — repaired {count} features")
+
+        else:
+            tot = src.featureCount()
+            fb.pushInfo(f"Processing {tot} features...")
+            snk, dst = self.parameterAsSink(params, "OUTPUT", ctx,
+                      src.fields(), src.wkbType(), src.sourceCrs())
+            output_path = dst
+            freq = QgsFeatureRequest().setInvalidGeometryCheck(_NO_CHECK)
+            feats = list(src.getFeatures(freq))
+            wkbs = [f.geometry().asWkb().data() if f.geometry() and not f.geometry().isEmpty()
+                    else b"" for f in feats]
+            results = geo_repair.repair_validate_wkb_batch(wkbs, ms[midx])
+
+            bad = 0
+            for i, f in enumerate(feats):
+                if fb.isCanceled():
+                    break
+                fixed_wkb, valid, errors = results[i]
                 if not valid:
                     bad += 1
                     if mode != 2 and bad <= 20:
                         fb.pushWarning(f"  FID {f.id()}: {', '.join(errors[:3])}")
-                if fix:
-                    fg = QgsGeometry.fromWkt(fixed_wkt)
-                    if fg and not fg.isEmpty(): f.setGeometry(fg)
-            snk.addFeature(f, QgsFeatureSink.FastInsert)
-            pct = 50 + int(i / tot * 50)
-            if i % 100 == 0: fb.setProgress(pct)
-        fb.setProgress(100)
-        fb.pushInfo(f"Done — {bad} invalid features out of {tot}")
-        return {"OUTPUT": dst}
+                if mode != 1 and fixed_wkb:
+                    fg = QgsGeometry()
+                    fg.fromWkb(fixed_wkb)
+                    if not fg.isEmpty():
+                        f.setGeometry(fg)
+                snk.addFeature(f, QgsFeatureSink.FastInsert)
+                if i % 100 == 0:
+                    fb.setProgress(int(i / tot * 100))
+                    QgsApplication.processEvents()
+
+            fb.setProgress(100)
+            fb.pushInfo(f"Done — {bad} invalid features out of {tot}")
+
+        return {"OUTPUT": output_path}
 
 
 def createAlgorithms():

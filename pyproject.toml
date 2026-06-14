@@ -12,5 +12,5 @@ classifiers = [
 ]
 
 [tool.maturin]
-features = ["arrange", "structure", "python"]
+features = ["arrange", "structure", "python", "load-shp"]
 module-name = "geo_repair"

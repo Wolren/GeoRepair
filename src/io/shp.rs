@@ -59,7 +59,16 @@ pub fn load_shp(path: &str) -> Result<Vec<Polygon<f64>>, shapefile::Error> {
     let mut reader = shapefile::Reader::from_path(path)?;
     let mut all_rings: Vec<Vec<Coord<f64>>> = Vec::new();
     for result in reader.iter_shapes_and_records() {
-        let Ok((shape, _)) = result else { continue };
+        let (shape, _) = match result {
+            Ok(v) => v,
+            Err(shapefile::Error::IoError(e))
+                if e.kind() == std::io::ErrorKind::UnexpectedEof
+                    || e.kind() == std::io::ErrorKind::WriteZero =>
+            {
+                break;
+            }
+            Err(_) => continue,
+        };
         match shape {
             shapefile::Shape::Polygon(poly) => {
                 for r in poly.rings() {
@@ -88,7 +97,16 @@ pub fn load_shp_geometries(path: &str) -> Result<Vec<Geometry<f64>>, shapefile::
     let mut geoms = Vec::new();
 
     for result in reader.iter_shapes_and_records() {
-        let Ok((shape, _)) = result else { continue };
+        let (shape, _) = match result {
+            Ok(v) => v,
+            Err(shapefile::Error::IoError(e))
+                if e.kind() == std::io::ErrorKind::UnexpectedEof
+                    || e.kind() == std::io::ErrorKind::WriteZero =>
+            {
+                break;
+            }
+            Err(_) => continue,
+        };
         match shape {
             shapefile::Shape::Point(p) => {
                 geoms.push(Geometry::Point(geo::Point::new(p.x, p.y)));
@@ -163,11 +181,26 @@ pub fn load_shp_features(path: &str) -> Result<Vec<Feature>, shapefile::Error> {
 
     let crs = load_shp_crs(&dir.join(format!("{stem}.prj")));
 
-    let mut reader = shapefile::Reader::from_path(path)?;
+    let mut reader = match shapefile::Reader::from_path(path) {
+        Ok(r) => r,
+        Err(e) => {
+            return Err(e);
+        }
+    };
     let mut features = Vec::new();
 
     for result in reader.iter_shapes_and_records() {
-        let (shape, record) = result?;
+        let (shape, record) = match result {
+            Ok(v) => v,
+            Err(shapefile::Error::IoError(e))
+                if e.kind() == std::io::ErrorKind::UnexpectedEof
+                    || e.kind() == std::io::ErrorKind::WriteZero =>
+            {
+                // Truncated / partial file — return what we have
+                break;
+            }
+            Err(e) => return Err(e),
+        };
         let geometry = convert_shape_to_geometry(shape);
         if let Some(geom) = geometry {
             let properties: Map<String, Value> = record

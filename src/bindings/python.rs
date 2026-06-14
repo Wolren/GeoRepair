@@ -2,8 +2,8 @@ use std::str::FromStr;
 
 use geo::Geometry;
 use geojson::GeoJson;
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::PyList;
 use wkt::{ToWkt, Wkt};
 
 use crate::validation::GeoValidation;
@@ -21,6 +21,11 @@ fn geo_repair_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(repair_wkt_batch, m)?)?;
     m.add_function(wrap_pyfunction!(validate_wkt_batch, m)?)?;
     m.add_function(wrap_pyfunction!(repair_validate_wkt_batch, m)?)?;
+    m.add_function(wrap_pyfunction!(repair_wkb_batch, m)?)?;
+    m.add_function(wrap_pyfunction!(repair_validate_wkb_batch, m)?)?;
+    m.add_function(wrap_pyfunction!(repair_file, m)?)?;
+    m.add_function(wrap_pyfunction!(repair_file_to_file, m)?)?;
+    m.add_function(wrap_pyfunction!(repair_validate_wkb, m)?)?;
     Ok(())
 }
 
@@ -253,4 +258,179 @@ fn repair_validate_wkt_batch(
         }
     }
     Ok(results)
+}
+
+// ---------------------------------------------------------------------------
+// WKB batch functions — binary WKB I/O, faster than WKT
+// ---------------------------------------------------------------------------
+
+#[pyfunction]
+#[pyo3(signature = (wkbs, method = None))]
+fn repair_wkb_batch(wkbs: Vec<Vec<u8>>, method: Option<&str>) -> PyResult<Vec<Vec<u8>>> {
+    let config = make_config(method);
+    let mut results = Vec::with_capacity(wkbs.len());
+    for wkb_bytes in wkbs {
+        match (|| -> PyResult<Vec<u8>> {
+            let wkb_geom = wkb::reader::read_wkb(&wkb_bytes)
+                .map_err(|e| PyValueError::new_err(format!("WKB parse error: {e}")))?;
+            let geom = geo_traits::to_geo::ToGeoGeometry::to_geometry(&wkb_geom);
+            let fixed = geom.make_valid_with_config(&config);
+            crate::io::wkb::encode_wkb_2d(&fixed)
+                .map_err(|e| PyValueError::new_err(format!("WKB write error: {e}")))
+        })() {
+            Ok(r) => results.push(r),
+            Err(_) => results.push(wkb_bytes),
+        }
+    }
+    Ok(results)
+}
+
+#[pyfunction]
+#[pyo3(signature = (wkbs, method = None))]
+fn repair_validate_wkb_batch(
+    wkbs: Vec<Vec<u8>>,
+    method: Option<&str>,
+) -> PyResult<Vec<(Vec<u8>, bool, Vec<String>)>> {
+    let config = make_config(method);
+    let mut results = Vec::with_capacity(wkbs.len());
+    for wkb_bytes in wkbs {
+        match (|| -> PyResult<(Vec<u8>, bool, Vec<String>)> {
+            let wkb_geom = wkb::reader::read_wkb(&wkb_bytes)
+                .map_err(|e| PyValueError::new_err(format!("WKB parse error: {e}")))?;
+            let geom = geo_traits::to_geo::ToGeoGeometry::to_geometry(&wkb_geom);
+            let is_valid = geom.is_valid();
+            let errors = validation_errors(&geom);
+            let fixed = geom.make_valid_with_config(&config);
+            let out_bytes = crate::io::wkb::encode_wkb_2d(&fixed)
+                .map_err(|e| PyValueError::new_err(format!("WKB write error: {e}")))?;
+            Ok((out_bytes, is_valid, errors))
+        })() {
+            Ok(r) => results.push(r),
+            Err(e) => results.push((wkb_bytes, false, vec![format!("{e}")])),
+        }
+    }
+    Ok(results)
+}
+
+// ---------------------------------------------------------------------------
+// repair_file — read from a file in Rust, repair, return WKB results
+// ---------------------------------------------------------------------------
+
+#[pyfunction]
+#[pyo3(signature = (input_path, method = None))]
+fn repair_file(
+    input_path: &str,
+    method: Option<&str>,
+) -> PyResult<Vec<(Vec<u8>, bool, Vec<String>)>> {
+    let config = make_config(method);
+    let geoms = crate::io::load_geometries(input_path)
+        .map_err(|e| PyValueError::new_err(format!("Failed to load {}: {e}", input_path)))?;
+    let mut results = Vec::with_capacity(geoms.len());
+    for geom in geoms {
+        let is_valid = geom.is_valid();
+        let errors = validation_errors(&geom);
+        let fixed = geom.make_valid_with_config(&config);
+        match crate::io::wkb::encode_wkb_2d(&fixed) {
+            Ok(out_bytes) => results.push((out_bytes, is_valid, errors)),
+            Err(e) => results.push((Vec::new(), false, vec![format!("WKB write error: {e}")])),
+        }
+    }
+    Ok(results)
+}
+
+// ---------------------------------------------------------------------------
+// repair_file_to_file — read file, repair, write file (everything in Rust)
+//   mode: "both" (default) — repair + validate, return diagnostics
+//         "validate"      — validate only, write original geometry
+//         "repair"        — repair silently, return empty diagnostics
+// ---------------------------------------------------------------------------
+
+#[pyfunction]
+#[pyo3(signature = (input_path, output_path, method = None, mode = "both", progress = None))]
+fn repair_file_to_file(
+    input_path: &str,
+    output_path: &str,
+    method: Option<&str>,
+    mode: &str,
+    #[allow(deprecated)] progress: Option<Py<PyAny>>,
+) -> PyResult<(usize, Vec<(bool, Vec<String>)>)> {
+    let config = make_config(method);
+    let mut features = crate::io::load_features(input_path)
+        .map_err(|e| PyValueError::new_err(format!("Failed to load {}: {e}", input_path)))?;
+    let count = features.len();
+    let mut diags = Vec::with_capacity(count);
+    let report = |pct: f64| {
+        if let Some(ref cb) = progress {
+            Python::attach(|py| {
+                let _ = cb.call1(py, (pct,));
+            });
+        }
+    };
+
+    report(5.0);
+
+    if mode == "validate" {
+        for (i, feat) in features.iter().enumerate() {
+            let is_valid = feat.geometry.is_valid();
+            let errors = if is_valid {
+                vec![]
+            } else {
+                validation_errors(&feat.geometry)
+            };
+            diags.push((is_valid, errors));
+            if i % 100 == 0 {
+                report(5.0 + (i as f64 / count as f64) * 70.0);
+            }
+        }
+    } else {
+        for (i, feat) in features.iter_mut().enumerate() {
+            let is_valid = feat.geometry.is_valid();
+            let errors = if is_valid {
+                vec![]
+            } else {
+                validation_errors(&feat.geometry)
+            };
+            let fixed = feat.geometry.make_valid_with_config(&config);
+            feat.geometry = fixed;
+            diags.push((is_valid, errors));
+            if i % 100 == 0 {
+                report(5.0 + (i as f64 / count as f64) * 70.0);
+            }
+        }
+    }
+
+    report(80.0);
+
+    crate::io::export_features(&features, output_path)
+        .map_err(|e| PyValueError::new_err(format!("Failed to write {}: {e}", output_path)))?;
+
+    report(100.0);
+
+    if mode == "repair" {
+        Ok((count, vec![]))
+    } else {
+        Ok((count, diags))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// repair_validate_wkb — single-geometry WKB repair + validate (streaming)
+// ---------------------------------------------------------------------------
+
+#[pyfunction]
+#[pyo3(signature = (wkb, method = None))]
+fn repair_validate_wkb(
+    wkb: Vec<u8>,
+    method: Option<&str>,
+) -> PyResult<(Vec<u8>, bool, Vec<String>)> {
+    let config = make_config(method);
+    let wkb_geom = wkb::reader::read_wkb(&wkb)
+        .map_err(|e| PyValueError::new_err(format!("WKB parse error: {e}")))?;
+    let geom = geo_traits::to_geo::ToGeoGeometry::to_geometry(&wkb_geom);
+    let is_valid = geom.is_valid();
+    let errors = validation_errors(&geom);
+    let fixed = geom.make_valid_with_config(&config);
+    let out_bytes = crate::io::wkb::encode_wkb_2d(&fixed)
+        .map_err(|e| PyValueError::new_err(format!("WKB write error: {e}")))?;
+    Ok((out_bytes, is_valid, errors))
 }
