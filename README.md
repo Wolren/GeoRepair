@@ -192,7 +192,8 @@ cargo bench
 cargo bench --features bench-criterion --bench criterion
 
 # Real-world dataset (GEOS comparison via bench-geos feature)
-scripts/bench-geos.ps1          # Windows — auto-detects conda GEOS
+./scripts/fetch-geos-src.sh               # fetch geos-src crate (once)
+scripts/bench-geos.ps1                    # Windows — auto-detects conda GEOS
 # or manually:
 $env:BENCH_FILE = "benches/real_world/data_0.bin"
 cargo bench --features bench-geos --bench real_world
@@ -203,13 +204,28 @@ cargo bench --features bench-geos --bench real_world
 
 #### GEOS setup
 
+The GEOS C++ source tree is **not vendored** in the repository. Before running
+GEOS benchmarks, you must fetch the `geos-src` crate first:
+
+```shell
+# Bash (Linux/macOS/Git Bash on Windows)
+./scripts/fetch-geos-src.sh
+
+# PowerShell (Windows)
+.\scripts\fetch-geos-src.ps1
+```
+
+This downloads the `geos-src` crate (v0.2.4 by default) into `patches/geos-src/`
+so the build system can compile the GEOS C++ library for benchmark comparison.
+
 Requires GEOS installed on the system (for benchmark comparisons only).
 
 **Windows (conda)** — install, then use the script or set paths manually:
 
 ```shell
 conda install -c conda-forge geos
-./scripts/bench-geos.ps1
+.\scripts\fetch-geos-src.ps1
+.\scripts\bench-geos.ps1
 ```
 
 **Linux/macOS** — use your system package manager:
@@ -217,11 +233,17 @@ conda install -c conda-forge geos
 ```shell
 # Debian/Ubuntu
 sudo apt install libgeos-dev
+./scripts/fetch-geos-src.sh
 ./scripts/bench-geos.sh
 # macOS (Homebrew)
 brew install geos
+./scripts/fetch-geos-src.sh
 ./scripts/bench-geos.sh
 ```
+
+> **Note**: The `fetch-geos-src` script is idempotent — it's safe to run multiple
+> times. It skips the download if `patches/geos-src/` already contains a valid
+> `geos-src` installation.
 
 ### Parallelism
 
