@@ -1,0 +1,42 @@
+name: Bug report
+description: File a bug report
+labels: [bug]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description: A clear and concise description of the issue
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: To reproduce
+      description: Steps to reproduce the behavior. Include input geometry (WKT/GeoJSON) if applicable.
+      placeholder: |
+        1. Call make_valid() on geometry...
+        2. See error
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Windows, macOS, Linux, Other]
+  - type: dropdown
+    id: version
+    attributes:
+      label: GeoRepair version
+      options: [crates.io latest, git main branch, local build]
+  - type: textarea
+    id: geometry
+    attributes:
+      label: Input geometry (WKT preferred)
+      description: Paste the geometry that triggers the bug
+      render: text
