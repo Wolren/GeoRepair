@@ -1,10 +1,94 @@
 [package]
 name = "geo-repair"
 description = "Fix invalid GIS geometries using optimal algorithms per type: CDT arrangement for polygons, noding for lines, structure method as fast path"
-version = "0.1.1"
+version = "0.2.0"
 license = "Apache-2.0"
 repository = "https://github.com/Wolren/GeoRepair"
 keywords = ["gis", "geo", "geospatial", "validation", "repair"]
 categories = ["science::geo"]
 edition = "2024"
 rust-version = "1.95"
+
+[features]
+default = ["arrange", "structure", "parallel", "simd", "io-geojson", "io-wkt", "io-wkb", "load-shp"]
+arrange = ["dep:spade", "geo/spade"]
+structure = ["simd"]
+parallel = ["dep:rayon", "geo/multithreading"]
+simd = []
+simd-portable = []
+bench-geos = ["dep:geos", "load-shp"]
+bench-criterion = []
+load-shp = ["dep:shapefile"]
+io-geojson = ["dep:geojson", "serde_json/arbitrary_precision"]
+io-wkt = ["dep:wkt"]
+io-wkb = ["dep:wkb", "dep:geo-traits"]
+io-csv = ["dep:csv", "dep:wkt"]
+io-gpkg = ["dep:rusqlite"]
+io-gml = ["dep:quick-xml"]
+io-kml = ["dep:quick-xml"]
+io-all = ["io-geojson", "io-wkt", "io-wkb", "io-csv", "io-gpkg", "io-gml", "io-kml"]
+proj = []
+serde = ["geo/serde"]
+ffi = ["io-wkb"]
+python = ["dep:pyo3", "io-wkt", "io-geojson", "io-wkb", "load-shp", "io-gpkg"]
+
+[dependencies]
+geo = { version = "0.33", default-features = false }
+spade = { version = "2.15", optional = true }
+rstar = { version = "0.12" }
+log = { version = "0.4", default-features = false }
+robust = "1.2"
+thiserror = "2.0"
+rustc-hash = "2.1"
+smallvec = { version = "1.15", default-features = false, features = ["union"] }
+geojson = { version = "1.0", features = ["geo-types"], optional = true }
+serde_json = "1.0"
+wkt = { version = "0.14", features = ["geo-types"], optional = true }
+wkb = { version = "0.9", optional = true }
+geo-traits = { version = "0.3", optional = true }
+csv = { version = "1.4", optional = true }
+quick-xml = { version = "0.40", optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rayon = { version = "1.12", optional = true }
+rusqlite = { version = "0.40", optional = true, features = ["bundled"] }
+shapefile = { version = "0.8", features = ["geo-types"], optional = true }
+geos = { version = "11.1", optional = true, features = ["v3_8_0"] }
+mimalloc = { version = "0.1", default-features = false, optional = true }
+pyo3 = { version = "0.27", features = ["extension-module"], optional = true }
+
+[dev-dependencies]
+wkt = { version = "0.14", features = ["geo-types"] }
+criterion = { version = "0.8", features = ["html_reports"] }
+proptest = "1.11"
+
+[lib]
+name = "geo_repair"
+crate-type = ["cdylib"]
+
+# [[bin]]
+# name = "geo-repair-cli"
+# path = "src/main.rs"
+
+[[bench]]
+name = "bench"
+harness = false
+
+[[bench]]
+name = "real_world"
+harness = false
+
+[[bench]]
+name = "criterion"
+harness = false
+required-features = ["bench-criterion"]
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+
+[profile.bench]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
