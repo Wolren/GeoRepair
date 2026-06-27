@@ -1,4 +1,4 @@
-# geo-repair
+# GeoRepair
 
 [![crate](https://img.shields.io/crates/v/geo-repair.svg)](https://crates.io/crates/geo-repair)
 [![docs](https://docs.rs/geo-repair/badge.svg)](https://docs.rs/geo-repair)
