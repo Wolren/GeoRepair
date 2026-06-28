@@ -6,7 +6,7 @@ use geo_traits::to_geo::ToGeoGeometry;
 use serde_json::Value;
 use wkb::reader::read_wkb;
 
-use crate::core::MakeValidError;
+use crate::core::{io_err, MakeValidError};
 use crate::feature::Feature;
 use crate::zm::count_coords;
 use crate::Crs;
@@ -15,8 +15,7 @@ use crate::Crs;
 pub fn load_geopackage(path: &str) -> Result<Vec<Geometry<f64>>, MakeValidError> {
     use rusqlite::Connection;
 
-    let conn =
-        Connection::open(path).map_err(|e| MakeValidError::IoError(format!("open GPKG: {e}")))?;
+    let conn = Connection::open(path).map_err(|e| io_err(format!("open GPKG: {e}")))?;
 
     let mut stmt = conn
         .prepare("SELECT table_name, column_name FROM gpkg_geometry_columns")
@@ -71,12 +70,11 @@ pub fn export_geopackage(
     use rusqlite::Connection;
 
     let _db_exists = Path::new(path).exists();
-    let conn =
-        Connection::open(path).map_err(|e| MakeValidError::IoError(format!("open GPKG: {e}")))?;
+    let conn = Connection::open(path).map_err(|e| io_err(format!("open GPKG: {e}")))?;
 
     // Enable WAL mode for concurrent access
     conn.execute_batch("PRAGMA journal_mode=WAL;")
-        .map_err(|e| MakeValidError::IoError(format!("GPKG pragma: {e}")))?;
+        .map_err(|e| io_err(format!("GPKG pragma: {e}")))?;
 
     let has_metadata = conn
         .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='gpkg_contents'")
@@ -90,7 +88,7 @@ pub fn export_geopackage(
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS features (fid INTEGER PRIMARY KEY AUTOINCREMENT, geom BLOB);",
         )
-        .map_err(|e| MakeValidError::IoError(format!("create features table: {e}")))?;
+        .map_err(|e| io_err(format!("create features table: {e}")))?;
     }
 
     // Detect if any geometry has Z/M
@@ -103,7 +101,7 @@ pub fn export_geopackage(
             "INSERT INTO features (geom) VALUES (?1)",
             rusqlite::params![blob],
         )
-        .map_err(|e| MakeValidError::IoError(format!("insert geometry: {e}")))?;
+        .map_err(|e| io_err(format!("insert geometry: {e}")))?;
     }
 
     Ok(())
@@ -117,11 +115,10 @@ pub fn export_geopackage_features(
 ) -> Result<(), MakeValidError> {
     use rusqlite::Connection;
 
-    let conn =
-        Connection::open(path).map_err(|e| MakeValidError::IoError(format!("open GPKG: {e}")))?;
+    let conn = Connection::open(path).map_err(|e| io_err(format!("open GPKG: {e}")))?;
 
     conn.execute_batch("PRAGMA journal_mode=WAL;")
-        .map_err(|e| MakeValidError::IoError(format!("GPKG pragma: {e}")))?;
+        .map_err(|e| io_err(format!("GPKG pragma: {e}")))?;
 
     // Phase 1: collect unique property keys with sample values for type inference
     let mut all_keys: HashMap<String, &Value> = HashMap::new();
@@ -156,7 +153,7 @@ pub fn export_geopackage_features(
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS features (fid INTEGER PRIMARY KEY AUTOINCREMENT, geom BLOB);",
         )
-        .map_err(|e| MakeValidError::IoError(format!("create features table: {e}")))?;
+        .map_err(|e| io_err(format!("create features table: {e}")))?;
         for (san, _orig, sql_type) in &col_defs {
             let sql = format!("ALTER TABLE features ADD COLUMN \"{san}\" {sql_type};");
             let _ = conn.execute_batch(&sql);
@@ -185,7 +182,7 @@ pub fn export_geopackage_features(
     let sql = format!("INSERT INTO features ({col_list}) VALUES ({ph_list})");
     let mut stmt = conn
         .prepare(&sql)
-        .map_err(|e| MakeValidError::IoError(format!("prepare insert: {e}")))?;
+        .map_err(|e| io_err(format!("prepare insert: {e}")))?;
 
     for feat in features {
         let blob = encode_gpkg_blob(&feat.geometry, has_z)?;
@@ -204,7 +201,7 @@ pub fn export_geopackage_features(
 
         let params: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|v| v.as_ref()).collect();
         stmt.execute(params.as_slice())
-            .map_err(|e| MakeValidError::IoError(format!("insert: {e}")))?;
+            .map_err(|e| io_err(format!("insert: {e}")))?;
     }
 
     Ok(())
@@ -316,7 +313,7 @@ fn create_gpkg_schema_features(
             organization_coordsys_id INTEGER NOT NULL, definition TEXT, description TEXT
         );",
     ))
-    .map_err(|e| MakeValidError::IoError(format!("create GPKG tables: {e}")))?;
+    .map_err(|e| io_err(format!("create GPKG tables: {e}")))?;
 
     // Insert SRS
     if srs_id == 4326 {
@@ -324,7 +321,7 @@ fn create_gpkg_schema_features(
             "INSERT OR IGNORE INTO gpkg_spatial_ref_sys (srs_id,srs_name,srs_type,organization,organization_coordsys_id,definition) VALUES (?1,?2,?3,?4,?1,?5)",
             rusqlite::params![4326, "WGS 84", "geographic", "EPSG", "GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563,AUTHORITY[\"EPSG\",\"7030\"]],AUTHORITY[\"EPSG\",\"6326\"]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"4326\"]]"],
         )
-        .map_err(|e| MakeValidError::IoError(format!("GPKG SRS: {e}")))?;
+        .map_err(|e| io_err(format!("GPKG SRS: {e}")))?;
     }
 
     if srs_id != 4326 && srs_id != -1 {
@@ -341,14 +338,14 @@ fn create_gpkg_schema_features(
             "INSERT OR REPLACE INTO gpkg_spatial_ref_sys VALUES (?1,?2,?3,?4,?1,?5,NULL)",
             rusqlite::params![srs_id, srs_name, srs_type, org, def_wkt],
         )
-        .map_err(|e| MakeValidError::IoError(format!("GPKG SRS: {e}")))?;
+        .map_err(|e| io_err(format!("GPKG SRS: {e}")))?;
     }
 
     conn.execute(
         "INSERT OR IGNORE INTO gpkg_spatial_ref_sys VALUES (-1,'Undefined','geographic','NONE',-1,'UNDEFINED',NULL)",
         rusqlite::params![],
     )
-    .map_err(|e| MakeValidError::IoError(format!("GPKG SRS undefined: {e}")))?;
+    .map_err(|e| io_err(format!("GPKG SRS undefined: {e}")))?;
 
     let (min_x, min_y, max_x, max_y) = compute_bounds_slice(geometries);
 
@@ -357,14 +354,14 @@ fn create_gpkg_schema_features(
          VALUES ('features','features',?1,?2,?3,?4,?5)",
         rusqlite::params![min_x, min_y, max_x, max_y, srs_id],
     )
-    .map_err(|e| MakeValidError::IoError(format!("gpkg_contents: {e}")))?;
+    .map_err(|e| io_err(format!("gpkg_contents: {e}")))?;
 
     let has_z = geometries.iter().any(|g| count_coords(g) > 0);
     conn.execute(
         "INSERT INTO gpkg_geometry_columns VALUES ('features','geom','GEOMETRY',?1,?2,?3)",
         rusqlite::params![srs_id, if has_z { 1 } else { 0 }, 0],
     )
-    .map_err(|e| MakeValidError::IoError(format!("gpkg_geometry_columns: {e}")))?;
+    .map_err(|e| io_err(format!("gpkg_geometry_columns: {e}")))?;
 
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS gpkg_rtree_features_geom (
@@ -373,7 +370,7 @@ fn create_gpkg_schema_features(
             min_y REAL, max_y REAL
         );",
     )
-    .map_err(|e| MakeValidError::IoError(format!("GPKG R-tree table: {e}")))?;
+    .map_err(|e| io_err(format!("GPKG R-tree table: {e}")))?;
 
     for (i, geom) in geometries.iter().enumerate() {
         let (min_x, max_x, min_y, max_y) = compute_bounds_slice(std::slice::from_ref(geom));
@@ -381,7 +378,7 @@ fn create_gpkg_schema_features(
             "INSERT OR IGNORE INTO gpkg_rtree_features_geom VALUES (?1,?2,?3,?4,?5)",
             rusqlite::params![i as i64 + 1, min_x, max_x, min_y, max_y],
         )
-        .map_err(|e| MakeValidError::IoError(format!("GPKG R-tree insert: {e}")))?;
+        .map_err(|e| io_err(format!("GPKG R-tree insert: {e}")))?;
     }
 
     Ok(())
@@ -441,7 +438,7 @@ fn create_gpkg_schema(
         );
         ",
     )
-    .map_err(|e| MakeValidError::IoError(format!("create GPKG tables: {e}")))?;
+    .map_err(|e| io_err(format!("create GPKG tables: {e}")))?;
 
     // Insert SRS for the given CRS
     if srs_id == 4326 {
@@ -449,7 +446,7 @@ fn create_gpkg_schema(
             "INSERT OR IGNORE INTO gpkg_spatial_ref_sys (srs_id,srs_name,srs_type,organization,organization_coordsys_id,definition) VALUES (?1,?2,?3,?4,?1,?5)",
             rusqlite::params![4326, "WGS 84", "geographic", "EPSG", "GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563,AUTHORITY[\"EPSG\",\"7030\"]],AUTHORITY[\"EPSG\",\"6326\"]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"4326\"]]"],
         )
-        .map_err(|e| MakeValidError::IoError(format!("GPKG SRS: {e}")))?;
+        .map_err(|e| io_err(format!("GPKG SRS: {e}")))?;
     }
 
     if srs_id != 4326 && srs_id != -1 {
@@ -466,14 +463,14 @@ fn create_gpkg_schema(
             "INSERT OR REPLACE INTO gpkg_spatial_ref_sys VALUES (?1,?2,?3,?4,?1,?5,NULL)",
             rusqlite::params![srs_id, srs_name, srs_type, org, def_wkt],
         )
-        .map_err(|e| MakeValidError::IoError(format!("GPKG SRS: {e}")))?;
+        .map_err(|e| io_err(format!("GPKG SRS: {e}")))?;
     }
 
     conn.execute(
         "INSERT OR IGNORE INTO gpkg_spatial_ref_sys VALUES (-1,'Undefined','geographic','NONE',-1,'UNDEFINED',NULL)",
         rusqlite::params![],
     )
-    .map_err(|e| MakeValidError::IoError(format!("GPKG SRS undefined: {e}")))?;
+    .map_err(|e| io_err(format!("GPKG SRS undefined: {e}")))?;
 
     let (min_x, min_y, max_x, max_y) = compute_bounds(geometries);
 
@@ -482,7 +479,7 @@ fn create_gpkg_schema(
          VALUES ('features','features',?1,?2,?3,?4,?5)",
         rusqlite::params![min_x, min_y, max_x, max_y, srs_id],
     )
-    .map_err(|e| MakeValidError::IoError(format!("gpkg_contents: {e}")))?;
+    .map_err(|e| io_err(format!("gpkg_contents: {e}")))?;
 
     // Detect Z/M from geometries
     let has_z = geometries.iter().any(|g| count_coords(g) > 0);
@@ -492,7 +489,7 @@ fn create_gpkg_schema(
         "INSERT INTO gpkg_geometry_columns VALUES ('features','geom','GEOMETRY',?1,?2,?3)",
         rusqlite::params![srs_id, if has_z { 1 } else { 0 }, if has_m { 1 } else { 0 }],
     )
-    .map_err(|e| MakeValidError::IoError(format!("gpkg_geometry_columns: {e}")))?;
+    .map_err(|e| io_err(format!("gpkg_geometry_columns: {e}")))?;
 
     // Create R-tree spatial index with Rust-computed bounds
     conn.execute_batch(
@@ -502,7 +499,7 @@ fn create_gpkg_schema(
             min_y REAL, max_y REAL
         );",
     )
-    .map_err(|e| MakeValidError::IoError(format!("GPKG R-tree table: {e}")))?;
+    .map_err(|e| io_err(format!("GPKG R-tree table: {e}")))?;
 
     for (i, geom) in geometries.iter().enumerate() {
         let (min_x, max_x, min_y, max_y) = compute_bounds(std::slice::from_ref(geom));
@@ -510,7 +507,7 @@ fn create_gpkg_schema(
             "INSERT OR IGNORE INTO gpkg_rtree_features_geom VALUES (?1,?2,?3,?4,?5)",
             rusqlite::params![i as i64 + 1, min_x, max_x, min_y, max_y],
         )
-        .map_err(|e| MakeValidError::IoError(format!("GPKG R-tree insert: {e}")))?;
+        .map_err(|e| io_err(format!("GPKG R-tree insert: {e}")))?;
     }
 
     Ok(())

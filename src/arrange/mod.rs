@@ -3,6 +3,7 @@ pub mod cdt;
 pub mod extract;
 pub mod label;
 pub mod prep;
+pub mod prep_intersect;
 
 use crate::core::MakeValidConfig;
 use geo::{Coord, Geometry, GeometryCollection, LinesIter, MultiPolygon, Polygon};

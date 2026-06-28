@@ -2,7 +2,7 @@ use std::path::Path;
 
 use geo::Geometry;
 
-use crate::core::MakeValidError;
+use crate::core::{io_err, MakeValidError};
 use crate::feature::Feature;
 use crate::Crs;
 
@@ -15,7 +15,9 @@ pub mod geojson;
 pub mod geopackage;
 #[cfg(feature = "io-gml")]
 pub mod gml;
-pub mod shp;
+pub mod shp_export;
+mod shp_load;
+pub mod stream;
 #[cfg(feature = "io-wkb")]
 pub mod wkb;
 #[cfg(feature = "io-wkt")]
@@ -30,15 +32,15 @@ pub use self::geojson::{
     export_geojson_rfc7946, export_geojson_with_crs, export_geojson_with_crs_zm, load_geojson,
     load_geojson_features, load_geojson_with_crs, load_geojson_zm,
 };
-pub use self::shp::count_sub_polys;
-pub use self::shp::export_geojson;
-pub use self::shp::geo_area;
-pub use self::shp::polygon_area;
-pub use self::shp::signed_area;
+pub use self::shp_export::export_geojson;
 #[cfg(feature = "load-shp")]
-pub use self::shp::{
-    export_shp, export_shp_features, load_shp, load_shp_features, load_shp_geometries,
-};
+pub use self::shp_export::{export_shp, export_shp_features};
+pub use self::shp_load::count_sub_polys;
+pub use self::shp_load::geo_area;
+pub use self::shp_load::polygon_area;
+pub use self::shp_load::signed_area;
+#[cfg(feature = "load-shp")]
+pub use self::shp_load::{load_shp, load_shp_features, load_shp_geometries};
 #[cfg(feature = "io-wkb")]
 pub use self::wkb::{
     export_wkb, export_wkb_with_crs, export_wkb_zm_with_crs, load_wkb, load_wkb_with_crs,
@@ -46,6 +48,9 @@ pub use self::wkb::{
 };
 #[cfg(feature = "io-wkt")]
 pub use self::wkt::{export_wkt, export_wkt_with_crs, load_wkt, load_wkt_with_crs};
+
+// Streaming I/O
+pub use self::stream::{open_reader, open_writer, stream_repair, FeatureReader, FeatureWriter};
 
 // ---------------------------------------------------------------------------
 // Format-agnostic loading (geometry only)
@@ -80,7 +85,7 @@ pub fn load_geometries_with_crs(
             #[cfg(feature = "load-shp")]
             {
                 load_shp_features(path, None)
-                    .map_err(|e| MakeValidError::IoError(e.to_string()))
+                    .map_err(|e| io_err(e.to_string()))
                     .map(|features| {
                         let crs = features.first().and_then(|f| f.crs.clone());
                         let geoms = features.into_iter().map(|f| f.geometry).collect();
@@ -224,8 +229,7 @@ pub fn load_features_with_progress(
         "shp" => {
             #[cfg(feature = "load-shp")]
             {
-                load_shp_features(path, progress)
-                    .map_err(|e| MakeValidError::IoError(e.to_string()))
+                load_shp_features(path, progress).map_err(|e| io_err(e.to_string()))
             }
             #[cfg(not(feature = "load-shp"))]
             {
@@ -366,8 +370,8 @@ pub fn export_geometries_with_crs(
         "shp" => {
             #[cfg(feature = "load-shp")]
             {
-                shp::export_shp(geoms, path, crs)
-                    .map_err(|e| MakeValidError::IoError(e.to_string()))
+                shp_export::export_shp(geoms, path, crs)
+                    .map_err(|e| io_err(e.to_string()))
             }
             #[cfg(not(feature = "load-shp"))]
             {
@@ -423,8 +427,8 @@ pub fn export_features_with_progress(
             #[cfg(feature = "load-shp")]
             {
                 let crs = features.first().and_then(|f| f.crs.as_ref());
-                shp::export_shp_features(features, path, crs, progress)
-                    .map_err(|e| MakeValidError::IoError(e.to_string()))
+                shp_export::export_shp_features(features, path, crs, progress)
+                    .map_err(|e| io_err(e.to_string()))
             }
             #[cfg(not(feature = "load-shp"))]
             {

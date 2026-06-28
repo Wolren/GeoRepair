@@ -71,6 +71,10 @@ pub enum MakeValidError {
     CrsError(String),
 }
 
+pub(crate) fn io_err(msg: impl std::fmt::Display) -> MakeValidError {
+    MakeValidError::IoError(msg.to_string())
+}
+
 #[cfg(feature = "arrange")]
 impl From<spade::InsertionError> for MakeValidError {
     fn from(e: spade::InsertionError) -> Self {

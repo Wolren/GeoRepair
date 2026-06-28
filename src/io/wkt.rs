@@ -3,9 +3,9 @@ use std::io::{BufWriter, Write};
 use std::str::FromStr;
 
 use geo::Geometry;
-use wkt::Wkt;
+use wkt::{ToWkt, Wkt};
 
-use crate::core::MakeValidError;
+use crate::core::{io_err, MakeValidError};
 use crate::Crs;
 
 fn strip_srid_prefix(content: &str) -> (&str, Option<i32>) {
@@ -26,8 +26,7 @@ pub fn load_wkt(path: &str) -> Result<Vec<Geometry<f64>>, MakeValidError> {
 }
 
 pub fn load_wkt_with_crs(path: &str) -> Result<(Vec<Geometry<f64>>, Option<Crs>), MakeValidError> {
-    let content =
-        std::fs::read_to_string(path).map_err(|e| MakeValidError::IoError(e.to_string()))?;
+    let content = std::fs::read_to_string(path).map_err(|e| io_err(e.to_string()))?;
     let (body, srid) = strip_srid_prefix(&content);
     let crs = srid.map(|s| Crs::from_epsg(s as u32));
 
@@ -53,13 +52,13 @@ pub fn export_wkt_with_crs(
         .and_then(|c| c.srid())
         .map(|s| format!("SRID={s};"))
         .unwrap_or_default();
-    let file = File::create(path).map_err(|e| MakeValidError::IoError(e.to_string()))?;
+    let file = File::create(path).map_err(|e| io_err(e.to_string()))?;
     let mut writer = BufWriter::new(file);
     for geom in geometries {
-        write!(writer, "{srid_prefix}").map_err(|e| MakeValidError::IoError(e.to_string()))?;
-        let wkt: Wkt<f64> = Wkt::from(geom.clone());
-        write!(writer, "{wkt}").map_err(|e| MakeValidError::IoError(e.to_string()))?;
-        writeln!(writer).map_err(|e| MakeValidError::IoError(e.to_string()))?;
+        write!(writer, "{srid_prefix}").map_err(|e| io_err(e.to_string()))?;
+        let wkt = geom.to_wkt();
+        write!(writer, "{wkt}").map_err(|e| io_err(e.to_string()))?;
+        writeln!(writer).map_err(|e| io_err(e.to_string()))?;
     }
     Ok(())
 }

@@ -6,6 +6,7 @@ pub mod io;
 pub mod make_valid;
 pub mod orient;
 pub mod snap;
+pub(crate) mod util;
 pub mod validation;
 pub mod zm;
 
@@ -16,6 +17,7 @@ pub mod noding;
 pub mod structure;
 
 #[cfg(feature = "ffi")]
+#[path = "bindings/ffi.rs"]
 pub mod ffi;
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 pub mod parallel;

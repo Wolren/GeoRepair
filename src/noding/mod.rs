@@ -4,7 +4,15 @@
 //! 1. Removing invalid/repeated coordinates
 //! 2. Noding self-intersections by splitting crossing edges
 
-use std::mem;
+pub(crate) mod intersection;
+
+pub(crate) use self::intersection::NodingFloat;
+
+#[cfg_attr(not(test), allow(unused_imports))]
+use self::intersection::{
+    check_self_intersections, collinear_split_params, compute_intersection_param, dist2,
+    edges_intersect, interpolate, orient2d_generic,
+};
 
 use geo::{
     Coord, CoordNum, GeoFloat, Geometry, GeometryCollection, Line, LineString, MultiLineString,
@@ -13,35 +21,6 @@ use rstar::{RTree, RTreeObject, AABB};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::orient::orient2d as orient2d_robust;
-
-// ── Sealed trait: safe f64 downcast ────────────────────────────────────
-//
-// Only f64 and f32 implement NodingFloat.  Inside the f64‑only helpers no
-// unsafe code appears — safe `.to_f64()` conversions are used at the
-// dispatch boundary.
-
-mod private {
-    use geo::{Coord, GeoFloat};
-
-    pub trait NodingFloat: GeoFloat {
-        /// Deterministic hash from coordinate bits for HashMap keys.
-        fn coord_hash_key(c: &Coord<Self>) -> u64;
-    }
-
-    impl NodingFloat for f64 {
-        fn coord_hash_key(c: &Coord<f64>) -> u64 {
-            c.x.to_bits() ^ c.y.to_bits().rotate_left(32)
-        }
-    }
-
-    impl NodingFloat for f32 {
-        fn coord_hash_key(c: &Coord<f32>) -> u64 {
-            (c.x.to_bits() as u64) ^ (c.y.to_bits() as u64).rotate_left(32)
-        }
-    }
-}
-
-pub(crate) use private::NodingFloat;
 
 /// Node a line string by removing repeated points and splitting at
 /// self-intersections. Returns a MultiLineString if splitting occurred,
@@ -83,197 +62,6 @@ pub(crate) fn node_line_string<T: NodingFloat>(ls: &LineString<T>) -> Geometry<T
     } else {
         Geometry::MultiLineString(MultiLineString::new(linestrings))
     }
-}
-
-/// Check if any non-adjacent edges in the segment list intersect.
-fn check_self_intersections<T: GeoFloat>(edges: &[Line<T>]) -> bool {
-    let eps = T::from(1e-12).unwrap();
-    if edges.len() < 3 {
-        return false;
-    }
-
-    // R‑tree path for large edge sets (safe conversion, no transmute)
-    if edges.len() >= 64 {
-        let edges_f64: Vec<Line<f64>> = edges
-            .iter()
-            .map(|l| {
-                Line::new(
-                    Coord {
-                        x: l.start.x.to_f64().unwrap(),
-                        y: l.start.y.to_f64().unwrap(),
-                    },
-                    Coord {
-                        x: l.end.x.to_f64().unwrap(),
-                        y: l.end.y.to_f64().unwrap(),
-                    },
-                )
-            })
-            .collect();
-        return check_self_intersections_f64(&edges_f64, 1e-12);
-    }
-
-    // Generic fallback: brute force for smaller edge sets
-    for i in 0..edges.len() {
-        for j in (i + 2)..edges.len() {
-            if edges_intersect(&edges[i], &edges[j], eps) {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-fn check_self_intersections_f64(edges: &[Line<f64>], eps: f64) -> bool {
-    let n = edges.len();
-    if n < 3 {
-        return false;
-    }
-
-    #[derive(Clone, Copy)]
-    struct EdgeEnv {
-        idx: usize,
-        env: AABB<[f64; 2]>,
-    }
-    impl RTreeObject for EdgeEnv {
-        type Envelope = AABB<[f64; 2]>;
-        fn envelope(&self) -> Self::Envelope {
-            self.env
-        }
-    }
-
-    let envs: Vec<EdgeEnv> = edges
-        .iter()
-        .enumerate()
-        .map(|(i, e)| EdgeEnv {
-            idx: i,
-            env: AABB::from_corners(
-                [e.start.x.min(e.end.x), e.start.y.min(e.end.y)],
-                [e.start.x.max(e.end.x), e.start.y.max(e.end.y)],
-            ),
-        })
-        .collect();
-    let tree = RTree::bulk_load(envs);
-
-    for i in 0..n {
-        let e = &edges[i];
-        let query = AABB::from_corners(
-            [e.start.x.min(e.end.x), e.start.y.min(e.end.y)],
-            [e.start.x.max(e.end.x), e.start.y.max(e.end.y)],
-        );
-        let result = tree.locate_in_envelope_intersecting_int(&query, |c| {
-            let j = c.idx;
-            if j <= i {
-                return std::ops::ControlFlow::Continue(());
-            }
-            if i + 1 == j && edges[i].end == edges[j].start {
-                return std::ops::ControlFlow::Continue(());
-            }
-            if j + 1 == i && edges[j].end == edges[i].start {
-                return std::ops::ControlFlow::Continue(());
-            }
-            if edges_intersect(&edges[i], &edges[j], eps) {
-                std::ops::ControlFlow::Break(())
-            } else {
-                std::ops::ControlFlow::Continue(())
-            }
-        });
-        if result.is_break() {
-            return true;
-        }
-    }
-    false
-}
-
-fn edges_intersect<T: GeoFloat>(e1: &Line<T>, e2: &Line<T>, eps: T) -> bool {
-    // For f64, use robust orient2d (Shewchuk's algorithm)
-    // to avoid false negatives with near-collinear edges at large coordinates.
-    if mem::size_of::<T>() == 8 {
-        return edges_intersect_f64_robust(
-            &Line::new(
-                Coord {
-                    x: e1.start.x.to_f64().unwrap(),
-                    y: e1.start.y.to_f64().unwrap(),
-                },
-                Coord {
-                    x: e1.end.x.to_f64().unwrap(),
-                    y: e1.end.y.to_f64().unwrap(),
-                },
-            ),
-            &Line::new(
-                Coord {
-                    x: e2.start.x.to_f64().unwrap(),
-                    y: e2.start.y.to_f64().unwrap(),
-                },
-                Coord {
-                    x: e2.end.x.to_f64().unwrap(),
-                    y: e2.end.y.to_f64().unwrap(),
-                },
-            ),
-            eps.to_f64().unwrap(),
-        );
-    }
-    let o1 = orient2d_generic(e1.start, e1.end, e2.start);
-    let o2 = orient2d_generic(e1.start, e1.end, e2.end);
-    let o3 = orient2d_generic(e2.start, e2.end, e1.start);
-    let o4 = orient2d_generic(e2.start, e2.end, e1.end);
-
-    // General case (proper crossing)
-    if o1.abs() > eps && o2.abs() > eps && o3.abs() > eps && o4.abs() > eps {
-        return o1.signum() != o2.signum() && o3.signum() != o4.signum();
-    }
-
-    // Collinear case: check for interval overlap along the shared line
-    if o1.abs() <= eps && o2.abs() <= eps && o3.abs() <= eps && o4.abs() <= eps {
-        return collinear_overlap(e1, e2, eps);
-    }
-
-    // Endpoint touching — not considered an intersection for noding purposes
-    false
-}
-
-/// Robust intersection test for f64 edges using Shewchuk's orient2d.
-fn edges_intersect_f64_robust(e1: &Line<f64>, e2: &Line<f64>, eps: f64) -> bool {
-    let o1 = orient2d_robust(e1.start, e1.end, e2.start);
-    let o2 = orient2d_robust(e1.start, e1.end, e2.end);
-    let o3 = orient2d_robust(e2.start, e2.end, e1.start);
-    let o4 = orient2d_robust(e2.start, e2.end, e1.end);
-
-    if o1.abs() > eps && o2.abs() > eps && o3.abs() > eps && o4.abs() > eps {
-        return o1.signum() != o2.signum() && o3.signum() != o4.signum();
-    }
-
-    if o1.abs() <= eps && o2.abs() <= eps && o3.abs() <= eps && o4.abs() <= eps {
-        return collinear_overlap(e1, e2, eps);
-    }
-
-    false
-}
-
-/// Check whether two collinear segments overlap along the shared line.
-fn collinear_overlap<T: GeoFloat>(e1: &Line<T>, e2: &Line<T>, eps: T) -> bool {
-    let dx = e1.end.x - e1.start.x;
-    let dy = e1.end.y - e1.start.y;
-    let dot_d = dx * dx + dy * dy;
-    if dot_d <= eps {
-        return false;
-    }
-
-    // Project e2 endpoints onto e1's direction (t parameter along e1)
-    let t2s = ((e2.start.x - e1.start.x) * dx + (e2.start.y - e1.start.y) * dy) / dot_d;
-    let t2e = ((e2.end.x - e1.start.x) * dx + (e2.end.y - e1.start.y) * dy) / dot_d;
-
-    let (t2_min, t2_max) = if t2s < t2e { (t2s, t2e) } else { (t2e, t2s) };
-
-    // Overlap region on [0, 1]
-    let lo = T::zero().max(t2_min);
-    let hi = T::one().min(t2_max);
-
-    // True if overlap covers more than epsilon-length
-    lo + eps < hi
-}
-
-fn orient2d_generic<T: GeoFloat>(a: Coord<T>, b: Coord<T>, c: Coord<T>) -> T {
-    (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
 }
 
 /// Split edges at all pairwise intersection points.
@@ -468,81 +256,6 @@ fn split_edges_rtree(edges: &[Line<f64>], split_points: &mut [Vec<f64>], eps: f6
             std::ops::ControlFlow::<(), ()>::Continue(())
         });
     }
-}
-
-fn interpolate<T: GeoFloat>(e: Line<T>, t: T) -> Coord<T> {
-    Coord {
-        x: e.start.x + t * (e.end.x - e.start.x),
-        y: e.start.y + t * (e.end.y - e.start.y),
-    }
-}
-
-fn dist2<T: GeoFloat>(a: Coord<T>, b: Coord<T>) -> T {
-    (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y)
-}
-
-/// For two collinear segments, compute split t-parameters where one edge's
-/// endpoint falls strictly inside the other. Returns `(splits_on_e1, splits_on_e2)`.
-fn collinear_split_params<T: GeoFloat>(e1: &Line<T>, e2: &Line<T>, eps: T) -> (Vec<T>, Vec<T>) {
-    let eps_sq = eps * eps;
-
-    // Project e2 endpoints onto e1's direction
-    let dx1 = e1.end.x - e1.start.x;
-    let dy1 = e1.end.y - e1.start.y;
-    let dot1 = dx1 * dx1 + dy1 * dy1;
-    let (mut p1, mut p2) = (Vec::new(), Vec::new());
-    if dot1 > eps_sq {
-        let t2s = ((e2.start.x - e1.start.x) * dx1 + (e2.start.y - e1.start.y) * dy1) / dot1;
-        let t2e = ((e2.end.x - e1.start.x) * dx1 + (e2.end.y - e1.start.y) * dy1) / dot1;
-        let one = T::one();
-        if t2s > eps && t2s < one - eps {
-            p1.push(t2s);
-        }
-        if t2e > eps && t2e < one - eps {
-            p1.push(t2e);
-        }
-    }
-
-    // Project e1 endpoints onto e2's direction
-    let dx2 = e2.end.x - e2.start.x;
-    let dy2 = e2.end.y - e2.start.y;
-    let dot2 = dx2 * dx2 + dy2 * dy2;
-    if dot2 > eps_sq {
-        let t1s = ((e1.start.x - e2.start.x) * dx2 + (e1.start.y - e2.start.y) * dy2) / dot2;
-        let t1e = ((e1.end.x - e2.start.x) * dx2 + (e1.end.y - e2.start.y) * dy2) / dot2;
-        let one = T::one();
-        if t1s > eps && t1s < one - eps {
-            p2.push(t1s);
-        }
-        if t1e > eps && t1e < one - eps {
-            p2.push(t1e);
-        }
-    }
-
-    (p1, p2)
-}
-
-fn compute_intersection_param<T: GeoFloat>(
-    e1: &Line<T>,
-    e2: &Line<T>,
-    eps: T,
-) -> Option<(T, T, Coord<T>)> {
-    let denom = (e1.end.x - e1.start.x) * (e2.end.y - e2.start.y)
-        - (e1.end.y - e1.start.y) * (e2.end.x - e2.start.x);
-    if denom.abs() < eps {
-        return None;
-    }
-    let t = ((e2.start.x - e1.start.x) * (e2.end.y - e2.start.y)
-        - (e2.start.y - e1.start.y) * (e2.end.x - e2.start.x))
-        / denom;
-    let u = ((e2.start.x - e1.start.x) * (e1.end.y - e1.start.y)
-        - (e2.start.y - e1.start.y) * (e1.end.x - e1.start.x))
-        / denom;
-    let pt = Coord {
-        x: e1.start.x + t * (e1.end.x - e1.start.x),
-        y: e1.start.y + t * (e1.end.y - e1.start.y),
-    };
-    Some((t, u, pt))
 }
 
 /// Reconnect split edges into continuous linestrings by chaining touching edges.

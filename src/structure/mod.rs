@@ -1,5 +1,6 @@
 pub mod classify;
 pub mod fix_ring;
+pub mod fix_ring_graph;
 pub mod merge;
 pub mod subtract;
 pub mod sweep;
