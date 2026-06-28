@@ -164,7 +164,7 @@ fn extract_crs_from_foreign(foreign: &Option<Map<String, Value>>) -> Option<crat
     None
 }
 
-fn convert_geojson_zm(geom: geojson::Geometry) -> Result<ZmGeometry, MakeValidError> {
+pub(crate) fn convert_geojson_zm(geom: geojson::Geometry) -> Result<ZmGeometry, MakeValidError> {
     fn coord_zm(pos: &geojson::Position) -> (Coord<f64>, ZmValue) {
         (
             Coord {
@@ -449,7 +449,7 @@ pub fn export_geojson_with_crs_zm(
     Ok(())
 }
 
-fn geo_geom_to_geojson(geom: Geometry<f64>) -> geojson::Geometry {
+pub(crate) fn geo_geom_to_geojson(geom: Geometry<f64>) -> geojson::Geometry {
     geo_geom_to_geojson_inner(geom, &mut std::iter::empty())
 }
 
@@ -494,26 +494,34 @@ fn geo_geom_to_geojson_inner(
     }
 
     let value = match geom {
-        Geometry::Point(p) => {
-            GeometryValue::Point { coordinates: coord_to_pos(p.0, zm.next().unwrap_or(ZmValue::NONE)) }
-        }
+        Geometry::Point(p) => GeometryValue::Point {
+            coordinates: coord_to_pos(p.0, zm.next().unwrap_or(ZmValue::NONE)),
+        },
         Geometry::MultiPoint(mp) => GeometryValue::MultiPoint {
-            coordinates: mp.0.iter()
+            coordinates: mp
+                .0
+                .iter()
                 .map(|p| coord_to_pos(p.0, zm.next().unwrap_or(ZmValue::NONE)))
                 .collect(),
         },
-        Geometry::LineString(ls) => GeometryValue::LineString { coordinates: ring_to_pos(&ls, zm) },
-        Geometry::MultiLineString(mls) => {
-            GeometryValue::MultiLineString { coordinates: mls.0.iter().map(|ls| ring_to_pos(ls, zm)).collect() }
-        }
-        Geometry::Polygon(p) => GeometryValue::Polygon { coordinates: polygon_to_coords(&p, zm) },
-        Geometry::Line(l) => GeometryValue::LineString { coordinates: vec![
-            coord_to_pos(l.start, zm.next().unwrap_or(ZmValue::NONE)),
-            coord_to_pos(l.end, zm.next().unwrap_or(ZmValue::NONE)),
-        ]},
-        Geometry::MultiPolygon(mp) => {
-            GeometryValue::MultiPolygon { coordinates: mp.0.iter().map(|p| polygon_to_coords(&p, zm)).collect() }
-        }
+        Geometry::LineString(ls) => GeometryValue::LineString {
+            coordinates: ring_to_pos(&ls, zm),
+        },
+        Geometry::MultiLineString(mls) => GeometryValue::MultiLineString {
+            coordinates: mls.0.iter().map(|ls| ring_to_pos(ls, zm)).collect(),
+        },
+        Geometry::Polygon(p) => GeometryValue::Polygon {
+            coordinates: polygon_to_coords(&p, zm),
+        },
+        Geometry::Line(l) => GeometryValue::LineString {
+            coordinates: vec![
+                coord_to_pos(l.start, zm.next().unwrap_or(ZmValue::NONE)),
+                coord_to_pos(l.end, zm.next().unwrap_or(ZmValue::NONE)),
+            ],
+        },
+        Geometry::MultiPolygon(mp) => GeometryValue::MultiPolygon {
+            coordinates: mp.0.iter().map(|p| polygon_to_coords(&p, zm)).collect(),
+        },
         Geometry::GeometryCollection(gc) => {
             let geoms: Vec<geojson::Geometry> =
                 gc.0.into_iter()
@@ -547,14 +555,18 @@ fn geo_geom_to_geojson_inner(
                 ]),
                 Vec::new(),
             );
-            GeometryValue::Polygon { coordinates: polygon_to_coords(&poly, zm) }
+            GeometryValue::Polygon {
+                coordinates: polygon_to_coords(&poly, zm),
+            }
         }
         Geometry::Triangle(t) => {
             let poly = Polygon::new(
                 LineString::new(vec![t.v1(), t.v2(), t.v3(), t.v1()]),
                 Vec::new(),
             );
-            GeometryValue::Polygon { coordinates: polygon_to_coords(&poly, zm) }
+            GeometryValue::Polygon {
+                coordinates: polygon_to_coords(&poly, zm),
+            }
         }
     };
 
