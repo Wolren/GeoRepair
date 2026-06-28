@@ -64,19 +64,16 @@ pub fn load_shp(path: &str) -> Result<Vec<Polygon<f64>>, shapefile::Error> {
             }
             Err(_) => continue,
         };
-        match shape {
-            shapefile::Shape::Polygon(poly) => {
-                for r in poly.rings() {
-                    let coords: Vec<Coord<f64>> = r
-                        .clone()
-                        .into_inner()
-                        .into_iter()
-                        .map(|p| Coord { x: p.x, y: p.y })
-                        .collect();
-                    all_rings.push(coords);
-                }
+        if let shapefile::Shape::Polygon(poly) = shape {
+            for r in poly.rings() {
+                let coords: Vec<Coord<f64>> = r
+                    .clone()
+                    .into_inner()
+                    .into_iter()
+                    .map(|p| Coord { x: p.x, y: p.y })
+                    .collect();
+                all_rings.push(coords);
             }
-            _ => {}
         }
     }
 
@@ -224,13 +221,11 @@ pub fn load_shp_features(
             };
             features.push(Feature::with_all(geom, props, crs.clone(), Vec::new()));
         }
-        if let Some(ref cb) = progress {
-            if let Some(total) = estimated_count {
-                if total > 0 && i % 100 == 0 {
+        if let Some(ref cb) = progress
+            && let Some(total) = estimated_count
+                && total > 0 && i % 100 == 0 {
                     cb((i as f64 / total as f64) * 100.0);
                 }
-            }
-        }
     }
 
     Ok(features)

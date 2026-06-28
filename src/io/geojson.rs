@@ -70,30 +70,26 @@ pub fn load_geojson_features(path: &str) -> Result<Vec<GeoRepairFeature>, MakeVa
         GeoJson::FeatureCollection(collection) => {
             fc_crs = extract_crs_from_foreign(&collection.foreign_members);
             for mut feature in collection.features {
-                if let Some(gj_geom) = feature.geometry.take() {
-                    if let Ok(zm) = convert_geojson_zm(gj_geom) {
-                        let f = GeoRepairFeature::with_all(
-                            zm.geometry,
-                            feature.properties.take(),
-                            fc_crs.clone(),
-                            zm.zm,
-                        );
-                        features.push(f);
-                    }
-                }
-            }
-        }
-        GeoJson::Feature(mut feature) => {
-            if let Some(gj_geom) = feature.geometry.take() {
-                if let Ok(zm) = convert_geojson_zm(gj_geom) {
+                if let Some(gj_geom) = feature.geometry.take() && let Ok(zm) = convert_geojson_zm(gj_geom) {
                     let f = GeoRepairFeature::with_all(
                         zm.geometry,
                         feature.properties.take(),
-                        None,
+                        fc_crs.clone(),
                         zm.zm,
                     );
                     features.push(f);
                 }
+            }
+        }
+        GeoJson::Feature(mut feature) => {
+            if let Some(gj_geom) = feature.geometry.take() && let Ok(zm) = convert_geojson_zm(gj_geom) {
+                let f = GeoRepairFeature::with_all(
+                    zm.geometry,
+                    feature.properties.take(),
+                    None,
+                    zm.zm,
+                );
+                features.push(f);
             }
         }
         GeoJson::Geometry(geom) => {
@@ -122,18 +118,14 @@ pub fn load_geojson_zm(
         GeoJson::FeatureCollection(collection) => {
             crs = extract_crs_from_foreign(&collection.foreign_members);
             for mut feature in collection.features {
-                if let Some(geom) = feature.geometry.take() {
-                    if let Ok(zm) = convert_geojson_zm(geom) {
-                        zm_geoms.push(zm);
-                    }
+                if let Some(geom) = feature.geometry.take() && let Ok(zm) = convert_geojson_zm(geom) {
+                    zm_geoms.push(zm);
                 }
             }
         }
         GeoJson::Feature(mut feature) => {
-            if let Some(geom) = feature.geometry.take() {
-                if let Ok(zm) = convert_geojson_zm(geom) {
-                    zm_geoms.push(zm);
-                }
+            if let Some(geom) = feature.geometry.take() && let Ok(zm) = convert_geojson_zm(geom) {
+                zm_geoms.push(zm);
             }
         }
         GeoJson::Geometry(geom) => {
@@ -148,18 +140,14 @@ pub fn load_geojson_zm(
 
 fn extract_crs_from_foreign(foreign: &Option<Map<String, Value>>) -> Option<crate::Crs> {
     let members = foreign.as_ref()?;
-    if let Some(crs_val) = members.get("crs") {
-        if let Some(props) = crs_val.as_object() {
-            if let Some(Value::String(typ)) = props.get("type") {
-                if typ == "name" {
-                    if let Some(props_obj) = props.get("properties").and_then(|v| v.as_object()) {
-                        if let Some(Value::String(name)) = props_obj.get("name") {
-                            return Some(crate::Crs::from_authority(name));
-                        }
-                    }
-                }
-            }
-        }
+    if let Some(crs_val) = members.get("crs")
+        && let Some(props) = crs_val.as_object()
+        && let Some(Value::String(typ)) = props.get("type")
+        && typ == "name"
+        && let Some(props_obj) = props.get("properties").and_then(|v| v.as_object())
+        && let Some(Value::String(name)) = props_obj.get("name")
+    {
+        return Some(crate::Crs::from_authority(name));
     }
     None
 }
@@ -466,8 +454,8 @@ fn geo_geom_to_geojson_inner(
         if zv.z.is_some() || zv.m.is_some() {
             pos.push(zv.z.unwrap_or(0.0));
         }
-        if zv.m.is_some() {
-            pos.push(zv.m.unwrap());
+        if let Some(m) = zv.m {
+            pos.push(m);
         }
         geojson::Position::from(pos)
     }
@@ -520,7 +508,7 @@ fn geo_geom_to_geojson_inner(
             ],
         },
         Geometry::MultiPolygon(mp) => GeometryValue::MultiPolygon {
-            coordinates: mp.0.iter().map(|p| polygon_to_coords(&p, zm)).collect(),
+            coordinates: mp.0.iter().map(|p| polygon_to_coords(p, zm)).collect(),
         },
         Geometry::GeometryCollection(gc) => {
             let geoms: Vec<geojson::Geometry> =

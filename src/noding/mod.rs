@@ -278,13 +278,13 @@ fn reconnect_edges_by_key<T: NodingFloat>(edges: Vec<Line<T>>) -> Vec<LineString
 
     let mut start_map: FxHashMap<u64, Vec<usize>> = FxHashMap::default();
     let mut end_map: FxHashMap<u64, Vec<usize>> = FxHashMap::default();
-    for i in 0..n {
+    for (i, edge) in edges.iter().enumerate() {
         start_map
-            .entry(NodingFloat::coord_hash_key(&edges[i].start))
+            .entry(NodingFloat::coord_hash_key(&edge.start))
             .or_default()
             .push(i);
         end_map
-            .entry(NodingFloat::coord_hash_key(&edges[i].end))
+            .entry(NodingFloat::coord_hash_key(&edge.end))
             .or_default()
             .push(i);
     }

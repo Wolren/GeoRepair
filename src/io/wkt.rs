@@ -10,14 +10,13 @@ use crate::Crs;
 
 fn strip_srid_prefix(content: &str) -> (&str, Option<i32>) {
     let trimmed = content.trim();
-    if let Some(rest) = trimmed.strip_prefix("SRID=") {
-        if let Some(semi_pos) = rest.find(';') {
+    if let Some(rest) = trimmed.strip_prefix("SRID=")
+        && let Some(semi_pos) = rest.find(';') {
             let srid_str = &rest[..semi_pos];
             if let Ok(srid) = srid_str.parse::<i32>() {
                 return (&rest[semi_pos + 1..], Some(srid));
             }
         }
-    }
     (trimmed, None)
 }
 

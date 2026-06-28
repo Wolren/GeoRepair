@@ -100,7 +100,7 @@ pub fn load_geometries_with_crs(
             }
         }
         "bin" => {
-            let polys = load_bin(path).map_err(|e| MakeValidError::UnsupportedFormat(e))?;
+            let polys = load_bin(path).map_err(MakeValidError::UnsupportedFormat)?;
             Ok((polys.into_iter().map(Geometry::Polygon).collect(), None))
         }
         "geojson" | "json" => {

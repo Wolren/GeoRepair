@@ -86,11 +86,9 @@ fn build_mono_chains(lines: &[Line<f64>]) -> Vec<MonoChain> {
     let mut ring_idx = 0u32;
     let mut chains = Vec::new();
 
-    for i in 1..n {
+    for (i, line) in lines.iter().enumerate().skip(1) {
         // Force chain break at ring boundary
         let at_ring_boundary = i == ring_end;
-
-        let line = &lines[i];
         min_x = min_x.min(line.start.x).min(line.end.x);
         max_x = max_x.max(line.start.x).max(line.end.x);
         min_y = min_y.min(line.start.y).min(line.end.y);
@@ -115,11 +113,10 @@ fn build_mono_chains(lines: &[Line<f64>]) -> Vec<MonoChain> {
             });
             start = i;
             prev_quad = cur_quad;
-            let l = &lines[i];
-            min_x = l.start.x.min(l.end.x);
-            max_x = l.start.x.max(l.end.x);
-            min_y = l.start.y.min(l.end.y);
-            max_y = l.start.y.max(l.end.y);
+            min_x = line.start.x.min(line.end.x);
+            max_x = line.start.x.max(line.end.x);
+            min_y = line.start.y.min(line.end.y);
+            max_y = line.start.y.max(line.end.y);
 
             if at_ring_boundary {
                 ring_idx += 1;
