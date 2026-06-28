@@ -52,26 +52,10 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, _config: &MakeValidConfig) -> Geo
 /// Checks: ring closure & min points, non-finite coords, no self-intersections,
 /// hole containment, and no nested/overlapping holes.
 pub fn validate_polygon(poly: &Polygon<f64>) -> bool {
-    if !poly_has_basic_form(poly) {
-        return false;
-    }
-    for ring in std::iter::once(poly.exterior()).chain(poly.interiors().iter()) {
-        if ring_has_non_finite(ring) {
-            return false;
-        }
-    }
-    let lines: Vec<_> = poly.lines_iter().collect();
-    if !prep::has_no_intersections(&lines) {
-        return false;
-    }
-    if poly.interiors().is_empty() {
-        return true;
-    }
-    holes_are_valid(poly)
-}
-
-fn ring_has_non_finite(ring: &geo::LineString<f64>) -> bool {
-    ring.0.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
+    // Unified: delegated to GeoValidation (uses orient2d_fast in
+    // edges_intersect_general, OGC winding, hole containment, nesting).
+    use crate::validation::GeoValidation;
+    poly.validate().valid
 }
 
 /// Lightweight check: hole containment + nesting.
