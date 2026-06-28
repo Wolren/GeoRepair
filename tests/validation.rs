@@ -1,8 +1,8 @@
-use geo::validation::Validation;
 use geo::{
     Coord, Geometry, GeometryCollection, Line, LineString, MultiLineString, MultiPoint,
     MultiPolygon, Point, Polygon, Rect, Triangle,
 };
+use geo_repair::validation::GeoValidation;
 
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 use wkt::TryFromWkt;
@@ -11,12 +11,9 @@ use wkt::TryFromWkt;
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn assert_valid<T: Validation + std::fmt::Debug>(geom: &T) {
-    assert!(
-        geom.check_validation().is_ok(),
-        "expected valid, got: {:?}",
-        geom.check_validation()
-    );
+fn assert_valid<T: GeoValidation + std::fmt::Debug>(geom: &T) {
+    let r = geom.validate();
+    assert!(r.valid, "expected valid, got: {:?}", r);
 }
 
 fn assert_geometry_valid(geom: &Geometry<f64>) {
@@ -649,7 +646,7 @@ fn test_geometrycollection_all_empty() {
 #[test]
 fn test_valid_geom_short_circuits_validation() {
     let p = Point::new(1.0, 2.0);
-    assert!(p.check_validation().is_ok());
+    assert!(p.validate().valid);
     let result = p.make_valid();
     assert_eq!(result, Geometry::Point(p));
 }
@@ -666,7 +663,7 @@ fn test_valid_polygon_short_circuits() {
         ]),
         Vec::new(),
     );
-    assert!(poly.check_validation().is_ok());
+    assert!(poly.validate().valid);
     let result = poly.make_valid();
     assert_geometry_valid(&result);
 }

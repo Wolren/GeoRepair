@@ -1,5 +1,5 @@
-use geo::validation::Validation;
 use geo::{Coord, Geometry, Line, LineString, Polygon};
+use geo_repair::validation::GeoValidation;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 
 #[test]
@@ -106,7 +106,7 @@ fn diag_structure_pipeline() {
         ..Default::default()
     };
     let result = poly.make_valid_with_config(&config);
-    println!("Structure output valid: {:?}", result.check_validation());
+    println!("Structure output valid: {:?}", result.validate());
     match &result {
         Geometry::Polygon(p) => {
             println!("  Polygon exterior ({} verts):", p.exterior().0.len());

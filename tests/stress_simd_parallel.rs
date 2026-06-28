@@ -8,15 +8,15 @@
 
 #![cfg(feature = "parallel")]
 
-use geo::validation::Validation;
 use geo::{Coord, Geometry, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
+use geo_repair::validation::GeoValidation;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 
 fn assert_valid(g: &Geometry<f64>) {
     assert!(
-        g.check_validation().is_ok(),
+        g.validate().valid,
         "expected valid, got: {:?}",
-        g.check_validation()
+        g.validate()
     );
 }
 

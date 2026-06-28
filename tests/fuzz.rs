@@ -3,16 +3,17 @@
 //! Uses `proptest` to generate random invalid geometries and verify
 //! invariants: the output must always be valid, and valid inputs must be unchanged.
 
-use geo::validation::Validation;
 use geo::{
     Coord, Geometry, GeometryCollection, Line, LineString, MultiLineString, MultiPoint,
     MultiPolygon, Point, Polygon,
 };
+use geo_repair::validation::GeoValidation;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 use proptest::prelude::*;
 
 fn assert_valid(g: &Geometry<f64>) {
-    g.check_validation().unwrap();
+    let r = g.validate();
+    assert!(r.valid, "geometry invalid: {:?}", r.errors);
 }
 
 fn assert_not_empty(g: &Geometry<f64>) {
@@ -102,7 +103,7 @@ proptest! {
         assert_valid(&result);
 
         // If input was valid, output must be non-empty and similar shape
-        if poly.check_validation().is_ok() {
+        if poly.validate().valid {
             assert_not_empty(&result);
         }
     }
@@ -468,11 +469,11 @@ proptest! {
         let result = g.validate_or_fix();
         match result {
             Ok(fixed) => {
-                prop_assert!(fixed.check_validation().is_ok(),
+                prop_assert!(fixed.validate().valid,
                     "validate_or_fix returned Ok but geometry is invalid");
             }
             Err((_errors, fixed)) => {
-                prop_assert!(fixed.check_validation().is_ok(),
+                prop_assert!(fixed.validate().valid,
                     "validate_or_fix returned Err but fixed geometry is invalid");
             }
         }
@@ -529,7 +530,7 @@ proptest! {
                 ..Default::default()
             };
             let result = poly.make_valid_with_config(&cfg);
-            prop_assert!(result.check_validation().is_ok(),
+            prop_assert!(result.validate().valid,
                 "PolyMethod {:?} produced invalid output", method);
         }
     }
@@ -557,10 +558,10 @@ proptest! {
             geo::Geometry::Polygon(p1),
             geo::Geometry::Polygon(p2),
         ]);
-        if gc.check_validation().is_ok() {
+        if gc.validate().valid {
             // If the GC is valid, make_valid must not change it structurally
             let result = gc.make_valid_with_config(&cfg_auto());
-            prop_assert!(result.check_validation().is_ok(),
+            prop_assert!(result.validate().valid,
                 "valid GC became invalid after repair");
         }
     }
@@ -578,7 +579,7 @@ proptest! {
         if ring.first() != ring.last() { ring.push(ring[0]); }
         let poly = geo::Polygon::new(geo::LineString::new(ring), Vec::new());
         let (_result, fixed) = poly.validate_and_fix_always();
-        prop_assert!(fixed.check_validation().is_ok(),
+        prop_assert!(fixed.validate().valid,
             "validate_and_fix_always produced invalid output");
     }
 
@@ -601,8 +602,8 @@ proptest! {
 
 #[cfg(test)]
 mod diag_all_methods_fail {
-    use geo::validation::Validation;
     use geo::{Coord, LineString, Polygon};
+    use geo_repair::validation::GeoValidation;
     use geo_repair::{Feature, MakeValid, MakeValidConfig, PolyMethod, ValidateAndFix};
 
     #[test]
@@ -646,7 +647,7 @@ mod diag_all_methods_fail {
         for (i, c) in ring.iter().enumerate() {
             println!("  V{}: ({}, {})", i, c.x, c.y);
         }
-        println!("Input valid: {:?}", poly.check_validation());
+        println!("Input valid: {:?}", poly.validate());
         println!();
 
         // Also test the 4-coord version (first proptest minimal failure)
@@ -675,18 +676,14 @@ mod diag_all_methods_fail {
             }
             let poly4 = Polygon::new(LineString::new(ring4), Vec::new());
             println!("=== 4-coord version ===");
-            println!("  Input valid: {:?}", poly4.check_validation());
+            println!("  Input valid: {:?}", poly4.validate());
             for method in &[PolyMethod::Auto, PolyMethod::Arrange, PolyMethod::Structure] {
                 let cfg = MakeValidConfig {
                     poly_method: method.clone(),
                     ..Default::default()
                 };
                 let result = poly4.make_valid_with_config(&cfg);
-                println!(
-                    "  {:?}: valid={}",
-                    method,
-                    result.check_validation().is_ok()
-                );
+                println!("  {:?}: valid={}", method, result.validate().valid);
             }
             println!();
         }
@@ -697,9 +694,9 @@ mod diag_all_methods_fail {
                 ..Default::default()
             };
             let result = poly.make_valid_with_config(&config);
-            let valid = result.check_validation();
+            let vr = result.validate();
             println!("=== {:?} ===", method);
-            println!("Output valid: {:?}", valid);
+            println!("Output valid: {:?}", vr);
             println!("Output type: {:?}", result);
             match result {
                 geo::Geometry::Polygon(p) => {
@@ -743,7 +740,7 @@ mod diag_all_methods_fail {
                 poly_method: PolyMethod::Structure,
                 ..Default::default()
             });
-            println!("  OK: {}", g.check_validation().is_ok());
+            println!("  OK: {}", g.validate().valid);
         }
         println!("=== Arrange direct call ===");
         {
@@ -751,7 +748,7 @@ mod diag_all_methods_fail {
                 poly_method: PolyMethod::Arrange,
                 ..Default::default()
             });
-            println!("  OK: {}", g.check_validation().is_ok());
+            println!("  OK: {}", g.validate().valid);
         }
     }
 }

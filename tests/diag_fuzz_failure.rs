@@ -1,5 +1,5 @@
-use geo::validation::Validation;
 use geo::{Coord, LineString, Polygon};
+use geo_repair::validation::GeoValidation;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 
 const INPUT: &[(f64, f64)] = &[
@@ -24,9 +24,11 @@ fn diagnose_fuzz_6coord() {
         std::env::var("DIAG_FIX_RING")
     );
     eprintln!("=== Poly validation before make_valid ===");
-    match poly.check_validation() {
-        Ok(_) => eprintln!("  VALID"),
-        Err(e) => eprintln!("  INVALID: {:?}", e),
+    let r = poly.validate();
+    if r.valid {
+        eprintln!("  VALID");
+    } else {
+        eprintln!("  INVALID: {:?}", r.errors);
     }
 
     for method in &[PolyMethod::Auto, PolyMethod::Arrange, PolyMethod::Structure] {
@@ -37,9 +39,11 @@ fn diagnose_fuzz_6coord() {
         let result = poly.make_valid_with_config(&config);
         eprintln!("\n=== Method: {:?} ===", method);
         eprintln!("  Result type: {:?}", result);
-        match result.check_validation() {
-            Ok(_) => eprintln!("  Output VALID"),
-            Err(e) => eprintln!("  Output INVALID: {:?}", e),
+        let r = result.validate();
+        if r.valid {
+            eprintln!("  Output VALID");
+        } else {
+            eprintln!("  Output INVALID: {:?}", r.errors);
         }
         match &result {
             geo::Geometry::Polygon(p) => {
