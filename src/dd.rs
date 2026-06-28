@@ -233,17 +233,21 @@ pub(crate) fn normalize_four(
 }
 
 /// Compute the intersection point of two line segments using double-double
-/// arithmetic. Returns `Some(point)` if the segments intersect (proper crossing
-/// or endpoint-interior), `None` if they are parallel or do not intersect.
+/// arithmetic. Returns `Some((point, t, u))` if the lines intersect at any
+/// point (including outside segment bounds), `None` if they are parallel.
 ///
-/// The intersection parameter t along the first segment is also returned
-/// (as a DD) so the caller can classify interior vs endpoint.
+/// - `t` is the parameter along segment AB (DD precision)
+/// - `u` is the parameter along segment CD (DD precision)
+/// - `point` is the intersection point (f64)
+///
+/// Callers should check t/u in the desired range (e.g., `0..1` for interior,
+/// `-eps..1+eps` for extended segment intersection).
 pub(crate) fn segment_intersection_dd(
     a: Coord<f64>,
     b: Coord<f64>,
     c: Coord<f64>,
     d: Coord<f64>,
-) -> Option<(Coord<f64>, DD)> {
+) -> Option<(Coord<f64>, DD, DD)> {
     // Normalize large coordinates to prevent overflow in DD intermediate products.
     let large_threshold = 1e15;
     let needs_norm = a.x.abs() > large_threshold
@@ -291,31 +295,15 @@ pub(crate) fn segment_intersection_dd(
     let num_u = DD::cross(acx, acy, abx, aby);
     let u = num_u.div(denom);
 
-    // Only continue if intersection is within segment bounds (plus tiny epsilon)
-    let eps = DD::from_f64(1e-30);
-    let one = DD::from_f64(1.0);
-    let t_neg_eps = t.add(eps);
-    let t_pos_eps = t.sub(eps);
-    let u_neg_eps = u.add(eps);
-    let u_pos_eps = u.sub(eps);
-
-    if t_neg_eps.signum() >= 0
-        && t_pos_eps.sub(one).signum() <= 0
-        && u_neg_eps.signum() >= 0
-        && u_pos_eps.sub(one).signum() <= 0
-    {
-        // Compute intersection point in DD: p = a + t * (b - a)
-        let px = ax.add(abx.mul(t));
-        let py = ay.add(aby.mul(t));
-        // De-normalize: p = p' * scale + origin
-        let result = Coord {
-            x: px.to_f64() * scale + origin.x,
-            y: py.to_f64() * scale + origin.y,
-        };
-        Some((result, t))
-    } else {
-        None
-    }
+    // Compute intersection point in DD: p = a + t * (b - a)
+    let px = ax.add(abx.mul(t));
+    let py = ay.add(aby.mul(t));
+    // De-normalize: p = p' * scale + origin
+    let result = Coord {
+        x: px.to_f64() * scale + origin.x,
+        y: py.to_f64() * scale + origin.y,
+    };
+    Some((result, t, u))
 }
 
 #[cfg(test)]
@@ -391,7 +379,7 @@ mod tests {
         let d = Coord { x: 2.0, y: 0.0 };
         let result = segment_intersection_dd(a, b, c, d);
         assert!(result.is_some());
-        let (pt, _t) = result.unwrap();
+        let (pt, _, _) = result.unwrap();
         assert!((pt.x - 1.0).abs() < 1e-15);
         assert!((pt.y - 1.0).abs() < 1e-15);
     }
@@ -428,7 +416,7 @@ mod tests {
             result.is_some(),
             "near-degenerate intersection should be found"
         );
-        if let Some((pt, _t)) = result {
+        if let Some((pt, _t, _u)) = result {
             // The intersection point should be near the crossing region
             let eps = 1e-6;
             assert!(
@@ -448,7 +436,7 @@ mod tests {
         let d = Coord { x: 2e14, y: 0.0 };
         let result = segment_intersection_dd(a, b, c, d);
         assert!(result.is_some());
-        let (pt, _t) = result.unwrap();
+        let (pt, _, _) = result.unwrap();
         let rel_err_x = (pt.x - 1e14).abs() / 1e14;
         let rel_err_y = (pt.y - 1e14).abs() / 1e14;
         assert!(
@@ -479,7 +467,7 @@ mod tests {
         };
         let result = segment_intersection_dd(a, b, c, d);
         assert!(result.is_some(), "small-angle intersection should be found");
-        if let Some((pt, _t)) = result {
+        if let Some((pt, _t, _u)) = result {
             // Should intersect near the middle
             assert!((pt.y).abs() < 1.0, "y should be near 0, got {}", pt.y);
         }

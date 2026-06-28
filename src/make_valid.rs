@@ -312,17 +312,33 @@ impl MakeValid for Polygon<f64> {
                 return empty_geom();
             }
         }
+
         match config.poly_method {
-            PolyMethod::Arrange => arrange_or_empty(self, config),
-            PolyMethod::Structure => structure_fix(self, config).unwrap_or_else(empty_geom::<f64>),
+            PolyMethod::Arrange => {
+                let result = arrange_or_empty(self, config);
+                if is_valid_with_geo(&result) {
+                    return result;
+                }
+                warn!("Arrange mode: result invalid, retrying with precision reduction");
+                reduce_fallback(self, config)
+            }
+            PolyMethod::Structure => structure_fix(self, config).unwrap_or_else(|| {
+                warn!("Structure mode: fix failed, retrying with precision reduction");
+                reduce_fallback(self, config)
+            }),
             PolyMethod::Auto => {
                 if let Some(result) = structure_fix(self, config) {
-                    if <Geometry<f64> as geo::validation::Validation>::is_valid(&result) {
+                    if is_valid_with_geo(&result) {
                         return result;
                     }
                     warn!("Auto mode: structure_fix produced invalid output, falling back to CDT arrange");
                 }
-                arrange_or_empty(self, config)
+                let arranged = arrange_or_empty(self, config);
+                if is_valid_with_geo(&arranged) {
+                    return arranged;
+                }
+                warn!("Auto mode: arrange also invalid, retrying with precision reduction");
+                reduce_fallback(self, config)
             }
         }
     }
@@ -465,6 +481,33 @@ fn structure_fix(poly: &Polygon<f64>, _config: &MakeValidConfig) -> Option<Geome
         warn!("PolyMethod::Structure selected but 'structure' feature is not enabled. Enable the 'structure' feature in Cargo.toml to use Structure mode.");
     }
     None
+}
+
+/// Check OGC validity using the `geo` crate's Validation trait (same as
+/// test assertions). This is the authoritative validity check for the pipeline.
+fn is_valid_with_geo(g: &Geometry<f64>) -> bool {
+    <Geometry<f64> as geo::validation::Validation>::is_valid(g)
+}
+
+/// Last‑resort fallback: snap to progressively coarser grids until valid.
+///
+/// Uses only `reduce_raw` (snap only, no MakeValid call) to avoid recursion.
+#[cfg(any(feature = "arrange", feature = "structure"))]
+fn reduce_fallback(poly: &Polygon<f64>, config: &MakeValidConfig) -> Geometry<f64> {
+    use crate::reduce::{GeometryPrecisionReducer, PrecisionModel};
+    let scales = [1e-10, 1e-8, 1e-6, 1e-4];
+    for &scale in &scales {
+        let model = PrecisionModel::new(scale);
+        let reducer = GeometryPrecisionReducer::with_config(model, config.clone());
+        let geom = reducer.reduce_raw(poly);
+        if is_valid_with_geo(&geom) {
+            return geom;
+        }
+    }
+    // Last resort: coarsest grid, even if invalid
+    let model = PrecisionModel::new(1e-4);
+    let reducer = GeometryPrecisionReducer::with_config(model, config.clone());
+    reducer.reduce_raw(poly)
 }
 
 // ---------------------------------------------------------------------------

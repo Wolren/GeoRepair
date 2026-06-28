@@ -1,5 +1,6 @@
 use geo::{Coord, Line};
-use rustc_hash::FxHashMap;
+use rstar::{RTree, RTreeObject, AABB};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 const SNAP_GRID: f64 = 1e-10;
 const HOT_PIXEL_RADIUS: f64 = SNAP_GRID * 0.5;
@@ -76,6 +77,218 @@ impl HotPixel {
     }
 }
 
+// ── MCIndex: monotone-chain spatial indexing for O(n log n) intersection ──
+
+/// Direction quadrant (0-3) for a segment vector.
+fn quadrant(dx: f64, dy: f64) -> u8 {
+    if dx > 0.0 {
+        if dy >= 0.0 {
+            0
+        } else {
+            1
+        }
+    } else if dx < 0.0 {
+        if dy > 0.0 {
+            3
+        } else {
+            2
+        }
+    } else {
+        if dy > 0.0 {
+            0
+        } else {
+            2
+        }
+    }
+}
+
+/// A monotone chain of consecutive segments in the same direction quadrant.
+struct MonoChain {
+    start: usize,
+    end: usize,
+    min_x: f64,
+    max_x: f64,
+    min_y: f64,
+    max_y: f64,
+}
+
+fn build_chains(segments: &[Line<f64>]) -> Vec<MonoChain> {
+    let n = segments.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let mut chains: Vec<MonoChain> = Vec::new();
+    let mut start = 0usize;
+    let dx = segments[0].end.x - segments[0].start.x;
+    let dy = segments[0].end.y - segments[0].start.y;
+    let mut prev_quad = quadrant(dx, dy);
+    let mut min_x = segments[0].start.x.min(segments[0].end.x);
+    let mut max_x = segments[0].start.x.max(segments[0].end.x);
+    let mut min_y = segments[0].start.y.min(segments[0].end.y);
+    let mut max_y = segments[0].start.y.max(segments[0].end.y);
+
+    for i in 1..n {
+        let s = &segments[i];
+        let dx = s.end.x - s.start.x;
+        let dy = s.end.y - s.start.y;
+        let cur_quad = quadrant(dx, dy);
+        min_x = min_x.min(s.start.x).min(s.end.x);
+        max_x = max_x.max(s.start.x).max(s.end.x);
+        min_y = min_y.min(s.start.y).min(s.end.y);
+        max_y = max_y.max(s.start.y).max(s.end.y);
+        if cur_quad != prev_quad {
+            chains.push(MonoChain {
+                start,
+                end: i,
+                min_x,
+                max_x,
+                min_y,
+                max_y,
+            });
+            start = i;
+            prev_quad = cur_quad;
+            min_x = s.start.x.min(s.end.x);
+            max_x = s.start.x.max(s.end.x);
+            min_y = s.start.y.min(s.end.y);
+            max_y = s.start.y.max(s.end.y);
+        }
+    }
+    chains.push(MonoChain {
+        start,
+        end: n,
+        min_x,
+        max_x,
+        min_y,
+        max_y,
+    });
+    chains
+}
+
+struct ChainEnv {
+    idx: usize,
+    env: AABB<[f64; 2]>,
+}
+impl RTreeObject for ChainEnv {
+    type Envelope = AABB<[f64; 2]>;
+    fn envelope(&self) -> Self::Envelope {
+        self.env
+    }
+}
+
+/// Collect all intersection points using MCIndex spatial indexing.
+fn collect_intersections_mcindex(
+    segments: &[Line<f64>],
+    chains: &[MonoChain],
+    chain_tree: &RTree<ChainEnv>,
+    coords: &mut Vec<Coord<f64>>,
+    checked: &mut FxHashSet<(usize, usize)>,
+) {
+    let nc = chains.len();
+    for i in 0..nc {
+        let mc1 = &chains[i];
+        let q = AABB::from_corners([mc1.min_x, mc1.min_y], [mc1.max_x, mc1.max_y]);
+        let _ = chain_tree.locate_in_envelope_intersecting_int(&q, |c| {
+            let j = c.idx;
+            if j <= i {
+                return std::ops::ControlFlow::<(), ()>::Continue(());
+            }
+            check_chain_pair(segments, mc1, &chains[j], coords, checked);
+            std::ops::ControlFlow::<(), ()>::Continue(())
+        });
+    }
+}
+
+/// Recursive divide-and-conquer: split larger chain, check leaf pairs.
+fn check_chain_pair(
+    segments: &[Line<f64>],
+    mc1: &MonoChain,
+    mc2: &MonoChain,
+    coords: &mut Vec<Coord<f64>>,
+    checked: &mut FxHashSet<(usize, usize)>,
+) {
+    // Bounding box overlap test
+    if mc1.min_x > mc2.max_x + 1e-12
+        || mc1.max_x < mc2.min_x - 1e-12
+        || mc1.min_y > mc2.max_y + 1e-12
+        || mc1.max_y < mc2.min_y - 1e-12
+    {
+        return;
+    }
+
+    // Leaf case: single segment in each chain
+    if mc1.end - mc1.start == 1 && mc2.end - mc2.start == 1 {
+        let i = mc1.start;
+        let j = mc2.start;
+        if i >= j || !checked.insert((i, j)) {
+            return;
+        }
+        // Skip adjacent pairs sharing an endpoint
+        if j == i + 1 && segments[i].end == segments[j].start {
+            return;
+        }
+        if i == 0 && j == segments.len() - 1 && segments[j].end == segments[i].start {
+            return;
+        }
+        if let Some((pt, _, _)) = crate::dd::segment_intersection_dd(
+            segments[i].start,
+            segments[i].end,
+            segments[j].start,
+            segments[j].end,
+        ) {
+            coords.push(pt);
+        }
+        return;
+    }
+
+    // Subdivide the larger chain using actual segment bounds
+    if (mc1.end - mc1.start) >= (mc2.end - mc2.start) {
+        let mid = (mc1.start + mc1.end) / 2;
+        if mid > mc1.start {
+            let left = sub_chain(segments, mc1.start, mid);
+            check_chain_pair(segments, &left, mc2, coords, checked);
+        }
+        if mid < mc1.end {
+            let right = sub_chain(segments, mid, mc1.end);
+            check_chain_pair(segments, &right, mc2, coords, checked);
+        }
+    } else {
+        let mid = (mc2.start + mc2.end) / 2;
+        if mid > mc2.start {
+            let left = sub_chain(segments, mc2.start, mid);
+            check_chain_pair(segments, mc1, &left, coords, checked);
+        }
+        if mid < mc2.end {
+            let right = sub_chain(segments, mid, mc2.end);
+            check_chain_pair(segments, mc1, &right, coords, checked);
+        }
+    }
+}
+
+/// Build a sub-chain from `segments[start..end]` with a computed bounding box.
+fn sub_chain(segments: &[Line<f64>], start: usize, end: usize) -> MonoChain {
+    let mut min_x = f64::MAX;
+    let mut max_x = f64::MIN;
+    let mut min_y = f64::MAX;
+    let mut max_y = f64::MIN;
+    for s in &segments[start..end] {
+        min_x = min_x.min(s.start.x).min(s.end.x);
+        max_x = max_x.max(s.start.x).max(s.end.x);
+        min_y = min_y.min(s.start.y).min(s.end.y);
+        max_y = max_y.max(s.start.y).max(s.end.y);
+    }
+    MonoChain {
+        start,
+        end,
+        min_x,
+        max_x,
+        min_y,
+        max_y,
+    }
+}
+
+/// Threshold above which MCIndex is used instead of brute force.
+const MCINDEX_THRESHOLD: usize = 64;
+
 /// Snap-rounding noder that subdivides segments at hot pixel boundaries.
 struct SnapRoundingNoder {
     hot_pixels: FxHashMap<(i64, i64), HotPixel>,
@@ -106,20 +319,42 @@ impl SnapRoundingNoder {
             coords.push(seg.end);
         }
 
-        // Step 1b: Compute interior intersection points and add to coords
+        // Step 1b: Compute interior intersection points using MCIndex
+        // spatial indexing for large sets, brute force for small sets.
         let n = segments.len();
-        for i in 0..n {
-            for j in (i + 1)..n {
-                if j == i + 1 && segments[i].end == segments[j].start {
-                    continue;
-                }
-                if let Some((pt, _t_dd)) = crate::dd::segment_intersection_dd(
-                    segments[i].start,
-                    segments[i].end,
-                    segments[j].start,
-                    segments[j].end,
-                ) {
-                    coords.push(pt);
+        if n >= MCINDEX_THRESHOLD {
+            let chains = build_chains(segments);
+            let envs: Vec<ChainEnv> = chains
+                .iter()
+                .enumerate()
+                .map(|(i, mc)| ChainEnv {
+                    idx: i,
+                    env: AABB::from_corners([mc.min_x, mc.min_y], [mc.max_x, mc.max_y]),
+                })
+                .collect();
+            let chain_tree = RTree::bulk_load(envs);
+            let mut checked: FxHashSet<(usize, usize)> = FxHashSet::default();
+            collect_intersections_mcindex(
+                segments,
+                &chains,
+                &chain_tree,
+                &mut coords,
+                &mut checked,
+            );
+        } else {
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    if j == i + 1 && segments[i].end == segments[j].start {
+                        continue;
+                    }
+                    if let Some((pt, _, _)) = crate::dd::segment_intersection_dd(
+                        segments[i].start,
+                        segments[i].end,
+                        segments[j].start,
+                        segments[j].end,
+                    ) {
+                        coords.push(pt);
+                    }
                 }
             }
         }

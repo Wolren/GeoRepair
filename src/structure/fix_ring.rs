@@ -4,6 +4,7 @@ use smallvec::SmallVec;
 use geo::{Coord, Line, LineString};
 
 use crate::orient::orient2d;
+use log::warn;
 use crate::structure::fix_ring_graph::{
     build_graph, extract_all_faces, label_interior_faces, split_face_at_pinch_points,
 };
@@ -191,7 +192,25 @@ pub(crate) fn check_edge_pair(coords: &[Coord<f64>], i: usize, j: usize, eps: f6
 /// ---------------------------------------------------------------------------
 pub(crate) fn fix_self_intersecting(coords: &[Coord<f64>]) -> Option<Vec<LineString<f64>>> {
     let edges = edges_from_coords(coords);
-    let noded = split_edges(&edges);
+    let mut noded = split_edges(&edges);
+    if noded.is_empty() {
+        return None;
+    }
+
+    // Validate noding with MCIndex-based O(n log n) validator.
+    let mut validator = crate::noding::validator::NodingValidator::new(noded.clone());
+    validator.validate();
+    if validator.has_violations() {
+        warn!(
+            "fix_self_intersecting: {} noding violation(s) remain, retrying with snap rounding",
+            validator.violations().len()
+        );
+        let snapped = crate::noding::snap_round::snap_round_lines(&edges);
+        if !snapped.is_empty() {
+            noded = snapped;
+        }
+    }
+
     if noded.is_empty() {
         return None;
     }
@@ -508,22 +527,40 @@ fn build_edge_grid(edges: &[Line<f64>]) -> Vec<Vec<usize>> {
 
 #[inline]
 fn intersect_param(e1: &Line<f64>, e2: &Line<f64>, eps: f64) -> Option<(f64, f64)> {
-    let denom = (e1.end.x - e1.start.x) * (e2.end.y - e2.start.y)
-        - (e1.end.y - e1.start.y) * (e2.end.x - e2.start.x);
-    if denom.abs() < eps {
+    // Phase 1: Detection via robust orient2d (Shewchuk adaptive precision).
+    // Fast pre-check rejects obvious non-intersections (both endpoints on
+    // the same side of the other segment).
+    let o1 = orient2d(e1.start, e1.end, e2.start);
+    let o2 = orient2d(e1.start, e1.end, e2.end);
+    let o3 = orient2d(e2.start, e2.end, e1.start);
+    let o4 = orient2d(e2.start, e2.end, e1.end);
+
+    // Quick rejection: both endpoints on the same side of the other segment
+    if o1.signum() == o2.signum() && o1 != 0.0 && o2 != 0.0 {
+        return None;
+    }
+    if o3.signum() == o4.signum() && o3 != 0.0 && o4 != 0.0 {
+        return None;
+    }
+
+    // Collinear overlap (all four orientations zero)
+    if o1 == 0.0 && o2 == 0.0 && o3 == 0.0 && o4 == 0.0 {
         return intersect_param_collinear(e1, e2, eps);
     }
-    let t = ((e2.start.x - e1.start.x) * (e2.end.y - e2.start.y)
-        - (e2.start.y - e1.start.y) * (e2.end.x - e2.start.x))
-        / denom;
-    let u = ((e2.start.x - e1.start.x) * (e1.end.y - e1.start.y)
-        - (e2.start.y - e1.start.y) * (e1.end.x - e1.start.x))
-        / denom;
-    if t >= -eps && t <= 1.0 + eps && u >= -eps && u <= 1.0 + eps {
-        Some((t, u))
-    } else {
-        None
+
+    // Phase 2: Computation via double-double arithmetic (106-bit mantissa).
+    // Handles proper crossings AND endpoint-on-segment intersections (both
+    // are valid noding events).
+    if let Some((_pt, t_dd, u_dd)) = crate::dd::segment_intersection_dd(
+        e1.start, e1.end, e2.start, e2.end,
+    ) {
+        let t = t_dd.to_f64();
+        let u = u_dd.to_f64();
+        if t >= -eps && t <= 1.0 + eps && u >= -eps && u <= 1.0 + eps {
+            return Some((t, u));
+        }
     }
+    None
 }
 
 #[inline]
