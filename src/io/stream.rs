@@ -521,7 +521,7 @@ impl FeatureWriter for BufferedWriter {
 /// Uses streaming readers/writers where available (WKT, CSV, GeoJSON),
 /// falling back to buffered I/O for other formats.
 ///
-/// Geometry repair is done per-feature using [`MakeValid`] with the given
+/// Geometry repair is done per-feature using [`MakeValid`](crate::make_valid::MakeValid) with the given
 /// configuration.
 pub fn stream_repair(
     input_path: &str,
