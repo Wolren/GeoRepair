@@ -4,7 +4,7 @@ use std::io::{BufWriter, Write};
 use geo::Geometry;
 use geozero::csv::CsvString;
 use geozero::ToGeo;
-use geozero::wkt::WktWriter;
+use wkt::Wkt;
 
 use crate::core::MakeValidError;
 
@@ -23,13 +23,8 @@ pub fn export_csv_wkt(geometries: &[Geometry<f64>], path: &str) -> Result<(), Ma
     let mut writer = BufWriter::new(file);
     writeln!(writer, "geometry").map_err(|e| MakeValidError::IoError(e.to_string()))?;
     for geom in geometries {
-        let mut wkt_buf = Vec::new();
-        {
-            let mut wkt_writer = WktWriter::new(&mut wkt_buf);
-            wkt_writer.write_geometry(geom).map_err(|e| MakeValidError::ParseError(format!("WKT error: {e}")))?;
-        }
-        let wkt_str = String::from_utf8(wkt_buf)
-            .map_err(|e| MakeValidError::ParseError(format!("UTF-8 error: {e}")))?;
+        let wkt: Wkt<f64> = Wkt::from(geom.clone());
+        let wkt_str = wkt.to_string();
         writeln!(writer, "\"{wkt_str}\"").map_err(|e| MakeValidError::IoError(e.to_string()))?;
     }
     Ok(())
