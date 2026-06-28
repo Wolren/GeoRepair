@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::{BufReader, BufWriter, Write};
 
 use geo::{Coord, Geometry, LineString, Polygon};
-use geojson::Value as GeometryValue;
+use geojson::GeometryValue;
 use geojson::{Feature, FeatureCollection, GeoJson};
 use serde_json::{Map, Value};
 
@@ -208,16 +208,16 @@ fn convert_geojson_zm(geom: geojson::Geometry) -> Result<ZmGeometry, MakeValidEr
     }
 
     match geom.value {
-        GeometryValue::Point(ref coords) => {
-            let (c, zv) = coord_zm(coords);
+        GeometryValue::Point { coordinates, .. } => {
+            let (c, zv) = coord_zm(&coordinates);
             Ok(ZmGeometry::with_zm(
                 Geometry::Point(geo::Point(c)),
                 vec![zv],
             ))
         }
-        GeometryValue::MultiPoint(ref points) => {
-            let mut zms = Vec::with_capacity(points.len());
-            let pts: Vec<geo::Point<f64>> = points
+        GeometryValue::MultiPoint { coordinates, .. } => {
+            let mut zms = Vec::with_capacity(coordinates.len());
+            let pts: Vec<geo::Point<f64>> = coordinates
                 .iter()
                 .map(|c| {
                     let (c, zv) = coord_zm(c);
@@ -230,13 +230,13 @@ fn convert_geojson_zm(geom: geojson::Geometry) -> Result<ZmGeometry, MakeValidEr
                 zms,
             ))
         }
-        GeometryValue::LineString(ref coords) => {
-            let (ls, zms) = ring_zm(coords);
+        GeometryValue::LineString { coordinates, .. } => {
+            let (ls, zms) = ring_zm(&coordinates);
             Ok(ZmGeometry::with_zm(Geometry::LineString(ls), zms))
         }
-        GeometryValue::MultiLineString(ref lines) => {
+        GeometryValue::MultiLineString { coordinates, .. } => {
             let mut all_zm = Vec::new();
-            let mls: Vec<LineString<f64>> = lines
+            let mls: Vec<LineString<f64>> = coordinates
                 .iter()
                 .map(|l| {
                     let (ls, zm) = ring_zm(l);
@@ -249,13 +249,13 @@ fn convert_geojson_zm(geom: geojson::Geometry) -> Result<ZmGeometry, MakeValidEr
                 all_zm,
             ))
         }
-        GeometryValue::Polygon(ref coords) => {
-            let (poly, zms) = polygon_zm(coords);
+        GeometryValue::Polygon { coordinates, .. } => {
+            let (poly, zms) = polygon_zm(&coordinates);
             Ok(ZmGeometry::with_zm(Geometry::Polygon(poly), zms))
         }
-        GeometryValue::MultiPolygon(ref polygons) => {
+        GeometryValue::MultiPolygon { coordinates, .. } => {
             let mut all_zm = Vec::new();
-            let polys: Vec<Polygon<f64>> = polygons
+            let polys: Vec<Polygon<f64>> = coordinates
                 .iter()
                 .map(|p| {
                     let (poly, zm) = polygon_zm(p);
@@ -268,10 +268,10 @@ fn convert_geojson_zm(geom: geojson::Geometry) -> Result<ZmGeometry, MakeValidEr
                 all_zm,
             ))
         }
-        GeometryValue::GeometryCollection(ref geoms) => {
+        GeometryValue::GeometryCollection { geometries, .. } => {
             let mut all_geoms = Vec::new();
             let mut all_zm = Vec::new();
-            for g in geoms {
+            for g in geometries {
                 if let Ok(zm_geom) = convert_geojson_zm(g.clone()) {
                     let cnt = count_coords(&zm_geom.geometry);
                     all_zm.extend(zm_geom.zm.into_iter().take(cnt));
@@ -495,31 +495,31 @@ fn geo_geom_to_geojson_inner(
 
     let value = match geom {
         Geometry::Point(p) => {
-            GeometryValue::Point(coord_to_pos(p.0, zm.next().unwrap_or(ZmValue::NONE)))
+            GeometryValue::Point { coordinates: coord_to_pos(p.0, zm.next().unwrap_or(ZmValue::NONE)) }
         }
-        Geometry::MultiPoint(mp) => GeometryValue::MultiPoint(
-            mp.0.iter()
+        Geometry::MultiPoint(mp) => GeometryValue::MultiPoint {
+            coordinates: mp.0.iter()
                 .map(|p| coord_to_pos(p.0, zm.next().unwrap_or(ZmValue::NONE)))
                 .collect(),
-        ),
-        Geometry::LineString(ls) => GeometryValue::LineString(ring_to_pos(&ls, zm)),
+        },
+        Geometry::LineString(ls) => GeometryValue::LineString { coordinates: ring_to_pos(&ls, zm) },
         Geometry::MultiLineString(mls) => {
-            GeometryValue::MultiLineString(mls.0.iter().map(|ls| ring_to_pos(ls, zm)).collect())
+            GeometryValue::MultiLineString { coordinates: mls.0.iter().map(|ls| ring_to_pos(ls, zm)).collect() }
         }
-        Geometry::Polygon(p) => GeometryValue::Polygon(polygon_to_coords(&p, zm)),
-        Geometry::Line(l) => GeometryValue::LineString(vec![
+        Geometry::Polygon(p) => GeometryValue::Polygon { coordinates: polygon_to_coords(&p, zm) },
+        Geometry::Line(l) => GeometryValue::LineString { coordinates: vec![
             coord_to_pos(l.start, zm.next().unwrap_or(ZmValue::NONE)),
             coord_to_pos(l.end, zm.next().unwrap_or(ZmValue::NONE)),
-        ]),
+        ]},
         Geometry::MultiPolygon(mp) => {
-            GeometryValue::MultiPolygon(mp.0.iter().map(|p| polygon_to_coords(&p, zm)).collect())
+            GeometryValue::MultiPolygon { coordinates: mp.0.iter().map(|p| polygon_to_coords(&p, zm)).collect() }
         }
         Geometry::GeometryCollection(gc) => {
             let geoms: Vec<geojson::Geometry> =
                 gc.0.into_iter()
                     .map(|g| geo_geom_to_geojson_inner(g, zm))
                     .collect();
-            GeometryValue::GeometryCollection(geoms)
+            GeometryValue::GeometryCollection { geometries: geoms }
         }
         Geometry::Rect(r) => {
             let poly = Polygon::new(
@@ -547,14 +547,14 @@ fn geo_geom_to_geojson_inner(
                 ]),
                 Vec::new(),
             );
-            GeometryValue::Polygon(polygon_to_coords(&poly, zm))
+            GeometryValue::Polygon { coordinates: polygon_to_coords(&poly, zm) }
         }
         Geometry::Triangle(t) => {
             let poly = Polygon::new(
                 LineString::new(vec![t.v1(), t.v2(), t.v3(), t.v1()]),
                 Vec::new(),
             );
-            GeometryValue::Polygon(polygon_to_coords(&poly, zm))
+            GeometryValue::Polygon { coordinates: polygon_to_coords(&poly, zm) }
         }
     };
 
