@@ -93,18 +93,14 @@ fn extract_geometries(gj: GeoJson) -> Vec<Geometry<f64>> {
     match gj {
         GeoJson::FeatureCollection(fc) => {
             for mut f in fc.features {
-                if let Some(g) = f.geometry.take() {
-                    if let Ok(geo) = g.try_into() {
-                        geoms.push(geo);
-                    }
+                if let Some(g) = f.geometry.take() && let Ok(geo) = g.try_into() {
+                    geoms.push(geo);
                 }
             }
         }
         GeoJson::Feature(mut f) => {
-            if let Some(g) = f.geometry.take() {
-                if let Ok(geo) = g.try_into() {
-                    geoms.push(geo);
-                }
+            if let Some(g) = f.geometry.take() && let Ok(geo) = g.try_into() {
+                geoms.push(geo);
             }
         }
         GeoJson::Geometry(g) => {
@@ -128,7 +124,7 @@ fn repair_wkt_batch(wkts: Vec<String>, method: Option<&str>) -> PyResult<Vec<Str
     for wkt_str in wkts {
         match (|| -> PyResult<String> {
             let wkt = Wkt::from_str(&wkt_str)
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("{e}")))?;
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
             let geom: Geometry<f64> = wkt
                 .try_into()
                 .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("{e}")))?;
@@ -149,7 +145,7 @@ fn validate_wkt_batch(wkts: Vec<String>) -> PyResult<Vec<(bool, Vec<String>)>> {
     for wkt_str in wkts {
         match (|| -> PyResult<(bool, Vec<String>)> {
             let wkt = Wkt::from_str(&wkt_str)
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("{e}")))?;
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
             let geom: Geometry<f64> = wkt
                 .try_into()
                 .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("{e}")))?;
@@ -244,7 +240,7 @@ fn repair_validate_wkt_batch(
     for wkt_str in wkts {
         match (|| -> PyResult<(String, bool, Vec<String>)> {
             let wkt = Wkt::from_str(&wkt_str)
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("{e}")))?;
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
             let geom: Geometry<f64> = wkt
                 .try_into()
                 .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("{e}")))?;
@@ -287,6 +283,7 @@ fn repair_wkb_batch(wkbs: Vec<Vec<u8>>, method: Option<&str>) -> PyResult<Vec<Ve
 
 #[pyfunction]
 #[pyo3(signature = (wkbs, method = None))]
+#[allow(clippy::type_complexity)]
 fn repair_validate_wkb_batch(
     wkbs: Vec<Vec<u8>>,
     method: Option<&str>,
@@ -318,6 +315,7 @@ fn repair_validate_wkb_batch(
 
 #[pyfunction]
 #[pyo3(signature = (input_path, method = None))]
+#[allow(clippy::type_complexity)]
 fn repair_file(
     input_path: &str,
     method: Option<&str>,
@@ -347,6 +345,7 @@ fn repair_file(
 
 #[pyfunction]
 #[pyo3(signature = (input_path, output_path, method = None, mode = "both", progress = None))]
+#[allow(clippy::type_complexity)]
 fn repair_file_to_file(
     input_path: &str,
     output_path: &str,
