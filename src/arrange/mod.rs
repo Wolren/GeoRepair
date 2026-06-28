@@ -239,7 +239,7 @@ pub(crate) fn poly_has_basic_form(poly: &Polygon<f64>) -> bool {
     if !ring_is_plausible(poly.exterior()) {
         return false;
     }
-    poly.interiors().iter().all(|h| ring_is_plausible(h))
+    poly.interiors().iter().all(ring_is_plausible)
 }
 
 pub(crate) fn fix_from_lines(lines: Vec<geo::Line<f64>>) -> Option<MultiPolygon<f64>> {
@@ -255,7 +255,7 @@ pub(crate) fn fix_from_lines(lines: Vec<geo::Line<f64>>) -> Option<MultiPolygon<
     let raw_rings = extract::trace_rings(&cdt, &interior);
     let rings: Vec<_> = raw_rings
         .into_iter()
-        .flat_map(|r| extract::split_ring_at_pinch_points(r))
+        .flat_map(extract::split_ring_at_pinch_points)
         .map(geo::LineString::new)
         .collect();
     Some(assemble::assemble_polygons(rings))

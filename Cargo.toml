@@ -47,7 +47,7 @@ wkt = { version = "0.14", features = ["geo-types"], optional = true }
 wkb = { version = "0.9", optional = true }
 geo-traits = { version = "0.3", optional = true }
 csv = { version = "1.4", optional = true }
-geozero = { version = "0.15", features = ["with-wkt", "with-geo"], optional = true }
+geozero = { version = "0.15", features = ["with-wkt", "with-geo", "with-csv"], optional = true }
 quick-xml = { version = "0.40", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

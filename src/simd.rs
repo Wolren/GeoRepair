@@ -261,7 +261,7 @@ pub(crate) fn is_ring_ccw_simd(coords: &[Coord<f64>]) -> bool {
 
     #[cfg(not(target_feature = "avx"))]
     {
-        return is_ring_ccw_scalar(coords);
+        is_ring_ccw_scalar(coords)
     }
 
     #[cfg(target_feature = "avx")]
@@ -333,7 +333,7 @@ pub(crate) fn point_in_ring_exclusive(pt: Coord<f64>, coords: &[Coord<f64>]) -> 
 
     #[cfg(not(target_feature = "avx"))]
     {
-        return point_in_ring_scalar_loop(pt, coords, 0..n - 1) != 0;
+        point_in_ring_scalar_loop(pt, coords, 0..n - 1) != 0
     }
 
     #[cfg(target_feature = "avx")]

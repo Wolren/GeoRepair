@@ -10,7 +10,6 @@ use crate::orient::orient2d;
 /// ---------------------------------------------------------------------------
 /// Graph construction
 /// ---------------------------------------------------------------------------
-
 const SNAP_SCALE: f64 = 1e8;
 
 #[inline(always)]
@@ -93,7 +92,6 @@ pub(crate) fn build_graph(lines: &[Line<f64>]) -> Graph {
 /// ---------------------------------------------------------------------------
 /// Face extraction — walk each unused directed edge using smallest CCW turn
 /// ---------------------------------------------------------------------------
-
 pub(crate) fn extract_all_faces(graph: &Graph) -> Option<Vec<Vec<(usize, usize)>>> {
     let n_edges = graph.edges.len();
     let mut used_fwd = vec![false; n_edges];
@@ -102,20 +100,14 @@ pub(crate) fn extract_all_faces(graph: &Graph) -> Option<Vec<Vec<(usize, usize)>
 
     for start_ei in 0..n_edges {
         let (fi, ti) = graph.edges[start_ei];
-        if !used_fwd[start_ei] {
-            if let Some(face) = walk_face(graph, start_ei, fi, ti, &mut used_fwd, &mut used_rev) {
-                if face.len() >= 3 {
-                    faces.push(face);
-                }
+        if !used_fwd[start_ei] && let Some(face) = walk_face(graph, start_ei, fi, ti, &mut used_fwd, &mut used_rev)
+            && face.len() >= 3 {
+                faces.push(face);
             }
-        }
-        if !used_rev[start_ei] {
-            if let Some(face) = walk_face(graph, start_ei, ti, fi, &mut used_fwd, &mut used_rev) {
-                if face.len() >= 3 {
-                    faces.push(face);
-                }
+        if !used_rev[start_ei] && let Some(face) = walk_face(graph, start_ei, ti, fi, &mut used_fwd, &mut used_rev)
+            && face.len() >= 3 {
+                faces.push(face);
             }
-        }
     }
     if faces.is_empty() {
         None
@@ -196,6 +188,7 @@ fn walk_face(
     Some(face)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn find_next_edge(
     graph: &Graph,
     v_idx: usize,
@@ -256,7 +249,6 @@ fn find_next_edge(
 /// ---------------------------------------------------------------------------
 /// Split face at repeated vertices (pinch points) into simple cycles
 /// ---------------------------------------------------------------------------
-
 pub(crate) fn split_face_at_pinch_points(
     face: &[(usize, usize)],
     edges: &[(usize, usize)],
@@ -387,7 +379,6 @@ fn face_winding(
 /// ---------------------------------------------------------------------------
 /// Face labeling: BFS from exterior face toggling interior/exterior
 /// ---------------------------------------------------------------------------
-
 pub(crate) fn label_interior_faces(
     edges: &[Line<f64>],
     verts: &[Coord<f64>],

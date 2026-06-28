@@ -8,6 +8,8 @@ use crate::structure::fix_ring_graph::{
     build_graph, extract_all_faces, label_interior_faces, split_face_at_pinch_points,
 };
 
+type SplitPoint = SmallVec<[(f64, Coord<f64>); 2]>;
+
 pub(crate) fn repair_ring(ring: &LineString<f64>) -> Option<Vec<LineString<f64>>> {
     let coords = basic_cleanup(ring)?;
     if coords.len() < 4 {
@@ -73,8 +75,8 @@ pub(crate) fn has_self_intersections(coords: &[Coord<f64>]) -> bool {
 
     let mut seen: FxHashSet<(u64, u64)> =
         FxHashSet::with_capacity_and_hasher(n, Default::default());
-    for i in 0..n - 1 {
-        let key = (coords[i].x.to_bits(), coords[i].y.to_bits());
+    for c in &coords[..n - 1] {
+        let key = (c.x.to_bits(), c.y.to_bits());
         if !seen.insert(key) {
             return true;
         }
@@ -130,41 +132,45 @@ pub(crate) fn check_edge_pair(coords: &[Coord<f64>], i: usize, j: usize, eps: f6
         return true;
     }
 
-    if o[2].abs() <= eps && a1 != b1 && a1 != b2 {
-        if (b1.x - b2.x).abs() > eps && a1.x > b1.x.min(b2.x) + eps && a1.x < b1.x.max(b2.x) - eps
+    if o[2].abs() <= eps
+        && a1 != b1
+        && a1 != b2
+        && ((b1.x - b2.x).abs() > eps && a1.x > b1.x.min(b2.x) + eps && a1.x < b1.x.max(b2.x) - eps
             || (b1.y - b2.y).abs() > eps
                 && a1.y > b1.y.min(b2.y) + eps
-                && a1.y < b1.y.max(b2.y) - eps
-        {
-            return true;
-        }
+                && a1.y < b1.y.max(b2.y) - eps)
+    {
+        return true;
     }
-    if o[3].abs() <= eps && a2 != b1 && a2 != b2 {
-        if (b1.x - b2.x).abs() > eps && a2.x > b1.x.min(b2.x) + eps && a2.x < b1.x.max(b2.x) - eps
+    if o[3].abs() <= eps
+        && a2 != b1
+        && a2 != b2
+        && ((b1.x - b2.x).abs() > eps && a2.x > b1.x.min(b2.x) + eps && a2.x < b1.x.max(b2.x) - eps
             || (b1.y - b2.y).abs() > eps
                 && a2.y > b1.y.min(b2.y) + eps
-                && a2.y < b1.y.max(b2.y) - eps
-        {
-            return true;
-        }
+                && a2.y < b1.y.max(b2.y) - eps)
+    {
+        return true;
     }
-    if o[0].abs() <= eps && b1 != a1 && b1 != a2 {
-        if (a1.x - a2.x).abs() > eps && b1.x > a1.x.min(a2.x) + eps && b1.x < a1.x.max(a2.x) - eps
+    if o[0].abs() <= eps
+        && b1 != a1
+        && b1 != a2
+        && ((a1.x - a2.x).abs() > eps && b1.x > a1.x.min(a2.x) + eps && b1.x < a1.x.max(a2.x) - eps
             || (a1.y - a2.y).abs() > eps
                 && b1.y > a1.y.min(a2.y) + eps
-                && b1.y < a1.y.max(a2.y) - eps
-        {
-            return true;
-        }
+                && b1.y < a1.y.max(a2.y) - eps)
+    {
+        return true;
     }
-    if o[1].abs() <= eps && b2 != a1 && b2 != a2 {
-        if (a1.x - a2.x).abs() > eps && b2.x > a1.x.min(a2.x) + eps && b2.x < a1.x.max(a2.x) - eps
+    if o[1].abs() <= eps
+        && b2 != a1
+        && b2 != a2
+        && ((a1.x - a2.x).abs() > eps && b2.x > a1.x.min(a2.x) + eps && b2.x < a1.x.max(a2.x) - eps
             || (a1.y - a2.y).abs() > eps
                 && b2.y > a1.y.min(a2.y) + eps
-                && b2.y < a1.y.max(a2.y) - eps
-        {
-            return true;
-        }
+                && b2.y < a1.y.max(a2.y) - eps)
+    {
+        return true;
     }
 
     if o[0].abs() <= eps && o[1].abs() <= eps && o[2].abs() <= eps && o[3].abs() <= eps {
@@ -183,11 +189,6 @@ pub(crate) fn check_edge_pair(coords: &[Coord<f64>], i: usize, j: usize, eps: f6
 /// ---------------------------------------------------------------------------
 /// Self-intersecting ring fixer
 /// ---------------------------------------------------------------------------
-/// Self-intersecting ring fixer
-/// ---------------------------------------------------------------------------
-/// Self-intersecting ring fixer
-/// ---------------------------------------------------------------------------
-
 pub(crate) fn fix_self_intersecting(coords: &[Coord<f64>]) -> Option<Vec<LineString<f64>>> {
     let edges = edges_from_coords(coords);
     let noded = split_edges(&edges);
@@ -302,10 +303,9 @@ pub(crate) fn edges_from_coords(coords: &[Coord<f64>]) -> Vec<Line<f64>> {
 /// ---------------------------------------------------------------------------
 /// Edge splitting at intersection points
 /// ---------------------------------------------------------------------------
-
 pub(crate) fn split_edges(edges: &[Line<f64>]) -> Vec<Line<f64>> {
     let n = edges.len();
-    let mut split_points: Vec<SmallVec<[(f64, Coord<f64>); 2]>> = vec![SmallVec::new(); n];
+    let mut split_points: Vec<SplitPoint> = vec![SmallVec::new(); n];
 
     let (mut min_x, mut max_x, mut min_y, mut max_y) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
     for e in edges {
@@ -344,11 +344,7 @@ pub(crate) fn split_edges(edges: &[Line<f64>]) -> Vec<Line<f64>> {
     result
 }
 
-fn split_edges_bruteforce(
-    edges: &[Line<f64>],
-    split_points: &mut [SmallVec<[(f64, Coord<f64>); 2]>],
-    eps: f64,
-) {
+fn split_edges_bruteforce(edges: &[Line<f64>], split_points: &mut [SplitPoint], eps: f64) {
     let n = edges.len();
     for i in 0..n {
         for j in (i + 2)..n {
@@ -358,31 +354,27 @@ fn split_edges_bruteforce(
             if i == 0 && j == n - 1 && edges[i].start == edges[j].end {
                 continue;
             }
-            if let Some((ti, tj)) = intersect_param(&edges[i], &edges[j], eps) {
-                if (ti > eps && ti < 1.0 - eps) || (tj > eps && tj < 1.0 - eps) {
-                    let pi = lerp(edges[i], ti);
-                    let pj = lerp(edges[j], tj);
-                    let pt = Coord {
-                        x: (pi.x + pj.x) * 0.5,
-                        y: (pi.y + pj.y) * 0.5,
-                    };
-                    if ti > eps && ti < 1.0 - eps {
-                        split_points[i].push((ti, pt));
-                    }
-                    if tj > eps && tj < 1.0 - eps {
-                        split_points[j].push((tj, pt));
-                    }
+            if let Some((ti, tj)) = intersect_param(&edges[i], &edges[j], eps)
+                && ((ti > eps && ti < 1.0 - eps) || (tj > eps && tj < 1.0 - eps))
+            {
+                let pi = lerp(edges[i], ti);
+                let pj = lerp(edges[j], tj);
+                let pt = Coord {
+                    x: (pi.x + pj.x) * 0.5,
+                    y: (pi.y + pj.y) * 0.5,
+                };
+                if ti > eps && ti < 1.0 - eps {
+                    split_points[i].push((ti, pt));
+                }
+                if tj > eps && tj < 1.0 - eps {
+                    split_points[j].push((tj, pt));
                 }
             }
         }
     }
 }
 
-fn split_edges_grid(
-    edges: &[Line<f64>],
-    split_points: &mut [SmallVec<[(f64, Coord<f64>); 2]>],
-    eps: f64,
-) {
+fn split_edges_grid(edges: &[Line<f64>], split_points: &mut [SplitPoint], eps: f64) {
     let n = edges.len();
     let grid = build_edge_grid(edges);
 
@@ -398,27 +390,25 @@ fn split_edges_grid(
                 }
                 let mut sorted = cell.clone();
                 sorted.sort_unstable();
-                for ii in 0..sorted.len() {
-                    let ei = sorted[ii];
-                    for jj in (ii + 1)..sorted.len() {
-                        let ej = sorted[jj];
+                for (ii, &ei) in sorted.iter().enumerate() {
+                    for &ej in sorted.iter().skip(ii + 1) {
                         if ei.abs_diff(ej) <= 1 || (ei == 0 && ej == n - 1) {
                             continue;
                         }
-                        if let Some((ti, tj)) = intersect_param(&edges[ei], &edges[ej], eps) {
-                            if (ti > eps && ti < 1.0 - eps) || (tj > eps && tj < 1.0 - eps) {
-                                let pi = lerp(edges[ei], ti);
-                                let pj = lerp(edges[ej], tj);
-                                let pt = Coord {
-                                    x: (pi.x + pj.x) * 0.5,
-                                    y: (pi.y + pj.y) * 0.5,
-                                };
-                                if ti > eps && ti < 1.0 - eps {
-                                    hits.push((ei, ti, pt));
-                                }
-                                if tj > eps && tj < 1.0 - eps {
-                                    hits.push((ej, tj, pt));
-                                }
+                        if let Some((ti, tj)) = intersect_param(&edges[ei], &edges[ej], eps)
+                            && ((ti > eps && ti < 1.0 - eps) || (tj > eps && tj < 1.0 - eps))
+                        {
+                            let pi = lerp(edges[ei], ti);
+                            let pj = lerp(edges[ej], tj);
+                            let pt = Coord {
+                                x: (pi.x + pj.x) * 0.5,
+                                y: (pi.y + pj.y) * 0.5,
+                            };
+                            if ti > eps && ti < 1.0 - eps {
+                                hits.push((ei, ti, pt));
+                            }
+                            if tj > eps && tj < 1.0 - eps {
+                                hits.push((ej, tj, pt));
                             }
                         }
                     }
@@ -441,30 +431,28 @@ fn split_edges_grid(
             }
             let mut sorted = cell.clone();
             sorted.sort_unstable();
-            for ii in 0..sorted.len() {
-                let ei = sorted[ii];
-                for jj in (ii + 1)..sorted.len() {
-                    let ej = sorted[jj];
+            for (ii, &ei) in sorted.iter().enumerate() {
+                for &ej in sorted.iter().skip(ii + 1) {
                     if !checked.insert((ei, ej)) {
                         continue;
                     }
                     if ei.abs_diff(ej) <= 1 || (ei == 0 && ej == n - 1) {
                         continue;
                     }
-                    if let Some((ti, tj)) = intersect_param(&edges[ei], &edges[ej], eps) {
-                        if (ti > eps && ti < 1.0 - eps) || (tj > eps && tj < 1.0 - eps) {
-                            let pi = lerp(edges[ei], ti);
-                            let pj = lerp(edges[ej], tj);
-                            let pt = Coord {
-                                x: (pi.x + pj.x) * 0.5,
-                                y: (pi.y + pj.y) * 0.5,
-                            };
-                            if ti > eps && ti < 1.0 - eps {
-                                split_points[ei].push((ti, pt));
-                            }
-                            if tj > eps && tj < 1.0 - eps {
-                                split_points[ej].push((tj, pt));
-                            }
+                    if let Some((ti, tj)) = intersect_param(&edges[ei], &edges[ej], eps)
+                        && ((ti > eps && ti < 1.0 - eps) || (tj > eps && tj < 1.0 - eps))
+                    {
+                        let pi = lerp(edges[ei], ti);
+                        let pj = lerp(edges[ej], tj);
+                        let pt = Coord {
+                            x: (pi.x + pj.x) * 0.5,
+                            y: (pi.y + pj.y) * 0.5,
+                        };
+                        if ti > eps && ti < 1.0 - eps {
+                            split_points[ei].push((ti, pt));
+                        }
+                        if tj > eps && tj < 1.0 - eps {
+                            split_points[ej].push((tj, pt));
                         }
                     }
                 }
@@ -494,13 +482,12 @@ fn build_edge_grid(edges: &[Line<f64>]) -> Vec<Vec<usize>> {
     }
 
     let grid_dim = (n as f64).sqrt().ceil() as usize;
-    let grid_dim = grid_dim.max(4).min(256);
+    let grid_dim = grid_dim.clamp(4, 256);
     let cell_w = dx / grid_dim as f64;
     let cell_h = dy / grid_dim as f64;
     let mut grid: Vec<Vec<usize>> = vec![Vec::new(); grid_dim * grid_dim];
 
-    for ei in 0..n {
-        let e = &edges[ei];
+    for (ei, e) in edges.iter().enumerate() {
         let lo_x = (e.start.x.min(e.end.x) - min_x) / cell_w;
         let hi_x = (e.start.x.max(e.end.x) - min_x) / cell_w;
         let min_cx = (lo_x.floor() as isize).max(0) as usize;

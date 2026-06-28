@@ -314,9 +314,7 @@ impl MakeValid for Polygon<f64> {
         }
         match config.poly_method {
             PolyMethod::Arrange => arrange_or_empty(self, config),
-            PolyMethod::Structure => {
-                structure_fix(self, config).unwrap_or_else(|| empty_geom::<f64>())
-            }
+            PolyMethod::Structure => structure_fix(self, config).unwrap_or_else(empty_geom::<f64>),
             PolyMethod::Auto => {
                 if let Some(result) = structure_fix(self, config) {
                     if <Geometry<f64> as geo::validation::Validation>::is_valid(&result) {

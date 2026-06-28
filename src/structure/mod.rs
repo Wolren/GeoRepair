@@ -238,11 +238,10 @@ fn resolve_nesting(holes: &[LineString<f64>]) -> (Vec<LineString<f64>>, Vec<Poly
     // Propagate depths (bounded loop: at most n iterations)
     for _ in 0..n {
         for i in 0..n {
-            if let Some(p) = parent_of[i] {
-                if depth[p] > 0 {
+            if let Some(p) = parent_of[i]
+                && depth[p] > 0 {
                     depth[i] = depth[p] + 1;
                 }
-            }
         }
     }
 
@@ -251,11 +250,11 @@ fn resolve_nesting(holes: &[LineString<f64>]) -> (Vec<LineString<f64>>, Vec<Poly
     // odd depth (1, 3, ...): subtract-from-parent (holes/voids)
     let mut subtract = Vec::new();
     let mut island_indices = Vec::new();
-    for i in 0..n {
-        if depth[i] == 0 {
+    for (i, &d) in depth.iter().enumerate() {
+        if d == 0 {
             // Unreachable (shouldn't happen), treat as top-level hole
             subtract.push(i);
-        } else if depth[i] % 2 == 1 {
+        } else if d % 2 == 1 {
             subtract.push(i);
         } else {
             island_indices.push(i);

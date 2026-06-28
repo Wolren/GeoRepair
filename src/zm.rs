@@ -89,7 +89,7 @@ pub fn count_coords(geom: &Geometry<f64>) -> usize {
         Geometry::Polygon(p) => {
             p.exterior().0.len() + p.interiors().iter().map(|h| h.0.len()).sum::<usize>()
         }
-        Geometry::MultiPolygon(mp) => mp.0.iter().map(|p| count_polygon_coords(p)).sum(),
+        Geometry::MultiPolygon(mp) => mp.0.iter().map(count_polygon_coords).sum(),
         Geometry::Line(_) => 2,
         Geometry::Rect(_) => 5,
         Geometry::Triangle(_) => 4,

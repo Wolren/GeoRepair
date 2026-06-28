@@ -35,7 +35,7 @@ impl Crs {
             .split(':')
             .nth(1)
             .and_then(|s| s.parse::<u32>().ok())
-            .map_or(false, epsg_is_geographic);
+            .is_some_and(epsg_is_geographic);
         Self {
             authority: Some(auth.to_string()),
             is_geographic: is_geo,
@@ -256,7 +256,7 @@ fn epsg_is_geographic(code: u32) -> bool {
         4087 | 4088 | 4465 | 4466 | 4470 | 4471 | 4555 | 4556 | 4647 => false,
         c if (4400..=4999).contains(&c) => true,
         // WGS 84 / Pseudo-Mercator
-        3857 | 3858 | 3859 => false,
+        3857..=3859 => false,
         // UTM zones (north and south) — projected
         c if (32600..=32760).contains(&c) => false,
         // ED50 / UTM zones
