@@ -278,7 +278,7 @@ fn create_gpkg_schema_features(
     col_defs: &[(String, String, &str)],
 ) -> Result<(), MakeValidError> {
     let srs_id = crs
-        .and_then(|c| c.authority().and_then(|a| parse_srid(a)))
+        .and_then(|c| c.authority().and_then(parse_srid))
         .unwrap_or(-1);
     let srs_name = crs.and_then(|c| c.authority()).unwrap_or("EPSG:-1");
     let is_geographic = crs.map(|c| c.is_geographic()).unwrap_or(true);
@@ -408,7 +408,7 @@ fn create_gpkg_schema(
     crs: Option<&Crs>,
 ) -> Result<(), MakeValidError> {
     let srs_id = crs
-        .and_then(|c| c.authority().and_then(|a| parse_srid(a)))
+        .and_then(|c| c.authority().and_then(parse_srid))
         .unwrap_or(-1);
 
     let srs_name = crs.and_then(|c| c.authority()).unwrap_or("EPSG:-1");
@@ -597,7 +597,10 @@ fn compute_bounds(geometries: &[Geometry<f64>]) -> (f64, f64, f64, f64) {
 }
 
 fn parse_srid(authority: &str) -> Option<i32> {
-    authority.split(':').last().and_then(|s| s.parse().ok())
+    authority
+        .split(':')
+        .next_back()
+        .and_then(|s| s.parse().ok())
 }
 
 #[cfg(test)]
