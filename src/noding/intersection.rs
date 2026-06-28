@@ -314,8 +314,6 @@ pub(crate) fn compute_intersection_param<T: GeoFloat>(
                 y: e2.end.y.to_f64().unwrap(),
             },
         );
-        let eps_f64 = eps.to_f64().unwrap();
-
         // Phase 1: Detection via robust orient2d (Shewchuk adaptive precision).
         // Fast pre-check: reject when both endpoints are on the same side.
         let o1 = orient2d_robust(ef1.start, ef1.end, ef2.start);

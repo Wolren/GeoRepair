@@ -281,11 +281,12 @@ pub(crate) fn edges_intersect_general(
     b2: Coord<f64>,
     eps: f64,
 ) -> bool {
-    // Use Shewchuk adaptive-precision orient2d for robust intersection detection.
-    let o1 = crate::orient::orient2d(a1, a2, b1);
-    let o2 = crate::orient::orient2d(a1, a2, b2);
-    let o3 = crate::orient::orient2d(b1, b2, a1);
-    let o4 = crate::orient::orient2d(b1, b2, a2);
+    // Fast f64 orient2d for validation. The repair pipeline uses Shewchuk
+    // for precision-critical intersection computation.
+    let o1 = crate::orient::orient2d_fast(a1, a2, b1);
+    let o2 = crate::orient::orient2d_fast(a1, a2, b2);
+    let o3 = crate::orient::orient2d_fast(b1, b2, a1);
+    let o4 = crate::orient::orient2d_fast(b1, b2, a2);
 
     // Proper crossing
     if o1 * o2 < 0.0 && o3 * o4 < 0.0 {
@@ -293,7 +294,7 @@ pub(crate) fn edges_intersect_general(
     }
 
     // Collinear overlap (excluding endpoint-only touching)
-    let collinear = o1.abs() <= eps && o2.abs() <= eps && o3.abs() <= eps && o4.abs() <= eps;
+    let collinear = o1.abs() <= eps && o2.abs() <= eps;
     if collinear {
         let dx = a2.x - a1.x;
         let dy = a2.y - a1.y;
