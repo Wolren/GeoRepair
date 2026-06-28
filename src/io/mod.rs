@@ -2,7 +2,9 @@ use std::path::Path;
 
 use geo::Geometry;
 
-use crate::core::{io_err, MakeValidError};
+use crate::core::MakeValidError;
+#[cfg(any(feature = "io-geojson", feature = "io-wkt", feature = "io-csv", feature = "load-shp", feature = "io-gpkg", feature = "io-gml", feature = "io-kml", feature = "io-wkb"))]
+use crate::core::io_err;
 use crate::feature::Feature;
 use crate::Crs;
 

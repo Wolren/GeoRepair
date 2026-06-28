@@ -5,9 +5,13 @@ use std::io::{BufWriter, Write};
 
 #[cfg(feature = "load-shp")]
 use crate::feature::Feature;
+#[cfg(feature = "load-shp")]
 use crate::Crs;
+#[cfg(feature = "load-shp")]
 use serde_json::Value;
+#[cfg(feature = "load-shp")]
 use shapefile::dbase;
+#[cfg(feature = "load-shp")]
 use std::path::Path;
 
 /// Export geometries to a shapefile.

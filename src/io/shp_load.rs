@@ -171,6 +171,7 @@ fn dbf_record_count(shp_path: &Path) -> Option<usize> {
     Some(count as usize)
 }
 
+#[cfg(feature = "load-shp")]
 pub fn load_shp_features(
     path: &str,
     progress: Option<&dyn Fn(f64)>,

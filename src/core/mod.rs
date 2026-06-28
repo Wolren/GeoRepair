@@ -71,6 +71,16 @@ pub enum MakeValidError {
     CrsError(String),
 }
 
+#[cfg(any(
+    feature = "io-geojson",
+    feature = "io-wkt",
+    feature = "io-csv",
+    feature = "load-shp",
+    feature = "io-gpkg",
+    feature = "io-gml",
+    feature = "io-kml",
+    feature = "io-wkb"
+))]
 pub(crate) fn io_err(msg: impl std::fmt::Display) -> MakeValidError {
     MakeValidError::IoError(msg.to_string())
 }
