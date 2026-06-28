@@ -1,13 +1,42 @@
-use std::fs::File;
-use std::io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::Path;
-use std::str::FromStr;
 
-use geo::Geometry;
-use wkt::{ToWkt, Wkt};
-
-use crate::core::{io_err, MakeValidConfig, MakeValidError};
+use crate::core::{MakeValidConfig, MakeValidError};
 use crate::feature::Feature;
+
+#[cfg(any(
+    feature = "io-geojson",
+    feature = "io-wkt",
+    feature = "io-csv",
+    feature = "load-shp"
+))]
+use crate::core::io_err;
+#[cfg(any(
+    feature = "io-geojson",
+    feature = "io-wkt",
+    feature = "io-csv",
+    feature = "load-shp"
+))]
+use geo::Geometry;
+#[cfg(any(
+    feature = "io-geojson",
+    feature = "io-wkt",
+    feature = "io-csv",
+    feature = "load-shp"
+))]
+use std::fs::File;
+#[cfg(any(
+    feature = "io-geojson",
+    feature = "io-wkt",
+    feature = "io-csv",
+    feature = "load-shp"
+))]
+use std::io::{BufRead, BufReader, BufWriter, Write};
+#[cfg(feature = "io-geojson")]
+use std::io::{Read, Seek, SeekFrom};
+#[cfg(any(feature = "io-wkt", feature = "io-csv"))]
+use std::str::FromStr;
+#[cfg(any(feature = "io-wkt", feature = "io-csv"))]
+use wkt::{ToWkt, Wkt};
 
 // ---------------------------------------------------------------------------
 // Traits
@@ -36,10 +65,12 @@ pub trait FeatureWriter {
 // WKT backend — one line per geometry
 // ---------------------------------------------------------------------------
 
+#[cfg(any(feature = "io-wkt", feature = "io-csv"))]
 pub struct WktReader {
     lines: std::io::Lines<BufReader<File>>,
 }
 
+#[cfg(any(feature = "io-wkt", feature = "io-csv"))]
 impl WktReader {
     pub fn open(path: &str) -> Result<Self, MakeValidError> {
         let file = File::open(path).map_err(|e| io_err(e.to_string()))?;
@@ -50,6 +81,7 @@ impl WktReader {
     }
 }
 
+#[cfg(any(feature = "io-wkt", feature = "io-csv"))]
 impl FeatureReader for WktReader {
     fn next(&mut self) -> Option<Result<Feature, MakeValidError>> {
         let line = self.lines.next()?;
@@ -78,10 +110,12 @@ impl FeatureReader for WktReader {
     }
 }
 
+#[cfg(feature = "io-wkt")]
 pub struct WktWriter {
     writer: BufWriter<File>,
 }
 
+#[cfg(feature = "io-wkt")]
 impl WktWriter {
     pub fn open(path: &str) -> Result<Self, MakeValidError> {
         let file = File::create(path).map_err(|e| io_err(e.to_string()))?;
@@ -91,6 +125,7 @@ impl WktWriter {
     }
 }
 
+#[cfg(feature = "io-wkt")]
 impl FeatureWriter for WktWriter {
     fn write(&mut self, feature: Feature) -> Result<(), MakeValidError> {
         let wkt = feature.geometry.to_wkt();
@@ -108,11 +143,13 @@ impl FeatureWriter for WktWriter {
 // CSV backend — WKT column
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "io-csv")]
 pub struct CsvReader {
     lines: std::io::Lines<BufReader<File>>,
     header_skipped: bool,
 }
 
+#[cfg(feature = "io-csv")]
 impl CsvReader {
     pub fn open(path: &str) -> Result<Self, MakeValidError> {
         let file = File::open(path).map_err(|e| io_err(e.to_string()))?;
@@ -124,6 +161,7 @@ impl CsvReader {
     }
 }
 
+#[cfg(feature = "io-csv")]
 impl FeatureReader for CsvReader {
     fn next(&mut self) -> Option<Result<Feature, MakeValidError>> {
         if !self.header_skipped {
@@ -167,10 +205,12 @@ impl FeatureReader for CsvReader {
     }
 }
 
+#[cfg(feature = "io-csv")]
 pub struct CsvWriter {
     writer: BufWriter<File>,
 }
 
+#[cfg(feature = "io-csv")]
 impl CsvWriter {
     pub fn open(path: &str) -> Result<Self, MakeValidError> {
         let file = File::create(path).map_err(|e| io_err(e.to_string()))?;
@@ -180,6 +220,7 @@ impl CsvWriter {
     }
 }
 
+#[cfg(feature = "io-csv")]
 impl FeatureWriter for CsvWriter {
     fn write(&mut self, feature: Feature) -> Result<(), MakeValidError> {
         let wkt = feature.geometry.to_wkt();
@@ -404,7 +445,9 @@ pub fn open_reader(path: &str) -> Result<Box<dyn FeatureReader>, MakeValidError>
         .unwrap_or_default();
 
     match ext.as_str() {
+        #[cfg(any(feature = "io-wkt", feature = "io-csv"))]
         "wkt" => Ok(Box::new(WktReader::open(path)?)),
+        #[cfg(feature = "io-csv")]
         "csv" => Ok(Box::new(CsvReader::open(path)?)),
         #[cfg(feature = "io-geojson")]
         "geojson" | "json" => Ok(Box::new(GeoJsonReader::open(path)?)),
@@ -428,7 +471,9 @@ pub fn open_writer(path: &str) -> Result<Box<dyn FeatureWriter>, MakeValidError>
         .unwrap_or_default();
 
     match ext.as_str() {
+        #[cfg(feature = "io-wkt")]
         "wkt" => Ok(Box::new(WktWriter::open(path)?)),
+        #[cfg(feature = "io-csv")]
         "csv" => Ok(Box::new(CsvWriter::open(path)?)),
         #[cfg(feature = "io-geojson")]
         "geojson" | "json" => Ok(Box::new(GeoJsonWriter::open(path)?)),
