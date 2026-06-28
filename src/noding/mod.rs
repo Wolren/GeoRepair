@@ -5,6 +5,8 @@
 //! 2. Noding self-intersections by splitting crossing edges
 
 pub(crate) mod intersection;
+pub(crate) mod snap_round;
+pub(crate) mod validator;
 
 pub(crate) use self::intersection::NodingFloat;
 
