@@ -1042,3 +1042,218 @@ fn test_validate_or_fix_line_invalid() {
     // Just verify it doesn't panic
     let _ = result;
 }
+
+#[test]
+fn test_validate_and_fix_multipoint() {
+    use geo_repair::ValidateAndFix;
+    let mp = MultiPoint::new(vec![
+        Point::new(1.0, 2.0),
+        Point::new(f64::NAN, f64::NAN),
+        Point::new(3.0, 4.0),
+    ]);
+    let (result, geom) = mp.validate_and_fix();
+    assert!(!result.valid, "multipoint with NaN should be invalid");
+    assert_geometry_valid(&geom);
+    assert_not_empty(&geom);
+}
+
+#[test]
+fn test_validate_and_fix_multilinestring() {
+    use geo_repair::ValidateAndFix;
+    let mls = MultiLineString::new(vec![
+        LineString::new(vec![Coord { x: 0.0, y: 0.0 }, Coord { x: 1.0, y: 1.0 }]),
+        LineString::new(vec![Coord { x: 0.0, y: 1.0 }, Coord { x: 1.0, y: 0.0 }]),
+    ]);
+    let (result, geom) = mls.validate_and_fix();
+    assert!(!result.valid, "crossing lines should be invalid");
+    let _ = geom; // may or may not be valid after repair
+}
+
+#[test]
+fn test_validate_and_fix_geometrycollection_mixed() {
+    use geo_repair::ValidateAndFix;
+    let gc = GeometryCollection(vec![
+        Geometry::Point(Point::new(1.0, 2.0)),
+        Geometry::LineString(LineString::new(vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 10.0, y: 10.0 },
+        ])),
+    ]);
+    let (result, geom) = gc.validate_and_fix();
+    assert!(result.valid, "valid GC should be reported as valid");
+    assert_geometry_valid(&geom);
+}
+
+#[test]
+fn test_validate_or_fix_multipolygon() {
+    use geo_repair::ValidateAndFix;
+    let mp = MultiPolygon::new(vec![Polygon::new(
+        LineString::new(vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 1.0, y: 0.0 },
+            Coord { x: 1.0, y: 1.0 },
+            Coord { x: 0.0, y: 0.0 },
+        ]),
+        Vec::new(),
+    )]);
+    let result = mp.validate_or_fix();
+    assert!(result.is_ok(), "valid multipolygon should return Ok");
+    assert_geometry_valid(&result.unwrap());
+}
+
+#[test]
+fn test_validate_or_fix_multilinestring_valid() {
+    use geo_repair::ValidateAndFix;
+    let mls = MultiLineString::new(vec![LineString::new(vec![
+        Coord { x: 0.0, y: 0.0 },
+        Coord { x: 1.0, y: 1.0 },
+    ])]);
+    let result = mls.validate_or_fix();
+    assert!(result.is_ok(), "valid multilinestring should return Ok");
+}
+
+#[test]
+fn test_validate_or_fix_geometrycollection_valid() {
+    use geo_repair::ValidateAndFix;
+    let gc = GeometryCollection(vec![
+        Geometry::Point(Point::new(0.0, 0.0)),
+        Geometry::Line(Line::new(
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 1.0, y: 1.0 },
+        )),
+    ]);
+    let result = gc.validate_or_fix();
+    assert!(result.is_ok(), "valid GC should return Ok");
+}
+
+#[test]
+fn test_zm_roundtrip_stress() {
+    // Z/M roundtrip with extreme coordinate values
+    let coords = vec![
+        Coord { x: 1e14, y: 1e14 },
+        Coord {
+            x: 1e14 + 1.0,
+            y: 1e14,
+        },
+        Coord {
+            x: 1e14 + 1.0,
+            y: 1e14 + 1.0,
+        },
+        Coord { x: 1e14, y: 1e14 },
+    ];
+    let poly = Polygon::new(LineString::new(coords), Vec::new());
+    let count = geo_repair::zm::count_coords(&Geometry::Polygon(poly.clone()));
+    let zm: Vec<_> = (0..count)
+        .map(|i| geo_repair::zm::ZmValue::new(Some(i as f64 * 100.0), Some(i as f64 * 200.0)))
+        .collect();
+    let feature = geo_repair::Feature::with_all(Geometry::Polygon(poly), None, None, zm);
+    for method in &[PolyMethod::Auto, PolyMethod::Structure, PolyMethod::Arrange] {
+        let cfg = MakeValidConfig {
+            poly_method: method.clone(),
+            ..Default::default()
+        };
+        let repaired = feature.geometry.make_valid_with_config(&cfg);
+        let expected = geo_repair::zm::count_coords(&repaired);
+        let _with_zm = feature.with_repaired_geometry(repaired);
+        assert_eq!(
+            _with_zm.zm.len(),
+            expected,
+            "Z/M count mismatch for {:?}",
+            method
+        );
+    }
+}
+
+#[test]
+fn test_large_coord_polygon_with_hole() {
+    // Large magnitude coords with a hole — tests CDT range guard
+    let shell = LineString::new(vec![
+        Coord { x: 1e10, y: 1e10 },
+        Coord {
+            x: 1e10 + 1000.0,
+            y: 1e10,
+        },
+        Coord {
+            x: 1e10 + 1000.0,
+            y: 1e10 + 1000.0,
+        },
+        Coord {
+            x: 1e10,
+            y: 1e10 + 1000.0,
+        },
+        Coord { x: 1e10, y: 1e10 },
+    ]);
+    let hole = LineString::new(vec![
+        Coord {
+            x: 1e10 + 200.0,
+            y: 1e10 + 200.0,
+        },
+        Coord {
+            x: 1e10 + 400.0,
+            y: 1e10 + 200.0,
+        },
+        Coord {
+            x: 1e10 + 400.0,
+            y: 1e10 + 400.0,
+        },
+        Coord {
+            x: 1e10 + 200.0,
+            y: 1e10 + 400.0,
+        },
+        Coord {
+            x: 1e10 + 200.0,
+            y: 1e10 + 200.0,
+        },
+    ]);
+    let poly = Polygon::new(shell, vec![hole]);
+    for method in &[PolyMethod::Auto, PolyMethod::Structure, PolyMethod::Arrange] {
+        let cfg = MakeValidConfig {
+            poly_method: method.clone(),
+            ..Default::default()
+        };
+        let result = poly.make_valid_with_config(&cfg);
+        assert_geometry_valid(&result);
+        assert_not_empty(&result);
+    }
+}
+
+#[test]
+fn test_validate_and_fix_always_multiply_types() {
+    use geo_repair::ValidateAndFix;
+    // Point
+    let pt = Point::new(1.0, 2.0);
+    let (_, geom) = pt.validate_and_fix_always();
+    assert_geometry_valid(&geom);
+
+    // Rect
+    let rect = Rect::new(Point::new(0.0, 0.0), Point::new(10.0, 10.0));
+    let (_, geom) = rect.validate_and_fix_always();
+    assert_geometry_valid(&geom);
+
+    // Triangle
+    let tri = Triangle::new(
+        Coord { x: 0.0, y: 0.0 },
+        Coord { x: 5.0, y: 10.0 },
+        Coord { x: 10.0, y: 0.0 },
+    );
+    let (_, geom) = tri.validate_and_fix_always();
+    assert_geometry_valid(&geom);
+
+    // MultiPoint (valid)
+    let mp = MultiPoint::new(vec![Point::new(0.0, 0.0), Point::new(1.0, 1.0)]);
+    let (_, geom) = mp.validate_and_fix_always();
+    assert_geometry_valid(&geom);
+
+    // MultiLineString (with crossing components — may or may not be fixable)
+    let mls = MultiLineString::new(vec![
+        LineString::new(vec![Coord { x: 0.0, y: 0.0 }, Coord { x: 2.0, y: 2.0 }]),
+        LineString::new(vec![Coord { x: 0.0, y: 2.0 }, Coord { x: 2.0, y: 0.0 }]),
+    ]);
+    let (_, geom) = mls.validate_and_fix_always();
+    let _ = geom;
+
+    // GeometryCollection
+    let gc = GeometryCollection(vec![Geometry::Point(Point::new(0.0, 0.0))]);
+    let (_, geom) = gc.validate_and_fix_always();
+    assert_geometry_valid(&geom);
+}

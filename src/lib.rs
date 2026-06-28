@@ -1,6 +1,7 @@
 #![cfg_attr(feature = "simd-portable", feature(portable_simd))]
 pub mod core;
 pub mod crs;
+pub mod dd;
 pub mod feature;
 pub mod io;
 pub mod make_valid;
@@ -13,6 +14,7 @@ pub mod zm;
 #[cfg(feature = "arrange")]
 pub mod arrange;
 pub mod noding;
+pub mod reduce;
 #[cfg(feature = "structure")]
 pub mod structure;
 

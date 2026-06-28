@@ -65,6 +65,23 @@ fn polygon_points(
     })
 }
 
+fn geometry_with_zm() -> impl Strategy<Value = (geo::Geometry<f64>, Vec<geo_repair::zm::ZmValue>)> {
+    let coord_strat = proptest::collection::vec(coord_range(-100.0..=100.0), 3..=8);
+    let zm_single = (
+        proptest::option::of(proptest::num::f64::NORMAL),
+        proptest::option::of(proptest::num::f64::NORMAL),
+    )
+        .prop_map(|(z, m)| geo_repair::zm::ZmValue::new(z, m));
+    let zm_strat = proptest::collection::vec(zm_single, 3..=9);
+    (coord_strat, zm_strat).prop_map(|(mut coords, zm)| {
+        if coords.first() != coords.last() {
+            coords.push(coords[0]);
+        }
+        let poly = geo::Polygon::new(geo::LineString::new(coords), Vec::new());
+        (geo::Geometry::Polygon(poly), zm)
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Invariant: make_valid always returns valid geometry
 // ---------------------------------------------------------------------------
@@ -397,12 +414,196 @@ proptest! {
         assert_valid(&result);
         assert_not_empty(&result);
     }
+
+    // -----------------------------------------------------------------------
+    // Property: Z/M preservation through repair for polygon and linestring
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn invariant_zm_preserved_through_repair(
+        (geom, zm) in geometry_with_zm(),
+    ) {
+        let feature = geo_repair::Feature::with_all(geom, None, None, zm);
+        use geo_repair::GeoValidation;
+        let validated = feature.geometry.validate();
+        let repaired = feature.with_repaired_geometry(
+            feature.geometry.make_valid_with_config(&cfg_auto())
+        );
+        let expected_count = geo_repair::zm::count_coords(&repaired.geometry);
+        prop_assert_eq!(repaired.zm.len(), expected_count,
+            "Z/M count {} must match repaired coord count {}", repaired.zm.len(), expected_count);
+        if validated.valid && repaired.zm.len() == feature.zm.len() {
+            for (i, zm) in repaired.zm.iter().enumerate() {
+                prop_assert_eq!(zm, &feature.zm[i],
+                    "Z/M at index {} should be preserved for valid geometry", i);
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Property: validate_or_fix always returns Ok with valid geometry
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn invariant_validate_or_fix_valid(
+        coords in proptest::collection::vec(coord_range(-100.0..=100.0), 3..=8),
+        kind in 0u8..4u8,
+    ) {
+        use geo_repair::ValidateAndFix;
+        let g: geo::Geometry<f64> = match kind {
+            0 => {
+                if coords.is_empty() { return Ok(()); }
+                geo::Geometry::Point(geo::Point::new(coords[0].x, coords[0].y))
+            }
+            1 => {
+                let mut ring = coords;
+                if ring.first() != ring.last() { ring.push(ring[0]); }
+                geo::Geometry::Polygon(geo::Polygon::new(geo::LineString::new(ring), Vec::new()))
+            }
+            2 => geo::Geometry::LineString(geo::LineString::new(coords)),
+            _ => geo::Geometry::MultiPoint(geo::MultiPoint::new(
+                coords.iter().map(|c| geo::Point::new(c.x, c.y)).collect()
+            )),
+        };
+        let result = g.validate_or_fix();
+        match result {
+            Ok(fixed) => {
+                prop_assert!(fixed.check_validation().is_ok(),
+                    "validate_or_fix returned Ok but geometry is invalid");
+            }
+            Err((_errors, fixed)) => {
+                prop_assert!(fixed.check_validation().is_ok(),
+                    "validate_or_fix returned Err but fixed geometry is invalid");
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Property: Feature validation with random Z/M
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn invariant_feature_validate_zm_consistency(
+        coords in proptest::collection::vec(coord_range(-10.0..=10.0), 3..=6),
+        zm_enabled in proptest::bool::ANY,
+    ) {
+        let mut ring = coords;
+        if ring.first() != ring.last() { ring.push(ring[0]); }
+        let poly = geo::Polygon::new(geo::LineString::new(ring), Vec::new());
+        let geom = geo::Geometry::Polygon(poly);
+        let count = geo_repair::zm::count_coords(&geom);
+        let zm: Vec<geo_repair::zm::ZmValue> = if zm_enabled {
+            (0..count).map(|i| geo_repair::zm::ZmValue::new(Some(i as f64), Some(i as f64 * 2.0))).collect()
+        } else {
+            vec![geo_repair::zm::ZmValue::NONE; count]
+        };
+        let feature = geo_repair::Feature::with_all(geom.clone(), None, None, zm);
+        use geo_repair::GeoValidation;
+        let result = feature.geometry.validate();
+        if zm_enabled {
+            if result.valid {
+                prop_assert!(geom.validate().valid,
+                    "Feature valid but geometry OGC check failed: {:?}", geom.validate());
+            }
+        } else {
+            prop_assert_eq!(result.valid, geom.validate().valid,
+                "Feature validate without Z/M should match OGC validation");
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Property: Repairing a valid geometry should produce valid output
+    // (stronger: for simple coords, all methods should work)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn invariant_all_methods_valid_on_small(
+        coords in proptest::collection::vec(coord_range(-10.0..=10.0), 3..=6),
+    ) {
+        let mut ring = coords;
+        if ring.first() != ring.last() { ring.push(ring[0]); }
+        let poly = geo::Polygon::new(geo::LineString::new(ring), Vec::new());
+        for method in &[geo_repair::PolyMethod::Auto, geo_repair::PolyMethod::Structure, geo_repair::PolyMethod::Arrange] {
+            let cfg = geo_repair::MakeValidConfig {
+                poly_method: method.clone(),
+                ..Default::default()
+            };
+            let result = poly.make_valid_with_config(&cfg);
+            prop_assert!(result.check_validation().is_ok(),
+                "PolyMethod {:?} produced invalid output", method);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Property: GC with known-good sub-geometries should be valid
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn invariant_gc_disjoint_valid(
+        coords_a in proptest::collection::vec(coord_range(-100.0..=100.0), 3..=6),
+        coords_b in proptest::collection::vec(coord_range(-100.0..=100.0), 3..=6),
+        offset_x in 200.0f64..500.0f64,
+        offset_y in 200.0f64..500.0f64,
+    ) {
+        let mk_ring = |mut c: Vec<Coord<f64>>| -> geo::LineString<f64> {
+            if c.first() != c.last() { c.push(c[0]); }
+            geo::LineString::new(c)
+        };
+        let p1 = geo::Polygon::new(mk_ring(coords_a), Vec::new());
+        let p2 = geo::Polygon::new(mk_ring(
+            coords_b.into_iter().map(|c| Coord { x: c.x + offset_x, y: c.y + offset_y }).collect()
+        ), Vec::new());
+        let gc = geo::GeometryCollection(vec![
+            geo::Geometry::Polygon(p1),
+            geo::Geometry::Polygon(p2),
+        ]);
+        if gc.check_validation().is_ok() {
+            // If the GC is valid, make_valid must not change it structurally
+            let result = gc.make_valid_with_config(&cfg_auto());
+            prop_assert!(result.check_validation().is_ok(),
+                "valid GC became invalid after repair");
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Property: validate_and_fix_always always returns valid output
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn invariant_validate_and_fix_always_valid(
+        coords in proptest::collection::vec(coord_range(-100.0..=100.0), 3..=8),
+    ) {
+        use geo_repair::ValidateAndFix;
+        let mut ring = coords;
+        if ring.first() != ring.last() { ring.push(ring[0]); }
+        let poly = geo::Polygon::new(geo::LineString::new(ring), Vec::new());
+        let (_result, fixed) = poly.validate_and_fix_always();
+        prop_assert!(fixed.check_validation().is_ok(),
+            "validate_and_fix_always produced invalid output");
+    }
+
+    // -----------------------------------------------------------------------
+    // Property: extreme coordinate values don't cause panics
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn invariant_no_panic_extreme_coords(
+        coords in proptest::collection::vec(coord_range(-1e15..=1e15), 3..=8),
+    ) {
+        let mut ring = coords;
+        if ring.first() != ring.last() { ring.push(ring[0]); }
+        let poly = geo::Polygon::new(geo::LineString::new(ring), Vec::new());
+        let result = poly.make_valid_with_config(&cfg_auto());
+        // Should not panic; result may or may not be valid
+        let _ = result;
+    }
 }
+
 #[cfg(test)]
 mod diag_all_methods_fail {
     use geo::validation::Validation;
     use geo::{Coord, LineString, Polygon};
-    use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
+    use geo_repair::{Feature, MakeValid, MakeValidConfig, PolyMethod, ValidateAndFix};
 
     #[test]
     fn diagnose_all_methods_fail() {

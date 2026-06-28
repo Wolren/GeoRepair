@@ -34,11 +34,97 @@ use geo_repair::orient::orient2d;
 use geo_repair::parallel::par_fix_polygon_batch;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 #[cfg(feature = "bench-geos")]
-use geos::Geom;
+use geos::Geometry as GeosGeometry;
+#[cfg(feature = "bench-geos")]
+use geos::{CoordSeq, CoordType, Geom};
+#[cfg(feature = "bench-geos")]
+fn poly_to_geos(poly: &Polygon<f64>) -> Option<GeosGeometry> {
+    fn coords_to_ring(coords: &[Coord<f64>]) -> Option<GeosGeometry> {
+        let n = coords.len();
+        if n < 3 {
+            return None;
+        }
+        let mut cs = CoordSeq::new(n as u32, CoordType::XY).ok()?;
+        for (i, c) in coords.iter().enumerate() {
+            cs.set_x(i, c.x).ok()?;
+            cs.set_y(i, c.y).ok()?;
+        }
+        GeosGeometry::create_linear_ring(cs).ok()
+    }
+    let ring = coords_to_ring(&poly.exterior().0)?;
+    let holes: Vec<GeosGeometry> = poly
+        .interiors()
+        .iter()
+        .filter_map(|h| coords_to_ring(&h.0))
+        .collect();
+    GeosGeometry::create_polygon(ring, holes).ok()
+}
+#[cfg(feature = "bench-geos")]
+fn geo_polys_to_geos_batch<'a>(
+    polys: impl Iterator<Item = &'a Polygon<f64>>,
+) -> Vec<Option<GeosGeometry>> {
+    polys.map(|p| poly_to_geos(p)).collect()
+}
+#[cfg(feature = "bench-geos")]
+fn geom_to_geos(geom: &Geometry<f64>) -> Option<GeosGeometry> {
+    use geo::Geometry::*;
+    match geom {
+        Point(p) => {
+            let mut cs = CoordSeq::new(1, CoordType::XY).ok()?;
+            cs.set_x(0, p.0.x).ok()?;
+            cs.set_y(0, p.0.y).ok()?;
+            GeosGeometry::create_point(cs).ok()
+        }
+        LineString(ls) => {
+            let n = ls.0.len();
+            let mut cs = CoordSeq::new(n as u32, CoordType::XY).ok()?;
+            for (i, c) in ls.0.iter().enumerate() {
+                cs.set_x(i, c.x).ok()?;
+                cs.set_y(i, c.y).ok()?;
+            }
+            GeosGeometry::create_line_string(cs).ok()
+        }
+        Polygon(p) => poly_to_geos(p),
+        MultiPoint(mp) => {
+            let geoms: Vec<GeosGeometry> =
+                mp.0.iter()
+                    .filter_map(|p| geom_to_geos(&Point(*p)))
+                    .collect();
+            if geoms.is_empty() {
+                return None;
+            }
+            GeosGeometry::create_multipoint(geoms).ok()
+        }
+        MultiLineString(mls) => {
+            let geoms: Vec<GeosGeometry> = mls
+                .0
+                .iter()
+                .filter_map(|ls| geom_to_geos(&LineString(ls.clone())))
+                .collect();
+            if geoms.is_empty() {
+                return None;
+            }
+            GeosGeometry::create_multiline_string(geoms).ok()
+        }
+        MultiPolygon(mp) => {
+            let geoms: Vec<GeosGeometry> = mp.0.iter().filter_map(|p| poly_to_geos(p)).collect();
+            if geoms.is_empty() {
+                return None;
+            }
+            GeosGeometry::create_multipolygon(geoms).ok()
+        }
+        GeometryCollection(gc) => {
+            let geoms: Vec<GeosGeometry> = gc.0.iter().filter_map(|g| geom_to_geos(g)).collect();
+            if geoms.is_empty() {
+                return None;
+            }
+            GeosGeometry::create_geometry_collection(geoms).ok()
+        }
+        _ => None,
+    }
+}
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
-#[cfg(feature = "bench-geos")]
-use wkt::ToWkt;
 
 fn poly_n_vert(poly: &Polygon<f64>) -> usize {
     let mut n = poly.exterior().0.len();
@@ -259,13 +345,12 @@ fn main() {
                 #[cfg(feature = "bench-geos")]
                 {
                     let t0 = Instant::now();
-                    let wkt = poly.wkt_string();
-                    match geos::Geometry::new_from_wkt(&wkt) {
-                        Ok(geom) => {
+                    match poly_to_geos(poly) {
+                        Some(geom) => {
                             let _ = geom.make_valid();
                             eprintln!("  GEOS:             {:.6}s", t0.elapsed().as_secs_f64());
                         }
-                        Err(e) => eprintln!("  GEOS err:         {e}"),
+                        None => eprintln!("  GEOS err:         conversion failed"),
                     }
                 }
             } else {
@@ -320,33 +405,28 @@ fn main() {
         .collect();
     let stru_total = t0.elapsed().as_secs_f64();
 
-    // Pre-compute WKT once for all results and input polys
-    #[allow(unused_mut)]
-    let mut result_wkts: Vec<String> = Vec::new();
-    #[cfg(feature = "bench-geos")]
-    {
-        result_wkts = results.iter().map(|g| g.wkt_string()).collect();
-    }
-    #[allow(unused_mut)]
-    let mut input_wkts: Vec<String> = Vec::new();
-    #[cfg(feature = "bench-geos")]
-    {
-        input_wkts = invalid_polys.iter().map(|p| p.wkt_string()).collect();
-    }
-
     // Validate all Structure outputs through GEOS is_valid()
     #[allow(unused_mut)]
     let mut stru_invalid_outputs = 0usize;
     #[cfg(feature = "bench-geos")]
     {
-        for wkt in &result_wkts {
-            match geos::Geometry::new_from_wkt(wkt) {
-                Ok(gg) => {
+        for g in &results {
+            match geom_to_geos(g) {
+                Some(gg) => {
                     if !gg.is_valid().unwrap_or(false) {
                         stru_invalid_outputs += 1;
                     }
                 }
-                Err(_) => stru_invalid_outputs += 1,
+                None => stru_invalid_outputs += 1,
+            }
+        }
+    }
+    #[cfg(not(feature = "bench-geos"))]
+    {
+        use geo_repair::GeoValidation;
+        for g in &results {
+            if !g.is_valid() {
+                stru_invalid_outputs += 1;
             }
         }
     }
@@ -355,11 +435,16 @@ fn main() {
     let geos_total: f64;
     #[cfg(feature = "bench-geos")]
     {
-        let mut geos_geoms: Vec<Option<geos::Geometry>> = Vec::with_capacity(sample_n);
-        for wkt in &input_wkts {
-            geos_geoms.push(geos::Geometry::new_from_wkt(wkt).ok());
-        }
+        let geos_geoms: Vec<Option<GeosGeometry>> =
+            geo_polys_to_geos_batch(invalid_polys.iter().copied());
         let t0 = Instant::now();
+        #[cfg(feature = "parallel")]
+        geos_geoms.par_iter().for_each(|g| {
+            if let Some(g) = g {
+                let _ = g.make_valid();
+            }
+        });
+        #[cfg(not(feature = "parallel"))]
         for g in &geos_geoms {
             if let Some(g) = g {
                 let _ = g.make_valid();
@@ -398,15 +483,18 @@ fn main() {
     {
         eprint!("  Pre-building {} GEOS geometries...", full_n);
         let t0 = Instant::now();
-        let all_wkts: Vec<String> = polys.iter().map(|p| p.wkt_string()).collect();
-        let mut geos_geoms: Vec<Option<geos::Geometry>> = Vec::with_capacity(full_n);
-        for wkt in &all_wkts {
-            geos_geoms.push(geos::Geometry::new_from_wkt(wkt).ok());
-        }
+        let geos_geoms: Vec<Option<GeosGeometry>> = geo_polys_to_geos_batch(polys.iter());
         geos_setup = t0.elapsed().as_secs_f64();
         eprintln!(" {:.3}s", geos_setup);
 
         let t0 = Instant::now();
+        #[cfg(feature = "parallel")]
+        geos_geoms.par_iter().for_each(|g| {
+            if let Some(g) = g {
+                let _ = g.make_valid();
+            }
+        });
+        #[cfg(not(feature = "parallel"))]
         for g in &geos_geoms {
             if let Some(g) = g {
                 let _ = g.make_valid();
