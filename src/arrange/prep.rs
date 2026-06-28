@@ -343,7 +343,8 @@ pub(crate) fn has_no_intersections(lines: &[Line<f64>]) -> bool {
     if _do_parallel {
         use rayon::prelude::*;
         use std::ops::ControlFlow;
-        let found = std::sync::atomic::AtomicBool::new(false);
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let found = AtomicBool::new(false);
         (0..nc).into_par_iter().for_each(|i| {
             if found.load(Ordering::Acquire) {
                 return;
@@ -430,7 +431,7 @@ fn has_no_intersections_grid(chains: &[MonoChain], lines: &[Line<f64>]) -> Optio
                 let cell = &mut cell_chains[cy as usize * nx + cx as usize];
                 cell.push(i);
                 if cell.len() > 64 {
-                    return None; // too dense → fall back to R-tree
+                    return None; // too dense -> fall back to R-tree
                 }
             }
         }
@@ -528,7 +529,7 @@ fn segment_intersection(
     // Collinear or touching cases
     let collinear = o1.abs() < eps && o2.abs() < eps;
     if !collinear {
-        // Endpoint touching — check if any endpoint lies on the other segment
+        // Endpoint touching -- check if any endpoint lies on the other segment
         if o1.abs() < eps && on_segment(a, b, c, eps) {
             return Some(vec![c]);
         }
@@ -1090,6 +1091,7 @@ mod tests {
     #[test]
     fn diagnose_many_holes() {
         use geo::LinesIter;
+        use std::time::Instant;
 
         let mut wkt = String::from("POLYGON ((0 0, 100 0, 100 100, 0 100, 0 0)");
         for i in 0..10 {
