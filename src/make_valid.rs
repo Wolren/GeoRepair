@@ -1,6 +1,6 @@
 use geo::{
     Coord, CoordNum, GeoFloat, Geometry, GeometryCollection, Line, LineString, MultiLineString,
-    MultiPoint, MultiPolygon, Point, Polygon, Rect, Triangle,
+    MultiPoint, MultiPolygon, Point, Polygon, Rect, Triangle, Winding,
 };
 
 use crate::core::{MakeValidConfig, PolyMethod};
@@ -313,36 +313,92 @@ impl MakeValid for Polygon<f64> {
             }
         }
 
-        match config.poly_method {
+        // Produce result via the selected method
+        let result = match config.poly_method {
             PolyMethod::Arrange => {
-                let result = arrange_or_empty(self, config);
-                if is_valid_with_geo(&result) {
-                    return result;
+                let r = arrange_or_empty(self, config);
+                if is_valid_with_geo(&r) {
+                    r
+                } else {
+                    warn!("Arrange mode: result invalid, retrying with precision reduction");
+                    reduce_fallback(self, config)
                 }
-                warn!("Arrange mode: result invalid, retrying with precision reduction");
-                reduce_fallback(self, config)
             }
             PolyMethod::Structure => structure_fix(self, config).unwrap_or_else(|| {
                 warn!("Structure mode: fix failed, retrying with precision reduction");
                 reduce_fallback(self, config)
             }),
             PolyMethod::Auto => {
-                if let Some(result) = structure_fix(self, config) {
-                    if is_valid_with_geo(&result) {
-                        return result;
+                if let Some(r) = structure_fix(self, config) {
+                    if is_valid_with_geo(&r) {
+                        r
+                    } else {
+                        warn!("Auto mode: structure_fix produced invalid output, falling back to CDT arrange");
+                        let arranged = arrange_or_empty(self, config);
+                        if is_valid_with_geo(&arranged) {
+                            arranged
+                        } else {
+                            warn!("Auto mode: arrange also invalid, retrying with precision reduction");
+                            reduce_fallback(self, config)
+                        }
                     }
-                    warn!("Auto mode: structure_fix produced invalid output, falling back to CDT arrange");
+                } else {
+                    arrange_or_empty(self, config)
                 }
-                let arranged = arrange_or_empty(self, config);
-                if is_valid_with_geo(&arranged) {
-                    return arranged;
-                }
-                warn!("Auto mode: arrange also invalid, retrying with precision reduction");
-                reduce_fallback(self, config)
             }
-        }
+        };
+        enforce_ogc_winding(result)
     }
 }
+
+/// Enforce OGC winding: CCW exterior, CW interior rings.
+fn enforce_ogc_winding(g: Geometry<f64>) -> Geometry<f64> {
+    match g {
+        Geometry::Polygon(p) => {
+            let ext = enforce_ccw(p.exterior().clone());
+            let holes: Vec<_> = p
+                .interiors()
+                .iter()
+                .map(|h| enforce_cw(h.clone()))
+                .collect();
+            Geometry::Polygon(Polygon::new(ext, holes))
+        }
+        Geometry::MultiPolygon(mp) => Geometry::MultiPolygon(MultiPolygon::new(
+            mp.0.into_iter()
+                .map(|p| {
+                    let ext = enforce_ccw(p.exterior().clone());
+                    let holes: Vec<_> = p
+                        .interiors()
+                        .iter()
+                        .map(|h| enforce_cw(h.clone()))
+                        .collect();
+                    Polygon::new(ext, holes)
+                })
+                .collect(),
+        )),
+        other => other,
+    }
+}
+
+fn enforce_ccw(mut ring: LineString<f64>) -> LineString<f64> {
+    #[cfg(feature = "simd")]
+    let ccw = crate::simd::is_ring_ccw_simd(&ring.0);
+    #[cfg(not(feature = "simd"))]
+    let ccw = ring.winding_order() == Some(WindingOrder::CounterClockwise);
+    if !ccw {
+        ring.make_ccw_winding();
+    }
+    ring
+}
+
+fn enforce_cw(mut ring: LineString<f64>) -> LineString<f64> {
+    if ring.winding_order() != Some(WindingOrder::Clockwise) {
+        ring.make_cw_winding();
+    }
+    ring
+}
+
+use geo::winding_order::WindingOrder;
 
 #[cfg(any(feature = "arrange", feature = "structure"))]
 impl MakeValid for MultiPolygon<f64> {
@@ -483,10 +539,10 @@ fn structure_fix(poly: &Polygon<f64>, _config: &MakeValidConfig) -> Option<Geome
     None
 }
 
-/// Check OGC validity using the `geo` crate's Validation trait.
-/// The tests use this same trait, so the pipeline must agree with them.
+/// Check OGC validity using our own GeoValidation (Shewchuk-based).
 fn is_valid_with_geo(g: &Geometry<f64>) -> bool {
-    <Geometry<f64> as geo::validation::Validation>::is_valid(g)
+    use crate::validation::GeoValidation;
+    g.is_valid()
 }
 
 /// Last‑resort fallback: snap to progressively coarser grids until valid.

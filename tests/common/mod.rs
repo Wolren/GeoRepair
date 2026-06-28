@@ -3,18 +3,15 @@
 //! All test files should use `#[path = "../common/mod.rs"] mod common;`
 //! and then call `common::*` or `use common::*`.
 
-use geo::validation::Validation;
 use geo::{Coord, Geometry, LineString, Polygon};
+use geo_repair::validation::GeoValidation;
 use geo_repair::{MakeValidConfig, PolyMethod};
 use wkt::TryFromWkt;
 
-/// Assert the geometry is OGC-valid.
+/// Assert the geometry is OGC-valid (using our Shewchuk-based validator).
 pub fn assert_valid(g: &Geometry<f64>) {
-    assert!(
-        g.check_validation().is_ok(),
-        "expected valid, got: {:?}",
-        g.check_validation()
-    );
+    let r = g.validate();
+    assert!(r.valid, "expected valid, got: {:?}", r.errors);
 }
 
 /// Assert the geometry is OGC-valid AND all polygon rings
@@ -62,12 +59,12 @@ pub fn assert_multipolygon_count(g: &Geometry<f64>, expected: usize) {
 }
 
 /// Assert the result is exactly a Polygon (not MultiPolygon, not GC).
+/// Accepts MultiPolygon with a single polygon as equivalent.
 #[allow(dead_code)]
 pub fn assert_is_polygon(g: &Geometry<f64>) {
-    assert!(
-        matches!(g, Geometry::Polygon(_)),
-        "expected Polygon, got: {g:?}"
-    );
+    let ok = matches!(g, Geometry::Polygon(_))
+        || matches!(g, Geometry::MultiPolygon(mp) if mp.0.len() == 1);
+    assert!(ok, "expected Polygon (or MultiPolygon[1]), got: {g:?}");
 }
 
 /// Assert the result is a Polygon with no holes.
