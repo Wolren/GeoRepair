@@ -23,6 +23,7 @@ use rstar::{RTree, RTreeObject, AABB};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::orient::orient2d as orient2d_robust;
+use log::warn;
 
 /// Node a line string by removing repeated points and splitting at
 /// self-intersections. Returns a MultiLineString if splitting occurred,
@@ -49,11 +50,83 @@ pub(crate) fn node_line_string<T: NodingFloat>(ls: &LineString<T>) -> Geometry<T
         return Geometry::LineString(LineString::new(deduped));
     }
 
-    // Split at self-intersections using the same approach as prep.rs
+    // Split at self-intersections (now uses DD arithmetic for f64)
     let split_edges = split_edges_at_intersections(&edges);
     if split_edges.is_empty() {
         return empty();
     }
+
+    // ── Noding validation + snap-rounding fallback (f64 only) ──
+    #[cfg(any(feature = "arrange", feature = "structure"))]
+    if std::mem::size_of::<T>() == std::mem::size_of::<f64>() {
+        let f64_edges: Vec<Line<f64>> = split_edges
+            .iter()
+            .map(|e| {
+                Line::new(
+                    Coord {
+                        x: e.start.x.to_f64().unwrap(),
+                        y: e.start.y.to_f64().unwrap(),
+                    },
+                    Coord {
+                        x: e.end.x.to_f64().unwrap(),
+                        y: e.end.y.to_f64().unwrap(),
+                    },
+                )
+            })
+            .collect();
+
+        let mut validator = crate::noding::validator::NodingValidator::new(f64_edges);
+        validator.validate();
+
+        if validator.has_violations() {
+            warn!(
+                "node_line_string: {} noding violation(s) remain, falling back to snap rounding",
+                validator.violations().len()
+            );
+            let f64_input: Vec<Line<f64>> = edges
+                .iter()
+                .map(|e| {
+                    Line::new(
+                        Coord {
+                            x: e.start.x.to_f64().unwrap(),
+                            y: e.start.y.to_f64().unwrap(),
+                        },
+                        Coord {
+                            x: e.end.x.to_f64().unwrap(),
+                            y: e.end.y.to_f64().unwrap(),
+                        },
+                    )
+                })
+                .collect();
+            let snapped = crate::noding::snap_round::snap_round_lines(&f64_input);
+            if !snapped.is_empty() {
+                let converted: Vec<Line<T>> = snapped
+                    .iter()
+                    .map(|e| {
+                        Line::new(
+                            Coord {
+                                x: T::from(e.start.x).unwrap(),
+                                y: T::from(e.start.y).unwrap(),
+                            },
+                            Coord {
+                                x: T::from(e.end.x).unwrap(),
+                                y: T::from(e.end.y).unwrap(),
+                            },
+                        )
+                    })
+                    .collect();
+                let linestrings = reconnect_edges(converted);
+                return if linestrings.is_empty() {
+                    empty()
+                } else if linestrings.len() == 1 {
+                    Geometry::LineString(linestrings.into_iter().next().unwrap())
+                } else {
+                    Geometry::MultiLineString(MultiLineString::new(linestrings))
+                };
+            }
+        }
+    }
+
     // Reconstruct linestrings from split edges (connect touching edges)
     let linestrings = reconnect_edges(split_edges);
 
@@ -567,6 +640,8 @@ mod tests {
     fn test_intersection_param_endpoint_touching() {
         let e1 = Line::new(Coord { x: 0.0, y: 0.0 }, Coord { x: 1.0, y: 0.0 });
         let e2 = Line::new(Coord { x: 1.0, y: 0.0 }, Coord { x: 2.0, y: 1.0 });
+        // Endpoint-on-segment: DD computes the intersection, caller checks
+        // if the param is strictly interior.
         let result = compute_intersection_param(&e1, &e2, 1e-12);
         assert!(result.is_some());
         let (t1, _t2, pt) = result.unwrap();

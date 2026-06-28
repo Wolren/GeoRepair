@@ -279,11 +279,76 @@ pub(crate) fn collinear_split_params<T: GeoFloat>(
     (p1, p2)
 }
 
+/// f64‑only DD‑based intersection for maximum robustness.
+/// Callers MUST still check t/u in the desired range (this function
+/// returns the intersection even when the crossing falls outside segments).
+fn compute_intersection_param_dd(e1: &Line<f64>, e2: &Line<f64>) -> Option<(f64, f64, Coord<f64>)> {
+    crate::dd::segment_intersection_dd(e1.start, e1.end, e2.start, e2.end)
+        .map(|(pt, t, u)| (t.to_f64(), u.to_f64(), pt))
+}
+
 pub(crate) fn compute_intersection_param<T: GeoFloat>(
     e1: &Line<T>,
     e2: &Line<T>,
     eps: T,
 ) -> Option<(T, T, Coord<T>)> {
+    // For f64: GEOS-style two-phase — orient2d detection then DD computation.
+    if std::mem::size_of::<T>() == 8 {
+        let ef1 = Line::new(
+            Coord {
+                x: e1.start.x.to_f64().unwrap(),
+                y: e1.start.y.to_f64().unwrap(),
+            },
+            Coord {
+                x: e1.end.x.to_f64().unwrap(),
+                y: e1.end.y.to_f64().unwrap(),
+            },
+        );
+        let ef2 = Line::new(
+            Coord {
+                x: e2.start.x.to_f64().unwrap(),
+                y: e2.start.y.to_f64().unwrap(),
+            },
+            Coord {
+                x: e2.end.x.to_f64().unwrap(),
+                y: e2.end.y.to_f64().unwrap(),
+            },
+        );
+        let eps_f64 = eps.to_f64().unwrap();
+
+        // Phase 1: Detection via robust orient2d (Shewchuk adaptive precision).
+        // Fast pre-check: reject when both endpoints are on the same side.
+        let o1 = orient2d_robust(ef1.start, ef1.end, ef2.start);
+        let o2 = orient2d_robust(ef1.start, ef1.end, ef2.end);
+        let o3 = orient2d_robust(ef2.start, ef2.end, ef1.start);
+        let o4 = orient2d_robust(ef2.start, ef2.end, ef1.end);
+
+        // Quick rejection: both endpoints of one segment on the same side
+        // of the other segment → they cannot intersect (fast path).
+        if o1.signum() == o2.signum() && o1 != 0.0 && o2 != 0.0 {
+            return None;
+        }
+        if o3.signum() == o4.signum() && o3 != 0.0 && o4 != 0.0 {
+            return None;
+        }
+
+        // Phase 2: Computation via DD (106-bit mantissa) for any
+        // non-trivially-separated case: proper crossing, endpoint-on-
+        // segment, or near-parallel.  Let caller handle collinear
+        // overlap via `None`.
+        return compute_intersection_param_dd(&ef1, &ef2).map(|(t, u, pt)| {
+            (
+                T::from(t).unwrap(),
+                T::from(u).unwrap(),
+                Coord {
+                    x: T::from(pt.x).unwrap(),
+                    y: T::from(pt.y).unwrap(),
+                },
+            )
+        });
+    }
+
+    // Generic fallback for non-f64 types (f32, etc.)
     let denom = (e1.end.x - e1.start.x) * (e2.end.y - e2.start.y)
         - (e1.end.y - e1.start.y) * (e2.end.x - e2.start.x);
     if denom.abs() < eps {
