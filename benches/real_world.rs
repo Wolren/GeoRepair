@@ -306,6 +306,99 @@ fn main() {
     );
 
     // =========================================================================
+    // Validation head-to-head: our validate_polygon vs GEOS isValid
+    // =========================================================================
+    #[cfg(feature = "bench-geos")]
+    {
+        eprint!("[2b/5] Validation head-to-head (all {n_polys} polys, parallel)...");
+        std::io::stderr().flush().ok();
+        use rayon::prelude::*;
+
+        // Time our validator (parallel)
+        let t0 = Instant::now();
+        let our_valid: u64 = polys
+            .par_iter()
+            .map(|p| if validate_polygon(p) { 1 } else { 0 })
+            .sum();
+        let our_time = t0.elapsed().as_secs_f64();
+
+        // Pre-build GEOS geometries in parallel
+        let t0 = Instant::now();
+        let geos_geoms: Vec<Option<geos::Geometry>> =
+            polys.par_iter().map(|p| poly_to_geos(p)).collect();
+        let geos_build_time = t0.elapsed().as_secs_f64();
+
+        // Time GEOS isValid (parallel)
+        let t0 = Instant::now();
+        let geos_valid: u64 = geos_geoms
+            .par_iter()
+            .map(|g| g.as_ref().and_then(|g| g.is_valid().ok()).unwrap_or(false) as u64)
+            .sum();
+        let geos_time = t0.elapsed().as_secs_f64();
+
+        // Agreement (parallel)
+        let (both_valid, both_invalid, our_valid_geos_invalid, our_invalid_geos_valid): (
+            u64,
+            u64,
+            u64,
+            u64,
+        ) = polys
+            .par_iter()
+            .zip(geos_geoms.par_iter())
+            .map(|(poly, g)| {
+                match (
+                    validate_polygon(poly),
+                    g.as_ref().and_then(|g| g.is_valid().ok()).unwrap_or(false),
+                ) {
+                    (true, true) => (1, 0, 0, 0),
+                    (false, false) => (0, 1, 0, 0),
+                    (true, false) => (0, 0, 1, 0),
+                    (false, true) => (0, 0, 0, 1),
+                }
+            })
+            .reduce(
+                || (0, 0, 0, 0),
+                |a, b| (a.0 + b.0, a.1 + b.1, a.2 + b.2, a.3 + b.3),
+            );
+
+        let our_invalid = n_polys - our_valid as usize;
+        let geos_invalid = n_polys - geos_valid as usize;
+        let disagree = our_valid_geos_invalid + our_invalid_geos_valid;
+        let total = both_valid + both_invalid + disagree;
+        let rate = (total - disagree) as f64 / total as f64 * 100.0;
+        let our_per = our_time / n_polys as f64 * 1e6;
+        let geos_per = geos_time / n_polys as f64 * 1e6;
+
+        eprintln!(" done:");
+        eprintln!("  ┌──────────────────────┬──────────────┬─────────────┐");
+        eprintln!("  │ Validator            │ total        │ per-poly    │");
+        eprintln!("  ├──────────────────────┼──────────────┼─────────────┤");
+        eprintln!("  │ Ours                 │ {our_time:>11.4}s │ {our_per:>8.2}µs │");
+        eprintln!("  │ GEOS isValid         │ {geos_time:>11.4}s │ {geos_per:>8.2}µs │");
+        eprintln!("  │ GEOS build           │ {geos_build_time:>11.4}s │ (one-time)  │");
+        eprintln!("  ├──────────────────────┼──────────────┼─────────────┤");
+        eprintln!(
+            "  │ Our / GEOS           │    {:>7.2}x       │           │",
+            our_time / geos_time.max(1e-12)
+        );
+        eprintln!("  └──────────────────────┴──────────────┴─────────────┘");
+        eprintln!("  ┌────────────────────┬──────────┬──────────┐");
+        eprintln!("  │                    │  Ours    │  GEOS    │");
+        eprintln!("  ├────────────────────┼──────────┼──────────┤");
+        eprintln!("  │ Valid              │ {our_valid:>8} │ {geos_valid:>8} │");
+        eprintln!("  │ Invalid            │ {our_invalid:>8} │ {geos_invalid:>8} │");
+        eprintln!("  ├────────────────────┼──────────┼──────────┤");
+        eprintln!("  │ Both agree ✓✓     │ {both_valid:>8}     │           │");
+        eprintln!("  │ Both agree ✗✗     │ {both_invalid:>8}     │           │");
+        eprintln!("  │ Ours✓ GEOS✗       │ {our_valid_geos_invalid:>8}     │           │");
+        eprintln!("  │ Ours✗ GEOS✓       │ {our_invalid_geos_valid:>8}     │           │");
+        eprintln!("  │ Agreement          │    {rate:.2}%     │           │");
+        eprintln!("  └────────────────────┴──────────┴──────────┘");
+    }
+    #[cfg(not(feature = "bench-geos"))]
+    eprintln!("  (skip: bench-geos feature not enabled)");
+
+    // =========================================================================
     // Deep-dive analysis of a specific polygon (ANALYZE_POLY env var)
     // =========================================================================
     if let Ok(target_str) = env::var("ANALYZE_POLY") {

@@ -424,10 +424,12 @@ impl MakeValid for MultiPolygon<f64> {
         }
         if shells.len() == 1 {
             // Safe: len==1 verified above on local Vec
-            return Geometry::Polygon(shells.into_iter().next().unwrap());
+            return enforce_ogc_winding(Geometry::Polygon(shells.into_iter().next().unwrap()));
         }
         let mp = MultiPolygon::new(shells);
-        Geometry::MultiPolygon(geo::algorithm::bool_ops::unary_union(&mp))
+        enforce_ogc_winding(Geometry::MultiPolygon(
+            geo::algorithm::bool_ops::unary_union(&mp),
+        ))
     }
 
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
