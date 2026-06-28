@@ -117,16 +117,18 @@ class GeoRepairAlgo(QgsProcessingAlgorithm):
                       src.fields(), src.wkbType(), src.sourceCrs())
             output_path = dst
             freq = QgsFeatureRequest().setInvalidGeometryCheck(_NO_CHECK)
-            feats = list(src.getFeatures(freq))
-            wkbs = [f.geometry().asWkb().data() if f.geometry() and not f.geometry().isEmpty()
-                    else b"" for f in feats]
-            results = geo_repair.repair_validate_wkb_batch(wkbs, ms[midx])
 
             bad = 0
-            for i, f in enumerate(feats):
+            for i, f in enumerate(src.getFeatures(freq)):
                 if fb.isCanceled():
                     break
-                fixed_wkb, valid, errors = results[i]
+
+                wkb = f.geometry().asWkb().data() if f.geometry() and not f.geometry().isEmpty() else b""
+                if wkb:
+                    fixed_wkb, valid, errors = geo_repair.repair_validate_wkb(wkb, ms[midx])
+                else:
+                    fixed_wkb, valid, errors = b"", True, []
+
                 if not valid:
                     bad += 1
                     if mode != 2 and bad <= 20:

@@ -4,7 +4,7 @@ use geo::{
     MultiPolygon, Point, Polygon, Rect, Triangle,
 };
 
-use geo_repair::{GeoValidation, GeometryValidationError, MakeValid, MakeValidConfig, PolyMethod};
+use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 use wkt::TryFromWkt;
 
 // ---------------------------------------------------------------------------

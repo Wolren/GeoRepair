@@ -5,15 +5,14 @@ use geo::{
 use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, BytesText, Event};
 use quick_xml::{Reader, Writer};
 
-use crate::core::MakeValidError;
+use crate::core::{io_err, MakeValidError};
 use crate::Crs;
 
 const KML_NS: &str = "http://www.opengis.net/kml/2.2";
 
 /// Load geometries from a KML file (.kml).
 pub fn load_kml(path: &str) -> Result<Vec<Geometry<f64>>, MakeValidError> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| MakeValidError::IoError(format!("read KML: {e}")))?;
+    let content = std::fs::read_to_string(path).map_err(|e| io_err(format!("read KML: {e}")))?;
 
     let mut reader = Reader::from_str(&content);
     let mut buf = Vec::new();
@@ -54,40 +53,38 @@ pub fn export_kml_with_crs(
     _crs: Option<&Crs>,
 ) -> Result<(), MakeValidError> {
     use std::io::BufWriter;
-    let file = std::fs::File::create(path)
-        .map_err(|e| MakeValidError::IoError(format!("create KML: {e}")))?;
+    let file = std::fs::File::create(path).map_err(|e| io_err(format!("create KML: {e}")))?;
     let mut writer = Writer::new_with_indent(BufWriter::new(file), b' ', 2);
 
     writer
         .write_event(Event::Decl(BytesDecl::new("1.0", Some("UTF-8"), None)))
-        .map_err(|e| MakeValidError::IoError(format!("KML decl: {e}")))?;
+        .map_err(|e| io_err(format!("KML decl: {e}")))?;
 
     let root = BytesStart::new("kml").with_attributes(vec![("xmlns", KML_NS)]);
     writer
         .write_event(Event::Start(root))
-        .map_err(|e| MakeValidError::IoError(format!("KML root: {e}")))?;
+        .map_err(|e| io_err(format!("KML root: {e}")))?;
 
     writer
         .write_event(Event::Start(BytesStart::new("Document")))
-        .map_err(|e| MakeValidError::IoError(format!("Document: {e}")))?;
+        .map_err(|e| io_err(format!("Document: {e}")))?;
 
     for geom in geometries {
         writer
             .write_event(Event::Start(BytesStart::new("Placemark")))
-            .map_err(|e| MakeValidError::IoError(format!("Placemark: {e}")))?;
-        write_geometry_kml(&mut writer, geom)
-            .map_err(|e| MakeValidError::IoError(format!("geom: {e}")))?;
+            .map_err(|e| io_err(format!("Placemark: {e}")))?;
+        write_geometry_kml(&mut writer, geom).map_err(|e| io_err(format!("geom: {e}")))?;
         writer
             .write_event(Event::End(BytesEnd::new("Placemark")))
-            .map_err(|e| MakeValidError::IoError(format!("/Placemark: {e}")))?;
+            .map_err(|e| io_err(format!("/Placemark: {e}")))?;
     }
 
     writer
         .write_event(Event::End(BytesEnd::new("Document")))
-        .map_err(|e| MakeValidError::IoError(format!("/Document: {e}")))?;
+        .map_err(|e| io_err(format!("/Document: {e}")))?;
     writer
         .write_event(Event::End(BytesEnd::new("kml")))
-        .map_err(|e| MakeValidError::IoError(format!("/kml: {e}")))?;
+        .map_err(|e| io_err(format!("/kml: {e}")))?;
 
     Ok(())
 }

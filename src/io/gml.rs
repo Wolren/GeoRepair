@@ -5,7 +5,7 @@ use geo::{
 use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, BytesText, Event};
 use quick_xml::{Reader, Writer};
 
-use crate::core::MakeValidError;
+use crate::core::{io_err, MakeValidError};
 use crate::Crs;
 
 const GML_NS: &str = "http://www.opengis.net/gml/3.2";
@@ -24,8 +24,7 @@ fn crs_to_srs_name(crs: &Crs) -> Option<String> {
 
 /// Load geometries from a GML file (.gml or .xml).
 pub fn load_gml(path: &str) -> Result<Vec<Geometry<f64>>, MakeValidError> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| MakeValidError::IoError(format!("read GML: {e}")))?;
+    let content = std::fs::read_to_string(path).map_err(|e| io_err(format!("read GML: {e}")))?;
 
     let mut reader = Reader::from_str(&content);
     let mut buf = Vec::new();
@@ -63,42 +62,41 @@ pub fn export_gml_with_crs(
     crs: Option<&Crs>,
 ) -> Result<(), MakeValidError> {
     use std::io::BufWriter;
-    let file = std::fs::File::create(path)
-        .map_err(|e| MakeValidError::IoError(format!("create GML: {e}")))?;
+    let file = std::fs::File::create(path).map_err(|e| io_err(format!("create GML: {e}")))?;
     let mut writer = Writer::new_with_indent(BufWriter::new(file), b' ', 2);
 
     let srs_name = crs.and_then(crs_to_srs_name);
 
     writer
         .write_event(Event::Decl(BytesDecl::new("1.0", Some("UTF-8"), None)))
-        .map_err(|e| MakeValidError::IoError(format!("GML decl: {e}")))?;
+        .map_err(|e| io_err(format!("GML decl: {e}")))?;
 
     let root = BytesStart::new(format!("{GML_PREFIX}:FeatureCollection"))
         .with_attributes(vec![("xmlns:gml", GML_NS)]);
     writer
         .write_event(Event::Start(root))
-        .map_err(|e| MakeValidError::IoError(format!("GML root: {e}")))?;
+        .map_err(|e| io_err(format!("GML root: {e}")))?;
 
     for geom in geometries {
         writer
             .write_event(Event::Start(BytesStart::new(format!(
                 "{GML_PREFIX}:featureMember"
             ))))
-            .map_err(|e| MakeValidError::IoError(format!("member: {e}")))?;
+            .map_err(|e| io_err(format!("member: {e}")))?;
         write_geometry_gml(&mut writer, geom, srs_name.as_deref())
-            .map_err(|e| MakeValidError::IoError(format!("geom: {e}")))?;
+            .map_err(|e| io_err(format!("geom: {e}")))?;
         writer
             .write_event(Event::End(BytesEnd::new(format!(
                 "{GML_PREFIX}:featureMember"
             ))))
-            .map_err(|e| MakeValidError::IoError(format!("/member: {e}")))?;
+            .map_err(|e| io_err(format!("/member: {e}")))?;
     }
 
     writer
         .write_event(Event::End(BytesEnd::new(format!(
             "{GML_PREFIX}:FeatureCollection"
         ))))
-        .map_err(|e| MakeValidError::IoError(format!("/root: {e}")))?;
+        .map_err(|e| io_err(format!("/root: {e}")))?;
 
     Ok(())
 }

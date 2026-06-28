@@ -1,4 +1,4 @@
-use geo::algorithm::Winding;
+use geo::winding_order::{Winding, WindingOrder};
 use geo::{Coord, LineString};
 
 #[test]

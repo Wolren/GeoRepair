@@ -11,7 +11,7 @@ use geo_traits::{
 };
 use wkb::reader::read_wkb;
 
-use crate::core::MakeValidError;
+use crate::core::{io_err, MakeValidError};
 use crate::crs::Crs;
 use crate::zm::{count_coords, ZmGeometry, ZmValue};
 
@@ -34,9 +34,9 @@ pub fn load_wkb(path: &str) -> Result<Vec<Geometry<f64>>, MakeValidError> {
 pub fn load_wkb_with_crs(path: &str) -> Result<(Vec<Geometry<f64>>, Option<Crs>), MakeValidError> {
     let mut buf = Vec::new();
     File::open(path)
-        .map_err(|e| MakeValidError::IoError(e.to_string()))?
+        .map_err(|e| io_err(e.to_string()))?
         .read_to_end(&mut buf)
-        .map_err(|e| MakeValidError::IoError(e.to_string()))?;
+        .map_err(|e| io_err(e.to_string()))?;
 
     let (srid, clean_buf) = extract_ewkb_srid(&buf);
     let crs = srid.map(|s| Crs::from_epsg(s as u32));
@@ -51,9 +51,9 @@ pub fn load_wkb_with_crs(path: &str) -> Result<(Vec<Geometry<f64>>, Option<Crs>)
 pub fn load_wkb_zm(path: &str) -> Result<(Vec<ZmGeometry>, Option<Crs>), MakeValidError> {
     let mut buf = Vec::new();
     File::open(path)
-        .map_err(|e| MakeValidError::IoError(e.to_string()))?
+        .map_err(|e| io_err(e.to_string()))?
         .read_to_end(&mut buf)
-        .map_err(|e| MakeValidError::IoError(e.to_string()))?;
+        .map_err(|e| io_err(e.to_string()))?;
 
     let (srid, clean_buf) = extract_ewkb_srid(&buf);
     let crs = srid.map(|s| Crs::from_epsg(s as u32));
@@ -99,7 +99,7 @@ pub fn export_wkb_zm_with_crs(
         None => wkb_buf,
     };
 
-    std::fs::write(path, &out_buf).map_err(|e| MakeValidError::IoError(e.to_string()))?;
+    std::fs::write(path, &out_buf).map_err(|e| io_err(e.to_string()))?;
     Ok(())
 }
 
@@ -445,4 +445,13 @@ fn extract_geometries(geom: Geometry<f64>) -> Vec<Geometry<f64>> {
 
 pub fn extract_geometries_re(geom: Geometry<f64>) -> Vec<Geometry<f64>> {
     extract_geometries(geom)
+}
+
+#[allow(dead_code)]
+pub(crate) fn encode_wkb_2d(geom: &Geometry<f64>) -> Result<Vec<u8>, MakeValidError> {
+    let zm_geom = crate::zm::ZmGeometry::new(geom.clone());
+    let mut buf = Vec::new();
+    write_wkb_geometry(&mut buf, &zm_geom)
+        .map_err(|e| MakeValidError::ParseError(format!("WKB encode: {e}")))?;
+    Ok(buf)
 }
