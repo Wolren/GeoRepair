@@ -483,8 +483,8 @@ fn structure_fix(poly: &Polygon<f64>, _config: &MakeValidConfig) -> Option<Geome
     None
 }
 
-/// Check OGC validity using the `geo` crate's Validation trait (same as
-/// test assertions). This is the authoritative validity check for the pipeline.
+/// Check OGC validity using the `geo` crate's Validation trait.
+/// The tests use this same trait, so the pipeline must agree with them.
 fn is_valid_with_geo(g: &Geometry<f64>) -> bool {
     <Geometry<f64> as geo::validation::Validation>::is_valid(g)
 }
