@@ -47,15 +47,33 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, _config: &MakeValidConfig) -> Geo
     }
 }
 
-/// Validate a polygon against all OGC validity rules relevant to our pipeline.
+/// Validate a polygon against GEOS-compatible validity rules.
 ///
 /// Checks: ring closure & min points, non-finite coords, no self-intersections,
 /// hole containment, and no nested/overlapping holes.
+/// Does NOT check OGC winding (CCW exterior) — GEOS isValid accepts both
+/// winding orders, and winding is enforced on repair output separately.
 pub fn validate_polygon(poly: &Polygon<f64>) -> bool {
-    // Unified: delegated to GeoValidation (uses orient2d_fast in
-    // edges_intersect_general, OGC winding, hole containment, nesting).
-    use crate::validation::GeoValidation;
-    poly.validate().valid
+    if !poly_has_basic_form(poly) {
+        return false;
+    }
+    // Check for NaN/inf coordinates
+    let rings = std::iter::once(poly.exterior()).chain(poly.interiors().iter());
+    for ring in rings {
+        if ring.0.iter().any(|c| !c.x.is_finite() || !c.y.is_finite()) {
+            return false;
+        }
+    }
+    // Self-intersection check
+    let lines: Vec<_> = poly.lines_iter().collect();
+    if lines.is_empty() || !prep::has_no_intersections(&lines) {
+        return false;
+    }
+    // Hole containment checks
+    if poly.interiors().is_empty() {
+        return true;
+    }
+    holes_are_valid(poly)
 }
 
 /// Lightweight check: hole containment + nesting.

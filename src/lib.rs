@@ -42,7 +42,9 @@ pub use make_valid::MakeValid;
 /// violations that could not be automatically repaired.
 pub use make_valid::ValidateAndFix;
 pub use snap::{snap_coord, snap_coord_default, snap_line, snap_lines, DEFAULT_GRID};
-pub use validation::{GeoValidation, GeometryValidationError, ValidationResult};
+pub use validation::{
+    is_valid, validate, validate_reason, GeoValidation, GeometryValidationError, ValidationResult,
+};
 
 #[cfg(feature = "mimalloc")]
 #[global_allocator]

@@ -6,7 +6,18 @@ use crate::make_valid::MakeValid;
 use crate::validation::GeoValidation;
 use geo::Geometry;
 
+/// Result returned by geo-repair C FFI functions.
+///
+/// On success, `wkb_data` / `wkb_len` contain the output WKB geometry
+/// and `error_msg` is null.  On failure, `wkb_data` is null and
+/// `error_msg` points to a NUL-terminated error string.
+///
+/// # Safety
+///
+/// The caller must call [`geo_repair_free_result`] to release the
+/// allocated memory when the result is no longer needed.
 #[repr(C)]
+#[derive(Debug)]
 pub struct GeoRepairResult {
     pub success: bool,
     pub wkb_data: *mut u8,
@@ -65,8 +76,18 @@ fn geometry_to_wkb(geom: &Geometry<f64>) -> Result<Vec<u8>, String> {
     Ok(buf)
 }
 
+/// Repair a geometry from WKB using default configuration.
+///
+/// # Safety
+///
+/// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes.
+/// The returned [`GeoRepairResult`] must be freed with
+/// [`geo_repair_free_result`].
 #[unsafe(no_mangle)]
-pub extern "C" fn geo_repair_make_valid(wkb_data: *const u8, wkb_len: usize) -> GeoRepairResult {
+pub unsafe extern "C" fn geo_repair_make_valid(
+    wkb_data: *const u8,
+    wkb_len: usize,
+) -> GeoRepairResult {
     let geom = match geometry_from_wkb(wkb_data, wkb_len) {
         Ok(g) => g,
         Err(e) => return GeoRepairResult::error(&e),
@@ -78,8 +99,17 @@ pub extern "C" fn geo_repair_make_valid(wkb_data: *const u8, wkb_len: usize) -> 
     }
 }
 
+/// Repair a geometry from WKB with configuration.
+///
+/// `poly_method`: 0 = Auto, 1 = Arrange, 2 = Structure.
+///
+/// # Safety
+///
+/// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes.
+/// The returned [`GeoRepairResult`] must be freed with
+/// [`geo_repair_free_result`].
 #[unsafe(no_mangle)]
-pub extern "C" fn geo_repair_make_valid_with_config(
+pub unsafe extern "C" fn geo_repair_make_valid_with_config(
     wkb_data: *const u8,
     wkb_len: usize,
     keep_collapsed: bool,
@@ -108,8 +138,89 @@ pub extern "C" fn geo_repair_make_valid_with_config(
     }
 }
 
+/// Repair a geometry from WKB with full configuration.
+///
+/// `poly_method`: 0 = Auto, 1 = Arrange, 2 = Structure.
+/// `fill_rule`: 0 = EvenOdd, 1 = NonZero.
+///
+/// # Safety
+///
+/// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes.
+/// The returned [`GeoRepairResult`] must be freed with
+/// [`geo_repair_free_result`].
 #[unsafe(no_mangle)]
-pub extern "C" fn geo_repair_validate(wkb_data: *const u8, wkb_len: usize) -> GeoRepairResult {
+pub unsafe extern "C" fn geo_repair_make_valid_with_config_full(
+    wkb_data: *const u8,
+    wkb_len: usize,
+    keep_collapsed: bool,
+    poly_method: u8,
+    fill_rule: u8,
+    epsg_code: i32,
+) -> GeoRepairResult {
+    let geom = match geometry_from_wkb(wkb_data, wkb_len) {
+        Ok(g) => g,
+        Err(e) => return GeoRepairResult::error(&e),
+    };
+    let config = MakeValidConfig {
+        keep_collapsed,
+        poly_method: match poly_method {
+            0 => crate::PolyMethod::Auto,
+            1 => crate::PolyMethod::Arrange,
+            2 => crate::PolyMethod::Structure,
+            _ => crate::PolyMethod::Auto,
+        },
+        fill_rule: match fill_rule {
+            0 => geo::algorithm::bool_ops::FillRule::EvenOdd,
+            _ => geo::algorithm::bool_ops::FillRule::NonZero,
+        },
+        crs: if epsg_code > 0 {
+            Some(crate::Crs::from_epsg(epsg_code as u32))
+        } else {
+            None
+        },
+        target_crs: None,
+    };
+    let fixed = geom.make_valid_with_config(&config);
+    match geometry_to_wkb(&fixed) {
+        Ok(wkb) => GeoRepairResult::success(wkb),
+        Err(e) => GeoRepairResult::error(&e),
+    }
+}
+
+/// Check whether a WKB-encoded geometry is OGC-valid.
+///
+/// Returns 1 if valid, 0 if invalid, and sets `error_msg` on the result
+/// when invalid to describe the violation.
+///
+/// # Safety
+///
+/// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes.
+/// The returned [`GeoRepairResult`] must be freed with
+/// [`geo_repair_free_result`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn geo_repair_is_valid(wkb_data: *const u8, wkb_len: usize) -> u8 {
+    let geom = match geometry_from_wkb(wkb_data, wkb_len) {
+        Ok(g) => g,
+        Err(_) => return 0,
+    };
+    if geom.is_valid() {
+        1
+    } else {
+        0
+    }
+}
+
+/// Validate a WKB-encoded geometry and return a human-readable reason.
+///
+/// # Safety
+///
+/// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes.
+/// The returned string must be freed with [`geo_repair_free_result`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn geo_repair_validate_reason(
+    wkb_data: *const u8,
+    wkb_len: usize,
+) -> GeoRepairResult {
     let geom = match geometry_from_wkb(wkb_data, wkb_len) {
         Ok(g) => g,
         Err(e) => return GeoRepairResult::error(&e),
@@ -122,12 +233,32 @@ pub extern "C" fn geo_repair_validate(wkb_data: *const u8, wkb_len: usize) -> Ge
     }
 }
 
+/// Free a [`GeoRepairResult`] returned by any `geo_repair_*` function.
+///
+/// After calling this function the result struct is zeroed so that
+/// double-free is harmless (the inner pointers will be null).
+///
+/// # Safety
+///
+/// `result` must not be null and must point to a valid result that has
+/// not been freed before.
 #[unsafe(no_mangle)]
-pub extern "C" fn geo_repair_free_result(result: GeoRepairResult) {
-    if !result.wkb_data.is_null() {
-        let _ = unsafe { Vec::from_raw_parts(result.wkb_data, result.wkb_len, result.wkb_len) };
+pub unsafe extern "C" fn geo_repair_free_result(result: *mut GeoRepairResult) {
+    if result.is_null() {
+        return;
     }
-    if !result.error_msg.is_null() {
-        let _ = unsafe { CString::from_raw(result.error_msg) };
+    // SAFETY: caller guarantees result is a valid, non-null pointer.
+    let r = unsafe { &mut *result };
+    if !r.wkb_data.is_null() {
+        // SAFETY: the WKB buffer was allocated by Vec in success().
+        unsafe { drop(Vec::from_raw_parts(r.wkb_data, r.wkb_len, r.wkb_len)) };
     }
+    if !r.error_msg.is_null() {
+        // SAFETY: the error string was allocated by CString in error().
+        unsafe { drop(CString::from_raw(r.error_msg)) };
+    }
+    r.success = false;
+    r.wkb_data = ptr::null_mut();
+    r.wkb_len = 0;
+    r.error_msg = ptr::null_mut();
 }
