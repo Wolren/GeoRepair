@@ -1,14 +1,14 @@
-//! Alaska SHP regression test.
-//! Runs Structure fix on ALL Alaska polys and verifies every output
-//! is GEOS-valid and area-preserving.
-//! Requires `bench-geos` feature and the Alaska SHP at the expected path.
+//! Alaska regression test (runs via .bin format).
+//! Loads Alaska from custom binary format, runs Structure fix on all polys,
+//! and verifies every output is GEOS-valid and area-preserving.
+//!
+//! To generate alaska.bin from alaska.shp:
+//!   python scripts/convert_shp_to_bin.py benches/real_world/alaska.shp benches/real_world/alaska.bin
 
 #![cfg(feature = "bench-geos")]
 
 use geo::{Geometry, Polygon};
-#[cfg(feature = "load-shp")]
-use geo_repair::io::load_shp;
-use geo_repair::io::{geo_area, signed_area};
+use geo_repair::io::{geo_area, load_bin, signed_area};
 #[cfg(feature = "parallel")]
 use geo_repair::parallel::par_fix_polygon_batch;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
@@ -17,7 +17,8 @@ use wkt::ToWkt;
 
 #[test]
 fn alaska_all_polys_geos_valid_and_area_preserved() {
-    let polys = load_shp("benches/real_world/alaska.shp").unwrap();
+    let polys = load_bin("benches/real_world/alaska.bin")
+        .expect("alaska.bin not found — run: python scripts/convert_shp_to_bin.py benches/real_world/alaska.shp benches/real_world/alaska.bin");
     eprintln!("Total Alaska polys loaded: {}", polys.len());
 
     let cfg = MakeValidConfig {

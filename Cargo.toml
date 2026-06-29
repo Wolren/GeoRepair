@@ -10,31 +10,23 @@ edition = "2024"
 rust-version = "1.95"
 
 [features]
-default = ["arrange", "structure", "parallel", "simd", "io-geojson", "io-wkt", "io-wkb", "validate"]
+default = ["arrange", "structure", "parallel", "simd", "validate"]
 arrange = ["dep:spade", "geo/spade", "dep:rstar"]
 structure = ["simd", "dep:rstar"]
 validate = ["dep:rstar"]
 parallel = ["dep:rayon", "geo/multithreading"]
 simd = []
 simd-portable = []
-bench-geos = ["dep:geos", "load-shp", "io-wkb"]
+
+# Built-in WKB parser is always available — no extra deps needed
+bench-geos = ["dep:geos"]
 bench-criterion = []
 
-# Format-specific I/O features
-io-geojson = ["dep:geojson"]
-io-wkt = ["dep:wkt"]
-io-wkb = ["dep:wkb", "dep:geo-traits"]
-io-csv = ["dep:csv", "dep:wkt"]
-io-gpkg = ["dep:rusqlite", "dep:wkb", "dep:geo-traits"]
-io-gml = ["dep:quick-xml"]
-
-# Shapefile loading + export
-load-shp = ["dep:shapefile"]
+python = ["dep:pyo3"]
+ffi = []
 
 proj = []
 serde = ["geo/serde"]
-ffi = ["io-wkb"]
-python = ["dep:pyo3", "io-wkt", "io-geojson", "io-wkb", "load-shp"]
 
 [dependencies]
 geo = { version = "0.33", default-features = false }
@@ -45,26 +37,18 @@ robust = "1.2"
 thiserror = "2.0"
 rustc-hash = "2.1"
 smallvec = { version = "1.15", default-features = false, features = ["union"] }
-geojson = { version = "1.0", features = ["geo-types"], optional = true }
 serde_json = "1.0"
-wkt = { version = "0.14", features = ["geo-types"], optional = true }
-wkb = { version = "0.9", optional = true }
-geo-traits = { version = "0.3", optional = true }
-csv = { version = "1.3", optional = true }
-rusqlite = { version = "0.32", features = ["bundled"], optional = true }
-quick-xml = { version = "0.36", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rayon = { version = "1.12", optional = true }
-shapefile = { version = "0.8", features = ["geo-types"], optional = true }
 geos = { version = "11.1", optional = true, features = ["v3_8_0"] }
 mimalloc = { version = "0.1", default-features = false, optional = true }
 pyo3 = { version = "0.29", features = ["extension-module"], optional = true }
 
 [dev-dependencies]
-wkt = { version = "0.14", features = ["geo-types"] }
 criterion = { version = "0.8", features = ["html_reports"] }
 proptest = "1.11"
+wkt = { version = "0.14", features = ["geo-types"] }
 
 [lib]
 name = "geo_repair"

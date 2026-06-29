@@ -94,18 +94,6 @@ pub enum MakeValidError {
     CrsError(String),
 }
 
-#[cfg(any(
-    feature = "io-geojson",
-    feature = "io-wkt",
-    feature = "io-wkb",
-    feature = "io-csv",
-    feature = "io-gpkg",
-    feature = "load-shp"
-))]
-pub(crate) fn io_err(msg: impl std::fmt::Display) -> MakeValidError {
-    MakeValidError::IoError(msg.to_string())
-}
-
 #[cfg(feature = "arrange")]
 impl From<spade::InsertionError> for MakeValidError {
     fn from(e: spade::InsertionError) -> Self {

@@ -23,7 +23,7 @@ coordinates, and more) using algorithms selected by geometry type.
 - [Polygon repair strategies](#polygon-repair-strategies)
 - [CRS support](#crs-support)
 - [Performance](#performance)
-- [I/O formats](#io-formats)
+- [I/O](#io)
 - [Features](#features)
 - [Python bindings](#python-bindings)
 - [C FFI](#c-ffi)
@@ -36,30 +36,24 @@ coordinates, and more) using algorithms selected by geometry type.
 geo-repair = "0.2"
 ```
 
-```rust
-use geo_repair::{is_valid, validate, MakeValid, load_geometries, export_geometries};
-
-let geoms = load_geometries("input.geojson")?;
-let fixed: Vec<_> = geoms.iter().map(|g| g.make_valid()).collect();
-export_geometries(&fixed, "output.geojson")?;
-```
-
-**Validate before repair:**
+**Validate and repair geometries:**
 
 ```rust
 use geo_repair::{is_valid, validate, MakeValid, ValidateAndFix};
 
-if !is_valid(&geom) {
-    let result = validate(&geom);
+// Check validity
+let result = validate(&geom);
+if !result.valid {
     for err in &result.errors {
         eprintln!("  {err}");
     }
 }
+
+// Fix invalid geometry
 let fixed = geom.make_valid();
 
-// Combined validate-and-fix pipeline (GEOS-compatible)
+// Combined validate-and-fix (returns result + fixed geometry)
 let (result, fixed) = geom.validate_and_fix();
-let outcome = geom.validate_or_fix();
 ```
 
 **With method selection:**
@@ -73,6 +67,30 @@ let config = MakeValidConfig {
     ..Default::default()
 };
 let fixed = geom.make_valid_with_config(&config);
+```
+
+**WKB I/O (built-in, no dependencies):**
+
+```rust
+use geo_repair::{read_wkb, write_wkb, read_wkb_concat};
+
+// Encode geometry to WKB bytes
+let wkb: Vec<u8> = write_wkb(&geom);
+
+// Decode single geometry from WKB
+let geom = read_wkb(&wkb).unwrap();
+
+// Decode concatenated multi-geometry WKB
+let geoms: Vec<Geometry<f64>> = read_wkb_concat(&concat_buffer).unwrap();
+```
+
+**Binary format loading (custom `.bin` format, fast bulk I/O):**
+
+```rust
+use geo_repair::load_bin;
+
+// Load polygons from custom binary format
+let polys: Vec<Polygon<f64>> = load_bin("dataset.bin").unwrap();
 ```
 
 ## What it does
@@ -144,13 +162,13 @@ interior) on all output.
 ## CRS support
 
 The [`Crs`](https://docs.rs/geo-repair/latest/geo_repair/struct.Crs.html)
-type stores EPSG codes and is carried through I/O round-trips for formats
-that support it (GeoJSON, WKT, Shapefile, GeoPackage).  CRS-aware
-tolerance heuristics:
+type stores EPSG codes and provides CRS-aware tolerance heuristics:
 
 - Geographic (lon/lat): `1e-10` degrees
 - Projected (metres): `1e-6` metres
 - Unknown: `1e-12`
+
+CRS is not tied to I/O — you set it directly on `MakeValidConfig`:
 
 ```rust
 use geo_repair::{Crs, MakeValidConfig};
@@ -160,6 +178,9 @@ let config = MakeValidConfig {
     ..Default::default()
 };
 ```
+
+For CRS-tagged I/O (GeoJSON, Shapefile, GPKG), use GEOS bindings or
+other external tools to load data and extract CRS separately.
 
 ## Performance
 
@@ -222,30 +243,32 @@ cargo bench --features bench-criterion --bench criterion
 - **SIMD:** AVX2-accelerated orientation tests (1.5-3x on rings >= 100
   vertices), with Shewchuk fallback for near-collinear cases.
 
-## I/O formats
+## I/O
 
-| Format | Load | Export | Attributes | Z/M | CRS |
-|--------|------|--------|------------|-----|-----|
-| **GeoJSON** (.geojson/.json) | Yes | Yes | Yes | Yes | Yes |
-| **WKT** (.wkt) | Yes | Yes | - | - | Yes |
-| **WKB** (.wkb) | Yes | Yes | Yes | Yes | Yes |
-| **CSV+WKT** (.csv) | Yes | Yes | - | - | - |
-| **Shapefile** (.shp) | Yes | Yes | Yes | - | Yes |
-| **GeoPackage** (.gpkg) | Yes | Yes | Yes | Yes | Yes |
-| **GML** (.gml/.xml) | Yes | Yes | Yes | - | Yes |
-| **Binary** (.bin) | Yes | Yes | - | - | - |
+GeoRepair provides minimal built-in I/O — a custom binary format for bulk
+polygon loading and a zero-dependency WKB parser/encoder.  All other
+format handling (GeoJSON, Shapefile, GeoPackage, GML, CSV, WKT) is left to
+external tools such as GEOS bindings, GDAL, or dedicated conversion
+scripts.
 
-Auto-detection by file extension.  Feature-level I/O (`load_features`,
-`export_features`) preserves attributes, CRS, and Z/M through repair.
+| Format | Load | Export | Description |
+|--------|------|--------|-------------|
+| **Binary** (.bin) | `load_bin()` / `load_bin_stream()` | — | Custom format, bulk polygon I/O, ~950 MB/s throughput |
+| **WKB** (.wkb) | `read_wkb()` / `read_wkb_concat()` | `write_wkb()` | Standard OGC WKB, LE/BE, EWKB SRID |
+
+**SHP to .bin conversion:**
+
+```bash
+python scripts/convert_shp_to_bin.py input.shp output.bin
+```
+
+**WKB roundtrip example:**
 
 ```rust
-use geo_repair::{load_features, export_features, MakeValid};
+use geo_repair::{read_wkb, write_wkb};
 
-let mut features = load_features("input.geojson")?;
-for f in &mut features {
-    f.geometry = f.geometry.make_valid();
-}
-export_features("output.geojson", &features)?;
+let bytes: Vec<u8> = write_wkb(&geometry);
+let geom = read_wkb(&bytes).unwrap();
 ```
 
 ## Features
@@ -256,55 +279,61 @@ export_features("output.geojson", &features)?;
 | `structure` | Structure-based fast path repair | yes |
 | `parallel` | Rayon parallel processing | yes |
 | `simd` | AVX2-accelerated orientation tests | yes |
-| `io-geojson` | GeoJSON load/export | yes |
-| `io-wkt` | WKT load/export | yes |
-| `io-wkb` | WKB load/export | no |
-| `io-csv` | CSV+WKT column load | no |
-| `io-gpkg` | GeoPackage (SQLite) | no |
-| `io-gml` | GML load/export | no |
-| `io-all` | Enables all I/O formats | no |
+| `simd-portable` | Portable SIMD via `core::simd` | no |
+| `validate` | OGC validation predicates (enabled by default, can disable for smaller builds) | yes |
 | `proj` | CRS transformation (placeholder) | no |
 | `serde` | Geometry serde support | no |
-| `ffi` | C-compatible FFI (implies `io-wkb`) | no |
+| `ffi` | C-compatible FFI | no |
 | `python` | Python bindings (PyO3) | no |
 | `bench-geos` | GEOS comparison benchmarks | no |
-| `load-shp` | Shapefile loading | no |
+| `bench-criterion` | Criterion benchmark harness | no |
+| `mimalloc` | Use mimalloc global allocator | no |
 
 ## Python bindings
 
-Install or build:
+Build and install:
 
 ```bash
-pip install geo_repair                      # from PyPI (once published)
-# or build from source:
+# from source:
 pip install maturin
 python -m maturin build --features python
 pip install target/wheels/geo_repair-*.whl
+
+# or once published:
+pip install geo_repair
 ```
+
+The Python package exposes WKB-based batch processing — ideal for use
+with QGIS or GDAL where WKB is the native geometry format.
 
 ```python
 import geo_repair
+import struct
 
-# WKT input/output
-geo_repair.repair_wkt("POLYGON((0 0, 5 5, 5 0, 0 5, 0 0))")
+# Single geometry repair (WKB in, WKB out)
+wkb_in = bytes(...)  # from QgsGeometry.asWkb() or similar
+wkb_out = geo_repair.repair_wkb(wkb_in, method="auto")
 
-# GeoJSON (Geometry, Feature, or FeatureCollection — type is preserved)
-geo_repair.repair_geojson('{"type":"Polygon","coordinates":[...]}')
+# Batch repair (sequential)
+wkb_batch = [wkb_1, wkb_2, ...]
+results = geo_repair.repair_wkb_batch(wkb_batch, method="structure")
 
-# Choose method: "auto", "arrange", "structure"
-geo_repair.repair_wkt("...", method="structure")
+# Batch repair (parallel — requires `parallel` feature)
+results = geo_repair.par_repair_wkb_batch(wkb_batch, method="auto")
 
-# Validation
-geo_repair.is_valid_wkt("POINT(1 2)")       # True
-geo_repair.validate_wkt("POLYGON(...)")     # ['Ring has self-intersections']
-
-# Batch processing (parallel when compiled with `parallel` feature)
-geo_repair.repair_wkt_batch([wkt1, wkt2, ...])
-geo_repair.par_repair_wkt_batch([wkt1, wkt2, ...])
-
-# File-level repair
-geo_repair.repair_file_to_file("input.geojson", "output.geojson")
+# Combined repair + validation batch
+# Returns list of (repaired_wkb, valid_before, error_list)
+results = geo_repair.repair_validate_wkb_batch(wkb_batch, method="auto")
+for out_wkb, was_valid, errors in results:
+    if not was_valid:
+        print("  Errors:", errors)
+    if out_wkb:
+        set_geometry(result_feature, out_wkb)
 ```
+
+**QGIS integration:** See `qgis/qgis_geo_repair.py` for a complete
+processing script that iterates features, batches WKBs, and sends them
+to this engine.
 
 ## C FFI
 
@@ -362,7 +391,7 @@ void            geo_repair_free_result(GeoRepairResult* result);
 |----------|------|------|-----|----------|--------|
 | x86_64 Windows/Linux/macOS | Yes | Yes (AVX2) | Yes | Yes | Yes |
 | aarch64 macOS/Linux | Yes | Scalar | Yes | Yes | Yes |
-| WASM32 | Yes | Scalar | No | No | No |
+| WASM32 | Yes | Scalar | Yes | No | No |
 
 AVX2 requires `RUSTFLAGS="-C target-cpu=native"` at build time.  Falls
 back to scalar on CPUs without AVX2 or non-x86_64 targets.

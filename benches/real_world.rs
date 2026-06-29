@@ -1,11 +1,13 @@
-//! Real-world benchmark: Structure method vs GEOS on real SHP data.
+//! Real-world benchmark: Structure method vs GEOS on real dataset.
+//!
+//! Only .bin (custom binary format) is supported natively.
+//! For SHP files, pre-convert:
+//!   python scripts/convert_shp_to_bin.py input.shp output.bin
 //!
 //! You can benchmark any dataset by setting `BENCH_FILE` or passing file as first arg:
 //!
-//!   $env:BENCH_FILE = "benches/real_world/alaska.shp"
+//!   $env:BENCH_FILE = "benches/real_world/data_0.bin"
 //!   cargo bench --features bench-geos --bench real_world
-//!
-//! Supported: .bin (custom binary), .shp (shapefile)
 //!
 //! Run with:
 //!   scripts/bench-geos.ps1          # Windows — auto-detects conda GEOS
@@ -24,11 +26,9 @@ use std::io::Write;
 use std::path::Path;
 use std::time::Instant;
 
-use geo::{Coord, Polygon};
+use geo::{Coord, Geometry, Polygon};
 use geo_repair::arrange::validate_polygon;
 use geo_repair::io::load_bin;
-#[cfg(feature = "load-shp")]
-use geo_repair::io::load_shp;
 use geo_repair::orient::orient2d;
 #[cfg(feature = "parallel")]
 use geo_repair::parallel::par_fix_polygon_batch;
@@ -248,14 +248,10 @@ fn load_polys(path: &str) -> Vec<Polygon<f64>> {
         .and_then(|e| e.to_str())
         .unwrap_or("");
     match ext {
-        #[cfg(feature = "load-shp")]
-        "shp" => load_shp(path).unwrap(),
         "bin" => load_bin(path).unwrap_or_else(|e| {
             panic!("Failed to load {path}: {e}");
         }),
-        #[cfg(not(feature = "load-shp"))]
-        "shp" => panic!("load-shp feature not enabled. Re-run with --features load-shp"),
-        other => panic!("Unsupported file extension '.{other}'. Use .shp or .bin"),
+        other => panic!("Unsupported file extension '.{other}'. Use .bin. For SHP files, convert first: python scripts/convert_shp_to_bin.py input.shp output.bin"),
     }
 }
 

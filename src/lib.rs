@@ -32,10 +32,9 @@ pub mod simd;
 pub use core::{MakeValidConfig, MakeValidError, PolyMethod};
 pub use crs::Crs;
 pub use feature::Feature;
-pub use io::{
-    export_features, export_geometries, export_geometries_with_crs, load_features, load_geometries,
-    load_geometries_with_crs,
-};
+// IO: only binary format loading + WKB parsing (no format-specific loaders).
+// For file format loading use GEOS bindings or external tools.
+pub use io::{load_bin, load_bin_stream, read_wkb, read_wkb_concat, write_wkb};
 pub use make_valid::MakeValid;
 #[cfg(any(feature = "arrange", feature = "structure"))]
 /// Combines validation and repair in a single step, returning errors for
