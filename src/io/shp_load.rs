@@ -120,7 +120,7 @@ pub fn load_shp_geometries(path: &str) -> Result<Vec<Geometry<f64>>, shapefile::
                     })
                     .collect();
                 if parts.len() == 1 {
-                    geoms.push(Geometry::LineString(parts.into_iter().next().unwrap()));
+                    geoms.push(Geometry::LineString(parts.into_iter().next().expect("len==1 verified")));
                 } else {
                     geoms.push(Geometry::MultiLineString(geo::MultiLineString::new(parts)));
                 }
@@ -249,7 +249,7 @@ fn convert_shape_to_geometry(shape: shapefile::Shape) -> Option<Geometry<f64>> {
                 })
                 .collect();
             if parts.len() == 1 {
-                Geometry::LineString(parts.into_iter().next().unwrap())
+                Geometry::LineString(parts.into_iter().next().expect("len==1 verified"))
             } else {
                 Geometry::MultiLineString(geo::MultiLineString::new(parts))
             }
@@ -268,7 +268,7 @@ fn convert_shape_to_geometry(shape: shapefile::Shape) -> Option<Geometry<f64>> {
                 .collect();
             let assembled = assemble_polygons(rings);
             if assembled.len() == 1 {
-                Geometry::Polygon(assembled.into_iter().next().unwrap())
+                Geometry::Polygon(assembled.into_iter().next().expect("len==1 verified"))
             } else {
                 Geometry::MultiPolygon(geo::MultiPolygon::new(assembled))
             }

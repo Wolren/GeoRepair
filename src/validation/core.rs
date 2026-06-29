@@ -1,4 +1,5 @@
 use geo::{Coord, GeoFloat, Line, LineString, MultiLineString, MultiPoint, Point, Rect, Triangle};
+#[cfg(feature = "rstar")]
 use rstar::{RTree, RTreeObject, AABB};
 use thiserror::Error;
 
@@ -195,69 +196,90 @@ pub(crate) fn check_ring_validity(
         }
     }
 
-    struct EdgeEnv {
-        idx: u32,
-        env: AABB<[f64; 2]>,
-    }
-    impl RTreeObject for EdgeEnv {
-        type Envelope = AABB<[f64; 2]>;
-        fn envelope(&self) -> Self::Envelope {
-            self.env
+    #[cfg(feature = "rstar")]
+    {
+        struct EdgeEnv {
+            idx: u32,
+            env: rstar::AABB<[f64; 2]>,
         }
-    }
-    if n > 64 {
-        let mut edges = Vec::with_capacity(n);
-        for i in 0..n {
-            let (lo_x, hi_x) = if ring[i].x < ring[(i + 1) % n].x {
-                (ring[i].x, ring[(i + 1) % n].x)
-            } else {
-                (ring[(i + 1) % n].x, ring[i].x)
-            };
-            let (lo_y, hi_y) = if ring[i].y < ring[(i + 1) % n].y {
-                (ring[i].y, ring[(i + 1) % n].y)
-            } else {
-                (ring[(i + 1) % n].y, ring[i].y)
-            };
-            let ext = (hi_x - lo_x).abs().max((hi_y - lo_y).abs()).max(1.0) * 1e-10;
-            edges.push(EdgeEnv {
-                idx: i as u32,
-                env: AABB::from_corners([lo_x - ext, lo_y - ext], [hi_x + ext, hi_y + ext]),
-            });
-        }
-        let tree = RTree::bulk_load(edges);
-        for i in 0..n {
-            let (lo_x, hi_x) = if ring[i].x < ring[(i + 1) % n].x {
-                (ring[i].x, ring[(i + 1) % n].x)
-            } else {
-                (ring[(i + 1) % n].x, ring[i].x)
-            };
-            let (lo_y, hi_y) = if ring[i].y < ring[(i + 1) % n].y {
-                (ring[i].y, ring[(i + 1) % n].y)
-            } else {
-                (ring[(i + 1) % n].y, ring[i].y)
-            };
-            let ext = (hi_x - lo_x).abs().max((hi_y - lo_y).abs()).max(1.0) * 1e-10;
-            let env = AABB::from_corners([lo_x - ext, lo_y - ext], [hi_x + ext, hi_y + ext]);
-            let found = tree.locate_in_envelope_intersecting_int(&env, |c| {
-                let j = c.idx as usize;
-                if j <= i {
-                    return std::ops::ControlFlow::Continue(());
-                }
-                if i.abs_diff(j) <= 1 || (i == 0 && j == n - 1) {
-                    return std::ops::ControlFlow::Continue(());
-                }
-                if check_edge_pair_intersection(ring, i, j, eps) {
-                    std::ops::ControlFlow::Break(())
-                } else {
-                    std::ops::ControlFlow::<(), ()>::Continue(())
-                }
-            });
-            if found.is_break() {
-                errors.push(GeometryValidationError::SelfIntersection);
-                return errors;
+        impl rstar::RTreeObject for EdgeEnv {
+            type Envelope = rstar::AABB<[f64; 2]>;
+            fn envelope(&self) -> Self::Envelope {
+                self.env
             }
         }
-    } else {
+        if n > 64 {
+            let mut edges = Vec::with_capacity(n);
+            for i in 0..n {
+                let (lo_x, hi_x) = if ring[i].x < ring[(i + 1) % n].x {
+                    (ring[i].x, ring[(i + 1) % n].x)
+                } else {
+                    (ring[(i + 1) % n].x, ring[i].x)
+                };
+                let (lo_y, hi_y) = if ring[i].y < ring[(i + 1) % n].y {
+                    (ring[i].y, ring[(i + 1) % n].y)
+                } else {
+                    (ring[(i + 1) % n].y, ring[i].y)
+                };
+                let ext = (hi_x - lo_x).abs().max((hi_y - lo_y).abs()).max(1.0) * 1e-10;
+                edges.push(EdgeEnv {
+                    idx: i as u32,
+                    env: rstar::AABB::from_corners(
+                        [lo_x - ext, lo_y - ext],
+                        [hi_x + ext, hi_y + ext],
+                    ),
+                });
+            }
+            let tree = rstar::RTree::bulk_load(edges);
+            for i in 0..n {
+                let (lo_x, hi_x) = if ring[i].x < ring[(i + 1) % n].x {
+                    (ring[i].x, ring[(i + 1) % n].x)
+                } else {
+                    (ring[(i + 1) % n].x, ring[i].x)
+                };
+                let (lo_y, hi_y) = if ring[i].y < ring[(i + 1) % n].y {
+                    (ring[i].y, ring[(i + 1) % n].y)
+                } else {
+                    (ring[(i + 1) % n].y, ring[i].y)
+                };
+                let ext = (hi_x - lo_x).abs().max((hi_y - lo_y).abs()).max(1.0) * 1e-10;
+                let env =
+                    rstar::AABB::from_corners([lo_x - ext, lo_y - ext], [hi_x + ext, hi_y + ext]);
+                let found = tree.locate_in_envelope_intersecting_int(&env, |c| {
+                    let j = c.idx as usize;
+                    if j <= i {
+                        return std::ops::ControlFlow::Continue(());
+                    }
+                    if i.abs_diff(j) <= 1 || (i == 0 && j == n - 1) {
+                        return std::ops::ControlFlow::Continue(());
+                    }
+                    if check_edge_pair_intersection(ring, i, j, eps) {
+                        std::ops::ControlFlow::Break(())
+                    } else {
+                        std::ops::ControlFlow::<(), ()>::Continue(())
+                    }
+                });
+                if found.is_break() {
+                    errors.push(GeometryValidationError::SelfIntersection);
+                    return errors;
+                }
+            }
+        } else {
+            for i in 0..n {
+                for j in i + 2..n {
+                    if i == 0 && j == n - 1 {
+                        continue;
+                    }
+                    if check_edge_pair_intersection(ring, i, j, eps) {
+                        errors.push(GeometryValidationError::SelfIntersection);
+                        return errors;
+                    }
+                }
+            }
+        }
+    }
+    #[cfg(not(feature = "rstar"))]
+    {
         for i in 0..n {
             for j in i + 2..n {
                 if i == 0 && j == n - 1 {
@@ -328,21 +350,24 @@ pub(crate) fn check_edge_pair_intersection(
 }
 
 /// Minimal edge-index wrapper for R-tree intersection queries.
+#[cfg(feature = "rstar")]
 struct EdgeIdx {
     idx: usize,
-    env: AABB<[f64; 2]>,
+    env: rstar::AABB<[f64; 2]>,
 }
-impl RTreeObject for EdgeIdx {
-    type Envelope = AABB<[f64; 2]>;
+#[cfg(feature = "rstar")]
+impl rstar::RTreeObject for EdgeIdx {
+    type Envelope = rstar::AABB<[f64; 2]>;
     fn envelope(&self) -> Self::Envelope {
         self.env
     }
 }
 
 /// Build an R-tree over a ring's edges (wrapping at len-1 for closing point).
-fn build_ring_edge_tree(ring: &[Coord<f64>]) -> RTree<EdgeIdx> {
+#[cfg(feature = "rstar")]
+fn build_ring_edge_tree(ring: &[Coord<f64>]) -> rstar::RTree<EdgeIdx> {
     let n = ring.len() - 1;
-    RTree::bulk_load(
+    rstar::RTree::bulk_load(
         (0..n)
             .map(|i| {
                 let a = ring[i];
@@ -351,7 +376,7 @@ fn build_ring_edge_tree(ring: &[Coord<f64>]) -> RTree<EdgeIdx> {
                 let (lo_y, hi_y) = if a.y < b.y { (a.y, b.y) } else { (b.y, a.y) };
                 EdgeIdx {
                     idx: i,
-                    env: AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]),
+                    env: rstar::AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]),
                 }
             })
             .collect(),
@@ -359,12 +384,13 @@ fn build_ring_edge_tree(ring: &[Coord<f64>]) -> RTree<EdgeIdx> {
 }
 
 /// Build an R-tree over a linestring's segments (non-ring, no wrap-around).
-fn build_ls_edge_tree(coords: &[Coord<f64>]) -> RTree<EdgeIdx> {
+#[cfg(feature = "rstar")]
+fn build_ls_edge_tree(coords: &[Coord<f64>]) -> rstar::RTree<EdgeIdx> {
     let n = coords.len() - 1;
     if n < 1 {
-        return RTree::bulk_load(Vec::new());
+        return rstar::RTree::bulk_load(Vec::new());
     }
-    RTree::bulk_load(
+    rstar::RTree::bulk_load(
         (0..n)
             .map(|i| {
                 let a = coords[i];
@@ -373,7 +399,7 @@ fn build_ls_edge_tree(coords: &[Coord<f64>]) -> RTree<EdgeIdx> {
                 let (lo_y, hi_y) = if a.y < b.y { (a.y, b.y) } else { (b.y, a.y) };
                 EdgeIdx {
                     idx: i,
-                    env: AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]),
+                    env: rstar::AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]),
                 }
             })
             .collect(),
@@ -408,39 +434,56 @@ pub(crate) fn check_rings_intersect(ring1: &[Coord<f64>], ring2: &[Coord<f64>], 
 
     // Large rings: build tree over the smaller ring, query each edge of the
     // larger ring via envelope intersection.
-    let (build_ring, query_ring, n_query) = if n1 < n2 {
-        (ring1, ring2, n2)
-    } else {
-        (ring2, ring1, n1)
-    };
-    let n_build = build_ring.len() - 1;
-    let tree = build_ring_edge_tree(build_ring);
+    #[cfg(feature = "rstar")]
+    {
+        let (build_ring, query_ring, n_query) = if n1 < n2 {
+            (ring1, ring2, n2)
+        } else {
+            (ring2, ring1, n1)
+        };
+        let n_build = build_ring.len() - 1;
+        let tree = build_ring_edge_tree(build_ring);
 
-    for i in 0..n_query {
-        let a1 = query_ring[i];
-        let a2 = query_ring[(i + 1) % n_query];
-        let (lo_x, hi_x) = if a1.x < a2.x {
-            (a1.x, a2.x)
-        } else {
-            (a2.x, a1.x)
-        };
-        let (lo_y, hi_y) = if a1.y < a2.y {
-            (a1.y, a2.y)
-        } else {
-            (a2.y, a1.y)
-        };
-        let query = AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]);
-        let found = tree.locate_in_envelope_intersecting_int(&query, |c| {
-            let b1 = build_ring[c.idx];
-            let b2 = build_ring[(c.idx + 1) % n_build];
-            if edges_intersect_general(a1, a2, b1, b2, eps) {
-                std::ops::ControlFlow::Break(())
+        for i in 0..n_query {
+            let a1 = query_ring[i];
+            let a2 = query_ring[(i + 1) % n_query];
+            let (lo_x, hi_x) = if a1.x < a2.x {
+                (a1.x, a2.x)
             } else {
-                std::ops::ControlFlow::<(), ()>::Continue(())
+                (a2.x, a1.x)
+            };
+            let (lo_y, hi_y) = if a1.y < a2.y {
+                (a1.y, a2.y)
+            } else {
+                (a2.y, a1.y)
+            };
+            let query = rstar::AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]);
+            let found = tree.locate_in_envelope_intersecting_int(&query, |c| {
+                let b1 = build_ring[c.idx];
+                let b2 = build_ring[(c.idx + 1) % n_build];
+                if edges_intersect_general(a1, a2, b1, b2, eps) {
+                    std::ops::ControlFlow::Break(())
+                } else {
+                    std::ops::ControlFlow::<(), ()>::Continue(())
+                }
+            });
+            if found.is_break() {
+                return true;
             }
-        });
-        if found.is_break() {
-            return true;
+        }
+    }
+    #[cfg(not(feature = "rstar"))]
+    {
+        for i in 0..n1 {
+            let a1 = ring1[i];
+            let a2 = ring1[(i + 1) % n1];
+            for j in 0..n2 {
+                let b1 = ring2[j];
+                let b2 = ring2[(j + 1) % n2];
+                if edges_intersect_general(a1, a2, b1, b2, eps) {
+                    return true;
+                }
+            }
         }
     }
     false
@@ -647,49 +690,68 @@ pub(crate) fn check_holes_valid(
         }
 
         // --- nesting check ---
-        struct HoleEnv2 {
-            idx: usize,
-            env: AABB<[f64; 2]>,
-        }
-        impl RTreeObject for HoleEnv2 {
-            type Envelope = AABB<[f64; 2]>;
-            fn envelope(&self) -> Self::Envelope {
-                self.env
+        #[cfg(feature = "rstar")]
+        {
+            struct HoleEnv2 {
+                idx: usize,
+                env: rstar::AABB<[f64; 2]>,
             }
-        }
-        let mut envs = Vec::with_capacity(holes.len());
-        for (i, h) in holes.iter().enumerate() {
-            let first = h.first().map(|c| (c.x, c.y)).unwrap_or((0.0, 0.0));
-            let (mut min_x, mut max_x, mut min_y, mut max_y) = (first.0, first.0, first.1, first.1);
-            for c in *h {
-                min_x = min_x.min(c.x);
-                max_x = max_x.max(c.x);
-                min_y = min_y.min(c.y);
-                max_y = max_y.max(c.y);
-            }
-            envs.push(HoleEnv2 {
-                idx: i,
-                env: AABB::from_corners([min_x, min_y], [max_x, max_y]),
-            });
-        }
-        let tree = RTree::bulk_load(envs);
-        for (i, h2) in holes.iter().enumerate() {
-            let Some(pt) = h2.first().copied() else {
-                continue;
-            };
-            let query = AABB::from_corners([pt.x, pt.y], [pt.x, pt.y]);
-            let mut overlaps = false;
-            let _ = tree.locate_in_envelope_intersecting_int(&query, |c| {
-                if c.idx != i && point_in_ring_exclusive(pt, holes[c.idx]) {
-                    overlaps = true;
-                    std::ops::ControlFlow::Break(())
-                } else {
-                    std::ops::ControlFlow::<(), ()>::Continue(())
+            impl rstar::RTreeObject for HoleEnv2 {
+                type Envelope = rstar::AABB<[f64; 2]>;
+                fn envelope(&self) -> Self::Envelope {
+                    self.env
                 }
-            });
-            if overlaps {
-                errors.push(GeometryValidationError::NestedHoles);
-                return errors;
+            }
+            let mut envs = Vec::with_capacity(holes.len());
+            for (i, h) in holes.iter().enumerate() {
+                let first = h.first().map(|c| (c.x, c.y)).unwrap_or((0.0, 0.0));
+                let (mut min_x, mut max_x, mut min_y, mut max_y) =
+                    (first.0, first.0, first.1, first.1);
+                for c in *h {
+                    min_x = min_x.min(c.x);
+                    max_x = max_x.max(c.x);
+                    min_y = min_y.min(c.y);
+                    max_y = max_y.max(c.y);
+                }
+                envs.push(HoleEnv2 {
+                    idx: i,
+                    env: rstar::AABB::from_corners([min_x, min_y], [max_x, max_y]),
+                });
+            }
+            let tree = rstar::RTree::bulk_load(envs);
+            for (i, h2) in holes.iter().enumerate() {
+                let Some(pt) = h2.first().copied() else {
+                    continue;
+                };
+                let query = rstar::AABB::from_corners([pt.x, pt.y], [pt.x, pt.y]);
+                let mut overlaps = false;
+                let _ = tree.locate_in_envelope_intersecting_int(&query, |c| {
+                    if c.idx != i && point_in_ring_exclusive(pt, holes[c.idx]) {
+                        overlaps = true;
+                        std::ops::ControlFlow::Break(())
+                    } else {
+                        std::ops::ControlFlow::<(), ()>::Continue(())
+                    }
+                });
+                if overlaps {
+                    errors.push(GeometryValidationError::NestedHoles);
+                    return errors;
+                }
+            }
+        }
+        #[cfg(not(feature = "rstar"))]
+        {
+            for i in 0..holes.len() {
+                for j in 0..holes.len() {
+                    if i == j {
+                        continue;
+                    }
+                    if let Some(pt) = holes[j].first().copied()
+                        && point_in_ring_exclusive(pt, holes[i]) {
+                        errors.push(GeometryValidationError::NestedHoles);
+                        return errors;
+                    }
+                }
             }
         }
     }
@@ -822,41 +884,57 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
         return false;
     }
 
-    // R-tree path for long linestrings
-    let tree = build_ls_edge_tree(coords);
-    for i in 0..n {
-        let a1 = coords[i];
-        let a2 = coords[i + 1];
-        let (lo_x, hi_x) = if a1.x < a2.x {
-            (a1.x, a2.x)
-        } else {
-            (a2.x, a1.x)
-        };
-        let (lo_y, hi_y) = if a1.y < a2.y {
-            (a1.y, a2.y)
-        } else {
-            (a2.y, a1.y)
-        };
-        let query = AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]);
-        let found = tree.locate_in_envelope_intersecting_int(&query, |c| {
-            let j = c.idx;
-            // Skip same edge, adjacent edges, and edges already checked
-            if j <= i + 1 {
-                return std::ops::ControlFlow::<(), ()>::Continue(());
-            }
-            let b1 = coords[j];
-            let b2 = coords[j + 1];
-            if edges_intersect_general(a1, a2, b1, b2, eps) {
-                std::ops::ControlFlow::Break(())
+    #[cfg(feature = "rstar")]
+    {
+        let tree = build_ls_edge_tree(coords);
+        for i in 0..n {
+            let a1 = coords[i];
+            let a2 = coords[i + 1];
+            let (lo_x, hi_x) = if a1.x < a2.x {
+                (a1.x, a2.x)
             } else {
-                std::ops::ControlFlow::<(), ()>::Continue(())
+                (a2.x, a1.x)
+            };
+            let (lo_y, hi_y) = if a1.y < a2.y {
+                (a1.y, a2.y)
+            } else {
+                (a2.y, a1.y)
+            };
+            let query = rstar::AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]);
+            let found = tree.locate_in_envelope_intersecting_int(&query, |c| {
+                let j = c.idx;
+                if j <= i + 1 {
+                    return std::ops::ControlFlow::<(), ()>::Continue(());
+                }
+                let b1 = coords[j];
+                let b2 = coords[j + 1];
+                if edges_intersect_general(a1, a2, b1, b2, eps) {
+                    std::ops::ControlFlow::Break(())
+                } else {
+                    std::ops::ControlFlow::<(), ()>::Continue(())
+                }
+            });
+            if found.is_break() {
+                return true;
             }
-        });
-        if found.is_break() {
-            return true;
         }
+        false
     }
-    false
+    #[cfg(not(feature = "rstar"))]
+    {
+        for i in 0..n {
+            let a1 = coords[i];
+            let a2 = coords[i + 1];
+            for j in i + 2..n {
+                let b1 = coords[j];
+                let b2 = coords[j + 1];
+                if edges_intersect_general(a1, a2, b1, b2, eps) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
 }
 
 /// Check whether two LineString components have any intersecting edges.
@@ -887,39 +965,56 @@ pub(crate) fn check_line_components_intersect(
         return false;
     }
 
-    // Build tree over the larger component, query each edge of the smaller
-    let (small, large) = if n1 < n2 { (ls1, ls2) } else { (ls2, ls1) };
-    let n_small = small.len();
-    let tree = build_ls_edge_tree(large);
+    #[cfg(feature = "rstar")]
+    {
+        let (small, large) = if n1 < n2 { (ls1, ls2) } else { (ls2, ls1) };
+        let n_small = small.len();
+        let tree = build_ls_edge_tree(large);
 
-    for i in 0..n_small - 1 {
-        let a1 = small[i];
-        let a2 = small[i + 1];
-        let (lo_x, hi_x) = if a1.x < a2.x {
-            (a1.x, a2.x)
-        } else {
-            (a2.x, a1.x)
-        };
-        let (lo_y, hi_y) = if a1.y < a2.y {
-            (a1.y, a2.y)
-        } else {
-            (a2.y, a1.y)
-        };
-        let query = AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]);
-        let found = tree.locate_in_envelope_intersecting_int(&query, |c| {
-            let b1 = large[c.idx];
-            let b2 = large[c.idx + 1];
-            if edges_intersect_general(a1, a2, b1, b2, eps) {
-                std::ops::ControlFlow::Break(())
+        for i in 0..n_small - 1 {
+            let a1 = small[i];
+            let a2 = small[i + 1];
+            let (lo_x, hi_x) = if a1.x < a2.x {
+                (a1.x, a2.x)
             } else {
-                std::ops::ControlFlow::<(), ()>::Continue(())
+                (a2.x, a1.x)
+            };
+            let (lo_y, hi_y) = if a1.y < a2.y {
+                (a1.y, a2.y)
+            } else {
+                (a2.y, a1.y)
+            };
+            let query = rstar::AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]);
+            let found = tree.locate_in_envelope_intersecting_int(&query, |c| {
+                let b1 = large[c.idx];
+                let b2 = large[c.idx + 1];
+                if edges_intersect_general(a1, a2, b1, b2, eps) {
+                    std::ops::ControlFlow::Break(())
+                } else {
+                    std::ops::ControlFlow::<(), ()>::Continue(())
+                }
+            });
+            if found.is_break() {
+                return true;
             }
-        });
-        if found.is_break() {
-            return true;
         }
+        false
     }
-    false
+    #[cfg(not(feature = "rstar"))]
+    {
+        for i in 0..n1 - 1 {
+            let a1 = ls1[i];
+            let a2 = ls1[i + 1];
+            for j in 0..n2 - 1 {
+                let b1 = ls2[j];
+                let b2 = ls2[j + 1];
+                if edges_intersect_general(a1, a2, b1, b2, eps) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
 }
 
 impl GeoValidation for MultiLineString<f64> {

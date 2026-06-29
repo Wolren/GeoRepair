@@ -218,7 +218,13 @@ fn json_value_to_sql(val: Option<&Value>) -> Box<dyn rusqlite::types::ToSql> {
             }
         }
         Some(Value::Bool(b)) => Box::new(if *b { 1i32 } else { 0i32 }),
-        Some(Value::Array(_) | Value::Object(_)) => Box::new(val.unwrap().to_string()),
+        Some(Value::Array(_) | Value::Object(_)) => {
+            let s = match val {
+                Some(v) => v.to_string(),
+                None => String::new(),
+            };
+            Box::new(s)
+        }
         _ => Box::new(rusqlite::types::Null),
     }
 }

@@ -223,6 +223,11 @@ pub(crate) fn orient2d_batch_4(
     pc: &[Coord<f64>; 4],
 ) -> [f64; 4] {
     #[cfg(target_feature = "avx")]
+    // SAFETY: The `avx` target feature is verified at compile time by
+    // `#[cfg(target_feature = "avx")]`.  Input arrays `pa`, `pb`, `pc` are
+    // on the stack (valid aligned reads).  The output buffer `out` is a
+    // stack-allocated array whose pointer is valid for write via
+    // `_mm256_storeu_pd` (no alignment required).
     unsafe {
         use std::arch::x86_64::*;
         let pbx = _mm256_setr_pd(pb[0].x, pb[1].x, pb[2].x, pb[3].x);
@@ -284,6 +289,10 @@ pub(crate) fn is_ring_ccw_simd(coords: &[Coord<f64>]) -> bool {
                 coords[(i + 3) % n],
                 coords[(i + 4) % n],
             ];
+            // SAFETY: The `avx` target feature is verified at compile time
+            // by `#[cfg(target_feature = "avx")]`.  Input arrays `pb`, `pc`
+            // are stack-local with valid initialized `Coord<f64>` values.
+            // `out` is a stack array; `_mm256_storeu_pd` needs no alignment.
             let batch = unsafe {
                 let pax = _mm256_setzero_pd();
                 let pay = _mm256_setzero_pd();
