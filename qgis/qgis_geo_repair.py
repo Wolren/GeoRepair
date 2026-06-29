@@ -9,15 +9,13 @@
 3. Wheel auto-installs on first run. Manual: pip install <folder>/geo_repair-*.whl
 
 === BEST PRACTICES ===
-- This plugin uses **batched WKB streaming** — iterates features one-by-one
-  via QGIS, batches WKBs into chunks of 500, and sends them to the Rust
-  engine.  Memory is O(1) regardless of input size (handles 1GB+ files).
-- No file-path shortcut that loads everything into memory.
-- Cancellation is checked between every batch.
+- Batched WKB streaming — iterates features one-by-one via QGIS, batches WKBs
+  into chunks, and sends them to the Rust engine.  Memory is O(1).
+- UI stays responsive — processEvents() is called inside batch processing so
+  the progress bar updates and cancellation works mid-batch.
+- Cancellation is checked before and during every batch.
 """
 
-import sys
-import os
 from qgis.core import (
     QgsProcessingAlgorithm,
     QgsProcessingParameterFeatureSource,
@@ -37,7 +35,7 @@ from qgis.PyQt.QtCore import QCoreApplication
 _BATCH_SIZE = 500
 
 
-class GeoRepairAlgo(QgisProcessingAlgorithm):
+class GeoRepairAlgo(QgsProcessingAlgorithm):
     def tr(self, t):
         return QCoreApplication.translate("GeoRepair", t)
 
@@ -100,7 +98,6 @@ class GeoRepairAlgo(QgisProcessingAlgorithm):
     def processAlgorithm(self, params, ctx, fb):
         import geo_repair
 
-        # Disable QGIS's own geometry validation — we handle it.
         no_check = self._invalid_geometry_check_no_check()
         ctx.setInvalidGeometryCheck(no_check)
 
@@ -108,11 +105,12 @@ class GeoRepairAlgo(QgisProcessingAlgorithm):
         mode = self.parameterAsEnum(params, "MODE", ctx)
         midx = self.parameterAsEnum(params, "METHOD", ctx)
         ms = ["auto", "structure", "arrange"]
-        rust_modes = ["both", "validate", "repair"]
+        is_diagnose = mode == 1
+        is_repair_only = mode == 2
 
         tot = src.featureCount() or 0
         fb.pushInfo(
-            "Processing %d features via batched WKB streaming (batch=%d)…"
+            "Processing %d features via batched WKB streaming (batch=%d)\u2026"
             % (tot, _BATCH_SIZE)
         )
 
@@ -124,48 +122,98 @@ class GeoRepairAlgo(QgisProcessingAlgorithm):
         freq = QgsFeatureRequest().setInvalidGeometryCheck(no_check)
 
         has_parallel = hasattr(geo_repair, "par_repair_wkb_batch")
+        has_diag_batch = hasattr(geo_repair, "repair_validate_wkb_batch")
         total_diags = []
+        processed = 0
+
         batch_wkbs = []
         batch_fids = []
         batch_feats = []
 
+        def yield_to_ui():
+            QgsApplication.processEvents()
+
+        def check_cancel():
+            if fb.isCanceled():
+                raise RuntimeError("Canceled by user")
+
+        def update_progress():
+            nonlocal processed
+            if tot > 0:
+                fb.setProgress(int(processed / tot * 100))
+            yield_to_ui()
+
         def flush_batch():
-            nonlocal batch_wkbs, batch_fids, batch_feats
+            nonlocal batch_wkbs, batch_fids, batch_feats, processed, total_diags
             if not batch_wkbs:
                 return
 
+            check_cancel()
+
             try:
-                if mode == 1:
-                    for wkb in batch_wkbs:
-                        _, valid, errors = geo_repair.repair_validate_wkb(wkb, ms[midx])
-                        total_diags.append((valid, errors))
-                elif has_parallel and len(batch_wkbs) >= 4:
-                    results = geo_repair.par_repair_wkb_batch(batch_wkbs, ms[midx])
-                    for fid, feat, out_wkb in zip(batch_fids, batch_feats, results):
-                        if mode != 1 and out_wkb:
-                            self._set_feature_geom(feat, out_wkb)
-                        snk.addFeature(feat, QgsFeatureSink.FastInsert)
-                else:
-                    for fid, feat, wkb in zip(batch_fids, batch_feats, batch_wkbs):
-                        out_wkb, valid, errors = geo_repair.repair_validate_wkb(
-                            wkb, ms[midx]
+                if is_diagnose:
+                    if has_diag_batch:
+                        results = geo_repair.repair_validate_wkb_batch(
+                            batch_wkbs, ms[midx]
                         )
-                        total_diags.append((valid, errors))
-                        if mode != 1 and out_wkb:
+                        total_diags.extend((v, e) for _, v, e in results)
+                    else:
+                        for wkb in batch_wkbs:
+                            _, valid, errors = geo_repair.repair_validate_wkb(
+                                wkb, ms[midx]
+                            )
+                            total_diags.append((valid, errors))
+                            yield_to_ui()
+
+                elif is_repair_only:
+                    if has_parallel and len(batch_wkbs) >= 4:
+                        results = geo_repair.par_repair_wkb_batch(batch_wkbs, ms[midx])
+                    else:
+                        results = geo_repair.repair_wkb_batch(batch_wkbs, ms[midx])
+                    for feat, out_wkb in zip(batch_feats, results):
+                        if out_wkb:
                             self._set_feature_geom(feat, out_wkb)
                         snk.addFeature(feat, QgsFeatureSink.FastInsert)
+
+                else:
+                    if has_diag_batch:
+                        results = geo_repair.repair_validate_wkb_batch(
+                            batch_wkbs, ms[midx]
+                        )
+                        for feat, (out_wkb, valid, errors) in zip(batch_feats, results):
+                            total_diags.append((valid, errors))
+                            if out_wkb:
+                                self._set_feature_geom(feat, out_wkb)
+                            snk.addFeature(feat, QgsFeatureSink.FastInsert)
+                    elif has_parallel and len(batch_wkbs) >= 4:
+                        out_wkbs = geo_repair.par_repair_wkb_batch(batch_wkbs, ms[midx])
+                        for feat, out_wkb in zip(batch_feats, out_wkbs):
+                            if out_wkb:
+                                self._set_feature_geom(feat, out_wkb)
+                            snk.addFeature(feat, QgsFeatureSink.FastInsert)
+                    else:
+                        for feat, wkb in zip(batch_feats, batch_wkbs):
+                            out_wkb, valid, errors = geo_repair.repair_validate_wkb(
+                                wkb, ms[midx]
+                            )
+                            total_diags.append((valid, errors))
+                            if out_wkb:
+                                self._set_feature_geom(feat, out_wkb)
+                            snk.addFeature(feat, QgsFeatureSink.FastInsert)
+                            yield_to_ui()
+
             except RuntimeError:
                 raise
             except Exception as e:
                 fb.reportError("Batch error: %s" % e)
 
+            processed += len(batch_wkbs)
             batch_wkbs = []
             batch_fids = []
             batch_feats = []
 
-        for i, f in enumerate(src.getFeatures(freq)):
-            if fb.isCanceled():
-                raise RuntimeError("Canceled by user")
+        for f in src.getFeatures(freq):
+            check_cancel()
 
             wkb = self._extract_wkb(f)
             batch_wkbs.append(wkb)
@@ -174,20 +222,14 @@ class GeoRepairAlgo(QgisProcessingAlgorithm):
 
             if len(batch_wkbs) >= _BATCH_SIZE:
                 flush_batch()
-
-            if i % _BATCH_SIZE == 0 and tot > 0:
-                fb.setProgress(int(i / tot * 100))
-                QgsApplication.processEvents()
+                update_progress()
 
         flush_batch()
+        update_progress()
         fb.setProgress(100)
 
         self._report_diagnostics(fb, mode, total_diags, tot)
         return {"OUTPUT": dst}
-
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _invalid_geometry_check_no_check():
@@ -215,9 +257,8 @@ class GeoRepairAlgo(QgisProcessingAlgorithm):
 
     @staticmethod
     def _set_feature_geom(feat, wkb_bytes):
-        g = QgsGeometry()
-        g.fromWkb(wkb_bytes)
-        if not g.isEmpty():
+        g = QgsGeometry.fromWkb(wkb_bytes)
+        if g and not g.isEmpty():
             feat.setGeometry(g)
 
     @staticmethod

@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use geo_repair::io::{export_geometries, load_geometries};
+use geo_repair::io::{load_bin, read_wkb, write_wkb};
 use geo_repair::{GeoValidation, MakeValid, MakeValidConfig, PolyMethod};
 
 fn main() {
@@ -8,17 +8,20 @@ fn main() {
     let prog = args.first().map(|s| s.as_str()).unwrap_or("geo-repair-cli");
 
     if args.len() < 3 {
-        eprintln!("Usage: {prog} <input> <output> [--method auto|structure|arrange] [--machine]");
+        eprintln!(
+            "Usage: {prog} <input.wkb|input.bin> <output.wkb> [--method auto|structure|arrange]"
+        );
         eprintln!();
-        eprintln!("Supported formats (auto-detected by extension):");
-        eprintln!("  Input:  .shp, .geojson/.json, .wkt, .wkb, .bin, .csv, .gpkg");
-        eprintln!("  Output: .shp, .geojson/.json, .wkt, .wkb, .csv");
+        eprintln!("Supports:");
+        eprintln!("  Input:  .wkb (concatenated WKB), .bin (custom binary format)");
+        eprintln!("  Output: .wkb (concatenated WKB)");
+        eprintln!();
+        eprintln!("For other formats, use GEOS, GDAL, or QGIS to convert to/from WKB.");
         std::process::exit(1);
     }
 
     let input = &args[1];
     let output = &args[2];
-    let machine = args.iter().any(|a| a == "--machine");
 
     let method = args
         .iter()
@@ -37,12 +40,43 @@ fn main() {
         ..Default::default()
     };
 
+    let ext = input.rsplit('.').next().unwrap_or("wkb");
+
     let t0 = Instant::now();
     eprintln!("Loading {input}...");
-    let geoms = load_geometries(input).unwrap_or_else(|e| {
-        eprintln!("Error: failed to load {input}: {e}");
-        std::process::exit(1);
-    });
+
+    let geoms = match ext {
+        "bin" => {
+            let polys = load_bin(input).unwrap_or_else(|e| {
+                eprintln!("Error: failed to load {input}: {e}");
+                std::process::exit(1);
+            });
+            polys
+                .into_iter()
+                .map(|p| geo::Geometry::Polygon(p))
+                .collect::<Vec<_>>()
+        }
+        _ => {
+            // Assume concatenated WKB
+            let data = std::fs::read(input).unwrap_or_else(|e| {
+                eprintln!("Error: failed to read {input}: {e}");
+                std::process::exit(1);
+            });
+            let mut geoms = Vec::new();
+            let mut offset = 0;
+            while offset < data.len() {
+                let geom = read_wkb(&data[offset..]).unwrap_or_else(|e| {
+                    eprintln!("Error: WKB parse error at offset {offset}: {e}");
+                    std::process::exit(1);
+                });
+                let consumed = geo_repair::io::estimate_wkb_size(&data[offset..])
+                    .unwrap_or_else(|_| data.len() - offset);
+                geoms.push(geom);
+                offset += consumed;
+            }
+            geoms
+        }
+    };
     let load_time = t0.elapsed();
     let total = geoms.len();
     eprintln!("  Loaded {total} geometries in {load_time:.3?}");
@@ -64,22 +98,17 @@ fn main() {
 
     let t0 = Instant::now();
     eprintln!("Writing {output}...");
-    export_geometries(&fixed, output).unwrap_or_else(|e| {
+    let mut out_buf = Vec::new();
+    for g in &fixed {
+        out_buf.extend_from_slice(&write_wkb(g));
+    }
+    std::fs::write(output, &out_buf).unwrap_or_else(|e| {
         eprintln!("Error: failed to write {output}: {e}");
         std::process::exit(1);
     });
     let write_time = t0.elapsed();
-    let bytes = std::fs::metadata(output).map(|m| m.len()).unwrap_or(0);
-    eprintln!("  Wrote {bytes} bytes in {write_time:.3?}");
+    eprintln!("  Wrote {} bytes in {write_time:.3?}", out_buf.len());
 
     let total_elapsed = load_time + fix_time + write_time;
-    if machine {
-        let result = serde_json::json!({
-            "total": total,
-            "invalid": invalid,
-            "bytes": bytes,
-            "time_secs": total_elapsed.as_secs_f64(),
-        });
-        eprintln!("__RESULT__:{result}");
-    }
+    eprintln!("Total: {total_elapsed:.3?}");
 }
