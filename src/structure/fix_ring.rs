@@ -3,6 +3,8 @@ use smallvec::SmallVec;
 
 use geo::{Coord, Line, LineString};
 
+use crate::core;
+use crate::noding;
 use crate::orient::orient2d;
 use log::warn;
 use crate::structure::fix_ring_graph::{
@@ -44,7 +46,7 @@ pub(crate) fn basic_cleanup(ring: &LineString<f64>) -> Option<Vec<Coord<f64>>> {
     if coords.is_empty() {
         return None;
     }
-    let mut deduped = remove_consecutive_duplicates(&coords);
+    let mut deduped = noding::remove_consecutive_duplicates(&coords);
     if deduped.is_empty() {
         return None;
     }
@@ -56,16 +58,6 @@ pub(crate) fn basic_cleanup(ring: &LineString<f64>) -> Option<Vec<Coord<f64>>> {
     }
 
     Some(deduped)
-}
-
-fn remove_consecutive_duplicates(coords: &[Coord<f64>]) -> Vec<Coord<f64>> {
-    let mut result = Vec::with_capacity(coords.len());
-    for c in coords {
-        if result.last() != Some(c) {
-            result.push(*c);
-        }
-    }
-    result
 }
 
 pub(crate) fn has_self_intersections(coords: &[Coord<f64>]) -> bool {
@@ -91,9 +83,9 @@ pub(crate) fn has_self_intersections(coords: &[Coord<f64>]) -> bool {
         max_y = max_y.max(c.y);
     }
     let coord_scale = (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
-    let eps = 1e-12 * coord_scale;
+    let eps = core::EPS * coord_scale;
 
-    if n > 500 {
+    if n > core::GRID_THRESHOLD_N {
         return super::sweep::has_self_intersections(coords, eps);
     }
 
@@ -218,6 +210,7 @@ pub(crate) fn fix_self_intersecting(coords: &[Coord<f64>]) -> Option<Vec<LineStr
     if graph.edges.is_empty() {
         return None;
     }
+    #[cfg(any(test, debug_assertions))]
     if std::env::var("DIAG_FIX_RING").is_ok() {
         eprintln!("\n=== fix_self_intersecting DIAG ===");
         eprintln!("input coords ({}):", coords.len());
@@ -246,6 +239,7 @@ pub(crate) fn fix_self_intersecting(coords: &[Coord<f64>]) -> Option<Vec<LineStr
     if faces.is_empty() {
         return None;
     }
+    #[cfg(any(test, debug_assertions))]
     if std::env::var("DIAG_FIX_RING").is_ok() {
         eprintln!("\nfragments from extract_all_faces ({}):", faces.len());
         for (fi, face) in faces.iter().enumerate() {
@@ -266,6 +260,7 @@ pub(crate) fn fix_self_intersecting(coords: &[Coord<f64>]) -> Option<Vec<LineStr
     if simple_faces.is_empty() {
         return None;
     }
+    #[cfg(any(test, debug_assertions))]
     if std::env::var("DIAG_FIX_RING").is_ok() {
         eprintln!("\nsimple_faces after pinch split ({}):", simple_faces.len());
         for (fi, face) in simple_faces.iter().enumerate() {
@@ -282,6 +277,7 @@ pub(crate) fn fix_self_intersecting(coords: &[Coord<f64>]) -> Option<Vec<LineStr
         }
     }
     let interior = label_interior_faces(&noded, &graph.verts, coords, &simple_faces, &graph.edges)?;
+    #[cfg(any(test, debug_assertions))]
     if std::env::var("DIAG_FIX_RING").is_ok() {
         eprintln!(
             "\ninterior faces: {:?}",
@@ -297,6 +293,7 @@ pub(crate) fn fix_self_intersecting(coords: &[Coord<f64>]) -> Option<Vec<LineStr
             .collect();
         if ring_coords.len() >= 3 {
             ring_coords.push(ring_coords[0]);
+            #[cfg(any(test, debug_assertions))]
             if std::env::var("DIAG_FIX_RING").is_ok() {
                 eprintln!("  interior ring coords ({}):", ring_coords.len());
                 let visited: Vec<usize> = face.iter().map(|&(_, to)| to).collect();
@@ -334,15 +331,15 @@ pub(crate) fn split_edges(edges: &[Line<f64>]) -> Vec<Line<f64>> {
         max_y = max_y.max(e.start.y).max(e.end.y);
     }
     let coord_scale = (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
-    let eps = 1e-12 * coord_scale;
+    let eps = core::EPS * coord_scale;
 
-    if n > 500 {
+    if n > core::GRID_THRESHOLD_N {
         split_edges_grid(edges, &mut split_points, eps);
     } else {
         split_edges_bruteforce(edges, &mut split_points, eps);
     }
 
-    let eps_param = 1e-14;
+    let eps_param = core::EPS_PARAM;
     let mut result = Vec::new();
     for i in 0..n {
         let e = edges[i];
@@ -493,10 +490,9 @@ fn build_edge_grid(edges: &[Line<f64>]) -> Vec<Vec<usize>> {
         max_y = max_y.max(e.start.y).max(e.end.y);
     }
 
-    let eps = 1e-12;
     let dx = max_x - min_x;
     let dy = max_y - min_y;
-    if dx < eps || dy < eps {
+    if dx < core::EPS || dy < core::EPS {
         return vec![(0..n).collect()];
     }
 

@@ -327,24 +327,120 @@ pub(crate) fn check_edge_pair_intersection(
     edges_intersect_general(a1, a2, b1, b2, eps)
 }
 
+/// Minimal edge-index wrapper for R-tree intersection queries.
+struct EdgeIdx {
+    idx: usize,
+    env: AABB<[f64; 2]>,
+}
+impl RTreeObject for EdgeIdx {
+    type Envelope = AABB<[f64; 2]>;
+    fn envelope(&self) -> Self::Envelope {
+        self.env
+    }
+}
+
+/// Build an R-tree over a ring's edges (wrapping at len-1 for closing point).
+fn build_ring_edge_tree(ring: &[Coord<f64>]) -> RTree<EdgeIdx> {
+    let n = ring.len() - 1;
+    RTree::bulk_load(
+        (0..n)
+            .map(|i| {
+                let a = ring[i];
+                let b = ring[(i + 1) % n];
+                let (lo_x, hi_x) = if a.x < b.x { (a.x, b.x) } else { (b.x, a.x) };
+                let (lo_y, hi_y) = if a.y < b.y { (a.y, b.y) } else { (b.y, a.y) };
+                EdgeIdx {
+                    idx: i,
+                    env: AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]),
+                }
+            })
+            .collect(),
+    )
+}
+
+/// Build an R-tree over a linestring's segments (non-ring, no wrap-around).
+fn build_ls_edge_tree(coords: &[Coord<f64>]) -> RTree<EdgeIdx> {
+    let n = coords.len() - 1;
+    if n < 1 {
+        return RTree::bulk_load(Vec::new());
+    }
+    RTree::bulk_load(
+        (0..n)
+            .map(|i| {
+                let a = coords[i];
+                let b = coords[i + 1];
+                let (lo_x, hi_x) = if a.x < b.x { (a.x, b.x) } else { (b.x, a.x) };
+                let (lo_y, hi_y) = if a.y < b.y { (a.y, b.y) } else { (b.y, a.y) };
+                EdgeIdx {
+                    idx: i,
+                    env: AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]),
+                }
+            })
+            .collect(),
+    )
+}
+
 /// Check whether two rings (from different polygons) have any intersecting edges.
 /// Touching at a single vertex is allowed (OGC), but crossing, overlapping, or
 /// touching along an edge is not.
 pub(crate) fn check_rings_intersect(ring1: &[Coord<f64>], ring2: &[Coord<f64>], eps: f64) -> bool {
-    let n1 = ring1.len() - 1;
-    let n2 = ring2.len() - 1;
+    let n1 = ring1.len().max(2) - 1;
+    let n2 = ring2.len().max(2) - 1;
     if n1 < 2 || n2 < 2 {
         return false;
     }
-    for i in 0..n1 {
-        let a1 = ring1[i];
-        let a2 = ring1[(i + 1) % n1];
-        for j in 0..n2 {
-            let b1 = ring2[j];
-            let b2 = ring2[(j + 1) % n2];
-            if edges_intersect_general(a1, a2, b1, b2, eps) {
-                return true;
+
+    // Brute-force when both rings are small — faster than building a tree.
+    if n1.max(n2) <= 64 {
+        for i in 0..n1 {
+            let a1 = ring1[i];
+            let a2 = ring1[(i + 1) % n1];
+            for j in 0..n2 {
+                let b1 = ring2[j];
+                let b2 = ring2[(j + 1) % n2];
+                if edges_intersect_general(a1, a2, b1, b2, eps) {
+                    return true;
+                }
             }
+        }
+        return false;
+    }
+
+    // Large rings: build tree over the smaller ring, query each edge of the
+    // larger ring via envelope intersection.
+    let (build_ring, query_ring, n_query) = if n1 < n2 {
+        (ring1, ring2, n2)
+    } else {
+        (ring2, ring1, n1)
+    };
+    let n_build = build_ring.len() - 1;
+    let tree = build_ring_edge_tree(build_ring);
+
+    for i in 0..n_query {
+        let a1 = query_ring[i];
+        let a2 = query_ring[(i + 1) % n_query];
+        let (lo_x, hi_x) = if a1.x < a2.x {
+            (a1.x, a2.x)
+        } else {
+            (a2.x, a1.x)
+        };
+        let (lo_y, hi_y) = if a1.y < a2.y {
+            (a1.y, a2.y)
+        } else {
+            (a2.y, a1.y)
+        };
+        let query = AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]);
+        let found = tree.locate_in_envelope_intersecting_int(&query, |c| {
+            let b1 = build_ring[c.idx];
+            let b2 = build_ring[(c.idx + 1) % n_build];
+            if edges_intersect_general(a1, a2, b1, b2, eps) {
+                std::ops::ControlFlow::Break(())
+            } else {
+                std::ops::ControlFlow::<(), ()>::Continue(())
+            }
+        });
+        if found.is_break() {
+            return true;
         }
     }
     false
@@ -403,6 +499,49 @@ pub(crate) fn point_on_ring(pt: Coord<f64>, ring: &[Coord<f64>], eps: f64) -> bo
         }
     }
     false
+}
+
+/// Fast rotation-invariant fingerprint for duplicate ring detection.
+///
+/// Finds the index of the lexicographically-minimum coordinate, hashes the
+/// ring starting from that index in both forward and reverse directions, and
+/// XORs the two hashes together.  Two rings that are rotated duplicates will
+/// produce the same fingerprint regardless of winding order.
+pub(crate) fn ring_dup_fingerprint(ring: &[Coord<f64>]) -> (usize, u64) {
+    let n = ring.len() - 1;
+    if n == 0 {
+        return (ring.len(), 0);
+    }
+    let min_idx = {
+        let mut idx = 0usize;
+        for i in 1..n {
+            let c = ring[i];
+            let m = ring[idx];
+            if c.x < m.x || (c.x == m.x && c.y < m.y) {
+                idx = i;
+            }
+        }
+        idx
+    };
+    let mut h_fwd = 0u64;
+    let mut h_rev = 0u64;
+    for i in 0..n {
+        let c = ring[(min_idx + i) % n];
+        h_fwd = h_fwd
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(c.x.to_bits());
+        h_fwd = h_fwd
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(c.y.to_bits());
+        let d = ring[(min_idx + n - i) % n];
+        h_rev = h_rev
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(d.x.to_bits());
+        h_rev = h_rev
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(d.y.to_bits());
+    }
+    (ring.len(), h_fwd ^ h_rev)
 }
 
 /// Check whether two rings (with closing point) are duplicates starting at a
@@ -667,18 +806,54 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
     };
     let eps = 1e-12 * scale;
 
+    // Brute force for small inputs
+    if n <= 64 {
+        for i in 0..n {
+            let a1 = coords[i];
+            let a2 = coords[i + 1];
+            for j in i + 2..n {
+                let b1 = coords[j];
+                let b2 = coords[j + 1];
+                if edges_intersect_general(a1, a2, b1, b2, eps) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    // R-tree path for long linestrings
+    let tree = build_ls_edge_tree(coords);
     for i in 0..n {
         let a1 = coords[i];
         let a2 = coords[i + 1];
-        for j in i + 2..n {
-            if j == 0 {
-                continue;
+        let (lo_x, hi_x) = if a1.x < a2.x {
+            (a1.x, a2.x)
+        } else {
+            (a2.x, a1.x)
+        };
+        let (lo_y, hi_y) = if a1.y < a2.y {
+            (a1.y, a2.y)
+        } else {
+            (a2.y, a1.y)
+        };
+        let query = AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]);
+        let found = tree.locate_in_envelope_intersecting_int(&query, |c| {
+            let j = c.idx;
+            // Skip same edge, adjacent edges, and edges already checked
+            if j <= i + 1 {
+                return std::ops::ControlFlow::<(), ()>::Continue(());
             }
             let b1 = coords[j];
             let b2 = coords[j + 1];
             if edges_intersect_general(a1, a2, b1, b2, eps) {
-                return true;
+                std::ops::ControlFlow::Break(())
+            } else {
+                std::ops::ControlFlow::<(), ()>::Continue(())
             }
+        });
+        if found.is_break() {
+            return true;
         }
     }
     false
@@ -695,15 +870,53 @@ pub(crate) fn check_line_components_intersect(
     if n1 < 2 || n2 < 2 {
         return false;
     }
-    for i in 0..n1 - 1 {
-        let a1 = ls1[i];
-        let a2 = ls1[i + 1];
-        for j in 0..n2 - 1 {
-            let b1 = ls2[j];
-            let b2 = ls2[j + 1];
-            if edges_intersect_general(a1, a2, b1, b2, eps) {
-                return true;
+
+    // Brute force when both components are small
+    if n1.max(n2) <= 64 {
+        for i in 0..n1 - 1 {
+            let a1 = ls1[i];
+            let a2 = ls1[i + 1];
+            for j in 0..n2 - 1 {
+                let b1 = ls2[j];
+                let b2 = ls2[j + 1];
+                if edges_intersect_general(a1, a2, b1, b2, eps) {
+                    return true;
+                }
             }
+        }
+        return false;
+    }
+
+    // Build tree over the larger component, query each edge of the smaller
+    let (small, large) = if n1 < n2 { (ls1, ls2) } else { (ls2, ls1) };
+    let n_small = small.len();
+    let tree = build_ls_edge_tree(large);
+
+    for i in 0..n_small - 1 {
+        let a1 = small[i];
+        let a2 = small[i + 1];
+        let (lo_x, hi_x) = if a1.x < a2.x {
+            (a1.x, a2.x)
+        } else {
+            (a2.x, a1.x)
+        };
+        let (lo_y, hi_y) = if a1.y < a2.y {
+            (a1.y, a2.y)
+        } else {
+            (a2.y, a1.y)
+        };
+        let query = AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]);
+        let found = tree.locate_in_envelope_intersecting_int(&query, |c| {
+            let b1 = large[c.idx];
+            let b2 = large[c.idx + 1];
+            if edges_intersect_general(a1, a2, b1, b2, eps) {
+                std::ops::ControlFlow::Break(())
+            } else {
+                std::ops::ControlFlow::<(), ()>::Continue(())
+            }
+        });
+        if found.is_break() {
+            return true;
         }
     }
     false
@@ -722,15 +935,16 @@ impl GeoValidation for MultiLineString<f64> {
         }
         // OGC Simple Features: MultiLineString must not contain duplicate linestrings
         if self.0.len() > 1 {
-            for i in 0..self.0.len() {
-                for j in (i + 1)..self.0.len() {
-                    if self.0[i].0 == self.0[j].0 {
-                        errors.push(GeometryValidationError::MultiLineStringDuplicateLines);
-                        // Report only once
-                        if !errors.is_empty() {
-                            return ValidationResult::invalid(errors);
-                        }
-                    }
+            let mut seen: rustc_hash::FxHashSet<Vec<(u64, u64)>> =
+                rustc_hash::FxHashSet::with_capacity_and_hasher(self.0.len(), Default::default());
+            for ls in &self.0 {
+                let key: Vec<(u64, u64)> =
+                    ls.0.iter()
+                        .map(|c| (c.x.to_bits(), c.y.to_bits()))
+                        .collect();
+                if !seen.insert(key) {
+                    errors.push(GeometryValidationError::MultiLineStringDuplicateLines);
+                    return ValidationResult::invalid(errors);
                 }
             }
         }

@@ -4,6 +4,29 @@ use thiserror::Error;
 use crate::crs::Crs;
 
 // ---------------------------------------------------------------------------
+// Numeric constants
+// ---------------------------------------------------------------------------
+
+/// Default geometric epsilon for robust equality / zero checks.
+pub(crate) const EPS: f64 = 1e-12;
+
+/// Epsilon for parametric (t/u) intersection comparisons.
+pub(crate) const EPS_PARAM: f64 = 1e-14;
+
+/// Vertex count threshold above which grid-based spatial indexing is used
+/// instead of brute-force O(n²) checks for self-intersection detection
+/// and edge splitting. At n=2000 the brute-force 2M pair checks completes
+/// in ~5ms for most geometries, well below the cost of grid construction.
+pub(crate) const GRID_THRESHOLD_N: usize = 2000;
+
+/// Maximum total vertices for the fast-path validity check in fix_polygon.
+/// Larger polygons fall through to the full repair pipeline.
+pub(crate) const FAST_PATH_MAX_VERTS: usize = 50000;
+
+/// Snap scale factor for integer-keyed graph construction.
+pub(crate) const SNAP_SCALE: f64 = 1e8;
+
+// ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
 

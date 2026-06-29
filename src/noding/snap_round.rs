@@ -77,6 +77,30 @@ impl HotPixel {
     }
 }
 
+/// R-tree entry for a hot pixel center, used to accelerate segment-vs-hot-pixel
+/// queries from O(segments × hot_pixels) to O(segments × log(hot_pixels)).
+struct HpEntry {
+    center: Coord<f64>,
+    env: AABB<[f64; 2]>,
+}
+
+impl HpEntry {
+    fn new(center: Coord<f64>) -> Self {
+        let r = HOT_PIXEL_RADIUS;
+        HpEntry {
+            center,
+            env: AABB::from_corners([center.x - r, center.y - r], [center.x + r, center.y + r]),
+        }
+    }
+}
+
+impl RTreeObject for HpEntry {
+    type Envelope = AABB<[f64; 2]>;
+    fn envelope(&self) -> Self::Envelope {
+        self.env
+    }
+}
+
 // ── MCIndex: monotone-chain spatial indexing for O(n log n) intersection ──
 
 /// Direction quadrant (0-3) for a segment vector.
@@ -394,19 +418,37 @@ impl SnapRoundingNoder {
             }
         }
 
+        // Build R-tree over hot pixels for spatial queries
+        let hp_entries: Vec<HpEntry> = self
+            .hot_pixels
+            .values()
+            .map(|hp| HpEntry::new(hp.center))
+            .collect();
+        let hp_tree = RTree::bulk_load(hp_entries);
+
         // Step 4 & 5: Subdivide each segment at hot pixels and snap to grid
         let eps = 1e-14;
         let mut result: Vec<Line<f64>> = Vec::new();
+        let hp_r = HOT_PIXEL_RADIUS;
         for seg in segments {
             let mut params: Vec<f64> = Vec::new();
             params.push(0.0);
             params.push(1.0);
 
-            for hp in self.hot_pixels.values() {
+            let lo_x = seg.start.x.min(seg.end.x) - hp_r;
+            let hi_x = seg.start.x.max(seg.end.x) + hp_r;
+            let lo_y = seg.start.y.min(seg.end.y) - hp_r;
+            let hi_y = seg.start.y.max(seg.end.y) + hp_r;
+            let query = AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]);
+            let _ = hp_tree.locate_in_envelope_intersecting_int(&query, |entry| {
+                let hp = HotPixel {
+                    center: entry.center,
+                };
                 if hp.touches(seg) {
                     params.push(hp.closest_param(seg));
                 }
-            }
+                std::ops::ControlFlow::<(), ()>::Continue(())
+            });
 
             params.sort_by(|a, b| a.to_bits().cmp(&b.to_bits()));
             params.dedup_by(|a, b| (*a - *b).abs() < eps);

@@ -33,14 +33,32 @@ impl GeoValidation for Polygon<f64> {
         let interiors: Vec<&[Coord<f64>]> = self.interiors().iter().map(|h| &h.0[..]).collect();
 
         // Check for duplicate rings (including rotated-start duplicates)
-        for (i, h1) in interiors.iter().enumerate() {
-            for h2 in interiors.iter().skip(i + 1) {
-                if is_rotated_duplicate(h1, h2) {
-                    errors.push(GeometryValidationError::DuplicatedRings);
-                    return ValidationResult::invalid(errors);
+        // Use fingerprint grouping to avoid O(h²) pairwise checks.
+        if interiors.len() > 1 {
+            let mut groups: rustc_hash::FxHashMap<(usize, u64), Vec<usize>> =
+                rustc_hash::FxHashMap::with_capacity_and_hasher(
+                    interiors.len(),
+                    Default::default(),
+                );
+            for (i, h) in interiors.iter().enumerate() {
+                groups.entry(ring_dup_fingerprint(h)).or_default().push(i);
+            }
+            for (_, indices) in groups {
+                for (ii, &a) in indices.iter().enumerate() {
+                    for &b in indices.iter().skip(ii + 1) {
+                        if is_rotated_duplicate(interiors[a], interiors[b]) {
+                            errors.push(GeometryValidationError::DuplicatedRings);
+                            return ValidationResult::invalid(errors);
+                        }
+                    }
                 }
             }
-            if is_rotated_duplicate(h1, &self.exterior().0) {
+        }
+        // Also check each hole against the shell
+        for h in &interiors {
+            if ring_dup_fingerprint(h) == ring_dup_fingerprint(&self.exterior().0)
+                && is_rotated_duplicate(h, &self.exterior().0)
+            {
                 errors.push(GeometryValidationError::DuplicatedRings);
                 return ValidationResult::invalid(errors);
             }
@@ -83,11 +101,20 @@ impl GeoValidation for MultiPolygon<f64> {
         let shells: Vec<&[Coord<f64>]> = self.0.iter().map(|p| &p.exterior().0[..]).collect();
 
         // Check for duplicate shells (including rotated-start duplicates)
-        for i in 0..shells.len() {
-            for j in (i + 1)..shells.len() {
-                if is_rotated_duplicate(shells[i], shells[j]) {
-                    errors.push(GeometryValidationError::DuplicatedRings);
-                    return ValidationResult::invalid(errors);
+        if shells.len() > 1 {
+            let mut groups: rustc_hash::FxHashMap<(usize, u64), Vec<usize>> =
+                rustc_hash::FxHashMap::with_capacity_and_hasher(shells.len(), Default::default());
+            for (i, s) in shells.iter().enumerate() {
+                groups.entry(ring_dup_fingerprint(s)).or_default().push(i);
+            }
+            for (_, indices) in groups {
+                for (ii, &a) in indices.iter().enumerate() {
+                    for &b in indices.iter().skip(ii + 1) {
+                        if is_rotated_duplicate(shells[a], shells[b]) {
+                            errors.push(GeometryValidationError::DuplicatedRings);
+                            return ValidationResult::invalid(errors);
+                        }
+                    }
                 }
             }
         }

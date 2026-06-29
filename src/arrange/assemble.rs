@@ -2,20 +2,14 @@ use geo::coordinate_position::{coord_pos_relative_to_ring, CoordPos};
 use geo::{LineString, MultiPolygon, Polygon, Winding};
 use rstar::{RTree, RTreeObject, AABB};
 
-fn shoelace_sum(ring: &geo::LineString<f64>) -> f64 {
-    let mut sum = 0.0;
-    for w in ring.0.windows(2) {
-        sum += w[0].x * w[1].y - w[1].x * w[0].y;
-    }
-    sum
-}
+use crate::util;
 
 pub(crate) fn assemble_polygons(rings: Vec<geo::LineString<f64>>) -> geo::MultiPolygon<f64> {
     let mut exteriors: Vec<LineString<f64>> = Vec::new();
     let mut holes: Vec<LineString<f64>> = Vec::new();
 
     for ring in &rings {
-        let sum = shoelace_sum(ring);
+        let sum = util::shoelace_sum(&ring.0);
         if sum > 0.0 {
             exteriors.push(ring.clone());
         } else if sum < 0.0 {
@@ -108,6 +102,7 @@ pub(crate) fn assemble_polygons(rings: Vec<geo::LineString<f64>>) -> geo::MultiP
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util;
     use geo::Coord;
 
     #[test]
@@ -119,8 +114,8 @@ mod tests {
             Coord { x: 0.0, y: 1.0 },
             Coord { x: 0.0, y: 0.0 },
         ]);
-        let sum = shoelace_sum(&ring);
-        assert!(sum > 0.0); // CCW winding -> positive area
+        let sum = util::shoelace_sum(&ring.0);
+        assert!(sum > 0.0);
     }
 
     #[test]
@@ -132,8 +127,8 @@ mod tests {
             Coord { x: 1.0, y: 0.0 },
             Coord { x: 0.0, y: 0.0 },
         ]);
-        let sum = shoelace_sum(&ring);
-        assert!(sum < 0.0); // CW winding -> negative area
+        let sum = util::shoelace_sum(&ring.0);
+        assert!(sum < 0.0);
     }
 
     #[test]
@@ -144,14 +139,14 @@ mod tests {
             Coord { x: 2.0, y: 2.0 },
             Coord { x: 0.0, y: 0.0 },
         ]);
-        let sum = shoelace_sum(&ring);
+        let sum = util::shoelace_sum(&ring.0);
         assert_eq!(sum, 0.0);
     }
 
     #[test]
     fn test_shoelace_sum_single() {
         let ring = LineString::new(vec![Coord { x: 0.0, y: 0.0 }, Coord { x: 0.0, y: 0.0 }]);
-        let sum = shoelace_sum(&ring);
+        let sum = util::shoelace_sum(&ring.0);
         assert_eq!(sum, 0.0);
     }
 

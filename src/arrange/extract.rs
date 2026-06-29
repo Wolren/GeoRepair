@@ -93,14 +93,20 @@ pub(crate) fn split_ring_at_pinch_points(mut coords: Vec<Coord<f64>>) -> Vec<Vec
     }
 
     let mut result: Vec<Vec<Coord<f64>>> = Vec::new();
+    let mut seen: rustc_hash::FxHashMap<(u64, u64), usize> =
+        rustc_hash::FxHashMap::with_capacity_and_hasher(coords.len(), Default::default());
     loop {
-        let repeat = coords.iter().enumerate().find_map(|(i, c)| {
-            coords[i + 1..]
-                .iter()
-                .position(|other| other == c)
-                .map(|j| (i, i + 1 + j))
+        seen.clear();
+        let pinch = coords.iter().enumerate().find_map(|(i, c)| {
+            let key = (c.x.to_bits(), c.y.to_bits());
+            if let Some(&prev) = seen.get(&key) {
+                Some((prev, i))
+            } else {
+                seen.insert(key, i);
+                None
+            }
         });
-        match repeat {
+        match pinch {
             Some((first, second)) => {
                 let sub: Vec<Coord<f64>> = coords[first..=second].to_vec();
                 coords.drain((first + 1)..=second);

@@ -5,17 +5,17 @@ use std::collections::VecDeque;
 #[cfg_attr(not(test), allow(unused_imports))]
 use geo::{Coord, Line, LineString};
 
+use crate::core;
 use crate::orient::orient2d;
 
 /// ---------------------------------------------------------------------------
 /// Graph construction
 /// ---------------------------------------------------------------------------
-const SNAP_SCALE: f64 = 1e8;
 
 #[inline(always)]
 fn snap_key(c: Coord<f64>) -> (i64, i64) {
-    let sx = c.x * SNAP_SCALE;
-    let sy = c.y * SNAP_SCALE;
+    let sx = c.x * core::SNAP_SCALE;
+    let sy = c.y * core::SNAP_SCALE;
     let x = if sx.is_finite() {
         sx.round().clamp(i64::MIN as f64, i64::MAX as f64) as i64
     } else {
@@ -32,8 +32,8 @@ fn snap_key(c: Coord<f64>) -> (i64, i64) {
 #[inline(always)]
 fn key_to_coord(key: (i64, i64)) -> Coord<f64> {
     Coord {
-        x: key.0 as f64 / SNAP_SCALE,
-        y: key.1 as f64 / SNAP_SCALE,
+        x: key.0 as f64 / core::SNAP_SCALE,
+        y: key.1 as f64 / core::SNAP_SCALE,
     }
 }
 
@@ -366,6 +366,7 @@ fn face_winding(
             wn -= 1;
         }
     }
+    #[cfg(any(test, debug_assertions))]
     if std::env::var("DIAG_FIX_RING").is_ok() {
         let vert_indices: Vec<usize> = face.iter().map(|&(_, to)| to).collect();
         eprintln!(
