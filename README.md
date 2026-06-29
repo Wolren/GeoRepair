@@ -5,8 +5,8 @@
 ![MSRV](https://img.shields.io/badge/rustc-1.95+-ab6000.svg)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://github.com/georust/geo-repair?tab=License-1-ov-file)
 
-**Fix invalid GIS geometries** — detects and repairs broken polygons, lines, and points
-with per-type optimal algorithms. Aims for **OGC Simple Features compliance**.
+Detects and repairs invalid polygon, line, and point geometries. Uses algorithms
+selected by geometry type to produce OGC Simple Features-compliant output.
 
 ## Getting started
 
@@ -193,7 +193,7 @@ cargo bench --features bench-criterion --bench criterion
 
 # Real-world dataset (GEOS comparison via bench-geos feature)
 ./scripts/fetch-geos-src.sh               # fetch geos-src crate (once)
-scripts/bench-geos.ps1                    # Windows — auto-detects conda GEOS
+scripts/bench-geos.ps1                    # Windows - auto-detects conda GEOS
 # or manually:
 $env:BENCH_FILE = "benches/real_world/data_0.bin"
 cargo bench --features bench-geos --bench real_world
@@ -220,7 +220,7 @@ so the build system can compile the GEOS C++ library for benchmark comparison.
 
 Requires GEOS installed on the system (for benchmark comparisons only).
 
-**Windows (conda)** — install, then use the script or set paths manually:
+**Windows (conda)** - install, then use the script or set paths manually:
 
 ```shell
 conda install -c conda-forge geos
@@ -228,7 +228,7 @@ conda install -c conda-forge geos
 .\scripts\bench-geos.ps1
 ```
 
-**Linux/macOS** — use your system package manager:
+**Linux/macOS** - use your system package manager:
 
 ```shell
 # Debian/Ubuntu
@@ -241,7 +241,7 @@ brew install geos
 ./scripts/bench-geos.sh
 ```
 
-> **Note**: The `fetch-geos-src` script is idempotent — it's safe to run multiple
+> **Note**: The `fetch-geos-src` script is idempotent - it's safe to run multiple
 > times. It skips the download if `patches/geos-src/` already contains a valid
 > `geos-src` installation.
 
@@ -250,12 +250,12 @@ brew install geos
 Use the `parallel` feature (enabled by default) for multi-core polygon repair via `rayon`.
 Two levels of parallelism:
 
-**Batch-level** — spreads independent polygons across worker threads:
-- `par_fix_polygon_batch` — batch polygon repair
-- `par_make_valid` / `par_make_valid_with_config` — trait methods on multi-geometry types
-- `MultiPolygon`, `MultiLineString`, `MultiPoint`, `GeometryCollection` — each child in parallel
+**Batch-level** - spreads independent polygons across worker threads:
+- `par_fix_polygon_batch` - batch polygon repair
+- `par_make_valid` / `par_make_valid_with_config` - trait methods on multi-geometry types
+- `MultiPolygon`, `MultiLineString`, `MultiPoint`, `GeometryCollection` - each child in parallel
 
-**Intra-polygon** — parallel hot loops inside a single polygon's repair:
+**Intra-polygon** - parallel hot loops inside a single polygon's repair:
 - Structure hole fixing (`structure/mod.rs`)
 - Structure parent-of / nesting resolution (`structure/mod.rs`)
 - Hole containment classification (`classify.rs`)
@@ -263,7 +263,7 @@ Two levels of parallelism:
 - Monotone-chain self-intersection check (`arrange/prep.rs`, ≥200 chains)
 
 The Arrange (CDT) path has limited intra-polygon parallelism (monotone chains only). Structure
-has the most breadth. Batch-level parallelism is always additive — no oversubscription concern
+has the most breadth. Batch-level parallelism is always additive - no oversubscription concern
 because the intra-polygon loops only fire for large inputs, while the batch path uses the same
 global `rayon` thread pool.
 
@@ -271,9 +271,9 @@ global `rayon` thread pool.
 
 Use the `simd` feature (enabled by default) for AVX2-accelerated orientation tests:
 
-- `orient2d_batch` — processes 4 orientation tests at once (256-bit vectors)
-- `is_ring_ccw_simd` — batch winding detection
-- `point_in_ring_exclusive` — AVX2-accelerated winding-number point-in-ring test
+- `orient2d_batch` - processes 4 orientation tests at once (256-bit vectors)
+- `is_ring_ccw_simd` - batch winding detection
+- `point_in_ring_exclusive` - AVX2-accelerated winding-number point-in-ring test
 
 Roughly 1.5–3× faster on large rings (≥100 vertices) than scalar iteration. When coordinates
 are near-collinear or extreme, it falls back to Shewchuk adaptive-precision arithmetic (the
@@ -288,20 +288,20 @@ The following are SIMD-accelerated:
 
 `par_fix_polygon_batch_chunked` processes an iterator in fixed-size batches, bounding peak
 memory to `chunk_size` polygons. Pair with `load_shp_stream` or `load_bin_stream` for lazy
-file reading — only one chunk is in memory at a time.
+file reading - only one chunk is in memory at a time.
 
 ## I/O format support
 
 | Format | Load | Export | Features | Z/M | CRS |
 |--------|------|--------|----------|-----|-----|
 | **GeoJSON** (.geojson/.json) | ✓ | ✓ | ✓ | ✓ | ✓ |
-| **WKT** (.wkt) | ✓ | ✓ | — | — | ✓ |
+| **WKT** (.wkt) | ✓ | ✓ | - | - | ✓ |
 | **WKB** (.wkb) | ✓ | ✓ | ✓ | ✓ | ✓ |
-| **CSV+WKT** (.csv) | ✓ | ✓ | — | — | — |
-| **Shapefile** (.shp) | ✓ | ✓ | ✓ | — | ✓ |
+| **CSV+WKT** (.csv) | ✓ | ✓ | - | - | - |
+| **Shapefile** (.shp) | ✓ | ✓ | ✓ | - | ✓ |
 | **GeoPackage** (.gpkg) | ✓ | ✓ | ✓ | ✓ | ✓ |
-| **GML** (.gml/.xml) | ✓ | ✓ | ✓ | — | ✓ |
-| **Binary** (.bin) | ✓ | ✓ | — | — | — |
+| **GML** (.gml/.xml) | ✓ | ✓ | ✓ | - | ✓ |
+| **Binary** (.bin) | ✓ | ✓ | - | - | - |
 
 Format auto-detection via file extension. Load with `load_geometries`, export with
 `export_geometries`. Feature-attribute-persisting variants (`load_features`,
@@ -371,7 +371,7 @@ geo_repair.repair_geojson('{"type":"Polygon","coordinates":...}')
 # Choose method (auto, arrange, structure)
 geo_repair.repair_wkt("...", "structure")
 
-# Validate only — no repair
+# Validate only - no repair
 geo_repair.is_valid_wkt("POINT(1 2)")     # -> True
 geo_repair.validate_wkt("POLYGON(...)")   # -> ['Ring has self-intersections']
 ```
