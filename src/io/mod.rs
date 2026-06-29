@@ -534,7 +534,7 @@ mod tests {
         let path = std::env::temp_dir().join("test_roundtrip.wkt");
         let path_str = path.to_str().unwrap().to_string();
 
-        let result = export_geometries(&[geom.clone()], &path_str);
+        let result = export_geometries(std::slice::from_ref(&geom), &path_str);
         assert!(result.is_ok());
 
         let loaded = load_geometries(&path_str);

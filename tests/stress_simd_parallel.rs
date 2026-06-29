@@ -237,7 +237,7 @@ fn stress_complex_bowtie() {
 
     for method in &[PolyMethod::Auto, PolyMethod::Arrange] {
         let config = MakeValidConfig {
-            poly_method: method.clone(),
+            poly_method: *method,
             ..Default::default()
         };
         let result = poly.make_valid_with_config(&config);

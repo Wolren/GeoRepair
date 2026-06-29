@@ -14,6 +14,7 @@ use rustc_hash::FxHashSet;
 
 /// A violation found by [`NodingValidator`].
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct NodingViolation {
     pub edge_a: usize,
     pub edge_b: usize,
@@ -80,8 +81,7 @@ fn build_chains(edges: &[Line<f64>]) -> Vec<ValMonoChain> {
     let mut min_y = edges[0].start.y.min(edges[0].end.y);
     let mut max_y = edges[0].start.y.max(edges[0].end.y);
 
-    for i in 1..n {
-        let s = &edges[i];
+    for (i, s) in edges.iter().enumerate().skip(1) {
         let dx = s.end.x - s.start.x;
         let dy = s.end.y - s.start.y;
         let cur_quad = quadrant(dx, dy);
@@ -199,30 +199,29 @@ fn check_crossing_violation(
     }
 
     // Collinear overlap
-    if o1 == 0.0 && o2 == 0.0 && o3 == 0.0 && o4 == 0.0 {
-        if collinear_overlap_violation(e1, e2, eps) {
-            let mid = Coord {
-                x: (e1.start.x.max(e2.start.x).max(
-                    e1.end
-                        .x
-                        .min(e2.end.x)
-                        .min(e1.start.x + e1.end.x + e2.start.x + e2.end.x)
-                        / 4.0,
-                )) / 2.0,
-                y: (e1.start.y.max(e2.start.y).max(
-                    e1.end
-                        .y
-                        .min(e2.end.y)
-                        .min(e1.start.y + e1.end.y + e2.start.y + e2.end.y)
-                        / 4.0,
-                )) / 2.0,
-            };
-            violations.push(NodingViolation {
-                edge_a: i,
-                edge_b: j,
-                at: mid,
-            });
-        }
+    if o1 == 0.0 && o2 == 0.0 && o3 == 0.0 && o4 == 0.0 && collinear_overlap_violation(e1, e2, eps)
+    {
+        let mid = Coord {
+            x: (e1.start.x.max(e2.start.x).max(
+                e1.end
+                    .x
+                    .min(e2.end.x)
+                    .min(e1.start.x + e1.end.x + e2.start.x + e2.end.x)
+                    / 4.0,
+            )) / 2.0,
+            y: (e1.start.y.max(e2.start.y).max(
+                e1.end
+                    .y
+                    .min(e2.end.y)
+                    .min(e1.start.y + e1.end.y + e2.start.y + e2.end.y)
+                    / 4.0,
+            )) / 2.0,
+        };
+        violations.push(NodingViolation {
+            edge_a: i,
+            edge_b: j,
+            at: mid,
+        });
     }
 }
 
@@ -311,6 +310,7 @@ impl NodingValidator {
         }
     }
 
+    #[allow(dead_code)]
     pub fn edges(&self) -> &[Line<f64>] {
         &self.edges
     }
@@ -415,8 +415,7 @@ fn collinear_overlap_violation(e1: &Line<f64>, e2: &Line<f64>, eps: f64) -> bool
     let t2s = ((e2.start.x - e1.start.x) * dx + (e2.start.y - e1.start.y) * dy) / dot;
     let t2e = ((e2.end.x - e1.start.x) * dx + (e2.end.y - e1.start.y) * dy) / dot;
     let (lo, hi) = if t2s < t2e { (t2s, t2e) } else { (t2e, t2s) };
-    let overlap = 0.0f64.max(lo).min(1.0) < 1.0f64.min(hi).max(0.0) - eps;
-    overlap
+    0.0f64.max(lo).min(1.0) < 1.0f64.min(hi).max(0.0) - eps
 }
 
 #[cfg(test)]

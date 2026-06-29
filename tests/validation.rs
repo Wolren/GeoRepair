@@ -846,7 +846,7 @@ fn test_all_poly_methods_on_bowtie() {
     // Arrange and Auto handle self-intersection; Structure returns empty
     for method in &[PolyMethod::Auto, PolyMethod::Arrange] {
         let config = MakeValidConfig {
-            poly_method: method.clone(),
+            poly_method: *method,
             ..Default::default()
         };
         let result = poly.make_valid_with_config(&config);
@@ -875,7 +875,7 @@ fn test_all_poly_methods_on_valid() {
     );
     for method in &[PolyMethod::Auto, PolyMethod::Arrange, PolyMethod::Structure] {
         let config = MakeValidConfig {
-            poly_method: method.clone(),
+            poly_method: *method,
             ..Default::default()
         };
         let result = poly.make_valid_with_config(&config);
@@ -1146,7 +1146,7 @@ fn test_zm_roundtrip_stress() {
     let feature = geo_repair::Feature::with_all(Geometry::Polygon(poly), None, None, zm);
     for method in &[PolyMethod::Auto, PolyMethod::Structure, PolyMethod::Arrange] {
         let cfg = MakeValidConfig {
-            poly_method: method.clone(),
+            poly_method: *method,
             ..Default::default()
         };
         let repaired = feature.geometry.make_valid_with_config(&cfg);
@@ -1205,7 +1205,7 @@ fn test_large_coord_polygon_with_hole() {
     let poly = Polygon::new(shell, vec![hole]);
     for method in &[PolyMethod::Auto, PolyMethod::Structure, PolyMethod::Arrange] {
         let cfg = MakeValidConfig {
-            poly_method: method.clone(),
+            poly_method: *method,
             ..Default::default()
         };
         let result = poly.make_valid_with_config(&cfg);

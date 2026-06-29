@@ -4,9 +4,7 @@
 //! Tests: isValid, makeValid, isSimple. Skips overlay/predicate operations.
 //! XML files are cached in tests/geos_xml/.
 
-use geo::{
-    Geometry, GeometryCollection, LineString, MultiLineString, MultiPoint, MultiPolygon, Point,
-};
+use geo::Geometry;
 use geo_repair::validation::GeoValidation;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 use std::collections::HashMap;
@@ -30,12 +28,8 @@ fn parse_xml_cases(xml: &str) -> Vec<XmlCase> {
     let mut cases = Vec::new();
     let mut pos = 0usize;
 
-    loop {
-        // Find next <case>
-        let case_start = match xml[pos..].find("<case>") {
-            Some(i) => pos + i,
-            None => break,
-        };
+    while let Some(i) = xml[pos..].find("<case>") {
+        let case_start = pos + i;
         let case_end = match xml[case_start..].find("</case>") {
             Some(i) => case_start + i + 7,
             None => break,
@@ -49,10 +43,10 @@ fn parse_xml_cases(xml: &str) -> Vec<XmlCase> {
         // Extract <a>, <b>, <c>
         let mut geoms: HashMap<String, Geometry<f64>> = HashMap::new();
         for tag in &["a", "b", "c"] {
-            if let Some(wkt) = extract_tag(block, tag) {
-                if let Some(g) = parse_wkt(&wkt) {
-                    geoms.insert(tag.to_string(), g);
-                }
+            if let Some(wkt) = extract_tag(block, tag)
+                && let Some(g) = parse_wkt(&wkt)
+            {
+                geoms.insert(tag.to_string(), g);
             }
         }
 
@@ -166,7 +160,7 @@ fn run_all_geos_xml_tests() -> Vec<(String, usize, usize, String)> {
     let mut entries: Vec<_> = std::fs::read_dir(dir)
         .unwrap()
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map_or(false, |ext| ext == "xml"))
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "xml"))
         .collect();
     entries.sort_by_key(|e| e.file_name());
 
@@ -236,8 +230,6 @@ fn geos_xml_suite() {
     let results = run_all_geos_xml_tests();
     let mut total_passed = 0usize;
     let mut total_failed = 0usize;
-    let mut any_fail = false;
-
     eprintln!("\n═══ GEOS XML Test Suite ═══");
     let mut had_issues = false;
     for (fname, passed, failed, first_fail) in &results {
