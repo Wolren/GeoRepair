@@ -11,8 +11,8 @@ fn main() {
         eprintln!("Usage: {prog} <input> <output> [--method auto|structure|arrange] [--machine]");
         eprintln!();
         eprintln!("Supported formats (auto-detected by extension):");
-        eprintln!("  Input:  .shp, .geojson/.json, .wkt, .wkb, .bin, .csv, .gpkg, .gml/.xml, .kml");
-        eprintln!("  Output: .shp, .geojson/.json, .wkt, .wkb, .csv, .gpkg, .gml/.xml, .kml");
+        eprintln!("  Input:  .shp, .geojson/.json, .wkt, .wkb, .bin, .csv, .gpkg");
+        eprintln!("  Output: .shp, .geojson/.json, .wkt, .wkb, .csv");
         std::process::exit(1);
     }
 

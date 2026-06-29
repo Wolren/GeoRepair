@@ -11,6 +11,18 @@ use crate::{MakeValid, MakeValidConfig, PolyMethod};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+fn encode_wkb_2d(geom: &Geometry<f64>) -> Result<Vec<u8>, String> {
+    use std::io::Cursor;
+    use wkb::writer::{geometry_wkb_size, write_geometry, WriteOptions};
+
+    let opts = WriteOptions::default();
+    let size = geometry_wkb_size(geom);
+    let mut buf = vec![0u8; size];
+    write_geometry(&mut Cursor::new(&mut buf[..]), geom, &opts)
+        .map_err(|e| format!("WKB write error: {e}"))?;
+    Ok(buf)
+}
+
 #[pymodule]
 #[pyo3(name = "geo_repair")]
 fn geo_repair_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -109,8 +121,7 @@ fn repair_wkb(wkb: Vec<u8>, method: Option<&str>) -> PyResult<Vec<u8>> {
         .map_err(|e| PyValueError::new_err(format!("WKB parse error: {e}")))?;
     let geom = geo_traits::to_geo::ToGeoGeometry::to_geometry(&wkb_geom);
     let fixed = repair_one(geom, &config);
-    crate::io::wkb::encode_wkb_2d(&fixed)
-        .map_err(|e| PyValueError::new_err(format!("WKB write error: {e}")))
+    encode_wkb_2d(&fixed).map_err(|e| PyValueError::new_err(format!("WKB write error: {e}")))
 }
 
 // ---------------------------------------------------------------------------
@@ -393,7 +404,7 @@ fn repair_wkb_batch(wkbs: Vec<Vec<u8>>, method: Option<&str>) -> PyResult<Vec<Ve
         let r = match parse_wkb_geom(&wkb) {
             Ok(geom) => {
                 let fixed = repair_one(geom, &config);
-                crate::io::wkb::encode_wkb_2d(&fixed).unwrap_or(wkb.to_vec())
+                encode_wkb_2d(&fixed).unwrap_or(wkb.to_vec())
             }
             Err(_) => wkb.to_vec(),
         };
@@ -414,7 +425,7 @@ fn par_repair_wkb_batch(wkbs: Vec<Vec<u8>>, method: Option<&str>) -> PyResult<Ve
         .map(|wkb| match parse_wkb_geom(wkb) {
             Ok(geom) => {
                 let fixed = repair_one(geom, &config);
-                crate::io::wkb::encode_wkb_2d(&fixed).unwrap_or(wkb.to_vec())
+                encode_wkb_2d(&fixed).unwrap_or(wkb.to_vec())
             }
             Err(_) => wkb.to_vec(),
         })
@@ -437,7 +448,7 @@ fn repair_validate_wkb_batch(
                 let valid = geom.is_valid();
                 let errors = validation_errors(&geom);
                 let fixed = repair_one(geom, &config);
-                let out = crate::io::wkb::encode_wkb_2d(&fixed).unwrap_or(wkb.to_vec());
+                let out = encode_wkb_2d(&fixed).unwrap_or(wkb.to_vec());
                 (out, valid, errors)
             }
             Err(e) => (wkb.to_vec(), false, vec![format!("{e}")]),
@@ -470,7 +481,7 @@ fn repair_file(
         let valid = geom.is_valid();
         let errors = validation_errors(&geom);
         let fixed = repair_one(geom, &config);
-        let out = match crate::io::wkb::encode_wkb_2d(&fixed) {
+        let out = match encode_wkb_2d(&fixed) {
             Ok(b) => b,
             Err(e) => {
                 results.push((Vec::new(), false, vec![format!("WKB write error: {e}")]));

@@ -1,84 +1,15 @@
 #[cfg(feature = "load-shp")]
-use geo::LineString;
-use geo::{Coord, Geometry, Polygon};
-
+use geo::{Coord, Geometry, LineString, Polygon};
 #[cfg(feature = "load-shp")]
 use crate::feature::Feature;
 #[cfg(feature = "load-shp")]
 use crate::Crs;
-#[cfg(feature = "load-shp")]
-#[cfg(feature = "load-shp")]
-use geo::MultiPolygon;
 #[cfg(feature = "load-shp")]
 use serde_json::Value;
 #[cfg(feature = "load-shp")]
 use shapefile::dbase;
 #[cfg(feature = "load-shp")]
 use std::path::Path;
-
-pub fn signed_area(ring: &[Coord<f64>]) -> f64 {
-    let mut s = 0.0;
-    for w in ring.windows(2) {
-        s += w[0].x * w[1].y - w[1].x * w[0].y;
-    }
-    s / 2.0
-}
-
-pub fn polygon_area(p: &Polygon<f64>) -> f64 {
-    signed_area(&p.exterior().0).abs()
-}
-
-pub fn geo_area(g: &Geometry<f64>) -> f64 {
-    match g {
-        Geometry::Polygon(p) => polygon_area(p),
-        Geometry::MultiPolygon(mp) => mp.0.iter().map(polygon_area).sum(),
-        _ => 0.0,
-    }
-}
-
-pub fn count_sub_polys(g: &Geometry<f64>) -> usize {
-    match g {
-        Geometry::Polygon(_) => 1,
-        Geometry::MultiPolygon(mp) => mp.0.len(),
-        _ => 0,
-    }
-}
-
-/// Load polygons from a shapefile.
-///
-/// Reads only Polygon shapes; Point and PolyLine shapes are skipped.
-/// Returns polygons constructed from the shapefile rings using
-/// signed-area winding direction to distinguish exterior vs holes.
-#[cfg(feature = "load-shp")]
-pub fn load_shp(path: &str) -> Result<Vec<Polygon<f64>>, shapefile::Error> {
-    let mut reader = shapefile::Reader::from_path(path)?;
-    let mut all_rings: Vec<Vec<Coord<f64>>> = Vec::new();
-    for result in reader.iter_shapes_and_records() {
-        let (shape, _) = match result {
-            Ok(v) => v,
-            Err(shapefile::Error::IoError(e))
-                if e.kind() == std::io::ErrorKind::UnexpectedEof
-                    || e.kind() == std::io::ErrorKind::WriteZero =>
-            {
-                break;
-            }
-            Err(_) => continue,
-        };
-        if let shapefile::Shape::Polygon(poly) = shape {
-            for r in poly.rings() {
-                let coords: Vec<Coord<f64>> = r
-                    .clone()
-                    .into_inner()
-                    .into_iter()
-                    .map(|p| Coord { x: p.x, y: p.y })
-                    .collect();
-                all_rings.push(coords);
-            }
-        }
-    }
-
-    Ok(assemble_polygons(all_rings))
-}
 
 /// Load all geometry types from a shapefile.
 ///
@@ -150,7 +81,7 @@ pub fn load_shp_geometries(path: &str) -> Result<Vec<Geometry<f64>>, shapefile::
                     .collect();
                 geoms.push(Geometry::MultiPoint(geo::MultiPoint::new(points)));
             }
-            _ => {} // skip other types (MultiPatch, etc.)
+            _ => {}
         }
     }
 
@@ -315,6 +246,7 @@ fn load_shp_crs(prj_path: &Path) -> Option<Crs> {
 
 #[cfg(feature = "load-shp")]
 fn assemble_polygons(all_rings: Vec<Vec<Coord<f64>>>) -> Vec<Polygon<f64>> {
+    use super::signed_area;
     let mut polys: Vec<Polygon<f64>> = Vec::new();
     let first_idx = all_rings.iter().position(|r| signed_area(r).abs() > 1e-12);
     if let Some(first) = first_idx {
@@ -363,79 +295,4 @@ fn assemble_polygons(all_rings: Vec<Vec<Coord<f64>>>) -> Vec<Polygon<f64>> {
     polys
 }
 
-/// Streaming shapefile polygon reader.
-#[cfg(feature = "load-shp")]
-#[allow(dead_code)]
-pub fn load_shp_stream(path: &str) -> Result<impl Iterator<Item = Polygon<f64>>, shapefile::Error> {
-    let reader = shapefile::Reader::from_path(path)?;
-    Ok(LoadShpStream {
-        reader,
-        buf: Vec::new(),
-    })
-}
 
-#[cfg(feature = "load-shp")]
-#[allow(dead_code)]
-struct LoadShpStream {
-    reader: shapefile::Reader<std::io::BufReader<std::fs::File>, std::io::BufReader<std::fs::File>>,
-    buf: Vec<Polygon<f64>>,
-}
-
-#[cfg(feature = "load-shp")]
-impl Iterator for LoadShpStream {
-    type Item = Polygon<f64>;
-
-    fn next(&mut self) -> Option<Polygon<f64>> {
-        if let Some(p) = self.buf.pop() {
-            return Some(p);
-        }
-        loop {
-            match self.reader.iter_shapes_and_records().next() {
-                None => return None,
-                Some(Ok((shape, _))) => {
-                    if let shapefile::Shape::Polygon(poly) = shape {
-                        let mp: Result<MultiPolygon<f64>, _> = poly.try_into();
-                        if let Ok(mp) = mp {
-                            let mut members = mp.0;
-                            if let Some(first) = members.pop() {
-                                self.buf = members;
-                                return Some(first);
-                            }
-                        }
-                    }
-                }
-                Some(Err(_)) => continue,
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_signed_area_square() {
-        let ring = vec![
-            Coord { x: 0.0, y: 0.0 },
-            Coord { x: 10.0, y: 0.0 },
-            Coord { x: 10.0, y: 10.0 },
-            Coord { x: 0.0, y: 10.0 },
-            Coord { x: 0.0, y: 0.0 },
-        ];
-        assert!((signed_area(&ring) - 100.0).abs() < 1e-12);
-    }
-
-    #[test]
-    fn test_polygon_area() {
-        let ext = geo::LineString::new(vec![
-            Coord { x: 0.0, y: 0.0 },
-            Coord { x: 10.0, y: 0.0 },
-            Coord { x: 10.0, y: 10.0 },
-            Coord { x: 0.0, y: 10.0 },
-            Coord { x: 0.0, y: 0.0 },
-        ]);
-        let p = Polygon::new(ext, vec![]);
-        assert!((polygon_area(&p) - 100.0).abs() < 1e-12);
-    }
-}
