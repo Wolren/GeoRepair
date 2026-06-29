@@ -11,6 +11,14 @@ use crate::{MakeValid, MakeValidConfig, PolyMethod};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// SAFE: call only from #[pyfunction] where the GIL is guaranteed held.
+fn with_gil<F, R>(f: F) -> R
+where
+    F: for<'py> FnOnce(Python<'py>) -> R,
+{
+    Python::try_attach(f).expect("GIL must be held in pyfunction")
+}
+
 fn encode_wkb_2d(geom: &Geometry<f64>) -> Result<Vec<u8>, String> {
     use std::io::Cursor;
     use wkb::writer::{geometry_wkb_size, write_geometry, WriteOptions};
@@ -49,6 +57,7 @@ fn geo_repair_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     }
     m.add_function(wrap_pyfunction!(repair_file, m)?)?;
     m.add_function(wrap_pyfunction!(repair_file_to_file, m)?)?;
+    m.add_function(wrap_pyfunction!(repair_file_to_file_streaming, m)?)?;
     Ok(())
 }
 
@@ -148,7 +157,7 @@ fn repair_geojson(geojson: &str, method: Option<&str>) -> PyResult<String> {
 
     let result = match gj {
         GeoJson::Geometry(g) => {
-            if let Ok(geo) = g.try_into() {
+            if let Ok(geo) = g.clone().try_into() {
                 let fixed = repair_one(geo, &config);
                 GeoJson::Geometry(geojson::Geometry::from(&fixed))
             } else {
@@ -157,7 +166,7 @@ fn repair_geojson(geojson: &str, method: Option<&str>) -> PyResult<String> {
         }
         GeoJson::Feature(mut f) => {
             if let Some(g) = f.geometry.take() {
-                if let Ok(geo) = g.try_into() {
+                if let Ok(geo) = g.clone().try_into() {
                     let fixed = repair_one(geo, &config);
                     f.geometry = Some(geojson::Geometry::from(&fixed));
                 } else {
@@ -172,7 +181,7 @@ fn repair_geojson(geojson: &str, method: Option<&str>) -> PyResult<String> {
                 .into_iter()
                 .map(|mut f| {
                     if let Some(g) = f.geometry.take() {
-                        if let Ok(geo) = g.try_into() {
+                        if let Ok(geo) = g.clone().try_into() {
                             let fixed = repair_one(geo, &config);
                             f.geometry = Some(geojson::Geometry::from(&fixed));
                         } else {
@@ -513,7 +522,7 @@ fn repair_file_to_file(
     output_path: &str,
     method: Option<&str>,
     mode: &str,
-    progress: Option<PyObject>,
+    progress: Option<pyo3::Py<pyo3::PyAny>>,
 ) -> PyResult<(usize, Vec<(bool, Vec<String>)>)> {
     let config = make_config(method);
     let report = |pct: f64, py: Python<'_>| {
@@ -526,7 +535,7 @@ fn repair_file_to_file(
     let mut features = crate::io::load_features_with_progress(
         input_path,
         Some(&|p| {
-            Python::with_gil(|py| load_report(p, py));
+            with_gil(|py| load_report(p, py));
         }),
     )
     .map_err(|e| PyValueError::new_err(format!("Failed to load {}: {e}", input_path)))?;
@@ -544,7 +553,7 @@ fn repair_file_to_file(
             };
             diags.push((valid, errors));
             if i % 100 == 0 {
-                Python::with_gil(|py| report(5.0 + (i as f64 / count as f64) * 70.0, py));
+                with_gil(|py| report(5.0 + (i as f64 / count as f64) * 70.0, py));
             }
         }
     } else {
@@ -559,30 +568,96 @@ fn repair_file_to_file(
             feat.geometry = fixed;
             diags.push((valid, errors));
             if i % 100 == 0 {
-                Python::with_gil(|py| report(5.0 + (i as f64 / count as f64) * 70.0, py));
+                with_gil(|py| report(5.0 + (i as f64 / count as f64) * 70.0, py));
             }
         }
     }
 
     // Export (80-100%)
-    Python::with_gil(|py| report(80.0, py));
+    with_gil(|py| report(80.0, py));
     let export_report = |pct: f64, py: Python<'_>| report(80.0 + pct * 0.2, py);
     crate::io::export_features_with_progress(
         &features,
         output_path,
         Some(&|p| {
-            Python::with_gil(|py| export_report(p, py));
+            with_gil(|py| export_report(p, py));
         }),
     )
     .map_err(|e| PyValueError::new_err(format!("Failed to write {}: {e}", output_path)))?;
 
-    Python::with_gil(|py| report(100.0, py));
+    with_gil(|py| report(100.0, py));
 
     if mode == "repair" {
         Ok((count, vec![]))
     } else {
         Ok((count, diags))
     }
+}
+
+/// Repair a file using streaming I/O.
+///
+/// Uses per-feature streaming without loading the entire file into memory.
+/// Truly streaming for formats with native streaming backends (WKT, CSV,
+/// GeoJSON).  GPKG loads compact WKB blobs then decodes one-at-a-time.
+/// SHP loads shapes + records then converts one-at-a-time.
+/// Other formats fall back to buffered I/O.
+#[pyfunction]
+#[pyo3(signature = (input_path, output_path, method = None, progress = None))]
+fn repair_file_to_file_streaming(
+    input_path: &str,
+    output_path: &str,
+    method: Option<&str>,
+    progress: Option<pyo3::Py<pyo3::PyAny>>,
+) -> PyResult<(usize, Vec<(bool, Vec<String>)>)> {
+    use crate::make_valid::MakeValid;
+
+    let config = make_config(method);
+    let mut reader = crate::io::stream::open_reader(input_path)
+        .map_err(|e| PyValueError::new_err(format!("Open reader: {e}")))?;
+
+    let mut writer = crate::io::stream::open_writer(output_path)
+        .map_err(|e| PyValueError::new_err(format!("Open writer: {e}")))?;
+
+    let mut diags = Vec::new();
+    let mut idx = 0;
+
+    while let Some(result) = reader.next() {
+        let feature = result.map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let valid = feature.geometry.is_valid();
+        let errors = if valid {
+            vec![]
+        } else {
+            validation_errors(&feature.geometry)
+        };
+        let repaired = feature.geometry.make_valid_with_config(&config);
+        let fixed = feature.with_repaired_geometry(repaired);
+        writer
+            .write(fixed)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        diags.push((valid, errors));
+        idx += 1;
+
+        if idx % 100 == 0 {
+            if let Some(ref cb) = progress {
+                let pct = (idx as f64).min(1.0);
+                with_gil(|py| {
+                    let _ = cb.call1(py, (pct,));
+                });
+            }
+        }
+    }
+
+    writer
+        .finish()
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+
+    if let Some(ref cb) = progress {
+        with_gil(|py| {
+            let _ = cb.call1(py, (100.0,));
+        });
+    }
+
+    Ok((idx, diags))
 }
 
 // ---------------------------------------------------------------------------
