@@ -67,9 +67,9 @@ proptest = "1.11"
 name = "geo_repair"
 crate-type = ["cdylib", "lib"]
 
-# [[bin]]
-# name = "geo-repair-cli"
-# path = "src/main.rs"
+[[bin]]
+name = "geo-repair-cli"
+path = "src/main.rs"
 
 [[bench]]
 name = "bench"

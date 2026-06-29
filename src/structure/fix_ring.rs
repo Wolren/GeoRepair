@@ -2,6 +2,7 @@ use rustc_hash::FxHashSet;
 use smallvec::SmallVec;
 
 use geo::{Coord, Line, LineString};
+use rstar::{RTree, RTreeObject, AABB};
 
 use crate::core;
 use crate::noding;
@@ -334,7 +335,7 @@ pub(crate) fn split_edges(edges: &[Line<f64>]) -> Vec<Line<f64>> {
     let eps = core::EPS * coord_scale;
 
     if n > core::GRID_THRESHOLD_N {
-        split_edges_grid(edges, &mut split_points, eps);
+        split_edges_rtree(edges, &mut split_points, eps);
     } else {
         split_edges_bruteforce(edges, &mut split_points, eps);
     }
@@ -390,49 +391,87 @@ fn split_edges_bruteforce(edges: &[Line<f64>], split_points: &mut [SplitPoint], 
     }
 }
 
-fn split_edges_grid(edges: &[Line<f64>], split_points: &mut [SplitPoint], eps: f64) {
+fn split_edges_rtree(edges: &[Line<f64>], split_points: &mut [SplitPoint], eps: f64) {
     let n = edges.len();
-    let grid = build_edge_grid(edges);
+
+    struct SegEnv {
+        idx: usize,
+        env: AABB<[f64; 2]>,
+    }
+    impl RTreeObject for SegEnv {
+        type Envelope = AABB<[f64; 2]>;
+        fn envelope(&self) -> Self::Envelope {
+            self.env
+        }
+    }
+
+    let envs: Vec<SegEnv> = edges
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            let lo_x = e.start.x.min(e.end.x);
+            let hi_x = e.start.x.max(e.end.x);
+            let lo_y = e.start.y.min(e.end.y);
+            let hi_y = e.start.y.max(e.end.y);
+            SegEnv {
+                idx: i,
+                env: AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]),
+            }
+        })
+        .collect();
+
+    let tree = RTree::bulk_load(envs);
+
+    // Collect hits per edge (local Vec avoids double-mutable-borrow on split_points).
+    // Each element is (edge_idx, param_t, intersection_point).
+    let query_edge = |i: usize, out: &mut Vec<(usize, f64, Coord<f64>)>| {
+        let lo_x = edges[i].start.x.min(edges[i].end.x);
+        let hi_x = edges[i].start.x.max(edges[i].end.x);
+        let lo_y = edges[i].start.y.min(edges[i].end.y);
+        let hi_y = edges[i].start.y.max(edges[i].end.y);
+        let query_env = AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]);
+
+        let _: std::ops::ControlFlow<()> =
+            tree.locate_in_envelope_intersecting_int(&query_env, |candidate| {
+                let j = candidate.idx;
+                if j <= i {
+                    return std::ops::ControlFlow::Continue(());
+                }
+                if i.abs_diff(j) <= 1 || (i == 0 && j == n - 1) {
+                    return std::ops::ControlFlow::Continue(());
+                }
+                if let Some((ti, tj)) = intersect_param(&edges[i], &edges[j], eps)
+                    && ((ti > eps && ti < 1.0 - eps) || (tj > eps && tj < 1.0 - eps))
+                {
+                    let pi = lerp(edges[i], ti);
+                    let pj = lerp(edges[j], tj);
+                    let pt = Coord {
+                        x: (pi.x + pj.x) * 0.5,
+                        y: (pi.y + pj.y) * 0.5,
+                    };
+                    if ti > eps && ti < 1.0 - eps {
+                        out.push((i, ti, pt));
+                    }
+                    if tj > eps && tj < 1.0 - eps {
+                        out.push((j, tj, pt));
+                    }
+                }
+                std::ops::ControlFlow::Continue(())
+            });
+    };
 
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     {
         use rayon::prelude::*;
-        let cell_results: Vec<Vec<(usize, f64, Coord<f64>)>> = grid
-            .par_iter()
-            .map(|cell| {
-                let mut hits = Vec::new();
-                if cell.len() < 2 {
-                    return hits;
-                }
-                let mut sorted = cell.clone();
-                sorted.sort_unstable();
-                for (ii, &ei) in sorted.iter().enumerate() {
-                    for &ej in sorted.iter().skip(ii + 1) {
-                        if ei.abs_diff(ej) <= 1 || (ei == 0 && ej == n - 1) {
-                            continue;
-                        }
-                        if let Some((ti, tj)) = intersect_param(&edges[ei], &edges[ej], eps)
-                            && ((ti > eps && ti < 1.0 - eps) || (tj > eps && tj < 1.0 - eps))
-                        {
-                            let pi = lerp(edges[ei], ti);
-                            let pj = lerp(edges[ej], tj);
-                            let pt = Coord {
-                                x: (pi.x + pj.x) * 0.5,
-                                y: (pi.y + pj.y) * 0.5,
-                            };
-                            if ti > eps && ti < 1.0 - eps {
-                                hits.push((ei, ti, pt));
-                            }
-                            if tj > eps && tj < 1.0 - eps {
-                                hits.push((ej, tj, pt));
-                            }
-                        }
-                    }
-                }
-                hits
+        let all_hits: Vec<Vec<(usize, f64, Coord<f64>)>> = (0..n)
+            .into_par_iter()
+            .map(|i| {
+                let mut local_hits = Vec::new();
+                query_edge(i, &mut local_hits);
+                local_hits
             })
             .collect();
-        for hits in cell_results {
+        for hits in all_hits {
             for (ei, t, pt) in hits {
                 split_points[ei].push((t, pt));
             }
@@ -440,85 +479,14 @@ fn split_edges_grid(edges: &[Line<f64>], split_points: &mut [SplitPoint], eps: f
     }
     #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
     {
-        let mut checked: FxHashSet<(usize, usize)> = FxHashSet::default();
-        for cell in &grid {
-            if cell.len() < 2 {
-                continue;
-            }
-            let mut sorted = cell.clone();
-            sorted.sort_unstable();
-            for (ii, &ei) in sorted.iter().enumerate() {
-                for &ej in sorted.iter().skip(ii + 1) {
-                    if !checked.insert((ei, ej)) {
-                        continue;
-                    }
-                    if ei.abs_diff(ej) <= 1 || (ei == 0 && ej == n - 1) {
-                        continue;
-                    }
-                    if let Some((ti, tj)) = intersect_param(&edges[ei], &edges[ej], eps)
-                        && ((ti > eps && ti < 1.0 - eps) || (tj > eps && tj < 1.0 - eps))
-                    {
-                        let pi = lerp(edges[ei], ti);
-                        let pj = lerp(edges[ej], tj);
-                        let pt = Coord {
-                            x: (pi.x + pj.x) * 0.5,
-                            y: (pi.y + pj.y) * 0.5,
-                        };
-                        if ti > eps && ti < 1.0 - eps {
-                            split_points[ei].push((ti, pt));
-                        }
-                        if tj > eps && tj < 1.0 - eps {
-                            split_points[ej].push((tj, pt));
-                        }
-                    }
-                }
-            }
+        let mut all_hits: Vec<(usize, f64, Coord<f64>)> = Vec::new();
+        for i in 0..n {
+            query_edge(i, &mut all_hits);
+        }
+        for (ei, t, pt) in all_hits {
+            split_points[ei].push((t, pt));
         }
     }
-}
-
-fn build_edge_grid(edges: &[Line<f64>]) -> Vec<Vec<usize>> {
-    let n = edges.len();
-    let mut min_x = f64::MAX;
-    let mut max_x = f64::MIN;
-    let mut min_y = f64::MAX;
-    let mut max_y = f64::MIN;
-    for e in edges {
-        min_x = min_x.min(e.start.x).min(e.end.x);
-        max_x = max_x.max(e.start.x).max(e.end.x);
-        min_y = min_y.min(e.start.y).min(e.end.y);
-        max_y = max_y.max(e.start.y).max(e.end.y);
-    }
-
-    let dx = max_x - min_x;
-    let dy = max_y - min_y;
-    if dx < core::EPS || dy < core::EPS {
-        return vec![(0..n).collect()];
-    }
-
-    let grid_dim = (n as f64).sqrt().ceil() as usize;
-    let grid_dim = grid_dim.clamp(4, 256);
-    let cell_w = dx / grid_dim as f64;
-    let cell_h = dy / grid_dim as f64;
-    let mut grid: Vec<Vec<usize>> = vec![Vec::new(); grid_dim * grid_dim];
-
-    for (ei, e) in edges.iter().enumerate() {
-        let lo_x = (e.start.x.min(e.end.x) - min_x) / cell_w;
-        let hi_x = (e.start.x.max(e.end.x) - min_x) / cell_w;
-        let min_cx = (lo_x.floor() as isize).max(0) as usize;
-        let max_cx = (hi_x.ceil() as isize - 1).min(grid_dim as isize - 1).max(0) as usize;
-        let lo_y = (e.start.y.min(e.end.y) - min_y) / cell_h;
-        let hi_y = (e.start.y.max(e.end.y) - min_y) / cell_h;
-        let min_cy = (lo_y.floor() as isize).max(0) as usize;
-        let max_cy = (hi_y.ceil() as isize - 1).min(grid_dim as isize - 1).max(0) as usize;
-
-        for cx in min_cx..=max_cx {
-            for cy in min_cy..=max_cy {
-                grid[cx + cy * grid_dim].push(ei);
-            }
-        }
-    }
-    grid
 }
 
 #[inline]

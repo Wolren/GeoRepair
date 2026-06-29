@@ -1025,3 +1025,31 @@ impl GeoValidation for Triangle<f64> {
         ValidationResult::valid()
     }
 }
+
+// ---------------------------------------------------------------------------
+// Free functions — convenience wrappers around GeoValidation
+// ---------------------------------------------------------------------------
+
+/// Check whether a geometry is OGC-valid.
+///
+/// Convenience wrapper around [`GeoValidation::is_valid`] that does not
+/// require importing the trait.
+pub fn is_valid(geom: &geo::Geometry<f64>) -> bool {
+    GeoValidation::is_valid(geom)
+}
+
+/// Validate a geometry, returning all OGC violations found.
+///
+/// Convenience wrapper around [`GeoValidation::validate`].
+pub fn validate(geom: &geo::Geometry<f64>) -> ValidationResult {
+    GeoValidation::validate(geom)
+}
+
+/// Validate and return a human-readable description of violations.
+///
+/// Returns `"Valid Geometry"` when the geometry passes all checks.
+///
+/// Convenience wrapper around [`GeoValidation::validate_reason`].
+pub fn validate_reason(geom: &geo::Geometry<f64>) -> String {
+    GeoValidation::validate_reason(geom)
+}
