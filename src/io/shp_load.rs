@@ -245,7 +245,7 @@ fn load_shp_crs(prj_path: &Path) -> Option<Crs> {
 }
 
 #[cfg(feature = "load-shp")]
-fn assemble_polygons(all_rings: Vec<Vec<Coord<f64>>>) -> Vec<Polygon<f64>> {
+pub fn assemble_polygons(all_rings: Vec<Vec<Coord<f64>>>) -> Vec<Polygon<f64>> {
     use super::signed_area;
     let mut polys: Vec<Polygon<f64>> = Vec::new();
     let first_idx = all_rings.iter().position(|r| signed_area(r).abs() > 1e-12);
