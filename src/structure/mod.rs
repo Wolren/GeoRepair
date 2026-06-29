@@ -11,18 +11,20 @@ use geo::{
 };
 use rstar::{RTree, RTreeObject, AABB};
 
+use crate::core;
 use crate::core::MakeValidConfig;
+use crate::util;
 use log::warn;
 
 pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geometry<f64>> {
     // Fast path: valid polygons can return immediately. Use a total-verts limit
-    // to avoid the mono-chain has_no_intersections O(n²) on very large rings.
+    // to avoid the monotone-chain has_no_intersections cost on very large rings.
     #[cfg(feature = "arrange")]
     {
         let total_verts: usize =
             poly.exterior().0.len() + poly.interiors().iter().map(|h| h.0.len()).sum::<usize>();
         if total_verts > 0
-            && total_verts <= 50000
+            && total_verts <= core::FAST_PATH_MAX_VERTS
             && poly.exterior().0.len() >= 4
             && crate::arrange::poly_has_basic_form(poly)
         {
@@ -169,13 +171,6 @@ fn resolve_nesting(holes: &[LineString<f64>]) -> (Vec<LineString<f64>>, Vec<Poly
             self.env
         }
     }
-    fn hole_area_signed(ring: &[Coord<f64>]) -> f64 {
-        let mut s = 0.0;
-        for w in ring.windows(2) {
-            s += w[0].x * w[1].y - w[1].x * w[0].y;
-        }
-        s / 2.0
-    }
     let envs: Vec<HoleEnv> = holes
         .iter()
         .enumerate()
@@ -191,7 +186,7 @@ fn resolve_nesting(holes: &[LineString<f64>]) -> (Vec<LineString<f64>>, Vec<Poly
             Some(HoleEnv {
                 idx: i,
                 env: AABB::from_corners([min_x, min_y], [max_x, max_y]),
-                area: hole_area_signed(&h.0).abs(),
+                area: util::shoelace_sum(&h.0).abs() / 2.0,
             })
         })
         .collect();
@@ -222,26 +217,25 @@ fn resolve_nesting(holes: &[LineString<f64>]) -> (Vec<LineString<f64>>, Vec<Poly
         p
     };
 
-    // Compute containment depth for each hole via topological sort
-    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-    let mut depth: Vec<usize> = (0..n)
-        .map(|i| if parent_of[i].is_none() { 1 } else { 0 })
-        .collect();
-    #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
+    // Compute containment depth for each hole via BFS topological sort
     let mut depth = vec![0usize; n];
-    #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
-    for i in 0..n {
-        if parent_of[i].is_none() {
+    let mut children = vec![Vec::new(); n];
+    let mut queue: Vec<usize> = Vec::with_capacity(n);
+    for (i, p) in parent_of.iter().enumerate() {
+        if let Some(p) = p {
+            children[*p].push(i);
+        } else {
             depth[i] = 1;
+            queue.push(i);
         }
     }
-    // Propagate depths (bounded loop: at most n iterations)
-    for _ in 0..n {
-        for i in 0..n {
-            if let Some(p) = parent_of[i]
-                && depth[p] > 0 {
-                    depth[i] = depth[p] + 1;
-                }
+    let mut head = 0;
+    while head < queue.len() {
+        let p = queue[head];
+        head += 1;
+        for &child in &children[p] {
+            depth[child] = depth[p] + 1;
+            queue.push(child);
         }
     }
 
