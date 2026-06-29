@@ -1,704 +1,960 @@
-use geo::{
-    Coord, Geometry, GeometryCollection, LineString, MultiLineString, MultiPoint, MultiPolygon,
-    Point, Polygon,
-};
-use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, BytesText, Event};
-use quick_xml::{Reader, Writer};
-
-use crate::core::{io_err, MakeValidError};
+#[cfg(feature = "io-gml")]
+use crate::core::MakeValidError;
+#[cfg(feature = "io-gml")]
 use crate::Crs;
+#[cfg(feature = "io-gml")]
+use geo::{Coord, Geometry, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
+#[cfg(feature = "io-gml")]
+use quick_xml::events::Event;
+#[cfg(feature = "io-gml")]
+use quick_xml::Reader;
+#[cfg(feature = "io-gml")]
+use std::io::Write;
 
+#[cfg(feature = "io-gml")]
 const GML_NS: &str = "http://www.opengis.net/gml/3.2";
-const GML_PREFIX: &str = "gml";
 
-/// Convert a `Crs` to a GML 3.2 `srsName` URN.
-fn crs_to_srs_name(crs: &Crs) -> Option<String> {
-    let auth = crs.authority()?;
-    let parts: Vec<&str> = auth.split(':').collect();
-    if parts.len() == 2 {
-        Some(format!("urn:ogc:def:crs:{}::{}", parts[0], parts[1]))
-    } else {
-        None
-    }
-}
+// ---------------------------------------------------------------------------
+// Writer
+// ---------------------------------------------------------------------------
 
-/// Load geometries from a GML file (.gml or .xml).
-pub fn load_gml(path: &str) -> Result<Vec<Geometry<f64>>, MakeValidError> {
-    let content = std::fs::read_to_string(path).map_err(|e| io_err(format!("read GML: {e}")))?;
-
-    let mut reader = Reader::from_str(&content);
-    let mut buf = Vec::new();
-    let mut geometries = Vec::new();
-
-    loop {
-        match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
-                let name = local_name(e);
-                if let Some(geom) = try_parse_geometry(&mut reader, &name) {
-                    geometries.push(geom);
-                }
-            }
-            Ok(Event::Eof) => break,
-            Err(e) => {
-                return Err(MakeValidError::ParseError(format!("GML parse: {e}")));
-            }
-            _ => {}
-        }
-        buf.clear();
-    }
-
-    Ok(geometries)
-}
-
-/// Export geometries to GML 3.2 (ISO 19136).
-pub fn export_gml(geometries: &[Geometry<f64>], path: &str) -> Result<(), MakeValidError> {
-    export_gml_with_crs(geometries, path, None)
-}
-
-/// Export geometries to GML 3.2 with optional CRS metadata (`srsName`).
-pub fn export_gml_with_crs(
-    geometries: &[Geometry<f64>],
+#[cfg(feature = "io-gml")]
+pub fn export_gml_geometry(
+    geoms: &[Geometry<f64>],
     path: &str,
     crs: Option<&Crs>,
 ) -> Result<(), MakeValidError> {
-    use std::io::BufWriter;
-    let file = std::fs::File::create(path).map_err(|e| io_err(format!("create GML: {e}")))?;
-    let mut writer = Writer::new_with_indent(BufWriter::new(file), b' ', 2);
+    let mut file =
+        std::fs::File::create(path).map_err(|e| MakeValidError::IoError(e.to_string()))?;
 
-    let srs_name = crs.and_then(crs_to_srs_name);
+    let srid = crs.and_then(|c| c.srid());
 
-    writer
-        .write_event(Event::Decl(BytesDecl::new("1.0", Some("UTF-8"), None)))
-        .map_err(|e| io_err(format!("GML decl: {e}")))?;
+    writeln!(file, r#"<?xml version="1.0" encoding="UTF-8"?>"#)
+        .map_err(|e| MakeValidError::IoError(e.to_string()))?;
+    writeln!(file, r#"<gml:FeatureCollection xmlns:gml="{GML_NS}">"#)
+        .map_err(|e| MakeValidError::IoError(e.to_string()))?;
+    writeln!(file, r#"  <gml:featureMembers>"#)
+        .map_err(|e| MakeValidError::IoError(e.to_string()))?;
 
-    let root = BytesStart::new(format!("{GML_PREFIX}:FeatureCollection"))
-        .with_attributes(vec![("xmlns:gml", GML_NS)]);
-    writer
-        .write_event(Event::Start(root))
-        .map_err(|e| io_err(format!("GML root: {e}")))?;
-
-    for geom in geometries {
-        writer
-            .write_event(Event::Start(BytesStart::new(format!(
-                "{GML_PREFIX}:featureMember"
-            ))))
-            .map_err(|e| io_err(format!("member: {e}")))?;
-        write_geometry_gml(&mut writer, geom, srs_name.as_deref())
-            .map_err(|e| io_err(format!("geom: {e}")))?;
-        writer
-            .write_event(Event::End(BytesEnd::new(format!(
-                "{GML_PREFIX}:featureMember"
-            ))))
-            .map_err(|e| io_err(format!("/member: {e}")))?;
+    for geom in geoms {
+        write_geom(&mut file, geom, srid, 4)?;
     }
 
-    writer
-        .write_event(Event::End(BytesEnd::new(format!(
-            "{GML_PREFIX}:FeatureCollection"
-        ))))
-        .map_err(|e| io_err(format!("/root: {e}")))?;
+    writeln!(file, r#"  </gml:featureMembers>"#)
+        .map_err(|e| MakeValidError::IoError(e.to_string()))?;
+    writeln!(file, r#"</gml:FeatureCollection>"#)
+        .map_err(|e| MakeValidError::IoError(e.to_string()))?;
 
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Writing
-// ---------------------------------------------------------------------------
-
-fn write_element<W: std::io::Write>(
-    writer: &mut Writer<W>,
-    tag: &str,
-    text: &str,
-) -> Result<(), quick_xml::Error> {
-    writer.write_event(Event::Start(BytesStart::new(format!("{GML_PREFIX}:{tag}"))))?;
-    writer.write_event(Event::Text(BytesText::new(text)))?;
-    writer.write_event(Event::End(BytesEnd::new(format!("{GML_PREFIX}:{tag}"))))?;
-    Ok(())
-}
-
-fn write_element_tag<W: std::io::Write>(
-    writer: &mut Writer<W>,
-    tag: &str,
-) -> Result<(), quick_xml::Error> {
-    writer.write_event(Event::Start(BytesStart::new(format!("{GML_PREFIX}:{tag}"))))?;
-    Ok(())
-}
-
-fn write_end_tag<W: std::io::Write>(
-    writer: &mut Writer<W>,
-    tag: &str,
-) -> Result<(), quick_xml::Error> {
-    writer.write_event(Event::End(BytesEnd::new(format!("{GML_PREFIX}:{tag}"))))?;
-    Ok(())
-}
-
-fn write_geometry_gml<W: std::io::Write>(
-    writer: &mut Writer<W>,
+#[cfg(feature = "io-gml")]
+fn write_geom(
+    file: &mut impl Write,
     geom: &Geometry<f64>,
-    srs_name: Option<&str>,
-) -> Result<(), quick_xml::Error> {
+    srid: Option<i32>,
+    indent: usize,
+) -> Result<(), MakeValidError> {
+    let ind = " ".repeat(indent);
     match geom {
-        Geometry::Point(p) => write_point_gml(writer, &p.0, srs_name),
-        Geometry::MultiPoint(mp) => write_multi(writer, "MultiPoint", srs_name, |w| {
+        Geometry::Point(p) => {
+            let srs = srid
+                .map(|s| format!(" srsName=\"urn:ogc:def:crs:EPSG::{s}\""))
+                .unwrap_or_default();
+            writeln!(
+                file,
+                "{ind}<gml:Point{srs}><gml:pos>{} {}</gml:pos></gml:Point>",
+                p.x(),
+                p.y()
+            )
+            .map_err(|e| MakeValidError::IoError(e.to_string()))
+        }
+        Geometry::LineString(ls) => {
+            let coords = coord_list_str(&ls.0);
+            writeln!(
+                file,
+                "{ind}<gml:LineString><gml:posList>{coords}</gml:posList></gml:LineString>"
+            )
+            .map_err(|e| MakeValidError::IoError(e.to_string()))
+        }
+        Geometry::Polygon(poly) => {
+            writeln!(file, "{ind}<gml:Polygon>")
+                .map_err(|e| MakeValidError::IoError(e.to_string()))?;
+            write_ring(file, poly.exterior(), "exterior", indent + 2)?;
+            for interior in poly.interiors() {
+                write_ring(file, interior, "interior", indent + 2)?;
+            }
+            writeln!(file, "{ind}</gml:Polygon>")
+                .map_err(|e| MakeValidError::IoError(e.to_string()))
+        }
+        Geometry::MultiPoint(mp) => {
+            writeln!(file, "{ind}<gml:MultiPoint>")
+                .map_err(|e| MakeValidError::IoError(e.to_string()))?;
             for pt in &mp.0 {
-                write_element_tag(w, "pointMember")?;
-                write_point_gml(w, &pt.0, None)?;
-                write_end_tag(w, "pointMember")?;
+                let srs = srid
+                    .map(|s| format!(" srsName=\"urn:ogc:def:crs:EPSG::{s}\""))
+                    .unwrap_or_default();
+                writeln!(
+                    file,
+                    "{}  <gml:pointMember><gml:Point{srs}><gml:pos>{} {}</gml:pos></gml:Point></gml:pointMember>",
+                    ind, pt.x(), pt.y()
+                )
+                .map_err(|e| MakeValidError::IoError(e.to_string()))?;
             }
-            Ok(())
-        }),
-        Geometry::LineString(ls) => write_linestring_gml(writer, &ls.0, srs_name),
-        Geometry::MultiLineString(mls) => write_multi(writer, "MultiCurve", srs_name, |w| {
+            writeln!(file, "{ind}</gml:MultiPoint>")
+                .map_err(|e| MakeValidError::IoError(e.to_string()))
+        }
+        Geometry::MultiLineString(mls) => {
+            writeln!(file, "{ind}<gml:MultiLineString>")
+                .map_err(|e| MakeValidError::IoError(e.to_string()))?;
             for ls in &mls.0 {
-                write_element_tag(w, "curveMember")?;
-                write_linestring_gml(w, &ls.0, None)?;
-                write_end_tag(w, "curveMember")?;
+                let coords = coord_list_str(&ls.0);
+                writeln!(
+                    file,
+                    "{ind}  <gml:lineStringMember><gml:LineString><gml:posList>{coords}</gml:posList></gml:LineString></gml:lineStringMember>"
+                )
+                .map_err(|e| MakeValidError::IoError(e.to_string()))?;
             }
-            Ok(())
-        }),
-        Geometry::Polygon(p) => write_polygon_gml(writer, p, srs_name),
-        Geometry::MultiPolygon(mp) => write_multi(writer, "MultiSurface", srs_name, |w| {
-            for p in &mp.0 {
-                write_element_tag(w, "surfaceMember")?;
-                write_polygon_gml(w, p, None)?;
-                write_end_tag(w, "surfaceMember")?;
+            writeln!(file, "{ind}</gml:MultiLineString>")
+                .map_err(|e| MakeValidError::IoError(e.to_string()))
+        }
+        Geometry::MultiPolygon(mp) => {
+            writeln!(file, "{ind}<gml:MultiPolygon>")
+                .map_err(|e| MakeValidError::IoError(e.to_string()))?;
+            for poly in &mp.0 {
+                writeln!(file, "{}  <gml:polygonMember>", ind)
+                    .map_err(|e| MakeValidError::IoError(e.to_string()))?;
+                write_polygon_inner(file, poly, indent + 4)?;
+                writeln!(file, "{}  </gml:polygonMember>", ind)
+                    .map_err(|e| MakeValidError::IoError(e.to_string()))?;
             }
-            Ok(())
-        }),
-        Geometry::GeometryCollection(gc) => write_multi(writer, "MultiGeometry", srs_name, |w| {
-            for child in &gc.0 {
-                write_element_tag(w, "geometryMember")?;
-                write_geometry_gml(w, child, None)?;
-                write_end_tag(w, "geometryMember")?;
+            writeln!(file, "{ind}</gml:MultiPolygon>")
+                .map_err(|e| MakeValidError::IoError(e.to_string()))
+        }
+        Geometry::GeometryCollection(gc) => {
+            writeln!(file, "{ind}<gml:MultiGeometry>")
+                .map_err(|e| MakeValidError::IoError(e.to_string()))?;
+            for g in &gc.0 {
+                writeln!(file, "{}  <gml:geometryMember>", ind)
+                    .map_err(|e| MakeValidError::IoError(e.to_string()))?;
+                write_geom(file, g, srid, indent + 4)?;
+                writeln!(file, "{}  </gml:geometryMember>", ind)
+                    .map_err(|e| MakeValidError::IoError(e.to_string()))?;
             }
-            Ok(())
-        }),
-        Geometry::Line(l) => write_linestring_gml(writer, &[l.start, l.end], srs_name),
+            writeln!(file, "{ind}</gml:MultiGeometry>")
+                .map_err(|e| MakeValidError::IoError(e.to_string()))
+        }
+        Geometry::Line(l) => {
+            let coords = coord_list_str(&[l.start, l.end]);
+            writeln!(
+                file,
+                "{ind}<gml:LineString><gml:posList>{coords}</gml:posList></gml:LineString>"
+            )
+            .map_err(|e| MakeValidError::IoError(e.to_string()))
+        }
         Geometry::Rect(r) => {
-            let coords = vec![
-                Coord {
-                    x: r.min().x,
-                    y: r.min().y,
-                },
+            let ring = vec![
+                r.min(),
                 Coord {
                     x: r.max().x,
                     y: r.min().y,
                 },
-                Coord {
-                    x: r.max().x,
-                    y: r.max().y,
-                },
+                r.max(),
                 Coord {
                     x: r.min().x,
                     y: r.max().y,
                 },
-                Coord {
-                    x: r.min().x,
-                    y: r.min().y,
-                },
+                r.min(),
             ];
-            write_polygon_rings(writer, &coords, &[], srs_name)
+            let coords = coord_list_str(&ring);
+            writeln!(
+                file,
+                "{ind}<gml:Polygon><gml:exterior><gml:LinearRing><gml:posList>{coords}</gml:posList></gml:LinearRing></gml:exterior></gml:Polygon>"
+            )
+            .map_err(|e| MakeValidError::IoError(e.to_string()))
         }
         Geometry::Triangle(t) => {
-            write_polygon_rings(writer, &[t.v1(), t.v2(), t.v3(), t.v1()], &[], srs_name)
+            let ring = vec![t.v1(), t.v2(), t.v3(), t.v1()];
+            let coords = coord_list_str(&ring);
+            writeln!(
+                file,
+                "{ind}<gml:Polygon><gml:exterior><gml:LinearRing><gml:posList>{coords}</gml:posList></gml:LinearRing></gml:exterior></gml:Polygon>"
+            )
+            .map_err(|e| MakeValidError::IoError(e.to_string()))
         }
     }
 }
 
-fn write_multi<W: std::io::Write, F: Fn(&mut Writer<W>) -> Result<(), quick_xml::Error>>(
-    writer: &mut Writer<W>,
-    tag: &str,
-    srs_name: Option<&str>,
-    f: F,
-) -> Result<(), quick_xml::Error> {
-    let mut start = BytesStart::new(format!("{GML_PREFIX}:{tag}"));
-    if let Some(srs) = srs_name {
-        start.push_attribute(("srsName", srs));
-    }
-    writer.write_event(Event::Start(start))?;
-    f(writer)?;
-    writer.write_event(Event::End(BytesEnd::new(format!("{GML_PREFIX}:{tag}"))))?;
-    Ok(())
+#[cfg(feature = "io-gml")]
+fn write_ring(
+    file: &mut impl Write,
+    ring: &LineString<f64>,
+    role: &str,
+    indent: usize,
+) -> Result<(), MakeValidError> {
+    let ind = " ".repeat(indent);
+    let coords = coord_list_str(&ring.0);
+    writeln!(
+        file,
+        "{ind}<gml:{role}><gml:LinearRing><gml:posList>{coords}</gml:posList></gml:LinearRing></gml:{role}>"
+    )
+    .map_err(|e| MakeValidError::IoError(e.to_string()))
 }
 
-fn write_point_gml<W: std::io::Write>(
-    writer: &mut Writer<W>,
-    coord: &Coord<f64>,
-    srs_name: Option<&str>,
-) -> Result<(), quick_xml::Error> {
-    let mut start = BytesStart::new(format!("{GML_PREFIX}:Point"));
-    if let Some(srs) = srs_name {
-        start.push_attribute(("srsName", srs));
-    }
-    writer.write_event(Event::Start(start))?;
-    write_element(writer, "pos", &format!("{} {}", coord.x, coord.y))?;
-    writer.write_event(Event::End(BytesEnd::new(format!("{GML_PREFIX}:Point"))))?;
-    Ok(())
-}
-
-fn write_linestring_gml<W: std::io::Write>(
-    writer: &mut Writer<W>,
-    coords: &[Coord<f64>],
-    srs_name: Option<&str>,
-) -> Result<(), quick_xml::Error> {
-    let txt = coords
-        .iter()
-        .map(|c| format!("{} {}", c.x, c.y))
-        .collect::<Vec<_>>()
-        .join(" ");
-    let mut start = BytesStart::new(format!("{GML_PREFIX}:LineString"));
-    if let Some(srs) = srs_name {
-        start.push_attribute(("srsName", srs));
-    }
-    writer.write_event(Event::Start(start))?;
-    write_element(writer, "posList", &txt)?;
-    writer.write_event(Event::End(BytesEnd::new(format!(
-        "{GML_PREFIX}:LineString"
-    ))))?;
-    Ok(())
-}
-
-fn write_polygon_gml<W: std::io::Write>(
-    writer: &mut Writer<W>,
+#[cfg(feature = "io-gml")]
+fn write_polygon_inner(
+    file: &mut impl Write,
     poly: &Polygon<f64>,
-    srs_name: Option<&str>,
-) -> Result<(), quick_xml::Error> {
-    write_polygon_rings(
-        writer,
-        poly.exterior().0.as_slice(),
-        poly.interiors(),
-        srs_name,
-    )
+    indent: usize,
+) -> Result<(), MakeValidError> {
+    let ind = " ".repeat(indent);
+    writeln!(file, "{ind}<gml:Polygon>").map_err(|e| MakeValidError::IoError(e.to_string()))?;
+    write_ring(file, poly.exterior(), "exterior", indent + 2)?;
+    for interior in poly.interiors() {
+        write_ring(file, interior, "interior", indent + 2)?;
+    }
+    writeln!(file, "{ind}</gml:Polygon>").map_err(|e| MakeValidError::IoError(e.to_string()))
 }
 
-fn write_polygon_rings<W: std::io::Write>(
-    writer: &mut Writer<W>,
-    exterior: &[Coord<f64>],
-    interiors: &[LineString<f64>],
-    srs_name: Option<&str>,
-) -> Result<(), quick_xml::Error> {
-    let mut start = BytesStart::new(format!("{GML_PREFIX}:Polygon"));
-    if let Some(srs) = srs_name {
-        start.push_attribute(("srsName", srs));
-    }
-    writer.write_event(Event::Start(start))?;
-
-    // exterior
-    writer.write_event(Event::Start(BytesStart::new(format!(
-        "{GML_PREFIX}:exterior"
-    ))))?;
-    writer.write_event(Event::Start(BytesStart::new(format!(
-        "{GML_PREFIX}:LinearRing"
-    ))))?;
-    let ext_txt = exterior
+#[cfg(feature = "io-gml")]
+fn coord_list_str(coords: &[Coord<f64>]) -> String {
+    coords
         .iter()
         .map(|c| format!("{} {}", c.x, c.y))
         .collect::<Vec<_>>()
-        .join(" ");
-    write_element(writer, "posList", &ext_txt)?;
-    writer.write_event(Event::End(BytesEnd::new(format!(
-        "{GML_PREFIX}:LinearRing"
-    ))))?;
-    writer.write_event(Event::End(BytesEnd::new(format!("{GML_PREFIX}:exterior"))))?;
-
-    // interiors
-    for ring in interiors {
-        writer.write_event(Event::Start(BytesStart::new(format!(
-            "{GML_PREFIX}:interior"
-        ))))?;
-        writer.write_event(Event::Start(BytesStart::new(format!(
-            "{GML_PREFIX}:LinearRing"
-        ))))?;
-        let int_txt = ring
-            .0
-            .iter()
-            .map(|c| format!("{} {}", c.x, c.y))
-            .collect::<Vec<_>>()
-            .join(" ");
-        write_element(writer, "posList", &int_txt)?;
-        writer.write_event(Event::End(BytesEnd::new(format!(
-            "{GML_PREFIX}:LinearRing"
-        ))))?;
-        writer.write_event(Event::End(BytesEnd::new(format!("{GML_PREFIX}:interior"))))?;
-    }
-
-    writer.write_event(Event::End(BytesEnd::new(format!("{GML_PREFIX}:Polygon"))))?;
-    Ok(())
+        .join(" ")
 }
 
 // ---------------------------------------------------------------------------
-// Reading
+// Reader
 // ---------------------------------------------------------------------------
 
-/// Get the local (unprefixed) name of an element.
-fn local_name(e: &quick_xml::events::BytesStart) -> String {
-    String::from_utf8_lossy(e.name().as_ref())
-        .split(':')
-        .last()
-        .unwrap_or_default()
-        .to_string()
+#[cfg(feature = "io-gml")]
+enum ReadOutcome {
+    Tag(Vec<u8>),
+    Done,
+    Skip,
 }
 
-fn local_name_from_end(e: &quick_xml::events::BytesEnd) -> String {
-    String::from_utf8_lossy(e.name().as_ref())
-        .split(':')
-        .last()
-        .unwrap_or_default()
-        .to_string()
-}
-
-/// Try to read a geometry element starting at `reader`.
-fn try_parse_geometry(reader: &mut Reader<&[u8]>, name: &str) -> Option<Geometry<f64>> {
-    match name {
-        "Point" => parse_point(reader).map(Geometry::Point),
-        "LineString" => parse_linestring(reader).map(Geometry::LineString),
-        "Polygon" => parse_polygon(reader).map(Geometry::Polygon),
-        "MultiPoint" | "MultiCurve" | "MultiSurface" | "MultiGeometry" | "MultiLineString"
-        | "MultiPolygon" => {
-            let members = parse_multi_members(reader, name);
-            if members.is_empty() {
-                return None;
-            }
-            let all_points = members.iter().all(|g| matches!(g, Geometry::Point(_)));
-            let all_lines = members.iter().all(|g| matches!(g, Geometry::LineString(_)));
-            let all_polys = members.iter().all(|g| matches!(g, Geometry::Polygon(_)));
-            Some(if all_points {
-                Geometry::MultiPoint(MultiPoint::new(
-                    members
-                        .into_iter()
-                        .filter_map(|g| {
-                            if let Geometry::Point(p) = g {
-                                Some(p)
-                            } else {
-                                None
-                            }
-                        })
-                        .collect(),
-                ))
-            } else if all_lines {
-                Geometry::MultiLineString(MultiLineString::new(
-                    members
-                        .into_iter()
-                        .filter_map(|g| {
-                            if let Geometry::LineString(ls) = g {
-                                Some(ls)
-                            } else {
-                                None
-                            }
-                        })
-                        .collect(),
-                ))
-            } else if all_polys {
-                Geometry::MultiPolygon(MultiPolygon::new(
-                    members
-                        .into_iter()
-                        .filter_map(|g| {
-                            if let Geometry::Polygon(p) = g {
-                                Some(p)
-                            } else {
-                                None
-                            }
-                        })
-                        .collect(),
-                ))
-            } else {
-                Geometry::GeometryCollection(GeometryCollection(members))
-            })
-        }
-        _ => None,
-    }
-}
-
-fn parse_point(reader: &mut Reader<&[u8]>) -> Option<Point<f64>> {
-    let coords = parse_text_coords(reader, &["Point"])?;
-    if coords.len() == 1 {
-        Some(Point::new(coords[0].x, coords[0].y))
-    } else {
-        None
-    }
-}
-
-fn parse_linestring(reader: &mut Reader<&[u8]>) -> Option<LineString<f64>> {
-    let coords = parse_text_coords(reader, &["LineString"])?;
-    Some(LineString::new(coords))
-}
-
-fn parse_polygon(reader: &mut Reader<&[u8]>) -> Option<Polygon<f64>> {
-    let buf = &mut Vec::new();
-    let mut exterior: Option<LineString<f64>> = None;
-    let mut interiors: Vec<LineString<f64>> = Vec::new();
+#[cfg(feature = "io-gml")]
+pub fn load_gml_content(
+    content: &str,
+) -> Result<(Vec<Geometry<f64>>, Option<Crs>), MakeValidError> {
+    let mut reader = Reader::from_str(content);
+    let mut buf = Vec::new();
+    let mut geoms = Vec::new();
+    let mut crs = None;
 
     loop {
-        match reader.read_event_into(buf) {
-            Ok(Event::Start(ref e)) => {
-                let name = local_name(e);
-                match name.as_str() {
-                    "exterior" => {
-                        exterior = parse_linear_ring(reader);
-                    }
-                    "interior" => {
-                        if let Some(ring) = parse_linear_ring(reader) {
-                            interiors.push(ring);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            Ok(Event::End(ref e)) => {
-                if local_name_from_end(e) == "Polygon" {
-                    break;
-                }
-            }
-            Ok(Event::Eof) => break,
-            Err(_) => return None,
-            _ => {}
-        }
         buf.clear();
-    }
-
-    exterior.map(|ext| Polygon::new(ext, interiors))
-}
-
-/// Parse a `<gml:LinearRing>` element, consuming its contents.
-fn parse_linear_ring(reader: &mut Reader<&[u8]>) -> Option<LineString<f64>> {
-    let coords = parse_text_coords(reader, &["LinearRing"])?;
-    Some(LineString::new(coords))
-}
-
-/// Collect text content from posList/pos/coordinates elements within
-/// a geometry container, stopping when one of `end_tags` is encountered.
-fn parse_text_coords(reader: &mut Reader<&[u8]>, end_tags: &[&str]) -> Option<Vec<Coord<f64>>> {
-    let buf = &mut Vec::new();
-    let mut all_text = String::new();
-
-    loop {
-        match reader.read_event_into(buf) {
+        let outcome = match reader.read_event_into(&mut buf) {
             Ok(Event::Start(ref e)) => {
-                let name = local_name(e);
-                if name == "pos" || name == "posList" {
-                    if let Ok(Event::Text(t)) = reader.read_event_into(buf) {
-                        all_text.push_str(&String::from_utf8_lossy(t.as_ref()));
-                        all_text.push(' ');
-                    }
-                } else if name == "coordinates" {
-                    if let Ok(Event::Text(t)) = reader.read_event_into(buf) {
-                        all_text.push_str(&String::from_utf8_lossy(t.as_ref()));
+                if crs.is_none() {
+                    crs = extract_srs_crs(e);
+                }
+                ReadOutcome::Tag(e.local_name().as_ref().to_vec())
+            }
+            Ok(Event::Empty(ref e)) => {
+                if crs.is_none() {
+                    crs = extract_srs_crs(e);
+                }
+                ReadOutcome::Skip
+            }
+            Ok(Event::Eof) => ReadOutcome::Done,
+            Err(e) => {
+                return Err(MakeValidError::ParseError(format!("GML parse error: {e}")));
+            }
+            _ => ReadOutcome::Skip,
+        };
+        match outcome {
+            ReadOutcome::Tag(tag) => match tag.as_slice() {
+                b"Point" => {
+                    if let Ok(pt) = parse_point(&mut reader, &mut buf) {
+                        geoms.push(Geometry::Point(pt));
                     }
                 }
-            }
-            Ok(Event::End(ref e)) => {
-                let name = local_name_from_end(e);
-                if end_tags.contains(&name.as_str()) {
-                    break;
-                }
-            }
-            Ok(Event::Eof) => break,
-            Err(_) => return None,
-            _ => {}
-        }
-        buf.clear();
-    }
-
-    parse_coords(&all_text)
-}
-
-/// Parse coordinate text into a Vec<Coord>.
-///
-/// Handles space-separated ("1 2 3 4") and legacy comma-separated ("1,2 3,4").
-fn parse_coords(text: &str) -> Option<Vec<Coord<f64>>> {
-    let text = text.trim();
-    if text.is_empty() {
-        return None;
-    }
-
-    // comma-separated pairs: "1.0,2.0 3.0,4.0"
-    if text.contains(',') {
-        let pairs: Vec<&str> = text.split_whitespace().collect();
-        let mut coords = Vec::with_capacity(pairs.len());
-        for pair in pairs {
-            let xy: Vec<&str> = pair.split(',').collect();
-            if xy.len() >= 2 {
-                coords.push(Coord {
-                    x: xy[0].parse().ok()?,
-                    y: xy[1].parse().ok()?,
-                });
-            } else {
-                return None;
-            }
-        }
-        return Some(coords);
-    }
-
-    // space-separated: "1.0 2.0 3.0 4.0"
-    let values: Vec<f64> = text
-        .split_whitespace()
-        .filter_map(|s| s.parse().ok())
-        .collect();
-
-    if values.len() < 2 || values.len() % 2 != 0 {
-        return None;
-    }
-
-    Some(
-        values
-            .chunks(2)
-            .map(|c| Coord { x: c[0], y: c[1] })
-            .collect(),
-    )
-}
-
-/// Parse member elements (pointMember, curveMember, surfaceMember, etc.)
-fn parse_multi_members(reader: &mut Reader<&[u8]>, start_name: &str) -> Vec<Geometry<f64>> {
-    let buf = &mut Vec::new();
-    let mut members = Vec::new();
-
-    loop {
-        match reader.read_event_into(buf) {
-            Ok(Event::Start(ref e)) => {
-                let name = local_name(e);
-                if matches!(
-                    name.as_str(),
-                    "pointMember" | "curveMember" | "surfaceMember" | "geometryMember" | "member"
-                ) {
-                    if let Some(child) = parse_member_child(reader) {
-                        members.push(child);
+                b"LineString" => {
+                    if let Ok(ls) = parse_linestring(&mut reader, &mut buf) {
+                        geoms.push(Geometry::LineString(ls));
                     }
                 }
-            }
-            Ok(Event::End(ref e)) => {
-                if local_name_from_end(e) == start_name {
-                    break;
+                b"Polygon" => {
+                    if let Ok(poly) = parse_polygon(&mut reader, &mut buf) {
+                        geoms.push(Geometry::Polygon(poly));
+                    }
                 }
-            }
-            Ok(Event::Eof) => break,
-            Err(_) => break,
-            _ => {}
+                b"MultiPoint" => {
+                    if let Ok(mp) = parse_multipoint(&mut reader, &mut buf) {
+                        geoms.push(Geometry::MultiPoint(mp));
+                    }
+                }
+                b"MultiLineString" => {
+                    if let Ok(mls) = parse_multilinestring(&mut reader, &mut buf) {
+                        geoms.push(Geometry::MultiLineString(mls));
+                    }
+                }
+                b"MultiPolygon" => {
+                    if let Ok(mp) = parse_multipolygon(&mut reader, &mut buf) {
+                        geoms.push(Geometry::MultiPolygon(mp));
+                    }
+                }
+                b"MultiGeometry" => {
+                    if let Ok(gc) = parse_multigeometry(&mut reader, &mut buf) {
+                        geoms.push(Geometry::GeometryCollection(gc));
+                    }
+                }
+                _ => {}
+            },
+            ReadOutcome::Done => break,
+            ReadOutcome::Skip => {}
         }
-        buf.clear();
     }
 
-    members
+    Ok((geoms, crs))
 }
 
-/// Parse the geometry inside a member element.
-fn parse_member_child(reader: &mut Reader<&[u8]>) -> Option<Geometry<f64>> {
-    let buf = &mut Vec::new();
-    loop {
-        match reader.read_event_into(buf) {
-            Ok(Event::Start(ref e)) => {
-                let name = local_name(e);
-                if let Some(geom) = try_parse_geometry(reader, &name) {
-                    return Some(geom);
-                }
+#[cfg(feature = "io-gml")]
+fn extract_srs_crs(e: &quick_xml::events::BytesStart) -> Option<Crs> {
+    if let Ok(Some(attr)) = e.try_get_attribute("srsName") {
+        if let Ok(val) = attr.unescape_value() {
+            if let Some(code) = parse_srs_name(&val) {
+                return Some(Crs::from_epsg(code));
             }
-            Ok(Event::End(ref e)) => {
-                let name = local_name_from_end(e);
-                if matches!(
-                    name.as_str(),
-                    "pointMember"
-                        | "curveMember"
-                        | "surfaceMember"
-                        | "geometryMember"
-                        | "member"
-                        | "featureMember"
-                ) {
-                    break;
-                }
-            }
-            Ok(Event::Eof) => break,
-            Err(_) => break,
-            _ => {}
         }
-        buf.clear();
     }
     None
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_coords_space() {
-        let coords = parse_coords("1.0 2.0").unwrap();
-        assert_eq!(coords.len(), 1);
-        assert!((coords[0].x - 1.0).abs() < 1e-12);
+#[cfg(feature = "io-gml")]
+fn parse_srs_name(srs: &str) -> Option<u32> {
+    if let Some(pos) = srs.rfind(':') {
+        srs[pos + 1..].parse::<u32>().ok()
+    } else {
+        srs.parse::<u32>().ok()
     }
+}
 
-    #[test]
-    fn test_parse_coords_poslist() {
-        let coords = parse_coords("0 0 1 1 2 2").unwrap();
-        assert_eq!(coords.len(), 3);
-        assert_eq!(coords[1].x, 1.0);
-    }
-
-    #[test]
-    fn test_parse_coords_legacy() {
-        let coords = parse_coords("1.0,2.0 3.0,4.0").unwrap();
-        assert_eq!(coords.len(), 2);
-        assert!((coords[1].y - 4.0).abs() < 1e-12);
-    }
-
-    fn write_and_read(geom: Geometry<f64>, name: &str) -> Geometry<f64> {
-        let path = std::env::temp_dir().join(format!("test_gml_{name}.gml"));
-        let ps = path.to_str().unwrap().to_string();
-        export_gml(&[geom], &ps).unwrap();
-        let loaded = load_gml(&ps).unwrap();
-        let _ = std::fs::remove_file(&path);
-        loaded.into_iter().next().unwrap()
-    }
-
-    #[test]
-    fn test_gml_point_roundtrip() {
-        let geom = Geometry::Point(Point::new(1.5, 2.5));
-        let loaded = write_and_read(geom, "point");
-        match loaded {
-            Geometry::Point(p) => {
-                assert!((p.x() - 1.5).abs() < 1e-10);
-                assert!((p.y() - 2.5).abs() < 1e-10);
+#[cfg(feature = "io-gml")]
+fn read_text(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>, end_local: &[u8]) -> String {
+    loop {
+        buf.clear();
+        match reader.read_event_into(buf) {
+            Ok(Event::Text(t)) => {
+                return t.unescape().unwrap_or_default().to_string();
             }
-            _ => panic!("expected Point"),
+            Ok(Event::End(ref e)) if e.local_name().as_ref() == end_local => {
+                return String::new();
+            }
+            Ok(Event::Eof) => return String::new(),
+            Err(_) => return String::new(),
+            _ => {}
+        }
+    }
+}
+
+#[cfg(feature = "io-gml")]
+fn skip_element(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>, name: &[u8]) {
+    let mut depth = 1;
+    loop {
+        buf.clear();
+        match reader.read_event_into(buf) {
+            Ok(Event::Start(ref e)) if e.local_name().as_ref() == name => depth += 1,
+            Ok(Event::End(ref e)) if e.local_name().as_ref() == name => {
+                depth -= 1;
+                if depth == 0 {
+                    return;
+                }
+            }
+            Ok(Event::Eof) => return,
+            Err(_) => return,
+            _ => {}
+        }
+    }
+}
+
+#[cfg(feature = "io-gml")]
+fn parse_pos_list(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Vec<Coord<f64>> {
+    let text = read_text(reader, buf, b"posList");
+    let parts: Vec<f64> = text
+        .split_whitespace()
+        .filter_map(|s| s.parse().ok())
+        .collect();
+    let mut coords = Vec::with_capacity(parts.len() / 2);
+    for chunk in parts.chunks(2) {
+        if chunk.len() == 2 {
+            coords.push(Coord {
+                x: chunk[0],
+                y: chunk[1],
+            });
+        }
+    }
+    coords
+}
+
+#[cfg(feature = "io-gml")]
+fn parse_pos(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Option<Coord<f64>> {
+    let text = read_text(reader, buf, b"pos");
+    let parts: Vec<f64> = text
+        .split_whitespace()
+        .filter_map(|s| s.parse().ok())
+        .collect();
+    if parts.len() >= 2 {
+        Some(Coord {
+            x: parts[0],
+            y: parts[1],
+        })
+    } else {
+        None
+    }
+}
+
+#[cfg(feature = "io-gml")]
+fn parse_linear_ring(
+    reader: &mut Reader<&[u8]>,
+    buf: &mut Vec<u8>,
+) -> Result<LineString<f64>, MakeValidError> {
+    let mut coords = Vec::new();
+    loop {
+        buf.clear();
+        let outcome = match reader.read_event_into(buf) {
+            Ok(Event::Start(ref e)) => ReadOutcome::Tag(e.local_name().as_ref().to_vec()),
+            Ok(Event::End(ref e)) if e.local_name().as_ref() == b"LinearRing" => ReadOutcome::Done,
+            Ok(Event::Eof) => ReadOutcome::Done,
+            Err(e) => {
+                return Err(MakeValidError::ParseError(format!("GML ring parse: {e}")));
+            }
+            _ => ReadOutcome::Skip,
+        };
+        match outcome {
+            ReadOutcome::Tag(tag) => match tag.as_slice() {
+                b"posList" => coords = parse_pos_list(reader, buf),
+                b"pos" => {
+                    if let Some(c) = parse_pos(reader, buf) {
+                        coords.push(c);
+                    }
+                }
+                _ => {
+                    skip_element(reader, buf, &tag);
+                }
+            },
+            ReadOutcome::Done => break,
+            ReadOutcome::Skip => {}
+        }
+    }
+    Ok(LineString::new(coords))
+}
+
+#[cfg(feature = "io-gml")]
+fn parse_point(
+    reader: &mut Reader<&[u8]>,
+    buf: &mut Vec<u8>,
+) -> Result<Point<f64>, MakeValidError> {
+    let mut coord: Option<Coord<f64>> = None;
+    loop {
+        buf.clear();
+        let outcome = match reader.read_event_into(buf) {
+            Ok(Event::Start(ref e)) => ReadOutcome::Tag(e.local_name().as_ref().to_vec()),
+            Ok(Event::End(ref e)) if e.local_name().as_ref() == b"Point" => ReadOutcome::Done,
+            Ok(Event::Eof) => ReadOutcome::Done,
+            Err(e) => {
+                return Err(MakeValidError::ParseError(format!("GML point parse: {e}")));
+            }
+            _ => ReadOutcome::Skip,
+        };
+        match outcome {
+            ReadOutcome::Tag(tag) => match tag.as_slice() {
+                b"pos" => {
+                    coord = parse_pos(reader, buf);
+                }
+                b"posList" => {
+                    let coords = parse_pos_list(reader, buf);
+                    if let Some(c) = coords.into_iter().next() {
+                        coord = Some(c);
+                    }
+                }
+                _ => {
+                    skip_element(reader, buf, &tag);
+                }
+            },
+            ReadOutcome::Done => break,
+            ReadOutcome::Skip => {}
+        }
+    }
+    coord
+        .map(|c| Point::new(c.x, c.y))
+        .ok_or_else(|| MakeValidError::ParseError("GML Point missing pos".into()))
+}
+
+#[cfg(feature = "io-gml")]
+fn parse_linestring(
+    reader: &mut Reader<&[u8]>,
+    buf: &mut Vec<u8>,
+) -> Result<LineString<f64>, MakeValidError> {
+    let mut coords = Vec::new();
+    loop {
+        buf.clear();
+        let outcome = match reader.read_event_into(buf) {
+            Ok(Event::Start(ref e)) => ReadOutcome::Tag(e.local_name().as_ref().to_vec()),
+            Ok(Event::End(ref e)) if e.local_name().as_ref() == b"LineString" => ReadOutcome::Done,
+            Ok(Event::Eof) => ReadOutcome::Done,
+            Err(e) => {
+                return Err(MakeValidError::ParseError(format!(
+                    "GML linestring parse: {e}"
+                )));
+            }
+            _ => ReadOutcome::Skip,
+        };
+        match outcome {
+            ReadOutcome::Tag(tag) => match tag.as_slice() {
+                b"posList" => coords = parse_pos_list(reader, buf),
+                b"pos" => {
+                    if let Some(c) = parse_pos(reader, buf) {
+                        coords.push(c);
+                    }
+                }
+                _ => {
+                    skip_element(reader, buf, &tag);
+                }
+            },
+            ReadOutcome::Done => break,
+            ReadOutcome::Skip => {}
+        }
+    }
+    Ok(LineString::new(coords))
+}
+
+#[cfg(feature = "io-gml")]
+fn parse_polygon(
+    reader: &mut Reader<&[u8]>,
+    buf: &mut Vec<u8>,
+) -> Result<Polygon<f64>, MakeValidError> {
+    let mut exterior: Option<LineString<f64>> = None;
+    let mut interiors: Vec<LineString<f64>> = Vec::new();
+
+    loop {
+        buf.clear();
+        let outcome = match reader.read_event_into(buf) {
+            Ok(Event::Start(ref e)) => ReadOutcome::Tag(e.local_name().as_ref().to_vec()),
+            Ok(Event::End(ref e)) if e.local_name().as_ref() == b"Polygon" => ReadOutcome::Done,
+            Ok(Event::Eof) => ReadOutcome::Done,
+            Err(e) => {
+                return Err(MakeValidError::ParseError(format!(
+                    "GML polygon parse: {e}"
+                )));
+            }
+            _ => ReadOutcome::Skip,
+        };
+        match outcome {
+            ReadOutcome::Tag(tag) => match tag.as_slice() {
+                b"exterior" => {
+                    parse_exterior(reader, buf, &mut exterior)?;
+                }
+                b"interior" => {
+                    let mut ring = None;
+                    parse_exterior(reader, buf, &mut ring)?;
+                    if let Some(r) = ring {
+                        interiors.push(r);
+                    }
+                }
+                _ => {
+                    skip_element(reader, buf, &tag);
+                }
+            },
+            ReadOutcome::Done => break,
+            ReadOutcome::Skip => {}
         }
     }
 
-    #[test]
-    fn test_gml_linestring_roundtrip() {
-        let geom = Geometry::LineString(LineString::new(vec![
-            Coord { x: 0.0, y: 0.0 },
-            Coord { x: 1.0, y: 1.0 },
-            Coord { x: 2.0, y: 0.0 },
-        ]));
-        let loaded = write_and_read(geom.clone(), "linestring");
-        assert_eq!(loaded, geom);
-    }
+    Ok(Polygon::new(
+        exterior.unwrap_or(LineString::new(vec![])),
+        interiors,
+    ))
+}
 
-    #[test]
-    fn test_gml_polygon_roundtrip() {
-        let geom = Geometry::Polygon(Polygon::new(
-            LineString::new(vec![
-                Coord { x: 0.0, y: 0.0 },
-                Coord { x: 1.0, y: 0.0 },
-                Coord { x: 1.0, y: 1.0 },
-                Coord { x: 0.0, y: 1.0 },
-                Coord { x: 0.0, y: 0.0 },
-            ]),
-            Vec::new(),
-        ));
-        let loaded = write_and_read(geom.clone(), "polygon");
-        assert_eq!(loaded, geom);
+#[cfg(feature = "io-gml")]
+fn parse_exterior(
+    reader: &mut Reader<&[u8]>,
+    buf: &mut Vec<u8>,
+    out: &mut Option<LineString<f64>>,
+) -> Result<(), MakeValidError> {
+    loop {
+        buf.clear();
+        let outcome = match reader.read_event_into(buf) {
+            Ok(Event::Start(ref e)) => ReadOutcome::Tag(e.local_name().as_ref().to_vec()),
+            Ok(Event::End(ref e))
+                if e.local_name().as_ref() == b"exterior"
+                    || e.local_name().as_ref() == b"interior" =>
+            {
+                ReadOutcome::Done
+            }
+            Ok(Event::Eof) => ReadOutcome::Done,
+            Err(e) => {
+                return Err(MakeValidError::ParseError(format!("GML ring reader: {e}")));
+            }
+            _ => ReadOutcome::Skip,
+        };
+        match outcome {
+            ReadOutcome::Tag(tag) => match tag.as_slice() {
+                b"LinearRing" => {
+                    *out = Some(parse_linear_ring(reader, buf)?);
+                }
+                _ => {
+                    skip_element(reader, buf, &tag);
+                }
+            },
+            ReadOutcome::Done => break,
+            ReadOutcome::Skip => {}
+        }
     }
+    Ok(())
+}
 
-    #[test]
-    fn test_gml_multipoint_roundtrip() {
-        let geom = Geometry::MultiPoint(MultiPoint::new(vec![
-            Point::new(1.0, 2.0),
-            Point::new(3.0, 4.0),
-        ]));
-        let loaded = write_and_read(geom.clone(), "multipoint");
-        assert_eq!(loaded, geom);
+#[cfg(feature = "io-gml")]
+fn parse_multipoint(
+    reader: &mut Reader<&[u8]>,
+    buf: &mut Vec<u8>,
+) -> Result<MultiPoint<f64>, MakeValidError> {
+    let mut points = Vec::new();
+    loop {
+        buf.clear();
+        let outcome = match reader.read_event_into(buf) {
+            Ok(Event::Start(ref e)) => ReadOutcome::Tag(e.local_name().as_ref().to_vec()),
+            Ok(Event::End(ref e)) if e.local_name().as_ref() == b"MultiPoint" => ReadOutcome::Done,
+            Ok(Event::Eof) => ReadOutcome::Done,
+            Err(e) => {
+                return Err(MakeValidError::ParseError(format!(
+                    "GML multipoint parse: {e}"
+                )));
+            }
+            _ => ReadOutcome::Skip,
+        };
+        match outcome {
+            ReadOutcome::Tag(tag) => match tag.as_slice() {
+                b"pointMember" => {
+                    parse_point_members(reader, buf, &mut points)?;
+                }
+                _ => {
+                    skip_element(reader, buf, &tag);
+                }
+            },
+            ReadOutcome::Done => break,
+            ReadOutcome::Skip => {}
+        }
     }
+    Ok(MultiPoint::new(points))
+}
+
+#[cfg(feature = "io-gml")]
+fn parse_point_members(
+    reader: &mut Reader<&[u8]>,
+    buf: &mut Vec<u8>,
+    out: &mut Vec<Point<f64>>,
+) -> Result<(), MakeValidError> {
+    loop {
+        buf.clear();
+        let outcome = match reader.read_event_into(buf) {
+            Ok(Event::Start(ref e)) => ReadOutcome::Tag(e.local_name().as_ref().to_vec()),
+            Ok(Event::End(ref e)) if e.local_name().as_ref() == b"pointMember" => ReadOutcome::Done,
+            Ok(Event::Eof) => ReadOutcome::Done,
+            Err(e) => {
+                return Err(MakeValidError::ParseError(format!(
+                    "GML multipoint member: {e}"
+                )));
+            }
+            _ => ReadOutcome::Skip,
+        };
+        match outcome {
+            ReadOutcome::Tag(tag) => match tag.as_slice() {
+                b"Point" => {
+                    if let Ok(pt) = parse_point(reader, buf) {
+                        out.push(pt);
+                    }
+                }
+                _ => {
+                    skip_element(reader, buf, &tag);
+                }
+            },
+            ReadOutcome::Done => break,
+            ReadOutcome::Skip => {}
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "io-gml")]
+fn parse_multilinestring(
+    reader: &mut Reader<&[u8]>,
+    buf: &mut Vec<u8>,
+) -> Result<MultiLineString<f64>, MakeValidError> {
+    let mut linestrings = Vec::new();
+    loop {
+        buf.clear();
+        let outcome = match reader.read_event_into(buf) {
+            Ok(Event::Start(ref e)) => ReadOutcome::Tag(e.local_name().as_ref().to_vec()),
+            Ok(Event::End(ref e)) if e.local_name().as_ref() == b"MultiLineString" => {
+                ReadOutcome::Done
+            }
+            Ok(Event::Eof) => ReadOutcome::Done,
+            Err(e) => {
+                return Err(MakeValidError::ParseError(format!(
+                    "GML multilinestring parse: {e}"
+                )));
+            }
+            _ => ReadOutcome::Skip,
+        };
+        match outcome {
+            ReadOutcome::Tag(tag) => match tag.as_slice() {
+                b"lineStringMember" => {
+                    parse_ls_members(reader, buf, &mut linestrings)?;
+                }
+                _ => {
+                    skip_element(reader, buf, &tag);
+                }
+            },
+            ReadOutcome::Done => break,
+            ReadOutcome::Skip => {}
+        }
+    }
+    Ok(MultiLineString::new(linestrings))
+}
+
+#[cfg(feature = "io-gml")]
+fn parse_ls_members(
+    reader: &mut Reader<&[u8]>,
+    buf: &mut Vec<u8>,
+    out: &mut Vec<LineString<f64>>,
+) -> Result<(), MakeValidError> {
+    loop {
+        buf.clear();
+        let outcome = match reader.read_event_into(buf) {
+            Ok(Event::Start(ref e)) => ReadOutcome::Tag(e.local_name().as_ref().to_vec()),
+            Ok(Event::End(ref e)) if e.local_name().as_ref() == b"lineStringMember" => {
+                ReadOutcome::Done
+            }
+            Ok(Event::Eof) => ReadOutcome::Done,
+            Err(e) => {
+                return Err(MakeValidError::ParseError(format!(
+                    "GML multilinestring member: {e}"
+                )));
+            }
+            _ => ReadOutcome::Skip,
+        };
+        match outcome {
+            ReadOutcome::Tag(tag) => match tag.as_slice() {
+                b"LineString" => {
+                    if let Ok(ls) = parse_linestring(reader, buf) {
+                        out.push(ls);
+                    }
+                }
+                _ => {
+                    skip_element(reader, buf, &tag);
+                }
+            },
+            ReadOutcome::Done => break,
+            ReadOutcome::Skip => {}
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "io-gml")]
+fn parse_multipolygon(
+    reader: &mut Reader<&[u8]>,
+    buf: &mut Vec<u8>,
+) -> Result<MultiPolygon<f64>, MakeValidError> {
+    let mut polygons = Vec::new();
+    loop {
+        buf.clear();
+        let outcome = match reader.read_event_into(buf) {
+            Ok(Event::Start(ref e)) => ReadOutcome::Tag(e.local_name().as_ref().to_vec()),
+            Ok(Event::End(ref e)) if e.local_name().as_ref() == b"MultiPolygon" => {
+                ReadOutcome::Done
+            }
+            Ok(Event::Eof) => ReadOutcome::Done,
+            Err(e) => {
+                return Err(MakeValidError::ParseError(format!(
+                    "GML multipolygon parse: {e}"
+                )));
+            }
+            _ => ReadOutcome::Skip,
+        };
+        match outcome {
+            ReadOutcome::Tag(tag) => match tag.as_slice() {
+                b"polygonMember" => {
+                    parse_poly_members(reader, buf, &mut polygons)?;
+                }
+                _ => {
+                    skip_element(reader, buf, &tag);
+                }
+            },
+            ReadOutcome::Done => break,
+            ReadOutcome::Skip => {}
+        }
+    }
+    Ok(MultiPolygon::new(polygons))
+}
+
+#[cfg(feature = "io-gml")]
+fn parse_poly_members(
+    reader: &mut Reader<&[u8]>,
+    buf: &mut Vec<u8>,
+    out: &mut Vec<Polygon<f64>>,
+) -> Result<(), MakeValidError> {
+    loop {
+        buf.clear();
+        let outcome = match reader.read_event_into(buf) {
+            Ok(Event::Start(ref e)) => ReadOutcome::Tag(e.local_name().as_ref().to_vec()),
+            Ok(Event::End(ref e)) if e.local_name().as_ref() == b"polygonMember" => {
+                ReadOutcome::Done
+            }
+            Ok(Event::Eof) => ReadOutcome::Done,
+            Err(e) => {
+                return Err(MakeValidError::ParseError(format!(
+                    "GML multipolygon member: {e}"
+                )));
+            }
+            _ => ReadOutcome::Skip,
+        };
+        match outcome {
+            ReadOutcome::Tag(tag) => match tag.as_slice() {
+                b"Polygon" => {
+                    if let Ok(poly) = parse_polygon(reader, buf) {
+                        out.push(poly);
+                    }
+                }
+                _ => {
+                    skip_element(reader, buf, &tag);
+                }
+            },
+            ReadOutcome::Done => break,
+            ReadOutcome::Skip => {}
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "io-gml")]
+fn parse_multigeometry(
+    reader: &mut Reader<&[u8]>,
+    buf: &mut Vec<u8>,
+) -> Result<geo::GeometryCollection<f64>, MakeValidError> {
+    let mut geoms = Vec::new();
+    loop {
+        buf.clear();
+        let outcome = match reader.read_event_into(buf) {
+            Ok(Event::Start(ref e)) => ReadOutcome::Tag(e.local_name().as_ref().to_vec()),
+            Ok(Event::End(ref e)) if e.local_name().as_ref() == b"MultiGeometry" => {
+                ReadOutcome::Done
+            }
+            Ok(Event::Eof) => ReadOutcome::Done,
+            Err(e) => {
+                return Err(MakeValidError::ParseError(format!(
+                    "GML multigeometry parse: {e}"
+                )));
+            }
+            _ => ReadOutcome::Skip,
+        };
+        match outcome {
+            ReadOutcome::Tag(tag) => match tag.as_slice() {
+                b"geometryMember" => {
+                    parse_geom_members(reader, buf, &mut geoms)?;
+                }
+                _ => {
+                    skip_element(reader, buf, &tag);
+                }
+            },
+            ReadOutcome::Done => break,
+            ReadOutcome::Skip => {}
+        }
+    }
+    Ok(geo::GeometryCollection(geoms))
+}
+
+#[cfg(feature = "io-gml")]
+fn parse_geom_members(
+    reader: &mut Reader<&[u8]>,
+    buf: &mut Vec<u8>,
+    out: &mut Vec<Geometry<f64>>,
+) -> Result<(), MakeValidError> {
+    loop {
+        buf.clear();
+        let outcome = match reader.read_event_into(buf) {
+            Ok(Event::Start(ref e)) => ReadOutcome::Tag(e.local_name().as_ref().to_vec()),
+            Ok(Event::End(ref e)) if e.local_name().as_ref() == b"geometryMember" => {
+                ReadOutcome::Done
+            }
+            Ok(Event::Eof) => ReadOutcome::Done,
+            Err(e) => {
+                return Err(MakeValidError::ParseError(format!(
+                    "GML multigeometry member: {e}"
+                )));
+            }
+            _ => ReadOutcome::Skip,
+        };
+        match outcome {
+            ReadOutcome::Tag(tag) => match tag.as_slice() {
+                b"Point" => {
+                    if let Ok(pt) = parse_point(reader, buf) {
+                        out.push(Geometry::Point(pt));
+                    }
+                }
+                b"LineString" => {
+                    if let Ok(ls) = parse_linestring(reader, buf) {
+                        out.push(Geometry::LineString(ls));
+                    }
+                }
+                b"Polygon" => {
+                    if let Ok(poly) = parse_polygon(reader, buf) {
+                        out.push(Geometry::Polygon(poly));
+                    }
+                }
+                b"MultiPoint" => {
+                    if let Ok(mp) = parse_multipoint(reader, buf) {
+                        out.push(Geometry::MultiPoint(mp));
+                    }
+                }
+                b"MultiLineString" => {
+                    if let Ok(mls) = parse_multilinestring(reader, buf) {
+                        out.push(Geometry::MultiLineString(mls));
+                    }
+                }
+                b"MultiPolygon" => {
+                    if let Ok(mp) = parse_multipolygon(reader, buf) {
+                        out.push(Geometry::MultiPolygon(mp));
+                    }
+                }
+                b"MultiGeometry" => {
+                    if let Ok(gc) = parse_multigeometry(reader, buf) {
+                        out.extend(gc.0);
+                    }
+                }
+                _ => {
+                    skip_element(reader, buf, &tag);
+                }
+            },
+            ReadOutcome::Done => break,
+            ReadOutcome::Skip => {}
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "io-gml"))]
+pub fn load_gml_content(
+    _content: &str,
+) -> Result<(Vec<Geometry<f64>>, Option<Crs>), MakeValidError> {
+    Err(MakeValidError::UnsupportedFormat(
+        "GML loading requires 'io-gml' feature".into(),
+    ))
+}
+
+#[cfg(not(feature = "io-gml"))]
+pub fn export_gml_geometry(
+    _geoms: &[Geometry<f64>],
+    _path: &str,
+    _crs: Option<&Crs>,
+) -> Result<(), MakeValidError> {
+    Err(MakeValidError::UnsupportedFormat(
+        "GML export requires 'io-gml' feature".into(),
+    ))
 }

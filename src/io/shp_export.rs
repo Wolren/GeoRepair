@@ -1,4 +1,4 @@
-use super::shp_load::{count_sub_polys, geo_area, polygon_area};
+use super::{count_sub_polys, geo_area, polygon_area};
 use geo::{Coord, Geometry, Polygon};
 use std::fs::File;
 use std::io::{BufWriter, Write};
