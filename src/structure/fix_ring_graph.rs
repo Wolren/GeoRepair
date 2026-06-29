@@ -237,7 +237,7 @@ fn find_next_edge(
             }
         }
 
-        if best.is_none() || turn < best.unwrap().1 {
+        if best.is_none_or(|(_, t, _)| turn < t) {
             best = Some((e_idx, turn, dest));
         }
     }

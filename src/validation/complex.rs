@@ -3,6 +3,7 @@ use geo::{
     Coord, Geometry, GeometryCollection, Line, LineString, MultiLineString, MultiPoint,
     MultiPolygon, Point, Polygon, Rect, Triangle,
 };
+#[cfg(feature = "rstar")]
 use rstar::{RTree, RTreeObject, AABB};
 
 use crate::validation::core::*;
@@ -149,50 +150,68 @@ impl GeoValidation for MultiPolygon<f64> {
             }
 
             // Nesting check: one shell fully inside another
-            struct ShellEnv {
-                idx: usize,
-                env: AABB<[f64; 2]>,
-            }
-            impl RTreeObject for ShellEnv {
-                type Envelope = AABB<[f64; 2]>;
-                fn envelope(&self) -> Self::Envelope {
-                    self.env
+            #[cfg(feature = "rstar")]
+            {
+                struct ShellEnv {
+                    idx: usize,
+                    env: rstar::AABB<[f64; 2]>,
                 }
-            }
-            let mut envs = Vec::with_capacity(shells.len());
-            for (i, s) in shells.iter().enumerate() {
-                let first = s.first().map(|c| (c.x, c.y)).unwrap_or((0.0, 0.0));
-                let (mut min_x, mut max_x, mut min_y, mut max_y) =
-                    (first.0, first.0, first.1, first.1);
-                for c in *s {
-                    min_x = min_x.min(c.x);
-                    max_x = max_x.max(c.x);
-                    min_y = min_y.min(c.y);
-                    max_y = max_y.max(c.y);
-                }
-                envs.push(ShellEnv {
-                    idx: i,
-                    env: AABB::from_corners([min_x, min_y], [max_x, max_y]),
-                });
-            }
-            let tree = RTree::bulk_load(envs);
-            for (i, s2) in shells.iter().enumerate() {
-                let Some(pt) = s2.first().copied() else {
-                    continue;
-                };
-                let query = AABB::from_corners([pt.x, pt.y], [pt.x, pt.y]);
-                let mut overlaps = false;
-                let _ = tree.locate_in_envelope_intersecting_int(&query, |c| {
-                    if c.idx != i && point_in_ring_exclusive(pt, shells[c.idx]) {
-                        overlaps = true;
-                        std::ops::ControlFlow::Break(())
-                    } else {
-                        std::ops::ControlFlow::<(), ()>::Continue(())
+                impl rstar::RTreeObject for ShellEnv {
+                    type Envelope = rstar::AABB<[f64; 2]>;
+                    fn envelope(&self) -> Self::Envelope {
+                        self.env
                     }
-                });
-                if overlaps {
-                    errors.push(GeometryValidationError::NestedHoles);
-                    return ValidationResult::invalid(errors);
+                }
+                let mut envs = Vec::with_capacity(shells.len());
+                for (i, s) in shells.iter().enumerate() {
+                    let first = s.first().map(|c| (c.x, c.y)).unwrap_or((0.0, 0.0));
+                    let (mut min_x, mut max_x, mut min_y, mut max_y) =
+                        (first.0, first.0, first.1, first.1);
+                    for c in *s {
+                        min_x = min_x.min(c.x);
+                        max_x = max_x.max(c.x);
+                        min_y = min_y.min(c.y);
+                        max_y = max_y.max(c.y);
+                    }
+                    envs.push(ShellEnv {
+                        idx: i,
+                        env: rstar::AABB::from_corners([min_x, min_y], [max_x, max_y]),
+                    });
+                }
+                let tree = rstar::RTree::bulk_load(envs);
+                for (i, s2) in shells.iter().enumerate() {
+                    let Some(pt) = s2.first().copied() else {
+                        continue;
+                    };
+                    let query = rstar::AABB::from_corners([pt.x, pt.y], [pt.x, pt.y]);
+                    let mut overlaps = false;
+                    let _ = tree.locate_in_envelope_intersecting_int(&query, |c| {
+                        if c.idx != i && point_in_ring_exclusive(pt, shells[c.idx]) {
+                            overlaps = true;
+                            std::ops::ControlFlow::Break(())
+                        } else {
+                            std::ops::ControlFlow::<(), ()>::Continue(())
+                        }
+                    });
+                    if overlaps {
+                        errors.push(GeometryValidationError::NestedHoles);
+                        return ValidationResult::invalid(errors);
+                    }
+                }
+            }
+            #[cfg(not(feature = "rstar"))]
+            {
+                for i in 0..shells.len() {
+                    for j in 0..shells.len() {
+                        if i == j {
+                            continue;
+                        }
+                        if let Some(pt) = shells[j].first().copied()
+                            && point_in_ring_exclusive(pt, shells[i]) {
+                            errors.push(GeometryValidationError::NestedHoles);
+                            return ValidationResult::invalid(errors);
+                        }
+                    }
                 }
             }
         }

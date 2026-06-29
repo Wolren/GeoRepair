@@ -19,10 +19,15 @@ use self::intersection::{
 use geo::{
     Coord, CoordNum, GeoFloat, Geometry, GeometryCollection, Line, LineString, MultiLineString,
 };
+#[cfg(feature = "rstar")]
 use rstar::{RTree, RTreeObject, AABB};
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
+#[cfg(feature = "rstar")]
+use rustc_hash::FxHashSet;
 
+#[cfg(feature = "rstar")]
 use crate::orient::orient2d as orient2d_robust;
+#[cfg(any(feature = "arrange", feature = "structure"))]
 use log::warn;
 
 /// Node a line string by removing repeated points and splitting at
@@ -64,12 +69,12 @@ pub(crate) fn node_line_string<T: NodingFloat>(ls: &LineString<T>) -> Geometry<T
             .map(|e| {
                 Line::new(
                     Coord {
-                        x: e.start.x.to_f64().unwrap(),
-                        y: e.start.y.to_f64().unwrap(),
+                        x: e.start.x.to_f64().expect("to_f64"),
+                        y: e.start.y.to_f64().expect("to_f64"),
                     },
                     Coord {
-                        x: e.end.x.to_f64().unwrap(),
-                        y: e.end.y.to_f64().unwrap(),
+                        x: e.end.x.to_f64().expect("to_f64"),
+                        y: e.end.y.to_f64().expect("to_f64"),
                     },
                 )
             })
@@ -88,12 +93,12 @@ pub(crate) fn node_line_string<T: NodingFloat>(ls: &LineString<T>) -> Geometry<T
                 .map(|e| {
                     Line::new(
                         Coord {
-                            x: e.start.x.to_f64().unwrap(),
-                            y: e.start.y.to_f64().unwrap(),
+                            x: e.start.x.to_f64().expect("to_f64"),
+                            y: e.start.y.to_f64().expect("to_f64"),
                         },
                         Coord {
-                            x: e.end.x.to_f64().unwrap(),
-                            y: e.end.y.to_f64().unwrap(),
+                            x: e.end.x.to_f64().expect("to_f64"),
+                            y: e.end.y.to_f64().expect("to_f64"),
                         },
                     )
                 })
@@ -105,12 +110,12 @@ pub(crate) fn node_line_string<T: NodingFloat>(ls: &LineString<T>) -> Geometry<T
                     .map(|e| {
                         Line::new(
                             Coord {
-                                x: T::from(e.start.x).unwrap(),
-                                y: T::from(e.start.y).unwrap(),
+                                x: T::from(e.start.x).expect("T::from(f64)"),
+                                y: T::from(e.start.y).expect("T::from(f64)"),
                             },
                             Coord {
-                                x: T::from(e.end.x).unwrap(),
-                                y: T::from(e.end.y).unwrap(),
+                                x: T::from(e.end.x).expect("T::from(f64)"),
+                                y: T::from(e.end.y).expect("T::from(f64)"),
                             },
                         )
                     })
@@ -119,7 +124,7 @@ pub(crate) fn node_line_string<T: NodingFloat>(ls: &LineString<T>) -> Geometry<T
                 return if linestrings.is_empty() {
                     empty()
                 } else if linestrings.len() == 1 {
-                    Geometry::LineString(linestrings.into_iter().next().unwrap())
+                    Geometry::LineString(linestrings.into_iter().next().expect("len==1 verified"))
                 } else {
                     Geometry::MultiLineString(MultiLineString::new(linestrings))
                 };
@@ -133,7 +138,7 @@ pub(crate) fn node_line_string<T: NodingFloat>(ls: &LineString<T>) -> Geometry<T
     if linestrings.is_empty() {
         empty()
     } else if linestrings.len() == 1 {
-        Geometry::LineString(linestrings.into_iter().next().unwrap())
+        Geometry::LineString(linestrings.into_iter().next().expect("len==1 verified"))
     } else {
         Geometry::MultiLineString(MultiLineString::new(linestrings))
     }
@@ -143,23 +148,23 @@ pub(crate) fn node_line_string<T: NodingFloat>(ls: &LineString<T>) -> Geometry<T
 fn split_edges_at_intersections<T: GeoFloat>(edges: &[Line<T>]) -> Vec<Line<T>> {
     let n = edges.len();
     let mut split_points: Vec<Vec<T>> = vec![Vec::new(); n];
-    let eps = T::from(1e-12).unwrap();
+    let eps = T::from(1e-12).expect("1e-12 fits any GeoFloat");
     let one = T::one();
     let zero = T::zero();
 
+    #[cfg(feature = "rstar")]
     if n >= 64 {
-        // R‑tree path: safe conversion, no transmute
         let edges_f64: Vec<Line<f64>> = edges
             .iter()
             .map(|l| {
                 Line::new(
                     Coord {
-                        x: l.start.x.to_f64().unwrap(),
-                        y: l.start.y.to_f64().unwrap(),
+                        x: l.start.x.to_f64().expect("to_f64"),
+                        y: l.start.y.to_f64().expect("to_f64"),
                     },
                     Coord {
-                        x: l.end.x.to_f64().unwrap(),
-                        y: l.end.y.to_f64().unwrap(),
+                        x: l.end.x.to_f64().expect("to_f64"),
+                        y: l.end.y.to_f64().expect("to_f64"),
                     },
                 )
             })
@@ -168,11 +173,13 @@ fn split_edges_at_intersections<T: GeoFloat>(edges: &[Line<T>]) -> Vec<Line<T>> 
         split_edges_rtree(&edges_f64, &mut split_f64, 1e-12);
         for i in 0..n {
             for &t in &split_f64[i] {
-                split_points[i].push(T::from(t).unwrap());
+                split_points[i].push(T::from(t).expect("intersection param in range"));
             }
         }
-    } else {
-        // Brute force for small edge sets or non-f64 types
+    }
+    #[cfg(not(feature = "rstar"))]
+    {}
+    if n < 64 || cfg!(not(feature = "rstar")) {
         for i in 0..n {
             for j in (i + 2)..n {
                 if i + 1 == j && edges[i].end == edges[j].start {
@@ -188,7 +195,6 @@ fn split_edges_at_intersections<T: GeoFloat>(edges: &[Line<T>]) -> Vec<Line<T>> 
                         }
                     }
                     None => {
-                        // Check for collinear overlap
                         let o1 = orient2d_generic(edges[i].start, edges[i].end, edges[j].start);
                         let o2 = orient2d_generic(edges[i].start, edges[i].end, edges[j].end);
                         if o1.abs() <= eps && o2.abs() <= eps {
@@ -210,12 +216,12 @@ fn split_edges_at_intersections<T: GeoFloat>(edges: &[Line<T>]) -> Vec<Line<T>> 
         }
     }
 
-    let eps_param = T::from(1e-14).unwrap();
+    let eps_param = T::from(1e-14).expect("1e-14 fits any GeoFloat");
     let mut result = Vec::new();
     for i in 0..n {
         let e = edges[i];
         let mut params: Vec<T> = std::mem::take(&mut split_points[i]);
-        params.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        params.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         params.dedup_by(|a, b| (*a - *b).abs() < eps_param);
 
         let mut prev_t = zero;
@@ -239,16 +245,17 @@ fn split_edges_at_intersections<T: GeoFloat>(edges: &[Line<T>]) -> Vec<Line<T>> 
     result
 }
 
+#[cfg(feature = "rstar")]
 fn split_edges_rtree(edges: &[Line<f64>], split_points: &mut [Vec<f64>], eps: f64) {
     let n = edges.len();
 
     #[derive(Clone, Copy)]
     struct EdgeEnv {
         idx: usize,
-        env: AABB<[f64; 2]>,
+        env: rstar::AABB<[f64; 2]>,
     }
-    impl RTreeObject for EdgeEnv {
-        type Envelope = AABB<[f64; 2]>;
+    impl rstar::RTreeObject for EdgeEnv {
+        type Envelope = rstar::AABB<[f64; 2]>;
         fn envelope(&self) -> Self::Envelope {
             self.env
         }
@@ -259,19 +266,19 @@ fn split_edges_rtree(edges: &[Line<f64>], split_points: &mut [Vec<f64>], eps: f6
         .enumerate()
         .map(|(i, e)| EdgeEnv {
             idx: i,
-            env: AABB::from_corners(
+            env: rstar::AABB::from_corners(
                 [e.start.x.min(e.end.x), e.start.y.min(e.end.y)],
                 [e.start.x.max(e.end.x), e.start.y.max(e.end.y)],
             ),
         })
         .collect();
-    let tree = RTree::bulk_load(envs);
+    let tree = rstar::RTree::bulk_load(envs);
 
     let mut checked: FxHashSet<(usize, usize)> = FxHashSet::default();
 
     for i in 0..n {
         let e = &edges[i];
-        let query = AABB::from_corners(
+        let query = rstar::AABB::from_corners(
             [e.start.x.min(e.end.x), e.start.y.min(e.end.y)],
             [e.start.x.max(e.end.x), e.start.y.max(e.end.y)],
         );
@@ -290,7 +297,6 @@ fn split_edges_rtree(edges: &[Line<f64>], split_points: &mut [Vec<f64>], eps: f6
                 return std::ops::ControlFlow::<(), ()>::Continue(());
             }
 
-            // Collinear overlap (even shared-vertex pairs can overlap)
             let o1 = orient2d_robust(edges[i].start, edges[i].end, edges[j].start);
             let o2 = orient2d_robust(edges[i].start, edges[i].end, edges[j].end);
             if o1.abs() <= eps && o2.abs() <= eps {
@@ -308,10 +314,6 @@ fn split_edges_rtree(edges: &[Line<f64>], split_points: &mut [Vec<f64>], eps: f6
                 return std::ops::ControlFlow::<(), ()>::Continue(());
             }
 
-            // Pre-filter: edges that share any vertex cannot produce a proper
-            // interior crossing, so skip the more expensive
-            // `compute_intersection_param`.  Catches the heavy spoke/star‑burst
-            // patterns where O(n²) pairs all meet at a single vertex.
             if edges[i].start == edges[j].start
                 || edges[i].start == edges[j].end
                 || edges[i].end == edges[j].start
@@ -383,11 +385,9 @@ fn reconnect_edges_by_key<T: NodingFloat>(edges: Vec<Line<T>>) -> Vec<LineString
 
             // Check forward start-matches (high index first, matching old rev() scan)
             let fwd: Option<usize> = start_map.get(&last_key).and_then(|cands| {
-                cands
-                    .iter()
-                    .copied()
-                    .rev()
-                    .find(|&idx| !used[idx] && edges[idx].start == *chain.last().unwrap())
+                cands.iter().copied().rev().find(|&idx| {
+                    !used[idx] && edges[idx].start == *chain.last().expect("non-empty chain")
+                })
             });
             if let Some(idx) = fwd {
                 chain.push(edges[idx].end);
@@ -397,11 +397,9 @@ fn reconnect_edges_by_key<T: NodingFloat>(edges: Vec<Line<T>>) -> Vec<LineString
 
             // Check backward end-matches (edge whose end == chain's last vertex)
             let bwd: Option<usize> = end_map.get(&last_key).and_then(|cands| {
-                cands
-                    .iter()
-                    .copied()
-                    .rev()
-                    .find(|&idx| !used[idx] && edges[idx].end == *chain.last().unwrap())
+                cands.iter().copied().rev().find(|&idx| {
+                    !used[idx] && edges[idx].end == *chain.last().expect("non-empty chain")
+                })
             });
             if let Some(idx) = bwd {
                 chain.push(edges[idx].start);

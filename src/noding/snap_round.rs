@@ -1,6 +1,9 @@
 use geo::{Coord, Line};
+#[cfg(feature = "rstar")]
 use rstar::{RTree, RTreeObject, AABB};
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
+#[cfg(feature = "rstar")]
+use rustc_hash::FxHashSet;
 
 const SNAP_GRID: f64 = 1e-10;
 const HOT_PIXEL_RADIUS: f64 = SNAP_GRID * 0.5;
@@ -77,25 +80,30 @@ impl HotPixel {
     }
 }
 
-/// R-tree entry for a hot pixel center, used to accelerate segment-vs-hot-pixel
-/// queries from O(segments × hot_pixels) to O(segments × log(hot_pixels)).
+/// R-tree entry for a hot pixel center.
+#[cfg(feature = "rstar")]
 struct HpEntry {
     center: Coord<f64>,
-    env: AABB<[f64; 2]>,
+    env: rstar::AABB<[f64; 2]>,
 }
 
+#[cfg(feature = "rstar")]
 impl HpEntry {
     fn new(center: Coord<f64>) -> Self {
         let r = HOT_PIXEL_RADIUS;
         HpEntry {
             center,
-            env: AABB::from_corners([center.x - r, center.y - r], [center.x + r, center.y + r]),
+            env: rstar::AABB::from_corners(
+                [center.x - r, center.y - r],
+                [center.x + r, center.y + r],
+            ),
         }
     }
 }
 
-impl RTreeObject for HpEntry {
-    type Envelope = AABB<[f64; 2]>;
+#[cfg(feature = "rstar")]
+impl rstar::RTreeObject for HpEntry {
+    type Envelope = rstar::AABB<[f64; 2]>;
     fn envelope(&self) -> Self::Envelope {
         self.env
     }
@@ -104,6 +112,7 @@ impl RTreeObject for HpEntry {
 // ── MCIndex: monotone-chain spatial indexing for O(n log n) intersection ──
 
 /// Direction quadrant (0-3) for a segment vector.
+#[cfg(feature = "rstar")]
 fn quadrant(dx: f64, dy: f64) -> u8 {
     if dx > 0.0 {
         if dy >= 0.0 {
@@ -127,6 +136,7 @@ fn quadrant(dx: f64, dy: f64) -> u8 {
 }
 
 /// A monotone chain of consecutive segments in the same direction quadrant.
+#[cfg(feature = "rstar")]
 struct MonoChain {
     start: usize,
     end: usize,
@@ -136,6 +146,7 @@ struct MonoChain {
     max_y: f64,
 }
 
+#[cfg(feature = "rstar")]
 fn build_chains(segments: &[Line<f64>]) -> Vec<MonoChain> {
     let n = segments.len();
     if n == 0 {
@@ -187,18 +198,21 @@ fn build_chains(segments: &[Line<f64>]) -> Vec<MonoChain> {
     chains
 }
 
+#[cfg(feature = "rstar")]
 struct ChainEnv {
     idx: usize,
-    env: AABB<[f64; 2]>,
+    env: rstar::AABB<[f64; 2]>,
 }
-impl RTreeObject for ChainEnv {
-    type Envelope = AABB<[f64; 2]>;
+#[cfg(feature = "rstar")]
+impl rstar::RTreeObject for ChainEnv {
+    type Envelope = rstar::AABB<[f64; 2]>;
     fn envelope(&self) -> Self::Envelope {
         self.env
     }
 }
 
 /// Collect all intersection points using MCIndex spatial indexing.
+#[cfg(feature = "rstar")]
 fn collect_intersections_mcindex(
     segments: &[Line<f64>],
     chains: &[MonoChain],
@@ -209,7 +223,7 @@ fn collect_intersections_mcindex(
     let nc = chains.len();
     for i in 0..nc {
         let mc1 = &chains[i];
-        let q = AABB::from_corners([mc1.min_x, mc1.min_y], [mc1.max_x, mc1.max_y]);
+        let q = rstar::AABB::from_corners([mc1.min_x, mc1.min_y], [mc1.max_x, mc1.max_y]);
         let _ = chain_tree.locate_in_envelope_intersecting_int(&q, |c| {
             let j = c.idx;
             if j <= i {
@@ -222,6 +236,7 @@ fn collect_intersections_mcindex(
 }
 
 /// Recursive divide-and-conquer: split larger chain, check leaf pairs.
+#[cfg(feature = "rstar")]
 fn check_chain_pair(
     segments: &[Line<f64>],
     mc1: &MonoChain,
@@ -288,6 +303,7 @@ fn check_chain_pair(
 }
 
 /// Build a sub-chain from `segments[start..end]` with a computed bounding box.
+#[cfg(feature = "rstar")]
 fn sub_chain(segments: &[Line<f64>], start: usize, end: usize) -> MonoChain {
     let mut min_x = f64::MAX;
     let mut max_x = f64::MIN;
@@ -342,9 +358,9 @@ impl SnapRoundingNoder {
             coords.push(seg.end);
         }
 
-        // Step 1b: Compute interior intersection points using MCIndex
-        // spatial indexing for large sets, brute force for small sets.
+        // Step 1b: Compute interior intersection points.
         let n = segments.len();
+        #[cfg(feature = "rstar")]
         if n >= MCINDEX_THRESHOLD {
             let chains = build_chains(segments);
             let envs: Vec<ChainEnv> = chains
@@ -352,10 +368,10 @@ impl SnapRoundingNoder {
                 .enumerate()
                 .map(|(i, mc)| ChainEnv {
                     idx: i,
-                    env: AABB::from_corners([mc.min_x, mc.min_y], [mc.max_x, mc.max_y]),
+                    env: rstar::AABB::from_corners([mc.min_x, mc.min_y], [mc.max_x, mc.max_y]),
                 })
                 .collect();
-            let chain_tree = RTree::bulk_load(envs);
+            let chain_tree = rstar::RTree::bulk_load(envs);
             let mut checked: FxHashSet<(usize, usize)> = FxHashSet::default();
             collect_intersections_mcindex(
                 segments,
@@ -364,7 +380,10 @@ impl SnapRoundingNoder {
                 &mut coords,
                 &mut checked,
             );
-        } else {
+        }
+        #[cfg(not(feature = "rstar"))]
+        {}
+        if n < MCINDEX_THRESHOLD || !cfg!(feature = "rstar") {
             for i in 0..n {
                 for j in (i + 1)..n {
                     if j == i + 1 && segments[i].end == segments[j].start {
@@ -417,37 +436,77 @@ impl SnapRoundingNoder {
             }
         }
 
-        // Build R-tree over hot pixels for spatial queries
-        let hp_entries: Vec<HpEntry> = self
-            .hot_pixels
-            .values()
-            .map(|hp| HpEntry::new(hp.center))
-            .collect();
-        let hp_tree = RTree::bulk_load(hp_entries);
-
         // Step 4 & 5: Subdivide each segment at hot pixels and snap to grid
         let eps = 1e-14;
         let mut result: Vec<Line<f64>> = Vec::new();
-        let hp_r = HOT_PIXEL_RADIUS;
+        #[cfg(feature = "rstar")]
+        {
+            let hp_r = HOT_PIXEL_RADIUS;
+
+            let hp_entries: Vec<HpEntry> = self
+                .hot_pixels
+                .values()
+                .map(|hp| HpEntry::new(hp.center))
+                .collect();
+            let hp_tree = rstar::RTree::bulk_load(hp_entries);
+
+            for seg in segments {
+                let mut params: Vec<f64> = Vec::new();
+                params.push(0.0);
+                params.push(1.0);
+
+                let lo_x = seg.start.x.min(seg.end.x) - hp_r;
+                let hi_x = seg.start.x.max(seg.end.x) + hp_r;
+                let lo_y = seg.start.y.min(seg.end.y) - hp_r;
+                let hi_y = seg.start.y.max(seg.end.y) + hp_r;
+                let query = rstar::AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]);
+                let _ = hp_tree.locate_in_envelope_intersecting_int(&query, |entry| {
+                    let hp = HotPixel {
+                        center: entry.center,
+                    };
+                    if hp.touches(seg) {
+                        params.push(hp.closest_param(seg));
+                    }
+                    std::ops::ControlFlow::<(), ()>::Continue(())
+                });
+
+                params.sort_by_key(|a| a.to_bits());
+                params.dedup_by(|a, b| (*a - *b).abs() < eps);
+
+                for window in params.windows(2) {
+                    let t1 = window[0];
+                    let t2 = window[1];
+                    if (t2 - t1).abs() < eps {
+                        continue;
+                    }
+                    let p1 = Coord {
+                        x: seg.start.x + t1 * (seg.end.x - seg.start.x),
+                        y: seg.start.y + t1 * (seg.end.y - seg.start.y),
+                    };
+                    let p2 = Coord {
+                        x: seg.start.x + t2 * (seg.end.x - seg.start.x),
+                        y: seg.start.y + t2 * (seg.end.y - seg.start.y),
+                    };
+                    let s1 = snap_to_grid(p1);
+                    let s2 = snap_to_grid(p2);
+                    if s1 != s2 {
+                        result.push(Line::new(s1, s2));
+                    }
+                }
+            }
+        }
+
+        #[cfg(not(feature = "rstar"))]
         for seg in segments {
             let mut params: Vec<f64> = Vec::new();
             params.push(0.0);
             params.push(1.0);
 
-            let lo_x = seg.start.x.min(seg.end.x) - hp_r;
-            let hi_x = seg.start.x.max(seg.end.x) + hp_r;
-            let lo_y = seg.start.y.min(seg.end.y) - hp_r;
-            let hi_y = seg.start.y.max(seg.end.y) + hp_r;
-            let query = AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]);
-            let _ = hp_tree.locate_in_envelope_intersecting_int(&query, |entry| {
-                let hp = HotPixel {
-                    center: entry.center,
-                };
+            for hp in self.hot_pixels.values() {
                 if hp.touches(seg) {
                     params.push(hp.closest_param(seg));
                 }
-                std::ops::ControlFlow::<(), ()>::Continue(())
-            });
+            }
 
             params.sort_by_key(|a| a.to_bits());
             params.dedup_by(|a, b| (*a - *b).abs() < eps);

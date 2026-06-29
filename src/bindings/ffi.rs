@@ -1,4 +1,5 @@
 use std::ffi::{c_char, CString};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr;
 
 use crate::core::MakeValidConfig;
@@ -88,14 +89,19 @@ pub unsafe extern "C" fn geo_repair_make_valid(
     wkb_data: *const u8,
     wkb_len: usize,
 ) -> GeoRepairResult {
-    let geom = match geometry_from_wkb(wkb_data, wkb_len) {
-        Ok(g) => g,
-        Err(e) => return GeoRepairResult::error(&e),
-    };
-    let fixed = geom.make_valid();
-    match geometry_to_wkb(&fixed) {
-        Ok(wkb) => GeoRepairResult::success(wkb),
-        Err(e) => GeoRepairResult::error(&e),
+    match catch_unwind(AssertUnwindSafe(|| {
+        let geom = match geometry_from_wkb(wkb_data, wkb_len) {
+            Ok(g) => g,
+            Err(e) => return GeoRepairResult::error(&e),
+        };
+        let fixed = geom.make_valid();
+        match geometry_to_wkb(&fixed) {
+            Ok(wkb) => GeoRepairResult::success(wkb),
+            Err(e) => GeoRepairResult::error(&e),
+        }
+    })) {
+        Ok(r) => r,
+        Err(_) => GeoRepairResult::error("internal error: repair panicked"),
     }
 }
 
@@ -115,26 +121,31 @@ pub unsafe extern "C" fn geo_repair_make_valid_with_config(
     keep_collapsed: bool,
     poly_method: u8,
 ) -> GeoRepairResult {
-    let geom = match geometry_from_wkb(wkb_data, wkb_len) {
-        Ok(g) => g,
-        Err(e) => return GeoRepairResult::error(&e),
-    };
-    let config = MakeValidConfig {
-        keep_collapsed,
-        poly_method: match poly_method {
-            0 => crate::PolyMethod::Auto,
-            1 => crate::PolyMethod::Arrange,
-            2 => crate::PolyMethod::Structure,
-            _ => crate::PolyMethod::Auto,
-        },
-        fill_rule: Default::default(),
-        crs: None,
-        target_crs: None,
-    };
-    let fixed = geom.make_valid_with_config(&config);
-    match geometry_to_wkb(&fixed) {
-        Ok(wkb) => GeoRepairResult::success(wkb),
-        Err(e) => GeoRepairResult::error(&e),
+    match catch_unwind(AssertUnwindSafe(|| {
+        let geom = match geometry_from_wkb(wkb_data, wkb_len) {
+            Ok(g) => g,
+            Err(e) => return GeoRepairResult::error(&e),
+        };
+        let config = MakeValidConfig {
+            keep_collapsed,
+            poly_method: match poly_method {
+                0 => crate::PolyMethod::Auto,
+                1 => crate::PolyMethod::Arrange,
+                2 => crate::PolyMethod::Structure,
+                _ => crate::PolyMethod::Auto,
+            },
+            fill_rule: Default::default(),
+            crs: None,
+            target_crs: None,
+        };
+        let fixed = geom.make_valid_with_config(&config);
+        match geometry_to_wkb(&fixed) {
+            Ok(wkb) => GeoRepairResult::success(wkb),
+            Err(e) => GeoRepairResult::error(&e),
+        }
+    })) {
+        Ok(r) => r,
+        Err(_) => GeoRepairResult::error("internal error: repair panicked"),
     }
 }
 
@@ -157,33 +168,38 @@ pub unsafe extern "C" fn geo_repair_make_valid_with_config_full(
     fill_rule: u8,
     epsg_code: i32,
 ) -> GeoRepairResult {
-    let geom = match geometry_from_wkb(wkb_data, wkb_len) {
-        Ok(g) => g,
-        Err(e) => return GeoRepairResult::error(&e),
-    };
-    let config = MakeValidConfig {
-        keep_collapsed,
-        poly_method: match poly_method {
-            0 => crate::PolyMethod::Auto,
-            1 => crate::PolyMethod::Arrange,
-            2 => crate::PolyMethod::Structure,
-            _ => crate::PolyMethod::Auto,
-        },
-        fill_rule: match fill_rule {
-            0 => geo::algorithm::bool_ops::FillRule::EvenOdd,
-            _ => geo::algorithm::bool_ops::FillRule::NonZero,
-        },
-        crs: if epsg_code > 0 {
-            Some(crate::Crs::from_epsg(epsg_code as u32))
-        } else {
-            None
-        },
-        target_crs: None,
-    };
-    let fixed = geom.make_valid_with_config(&config);
-    match geometry_to_wkb(&fixed) {
-        Ok(wkb) => GeoRepairResult::success(wkb),
-        Err(e) => GeoRepairResult::error(&e),
+    match catch_unwind(AssertUnwindSafe(|| {
+        let geom = match geometry_from_wkb(wkb_data, wkb_len) {
+            Ok(g) => g,
+            Err(e) => return GeoRepairResult::error(&e),
+        };
+        let config = MakeValidConfig {
+            keep_collapsed,
+            poly_method: match poly_method {
+                0 => crate::PolyMethod::Auto,
+                1 => crate::PolyMethod::Arrange,
+                2 => crate::PolyMethod::Structure,
+                _ => crate::PolyMethod::Auto,
+            },
+            fill_rule: match fill_rule {
+                0 => geo::algorithm::bool_ops::FillRule::EvenOdd,
+                _ => geo::algorithm::bool_ops::FillRule::NonZero,
+            },
+            crs: if epsg_code > 0 {
+                Some(crate::Crs::from_epsg(epsg_code as u32))
+            } else {
+                None
+            },
+            target_crs: None,
+        };
+        let fixed = geom.make_valid_with_config(&config);
+        match geometry_to_wkb(&fixed) {
+            Ok(wkb) => GeoRepairResult::success(wkb),
+            Err(e) => GeoRepairResult::error(&e),
+        }
+    })) {
+        Ok(r) => r,
+        Err(_) => GeoRepairResult::error("internal error: repair panicked"),
     }
 }
 
@@ -199,14 +215,19 @@ pub unsafe extern "C" fn geo_repair_make_valid_with_config_full(
 /// [`geo_repair_free_result`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_is_valid(wkb_data: *const u8, wkb_len: usize) -> u8 {
-    let geom = match geometry_from_wkb(wkb_data, wkb_len) {
-        Ok(g) => g,
-        Err(_) => return 0,
-    };
-    if geom.is_valid() {
-        1
-    } else {
-        0
+    match catch_unwind(AssertUnwindSafe(|| {
+        let geom = match geometry_from_wkb(wkb_data, wkb_len) {
+            Ok(g) => g,
+            Err(_) => return 0,
+        };
+        if geom.is_valid() {
+            1
+        } else {
+            0
+        }
+    })) {
+        Ok(v) => v,
+        Err(_) => 0,
     }
 }
 
@@ -221,15 +242,20 @@ pub unsafe extern "C" fn geo_repair_validate_reason(
     wkb_data: *const u8,
     wkb_len: usize,
 ) -> GeoRepairResult {
-    let geom = match geometry_from_wkb(wkb_data, wkb_len) {
-        Ok(g) => g,
-        Err(e) => return GeoRepairResult::error(&e),
-    };
-    if geom.is_valid() {
-        GeoRepairResult::success(Vec::new())
-    } else {
-        let reason = geom.validate_reason();
-        GeoRepairResult::error(&reason)
+    match catch_unwind(AssertUnwindSafe(|| {
+        let geom = match geometry_from_wkb(wkb_data, wkb_len) {
+            Ok(g) => g,
+            Err(e) => return GeoRepairResult::error(&e),
+        };
+        if geom.is_valid() {
+            GeoRepairResult::success(Vec::new())
+        } else {
+            let reason = geom.validate_reason();
+            GeoRepairResult::error(&reason)
+        }
+    })) {
+        Ok(r) => r,
+        Err(_) => GeoRepairResult::error("internal error: validation panicked"),
     }
 }
 

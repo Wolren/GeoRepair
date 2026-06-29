@@ -9,7 +9,9 @@
 
 use crate::orient::orient2d;
 use geo::{Coord, Line};
+#[cfg(feature = "rstar")]
 use rstar::{RTree, RTreeObject, AABB};
+#[cfg(feature = "rstar")]
 use rustc_hash::FxHashSet;
 
 /// A violation found by [`NodingValidator`].
@@ -35,6 +37,7 @@ pub struct NodingValidator {
 
 // ── MCIndex: monotone-chain spatial index ──
 
+#[cfg(feature = "rstar")]
 fn quadrant(dx: f64, dy: f64) -> u8 {
     if dx > 0.0 {
         if dy >= 0.0 {
@@ -57,6 +60,7 @@ fn quadrant(dx: f64, dy: f64) -> u8 {
     }
 }
 
+#[cfg(feature = "rstar")]
 struct ValMonoChain {
     start: usize,
     end: usize,
@@ -66,6 +70,7 @@ struct ValMonoChain {
     max_y: f64,
 }
 
+#[cfg(feature = "rstar")]
 fn build_chains(edges: &[Line<f64>]) -> Vec<ValMonoChain> {
     let n = edges.len();
     if n == 0 {
@@ -117,17 +122,20 @@ fn build_chains(edges: &[Line<f64>]) -> Vec<ValMonoChain> {
     chains
 }
 
+#[cfg(feature = "rstar")]
 struct ChainEnv {
     idx: usize,
-    env: AABB<[f64; 2]>,
+    env: rstar::AABB<[f64; 2]>,
 }
-impl RTreeObject for ChainEnv {
-    type Envelope = AABB<[f64; 2]>;
+#[cfg(feature = "rstar")]
+impl rstar::RTreeObject for ChainEnv {
+    type Envelope = rstar::AABB<[f64; 2]>;
     fn envelope(&self) -> Self::Envelope {
         self.env
     }
 }
 
+#[cfg(feature = "rstar")]
 fn sub_chain(edges: &[Line<f64>], start: usize, end: usize) -> ValMonoChain {
     let mut min_x = f64::MAX;
     let mut max_x = f64::MIN;
@@ -226,6 +234,7 @@ fn check_crossing_violation(
 }
 
 /// Recursive MCIndex divide-and-conquer: check all leaf pairs between two chains.
+#[cfg(feature = "rstar")]
 fn check_chain_pair(
     edges: &[Line<f64>],
     mc1: &ValMonoChain,
@@ -323,11 +332,7 @@ impl NodingValidator {
         !self.violations.is_empty()
     }
 
-    /// Validate all non-adjacent edge pairs using MCIndex spatial indexing.
-    ///
-    /// Runs in O(n log n) — builds monotone chains, indexes them in an
-    /// R-tree, then recursively subdivides overlapping chain pairs down
-    /// to single-segment leaves for exact orient2d checking.
+    /// Validate all non-adjacent edge pairs.
     pub fn validate(&mut self) {
         self.violations.clear();
         let n = self.edges.len();
@@ -336,54 +341,61 @@ impl NodingValidator {
         }
         let eps = 1e-12;
 
-        // Build MCIndex
-        let chains = build_chains(&self.edges);
-        let envs: Vec<ChainEnv> = chains
-            .iter()
-            .enumerate()
-            .map(|(i, mc)| ChainEnv {
-                idx: i,
-                env: AABB::from_corners([mc.min_x, mc.min_y], [mc.max_x, mc.max_y]),
-            })
-            .collect();
-        let tree = RTree::bulk_load(envs);
+        #[cfg(feature = "rstar")]
+        {
+            let chains = build_chains(&self.edges);
+            let envs: Vec<ChainEnv> = chains
+                .iter()
+                .enumerate()
+                .map(|(i, mc)| ChainEnv {
+                    idx: i,
+                    env: rstar::AABB::from_corners([mc.min_x, mc.min_y], [mc.max_x, mc.max_y]),
+                })
+                .collect();
+            let tree = rstar::RTree::bulk_load(envs);
 
-        let mut checked: FxHashSet<(usize, usize)> = FxHashSet::default();
+            let mut checked: FxHashSet<(usize, usize)> = FxHashSet::default();
 
-        for i in 0..chains.len() {
-            let mc1 = &chains[i];
-            let q = AABB::from_corners([mc1.min_x, mc1.min_y], [mc1.max_x, mc1.max_y]);
-            let _ = tree.locate_in_envelope_intersecting_int(&q, |c| {
-                let j = c.idx;
-                if j <= i {
-                    return std::ops::ControlFlow::<(), ()>::Continue(());
-                }
-                check_chain_pair(
-                    &self.edges,
-                    mc1,
-                    &chains[j],
-                    eps,
-                    &mut self.violations,
-                    &mut checked,
-                );
-                std::ops::ControlFlow::<(), ()>::Continue(())
-            });
-            // Intra-chain: recursively check pairs within the same chain.
-            // With monotone chains, collinear segments end up in the same
-            // chain and the R-tree inter-chain query misses them entirely.
-            if mc1.end - mc1.start > 1 {
-                let mid = (mc1.start + mc1.end) / 2;
-                if mid > mc1.start {
-                    let left = sub_chain(&self.edges, mc1.start, mid);
-                    let right = sub_chain(&self.edges, mid, mc1.end);
+            for i in 0..chains.len() {
+                let mc1 = &chains[i];
+                let q = rstar::AABB::from_corners([mc1.min_x, mc1.min_y], [mc1.max_x, mc1.max_y]);
+                let _ = tree.locate_in_envelope_intersecting_int(&q, |c| {
+                    let j = c.idx;
+                    if j <= i {
+                        return std::ops::ControlFlow::<(), ()>::Continue(());
+                    }
                     check_chain_pair(
                         &self.edges,
-                        &left,
-                        &right,
+                        mc1,
+                        &chains[j],
                         eps,
                         &mut self.violations,
                         &mut checked,
                     );
+                    std::ops::ControlFlow::<(), ()>::Continue(())
+                });
+                if mc1.end - mc1.start > 1 {
+                    let mid = (mc1.start + mc1.end) / 2;
+                    if mid > mc1.start {
+                        let left = sub_chain(&self.edges, mc1.start, mid);
+                        let right = sub_chain(&self.edges, mid, mc1.end);
+                        check_chain_pair(
+                            &self.edges,
+                            &left,
+                            &right,
+                            eps,
+                            &mut self.violations,
+                            &mut checked,
+                        );
+                    }
+                }
+            }
+        }
+        #[cfg(not(feature = "rstar"))]
+        {
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    check_crossing_violation(&self.edges, i, j, eps, &mut self.violations);
                 }
             }
         }

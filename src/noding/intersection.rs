@@ -1,5 +1,6 @@
 use crate::orient::orient2d as orient2d_robust;
 use geo::{Coord, GeoFloat, Line};
+#[cfg(feature = "rstar")]
 use rstar::{RTree, RTreeObject, AABB};
 use std::mem;
 
@@ -34,24 +35,25 @@ pub(crate) use private::NodingFloat;
 
 /// Check if any non-adjacent edges in the segment list intersect.
 pub(crate) fn check_self_intersections<T: GeoFloat>(edges: &[Line<T>]) -> bool {
-    let eps = T::from(1e-12).unwrap();
+    let eps = T::from(1e-12).expect("1e-12 fits any GeoFloat");
     if edges.len() < 3 {
         return false;
     }
 
     // R‑tree path for large edge sets (safe conversion, no transmute)
+    #[cfg(feature = "rstar")]
     if edges.len() >= 64 {
         let edges_f64: Vec<Line<f64>> = edges
             .iter()
             .map(|l| {
                 Line::new(
                     Coord {
-                        x: l.start.x.to_f64().unwrap(),
-                        y: l.start.y.to_f64().unwrap(),
+                        x: l.start.x.to_f64().expect("to_f64"),
+                        y: l.start.y.to_f64().expect("to_f64"),
                     },
                     Coord {
-                        x: l.end.x.to_f64().unwrap(),
-                        y: l.end.y.to_f64().unwrap(),
+                        x: l.end.x.to_f64().expect("to_f64"),
+                        y: l.end.y.to_f64().expect("to_f64"),
                     },
                 )
             })
@@ -59,7 +61,7 @@ pub(crate) fn check_self_intersections<T: GeoFloat>(edges: &[Line<T>]) -> bool {
         return check_self_intersections_f64(&edges_f64, 1e-12);
     }
 
-    // Generic fallback: brute force for smaller edge sets
+    // Brute force for smaller edge sets or when rstar unavailable
     for i in 0..edges.len() {
         for j in (i + 2)..edges.len() {
             if edges_intersect(&edges[i], &edges[j], eps) {
@@ -70,6 +72,7 @@ pub(crate) fn check_self_intersections<T: GeoFloat>(edges: &[Line<T>]) -> bool {
     false
 }
 
+#[cfg(feature = "rstar")]
 fn check_self_intersections_f64(edges: &[Line<f64>], eps: f64) -> bool {
     let n = edges.len();
     if n < 3 {
@@ -79,10 +82,10 @@ fn check_self_intersections_f64(edges: &[Line<f64>], eps: f64) -> bool {
     #[derive(Clone, Copy)]
     struct EdgeEnv {
         idx: usize,
-        env: AABB<[f64; 2]>,
+        env: rstar::AABB<[f64; 2]>,
     }
-    impl RTreeObject for EdgeEnv {
-        type Envelope = AABB<[f64; 2]>;
+    impl rstar::RTreeObject for EdgeEnv {
+        type Envelope = rstar::AABB<[f64; 2]>;
         fn envelope(&self) -> Self::Envelope {
             self.env
         }
@@ -93,17 +96,17 @@ fn check_self_intersections_f64(edges: &[Line<f64>], eps: f64) -> bool {
         .enumerate()
         .map(|(i, e)| EdgeEnv {
             idx: i,
-            env: AABB::from_corners(
+            env: rstar::AABB::from_corners(
                 [e.start.x.min(e.end.x), e.start.y.min(e.end.y)],
                 [e.start.x.max(e.end.x), e.start.y.max(e.end.y)],
             ),
         })
         .collect();
-    let tree = RTree::bulk_load(envs);
+    let tree = rstar::RTree::bulk_load(envs);
 
     for i in 0..n {
         let e = &edges[i];
-        let query = AABB::from_corners(
+        let query = rstar::AABB::from_corners(
             [e.start.x.min(e.end.x), e.start.y.min(e.end.y)],
             [e.start.x.max(e.end.x), e.start.y.max(e.end.y)],
         );
@@ -138,25 +141,25 @@ pub(crate) fn edges_intersect<T: GeoFloat>(e1: &Line<T>, e2: &Line<T>, eps: T) -
         return edges_intersect_f64_robust(
             &Line::new(
                 Coord {
-                    x: e1.start.x.to_f64().unwrap(),
-                    y: e1.start.y.to_f64().unwrap(),
+                    x: e1.start.x.to_f64().expect("to_f64"),
+                    y: e1.start.y.to_f64().expect("to_f64"),
                 },
                 Coord {
-                    x: e1.end.x.to_f64().unwrap(),
-                    y: e1.end.y.to_f64().unwrap(),
+                    x: e1.end.x.to_f64().expect("to_f64"),
+                    y: e1.end.y.to_f64().expect("to_f64"),
                 },
             ),
             &Line::new(
                 Coord {
-                    x: e2.start.x.to_f64().unwrap(),
-                    y: e2.start.y.to_f64().unwrap(),
+                    x: e2.start.x.to_f64().expect("to_f64"),
+                    y: e2.start.y.to_f64().expect("to_f64"),
                 },
                 Coord {
-                    x: e2.end.x.to_f64().unwrap(),
-                    y: e2.end.y.to_f64().unwrap(),
+                    x: e2.end.x.to_f64().expect("to_f64"),
+                    y: e2.end.y.to_f64().expect("to_f64"),
                 },
             ),
-            eps.to_f64().unwrap(),
+            eps.to_f64().expect("to_f64"),
         );
     }
     let o1 = orient2d_generic(e1.start, e1.end, e2.start);
@@ -296,22 +299,22 @@ pub(crate) fn compute_intersection_param<T: GeoFloat>(
     if std::mem::size_of::<T>() == 8 {
         let ef1 = Line::new(
             Coord {
-                x: e1.start.x.to_f64().unwrap(),
-                y: e1.start.y.to_f64().unwrap(),
+                x: e1.start.x.to_f64().expect("to_f64"),
+                y: e1.start.y.to_f64().expect("to_f64"),
             },
             Coord {
-                x: e1.end.x.to_f64().unwrap(),
-                y: e1.end.y.to_f64().unwrap(),
+                x: e1.end.x.to_f64().expect("to_f64"),
+                y: e1.end.y.to_f64().expect("to_f64"),
             },
         );
         let ef2 = Line::new(
             Coord {
-                x: e2.start.x.to_f64().unwrap(),
-                y: e2.start.y.to_f64().unwrap(),
+                x: e2.start.x.to_f64().expect("to_f64"),
+                y: e2.start.y.to_f64().expect("to_f64"),
             },
             Coord {
-                x: e2.end.x.to_f64().unwrap(),
-                y: e2.end.y.to_f64().unwrap(),
+                x: e2.end.x.to_f64().expect("to_f64"),
+                y: e2.end.y.to_f64().expect("to_f64"),
             },
         );
         // Phase 1: Detection via robust orient2d (Shewchuk adaptive precision).
@@ -336,11 +339,11 @@ pub(crate) fn compute_intersection_param<T: GeoFloat>(
         // overlap via `None`.
         return compute_intersection_param_dd(&ef1, &ef2).map(|(t, u, pt)| {
             (
-                T::from(t).unwrap(),
-                T::from(u).unwrap(),
+                T::from(t).expect("intersection param in range"),
+                T::from(u).expect("intersection param in range"),
                 Coord {
-                    x: T::from(pt.x).unwrap(),
-                    y: T::from(pt.y).unwrap(),
+                    x: T::from(pt.x).expect("intersection coord in range"),
+                    y: T::from(pt.y).expect("intersection coord in range"),
                 },
             )
         });

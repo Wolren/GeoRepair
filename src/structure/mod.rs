@@ -128,7 +128,7 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
 
     let result = if result_polys.len() == 1 {
         // Safe: len==1 verified above on local Vec
-        Geometry::Polygon(result_polys.into_iter().next().unwrap())
+        Geometry::Polygon(result_polys.pop().expect("len==1 verified"))
     } else {
         Geometry::MultiPolygon(MultiPolygon::new(merge::merge_shells(result_polys).0))
     };

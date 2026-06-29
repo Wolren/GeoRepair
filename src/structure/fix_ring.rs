@@ -345,7 +345,7 @@ pub(crate) fn split_edges(edges: &[Line<f64>]) -> Vec<Line<f64>> {
     for i in 0..n {
         let e = edges[i];
         let mut pts = std::mem::take(&mut split_points[i]);
-        pts.sort_by(|(a, _), (b, _)| a.partial_cmp(b).unwrap());
+        pts.sort_by(|(a, _), (b, _)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         pts.dedup_by(|(a, _), (b, _)| (*a - *b).abs() < eps_param);
         let mut prev_pt = e.start;
         for &(_, pt) in &pts {

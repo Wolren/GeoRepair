@@ -10,9 +10,10 @@ edition = "2024"
 rust-version = "1.95"
 
 [features]
-default = ["arrange", "structure", "parallel", "simd", "io-geojson", "io-wkt", "io-wkb", "load-shp"]
-arrange = ["dep:spade", "geo/spade"]
-structure = ["simd"]
+default = ["arrange", "structure", "parallel", "simd", "io-geojson", "io-wkt", "io-wkb", "load-shp", "validate"]
+arrange = ["dep:spade", "geo/spade", "dep:rstar"]
+structure = ["simd", "dep:rstar"]
+validate = ["dep:rstar"]
 parallel = ["dep:rayon", "geo/multithreading"]
 simd = []
 simd-portable = []
@@ -35,7 +36,7 @@ python = ["dep:pyo3", "io-wkt", "io-geojson", "io-wkb", "load-shp", "io-gpkg"]
 [dependencies]
 geo = { version = "0.33", default-features = false }
 spade = { version = "2.15", optional = true }
-rstar = { version = "0.12" }
+rstar = { version = "0.12", optional = true }
 log = { version = "0.4", default-features = false }
 robust = "1.2"
 thiserror = "2.0"

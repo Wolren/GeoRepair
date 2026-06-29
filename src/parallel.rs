@@ -54,14 +54,14 @@ pub fn par_fix_multi_line_string<T: NodingFloat + Send + Sync>(
         (0, 0) => Geometry::GeometryCollection(GeometryCollection(Vec::new())),
         (_, 0) => {
             if points.len() == 1 {
-                Geometry::Point(points.into_iter().next().unwrap())
+                Geometry::Point(points.pop().expect("len==1 verified"))
             } else {
                 Geometry::MultiPoint(MultiPoint::new(points))
             }
         }
         (0, _) => {
             if lines.len() == 1 {
-                Geometry::LineString(lines.into_iter().next().unwrap())
+                Geometry::LineString(lines.pop().expect("len==1 verified"))
             } else {
                 Geometry::MultiLineString(MultiLineString::new(lines))
             }
@@ -69,7 +69,7 @@ pub fn par_fix_multi_line_string<T: NodingFloat + Send + Sync>(
         _ => {
             let mut geoms: Vec<Geometry<T>> = lines.into_iter().map(Geometry::LineString).collect();
             if points.len() == 1 {
-                geoms.push(Geometry::Point(points.into_iter().next().unwrap()));
+                geoms.push(Geometry::Point(points.pop().expect("len==1 verified")));
             } else {
                 geoms.push(Geometry::MultiPoint(MultiPoint::new(points)));
             }
@@ -97,7 +97,7 @@ pub fn par_fix_multi_polygon(mp: &MultiPolygon<f64>, config: &MakeValidConfig) -
     }
     if shells.len() == 1 {
         // Safe: len==1 verified above on local Vec
-        return Geometry::Polygon(shells.into_iter().next().unwrap());
+        return Geometry::Polygon(shells.pop().expect("len==1 verified"));
     }
     let mp = MultiPolygon::new(shells);
     Geometry::MultiPolygon(geo::algorithm::bool_ops::unary_union(&mp))

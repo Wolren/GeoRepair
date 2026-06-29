@@ -3,7 +3,9 @@ use geo::{
     MultiPoint, MultiPolygon, Point, Polygon, Rect, Triangle, Winding,
 };
 
-use crate::core::{MakeValidConfig, PolyMethod};
+use crate::core::MakeValidConfig;
+#[cfg(any(feature = "arrange", feature = "structure"))]
+use crate::core::PolyMethod;
 use crate::noding::{node_line_string, remove_consecutive_duplicates, NodingFloat};
 use crate::validation::{GeoValidation, ValidationResult};
 use log::warn;
@@ -86,8 +88,8 @@ impl<T: GeoFloat> MakeValid for MultiPoint<T> {
                     return false;
                 }
                 let key = (
-                    p.0.x.to_f64().unwrap().to_bits(),
-                    p.0.y.to_f64().unwrap().to_bits(),
+                    p.0.x.to_f64().expect("to_f64").to_bits(),
+                    p.0.y.to_f64().expect("to_f64").to_bits(),
                 );
                 seen.insert(key)
             })
@@ -177,14 +179,14 @@ impl<T: NodingFloat> MakeValid for MultiLineString<T> {
             (0, 0) => empty_geom(),
             (_, 0) => {
                 if points.len() == 1 {
-                    Geometry::Point(points.into_iter().next().unwrap())
+                    Geometry::Point(points.pop().expect("len==1 verified"))
                 } else {
                     Geometry::MultiPoint(MultiPoint::new(points))
                 }
             }
             (0, _) => {
                 if lines.len() == 1 {
-                    Geometry::LineString(lines.into_iter().next().unwrap())
+                    Geometry::LineString(lines.pop().expect("len==1 verified"))
                 } else {
                     Geometry::MultiLineString(MultiLineString::new(lines))
                 }
@@ -193,7 +195,7 @@ impl<T: NodingFloat> MakeValid for MultiLineString<T> {
                 let mut geoms: Vec<Geometry<T>> =
                     lines.into_iter().map(Geometry::LineString).collect();
                 if points.len() == 1 {
-                    geoms.push(Geometry::Point(points.into_iter().next().unwrap()));
+                    geoms.push(Geometry::Point(points.pop().expect("len==1 verified")));
                 } else {
                     geoms.push(Geometry::MultiPoint(MultiPoint::new(points)));
                 }
@@ -424,7 +426,7 @@ impl MakeValid for MultiPolygon<f64> {
         }
         if shells.len() == 1 {
             // Safe: len==1 verified above on local Vec
-            return enforce_ogc_winding(Geometry::Polygon(shells.into_iter().next().unwrap()));
+            return enforce_ogc_winding(Geometry::Polygon(shells.pop().expect("len==1 verified")));
         }
         let mp = MultiPolygon::new(shells);
         enforce_ogc_winding(Geometry::MultiPolygon(
@@ -495,7 +497,7 @@ fn apply_target_crs(geom: Geometry<f64>, _config: &MakeValidConfig) -> Geometry<
 }
 
 #[cfg(not(any(feature = "arrange", feature = "structure")))]
-impl<T: GeoFloat> MakeValid for Geometry<T> {
+impl<T: NodingFloat> MakeValid for Geometry<T> {
     type Scalar = T;
 
     fn make_valid_with_config(&self, config: &MakeValidConfig) -> Geometry<T> {
@@ -597,7 +599,7 @@ impl MakeValid for GeometryCollection<f64> {
 }
 
 #[cfg(not(any(feature = "arrange", feature = "structure")))]
-impl<T: GeoFloat> MakeValid for GeometryCollection<T> {
+impl<T: NodingFloat> MakeValid for GeometryCollection<T> {
     type Scalar = T;
 
     fn make_valid_with_config(&self, config: &MakeValidConfig) -> Geometry<T> {
