@@ -220,9 +220,9 @@ impl GeometryPrecisionReducer {
             }
             Geometry::Triangle(t) => {
                 let snapped = [
-                    self.snap_coord(t.0),
-                    self.snap_coord(t.1),
-                    self.snap_coord(t.2),
+                    self.snap_coord(t.v1()),
+                    self.snap_coord(t.v2()),
+                    self.snap_coord(t.v3()),
                 ];
                 Geometry::Triangle(geo::Triangle::new(snapped[0], snapped[1], snapped[2]))
             }
@@ -257,7 +257,6 @@ pub fn reduce_with_retry(geom: &Geometry<f64>, config: &MakeValidConfig) -> Geom
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::make_valid::MakeValid;
 
     fn assert_valid(g: &Geometry<f64>) {
         let r = g.validate();

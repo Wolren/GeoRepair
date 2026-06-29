@@ -621,11 +621,8 @@ mod tests {
             Coord { x: 2.0, y: 2.0 },
         ];
         let batch = orient2d_batch_4_robust(&pa, &pb, &pc);
-        for i in 0..4 {
-            assert_eq!(
-                batch[i], 0.0,
-                "collinear triplet {i} should be exactly zero"
-            );
+        for (i, &val) in batch.iter().enumerate() {
+            assert_eq!(val, 0.0, "collinear triplet {i} should be exactly zero");
         }
     }
 

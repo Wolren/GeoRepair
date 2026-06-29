@@ -24,7 +24,7 @@ use std::io::Write;
 use std::path::Path;
 use std::time::Instant;
 
-use geo::{Coord, Geometry, Polygon};
+use geo::{Coord, Polygon};
 use geo_repair::arrange::validate_polygon;
 use geo_repair::io::load_bin;
 #[cfg(feature = "load-shp")]
@@ -188,19 +188,19 @@ fn examine_validity(poly: &Polygon<f64>) -> Vec<String> {
     }
 
     for (_hi, h) in poly.interiors().iter().enumerate() {
-        if let Some(pt) = h.0.first().copied() {
-            if !point_in_ring_exclusive(pt, &ext.0) {
-                reasons.push(format!("hole {_hi} outside shell"));
-            }
+        if let Some(pt) = h.0.first().copied()
+            && !point_in_ring_exclusive(pt, &ext.0)
+        {
+            reasons.push(format!("hole {_hi} outside shell"));
         }
     }
     let holes: Vec<_> = poly.interiors().iter().map(|h| &h.0).collect();
     for (i, h1) in holes.iter().enumerate() {
         for h2 in holes.iter().skip(i + 1) {
-            if let Some(pt) = h2.first().copied() {
-                if point_in_ring_exclusive(pt, h1) {
-                    reasons.push(format!("hole {i} contains hole"));
-                }
+            if let Some(pt) = h2.first().copied()
+                && point_in_ring_exclusive(pt, h1)
+            {
+                reasons.push(format!("hole {i} contains hole"));
             }
         }
     }

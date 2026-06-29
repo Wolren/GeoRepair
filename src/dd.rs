@@ -16,22 +16,17 @@ pub(crate) struct DD {
 }
 
 impl DD {
-    /// Create a DD from a single f64 (lo = 0).
-    #[inline]
-    pub fn from_f64(x: f64) -> Self {
-        DD { hi: x, lo: 0.0 }
-    }
-
     /// Create a DD from explicit hi and lo parts.
     #[inline]
+    #[allow(dead_code)]
     pub fn new(hi: f64, lo: f64) -> Self {
         DD { hi, lo }
     }
 
-    /// Create a DD from a Coord.
+    /// Create a DD from a single f64 (lo = 0).
     #[inline]
-    pub fn from_coord(c: Coord<f64>) -> [Self; 2] {
-        [Self::from_f64(c.x), Self::from_f64(c.y)]
+    pub fn from_f64(x: f64) -> Self {
+        DD { hi: x, lo: 0.0 }
     }
 
     /// Sum of two numbers with error term (Knuth's two-sum).
@@ -43,14 +38,6 @@ impl DD {
         let br = b - bv;
         let ar = a - av;
         (x, ar + br)
-    }
-
-    /// Quick two-sum (assumes |a| ≥ |b|).
-    #[inline]
-    fn quick_two_sum(a: f64, b: f64) -> (f64, f64) {
-        let x = a + b;
-        let e = b - (x - a);
-        (x, e)
     }
 
     /// Split a f64 into two parts, each with 26 bits of mantissa (Dekker).
@@ -78,6 +65,7 @@ impl DD {
 
     /// Renormalize after accumulation to reduce lo component.
     #[inline]
+    #[allow(dead_code)]
     fn renormalize(hi: f64, lo: f64) -> Self {
         let (x, e) = Self::two_sum(hi, lo);
         DD { hi: x, lo: e }
@@ -113,6 +101,7 @@ impl DD {
     }
 
     /// DD × f64 multiplication.
+    #[allow(dead_code)]
     pub fn mul_f64(self, other: f64) -> DD {
         let (p1, p2) = Self::two_prod(self.hi, other);
         let p3 = self.lo * other;
@@ -147,6 +136,7 @@ impl DD {
     }
 
     /// Dot product: self.x * other.x + self.y * other.y.
+    #[allow(dead_code)]
     pub fn dot(self_x: DD, self_y: DD, other_x: DD, other_y: DD) -> DD {
         let term1 = self_x.mul(other_x);
         let term2 = self_y.mul(other_y);
@@ -154,6 +144,7 @@ impl DD {
     }
 
     /// Squared length (in DD).
+    #[allow(dead_code)]
     pub fn sq_len(x: DD, y: DD) -> DD {
         let xx = x.mul(x);
         let yy = y.mul(y);
@@ -182,6 +173,7 @@ impl DD {
     }
 
     /// Absolute value.
+    #[allow(dead_code)]
     pub fn abs(self) -> DD {
         if self.hi < 0.0 || (self.hi == 0.0 && self.lo < 0.0) {
             DD {
@@ -194,6 +186,15 @@ impl DD {
     }
 }
 
+type NormResult = (
+    Coord<f64>,
+    Coord<f64>,
+    Coord<f64>,
+    Coord<f64>,
+    f64,
+    Coord<f64>,
+);
+
 /// Normalize a set of 4 coordinates for numerically stable DD computation.
 /// Returns (normalized_coords, scale, origin) where:
 /// - Each normalized coord = (coord - origin) / scale
@@ -203,14 +204,7 @@ pub(crate) fn normalize_four(
     b: Coord<f64>,
     c: Coord<f64>,
     d: Coord<f64>,
-) -> (
-    Coord<f64>,
-    Coord<f64>,
-    Coord<f64>,
-    Coord<f64>,
-    f64,
-    Coord<f64>,
-) {
+) -> NormResult {
     let min_x = a.x.min(b.x).min(c.x).min(d.x);
     let max_x = a.x.max(b.x).max(c.x).max(d.x);
     let min_y = a.y.min(b.y).min(c.y).min(d.y);

@@ -296,7 +296,7 @@ proptest! {
         let poly = Polygon::new(LineString::new(ring), Vec::new());
         for method in &[PolyMethod::Auto, PolyMethod::Arrange, PolyMethod::Structure] {
             let config = MakeValidConfig {
-                poly_method: method.clone(),
+                poly_method: *method,
                 ..Default::default()
             };
             let result = poly.make_valid_with_config(&config);
@@ -309,7 +309,7 @@ proptest! {
         coords in proptest::collection::vec(proptest::num::f64::ANY, 0..=8)
     ) {
         // Test that NaN/inf coordinates don't cause panics in any geometry type
-        for n in 0..coords.len().min(8).max(3) {
+        for n in 0..coords.len().clamp(3, 8) {
             let mut ring: Vec<Coord<f64>> = coords.iter().take(n).map(|&x| Coord { x, y: x }).collect();
             if ring.len() >= 3 {
                 if ring.first() != ring.last() {
@@ -527,7 +527,7 @@ proptest! {
         let poly = geo::Polygon::new(geo::LineString::new(ring), Vec::new());
         for method in &[geo_repair::PolyMethod::Auto, geo_repair::PolyMethod::Structure, geo_repair::PolyMethod::Arrange] {
             let cfg = geo_repair::MakeValidConfig {
-                poly_method: method.clone(),
+                poly_method: *method,
                 ..Default::default()
             };
             let result = poly.make_valid_with_config(&cfg);
@@ -603,7 +603,7 @@ proptest! {
 mod diag_all_methods_fail {
     use geo::{Coord, LineString, Polygon};
     use geo_repair::validation::GeoValidation;
-    use geo_repair::{Feature, MakeValid, MakeValidConfig, PolyMethod, ValidateAndFix};
+    use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 
     #[test]
     fn diagnose_all_methods_fail() {
@@ -678,7 +678,7 @@ mod diag_all_methods_fail {
             println!("  Input valid: {:?}", poly4.validate());
             for method in &[PolyMethod::Auto, PolyMethod::Arrange, PolyMethod::Structure] {
                 let cfg = MakeValidConfig {
-                    poly_method: method.clone(),
+                    poly_method: *method,
                     ..Default::default()
                 };
                 let result = poly4.make_valid_with_config(&cfg);
@@ -689,7 +689,7 @@ mod diag_all_methods_fail {
 
         for method in &[PolyMethod::Auto, PolyMethod::Arrange, PolyMethod::Structure] {
             let config = MakeValidConfig {
-                poly_method: method.clone(),
+                poly_method: *method,
                 ..Default::default()
             };
             let result = poly.make_valid_with_config(&config);

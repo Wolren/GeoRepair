@@ -151,8 +151,7 @@ fn build_chains(segments: &[Line<f64>]) -> Vec<MonoChain> {
     let mut min_y = segments[0].start.y.min(segments[0].end.y);
     let mut max_y = segments[0].start.y.max(segments[0].end.y);
 
-    for i in 1..n {
-        let s = &segments[i];
+    for (i, s) in segments.iter().enumerate().skip(1) {
         let dx = s.end.x - s.start.x;
         let dy = s.end.y - s.start.y;
         let cur_quad = quadrant(dx, dy);
@@ -450,7 +449,7 @@ impl SnapRoundingNoder {
                 std::ops::ControlFlow::<(), ()>::Continue(())
             });
 
-            params.sort_by(|a, b| a.to_bits().cmp(&b.to_bits()));
+            params.sort_by_key(|a| a.to_bits());
             params.dedup_by(|a, b| (*a - *b).abs() < eps);
 
             for window in params.windows(2) {
