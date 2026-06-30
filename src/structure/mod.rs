@@ -65,13 +65,23 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
     }
 
     // Fix holes — each hole may produce multiple rings (parallel via rayon)
+    // Type C: skip fix_ring for outer holes (bbox outside shell) or simple valid holes.
+    let shell_bbox = ring_bbox(poly.exterior().0.as_slice());
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     let hole_rings_cw: Vec<LineString<f64>> = {
         use rayon::prelude::*;
         let mut hole_results: Vec<Vec<LineString<f64>>> = poly
             .interiors()
             .par_iter()
-            .map(|h| fix_ring::repair_ring(h).unwrap_or_else(|| vec![h.clone()]))
+            .map(|h| {
+                if !bboxes_overlap(shell_bbox, ring_bbox(&h.0)) {
+                    return vec![h.clone()];
+                }
+                if !fix_ring::has_self_intersections(&h.0) {
+                    return vec![h.clone()];
+                }
+                fix_ring::repair_ring(h).unwrap_or_else(|| vec![h.clone()])
+            })
             .collect();
         hole_results
             .iter_mut()
@@ -83,6 +93,14 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
     let hole_rings_cw: Vec<LineString<f64>> = {
         let mut hole_rings: Vec<LineString<f64>> = Vec::new();
         for h in poly.interiors() {
+            if !bboxes_overlap(shell_bbox, ring_bbox(&h.0)) {
+                hole_rings.push(ensure_cw(h.clone()));
+                continue;
+            }
+            if !fix_ring::has_self_intersections(&h.0) {
+                hole_rings.push(ensure_cw(h.clone()));
+                continue;
+            }
             if let Some(rings) = fix_ring::repair_ring(h) {
                 hole_rings.extend(rings);
             } else {
@@ -140,6 +158,27 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
 /// Delegates to SIMD-accelerated implementation.
 fn point_in_ring_exclusive(pt: Coord<f64>, ring: &[Coord<f64>]) -> bool {
     crate::simd::point_in_ring_exclusive(pt, ring)
+}
+
+/// Compute bounding box of a coordinate ring as (min_x, max_x, min_y, max_y).
+fn ring_bbox(coords: &[Coord<f64>]) -> (f64, f64, f64, f64) {
+    let mut min_x = f64::MAX;
+    let mut max_x = f64::MIN;
+    let mut min_y = f64::MAX;
+    let mut max_y = f64::MIN;
+    for c in coords {
+        min_x = min_x.min(c.x);
+        max_x = max_x.max(c.x);
+        min_y = min_y.min(c.y);
+        max_y = max_y.max(c.y);
+    }
+    (min_x, max_x, min_y, max_y)
+}
+
+/// Check if two bounding boxes overlap.
+#[inline]
+fn bboxes_overlap(a: (f64, f64, f64, f64), b: (f64, f64, f64, f64)) -> bool {
+    a.0 <= b.1 && a.1 >= b.0 && a.2 <= b.3 && a.3 >= b.2
 }
 
 /// Resolve hole-hole nesting among inner holes of a shell.

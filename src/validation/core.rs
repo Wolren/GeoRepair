@@ -641,7 +641,11 @@ pub(crate) fn check_holes_valid(
     let mut errors = Vec::new();
 
     // Compute scale-relative epsilon for boundary checks
+    #[cfg(feature = "simd")]
+    let (min_x, max_x, min_y, max_y) = crate::simd::aabb_minmax_simd(shell);
+    #[cfg(not(feature = "simd"))]
     let (mut min_x, mut max_x, mut min_y, mut max_y) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+    #[cfg(not(feature = "simd"))]
     for c in shell {
         min_x = min_x.min(c.x);
         max_x = max_x.max(c.x);
