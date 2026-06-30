@@ -73,7 +73,10 @@ impl ZmValue {
 /// in the order defined by `CoordsIter` (depth-first traversal).
 #[derive(Clone, Debug)]
 pub struct ZmGeometry {
+    /// The underlying geometry (repaired or original).
     pub geometry: Geometry<f64>,
+    /// Per-coordinate Z/M values. Length must equal the number of
+    /// coordinates returned by [`crate::zm::count_coords`].
     pub zm: Vec<ZmValue>,
 }
 

@@ -163,7 +163,7 @@ pub fn save(path: &str, geom: &Geometry<f64>) -> Result<(), String> {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
 /// use geo_repair::{repair_file, MakeValidConfig, PolyMethod};
 /// let cfg = MakeValidConfig { poly_method: PolyMethod::Structure, ..Default::default() };
 /// repair_file("invalid.wkb", "fixed.wkb", &cfg).unwrap();
@@ -189,7 +189,7 @@ pub fn repair_file(input: &str, output: &str, config: &MakeValidConfig) -> Resul
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
 /// use geo_repair::diagnose_file;
 /// let results = diagnose_file("input.bin").unwrap();
 /// for (i, r) in results.iter().enumerate() {

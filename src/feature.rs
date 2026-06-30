@@ -1,3 +1,10 @@
+//! GIS feature container with attribute, CRS, and Z/M preservation.
+//!
+//! The [`Feature`] struct bundles a geometry with optional JSON attributes,
+//! CRS metadata, and per-coordinate Z/M values. It is the primary data
+//! container for I/O operations — the repair pipeline modifies only the
+//! geometry while preserving all other fields.
+
 use geo::{Coord, Geometry};
 use serde_json::{Map, Value};
 
@@ -11,9 +18,14 @@ use crate::zm::{count_coords, preserve_zm, zm_pairs, ZmValue};
 /// the repair pipeline (only the geometry is modified by repair).
 #[derive(Clone, Debug)]
 pub struct Feature {
+    /// The geometry being repaired or round-tripped.
     pub geometry: Geometry<f64>,
+    /// Optional JSON key-value attributes (e.g. from GeoJSON or shapefile).
     pub properties: Option<Map<String, Value>>,
+    /// Coordinate Reference System metadata.
     pub crs: Option<Crs>,
+    /// Per-coordinate Z (elevation) and M (measure) values, one entry per
+    /// coordinate in depth-first traversal order.
     pub zm: Vec<ZmValue>,
 }
 
