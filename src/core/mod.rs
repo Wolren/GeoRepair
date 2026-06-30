@@ -1,3 +1,13 @@
+//! Core configuration, error types, and numeric constants for geometry repair.
+//!
+//! Provides [`MakeValidConfig`] for fine-grained control over the repair
+//! strategy, [`PolyMethod`] to select the polygon repair algorithm, and
+//! [`MakeValidError`] as the crate's unified error type for repair,
+//! validation, WKB parsing, and I/O operations.
+//!
+//! Also defines internal numeric constants used across the crate for
+//! epsilon comparisons, grid thresholds, and snap scaling.
+
 use geo::algorithm::bool_ops::FillRule;
 use thiserror::Error;
 
@@ -61,6 +71,9 @@ pub struct MakeValidConfig {
     pub poly_method: PolyMethod,
 
     /// Fill rule for polygon assembly.
+    ///
+    /// - `EvenOdd`: standard OGC winding rule (default)
+    /// - `NonZero`: holes treated as positive space
     pub fill_rule: FillRule,
 
     /// CRS of the input geometry.

@@ -1,3 +1,13 @@
+//! Coordinate Reference System (CRS) metadata and transformation.
+//!
+//! Stores CRS information (authority, geographic vs projected) and provides
+//! tolerance heuristics per CRS type. When the `proj` feature is enabled,
+//! supports coordinate transformation via the PROJ library.
+//!
+//! The `Crs` type is embedded in [`Feature`](crate::Feature) for I/O
+//! round-tripping and in [`MakeValidConfig`](crate::MakeValidConfig) for
+//! CRS-aware tolerance adjustment.
+
 #[cfg(feature = "proj")]
 use crate::core::MakeValidError;
 #[cfg(feature = "proj")]
