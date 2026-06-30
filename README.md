@@ -45,7 +45,7 @@ real-world production datasets.
 
 ```toml
 [dependencies]
-geo-repair = "0.2"
+geo-repair = "0.10"
 ```
 
 **Validate and repair geometries:**
@@ -217,18 +217,42 @@ built from CoordSeq (no WKT overhead, ~1.4 s setup).  i5-12400F (6C/12T).
 
 ### Synthetic benchmarks (parallel, grid+R-tree hybrid)
 
-| Benchmark | geo-repair | GEOS | Ratio |
-|-----------|------------|------|-------|
-| Valid polygon 4v | 0.15 us | 4.4 us | 29x |
-| Valid polygon 100v | 0.86 us | 48.6 us | 57x |
-| Valid polygon 10k | 88 us | 4472 us | 51x |
-| Invalid bowtie 4v | 1.9 us | 91 us | 49x |
-| Invalid star 100v | 7.5 us | 103 us | 14x |
-| Collinear ls 500v | 18 us | 84.7 us | 5x |
-| Hilbert curve 1024v | 175 us | 203 us | 1.2x |
-| Lissajous 1000v | 333 us | 486 us | 1.5x |
-| Star-burst 500sp | 753 us | 357 us | GEOS 2.1x |
-| Spoke wheel 500sp | 862 us | 366 us | GEOS 2.4x |
+Structure strategy, parallel batch, i5-12400F (6C/12T).
+
+| Benchmark | geo-repair | GEOS (parallel) | Ratio |
+|-----------|------------|-----------------|-------|
+| Valid polygon 4v | 0.33 us | 2.92 us | 9x |
+| Valid polygon 10v | 0.28 us | 3.78 us | 14x |
+| Valid polygon 50v | 0.61 us | 12.3 us | 20x |
+| Valid polygon 100v | 0.80 us | 21.9 us | 27x |
+| Valid polygon 500v | 3.71 us | 114 us | 31x |
+| Valid polygon 1000v | 5.72 us | 206 us | 36x |
+| Valid polygon 5000v | 51.0 us | 1099 us | 22x |
+| Valid polygon 10000v | 113 us | 2033 us | 18x |
+| Invalid bowtie 4v | 1.89 us | 52.3 us | 28x |
+| Invalid star 100v | 7.20 us | 39.5 us | 5x |
+| Collinear ls 4v | 0.07 us | 2.49 us | 33x |
+| Collinear ls 10v | 0.16 us | 2.26 us | 14x |
+| Collinear ls 50v | 1.81 us | 6.45 us | 4x |
+| Collinear ls 100v | 7.08 us | 12.0 us | 1.7x |
+| Collinear ls 500v | 182 us | 59.1 us | GEOS 3x |
+| Hilbert curve 256v | 524 us | 30.3 us | GEOS 17x |
+| Hilbert curve 1024v | 8387 us | 122 us | GEOS 69x |
+| Lissajous 200v | 1511 us | 36.5 us | GEOS 41x |
+| Lissajous 500v | 17915 us | 89.4 us | GEOS 200x |
+| Lissajous 1000v | 378750 us | 214 us | GEOS 1769x |
+| Star-burst 10sp | 0.23 us | 3.73 us | 16x |
+| Star-burst 50sp | 1.69 us | 15.8 us | 9x |
+| Star-burst 100sp | 5.88 us | 31.2 us | 5x |
+| Star-burst 500sp | 156 us | 155 us | 1.0x (tie) |
+| Spoke wheel 10sp | 0.19 us | 3.65 us | 19x |
+| Spoke wheel 50sp | 1.62 us | 16.3 us | 10x |
+| Spoke wheel 100sp | 6.02 us | 31.6 us | 5x |
+| Spoke wheel 500sp | 151 us | 164 us | 1.1x |
+| Collinear overlap 10seg | 0.62 us | 4.06 us | 7x |
+| Collinear overlap 50seg | 15.5 us | 17.6 us | 1.1x |
+| Collinear overlap 100seg | 63.3 us | 34.9 us | GEOS 1.8x |
+| Collinear overlap 500seg | 1580 us | 174 us | GEOS 9x |
 
 ### Run benchmarks
 
@@ -236,8 +260,8 @@ built from CoordSeq (no WKT overhead, ~1.4 s setup).  i5-12400F (6C/12T).
 # Quick sweep (no GEOS)
 cargo bench --bench bench
 
-# With GEOS comparison (requires libgeos-dev / geos-sys-build deps)
-cargo bench --features bench-geos --bench bench
+# With GEOS parallel comparison (requires libgeos-dev / geos-sys-build deps)
+cargo bench --features bench-geos,arrange,structure,parallel,simd --bench bench
 
 # Criterion detailed benchmarks
 cargo bench --features bench-criterion --bench criterion
