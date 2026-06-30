@@ -1,4 +1,20 @@
 #![cfg_attr(feature = "simd-portable", feature(portable_simd))]
+
+/// Compile-time guard: ensures `cfg(feature = "rstar")` is active when any
+/// rstar-dependent feature is enabled. Prevents silent O(n²) regression when
+/// `dep:rstar` is used in Cargo.toml feature lists instead of the explicit
+/// `rstar = ["dep:rstar"]` feature alias.
+#[cfg(any(feature = "arrange", feature = "structure", feature = "validate"))]
+const _: () = {
+    #[cfg(not(feature = "rstar"))]
+    compile_error!(
+        "cfg(feature = \"rstar\") must be set when rstar-dependent features are active.\n  \
+         Fix: replace `dep:rstar` with `rstar` in Cargo.toml feature lists. The pattern is:\n  \
+         rstar = [\"dep:rstar\"]  # explicit feature alias\n  \
+         foo = [\"rstar\"]          # not foo = [\"dep:rstar\"]"
+    );
+};
+
 pub mod core;
 pub mod crs;
 pub mod dd;

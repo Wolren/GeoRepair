@@ -1,7 +1,7 @@
 [package]
 name = "geo-repair"
 description = "Fix invalid GIS geometries using optimal algorithms per type: CDT arrangement for polygons, noding for lines, structure method as fast path"
-version = "0.10.0"
+version = "0.11.0"
 license = "Apache-2.0"
 repository = "https://github.com/Wolren/GeoRepair"
 homepage = "https://github.com/Wolren/GeoRepair"
@@ -20,9 +20,10 @@ default = ["std", "arrange", "structure", "parallel", "simd", "validate"]
 # alloc-only. WKB parsing, geometry validation, and repair work
 # without std — only file/network I/O requires it.
 std = ["thiserror/std"]
-arrange = ["dep:spade", "geo/spade", "dep:rstar"]
-structure = ["simd", "dep:rstar"]
-validate = ["dep:rstar"]
+rstar = ["dep:rstar"]
+arrange = ["dep:spade", "geo/spade", "rstar"]
+structure = ["simd", "rstar"]
+validate = ["rstar"]
 parallel = ["dep:rayon", "geo/multithreading"]
 # SIMD acceleration
 # - `simd`: x86_64 AVX2 intrinsics on x86_64, scalar fallback elsewhere
