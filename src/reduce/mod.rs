@@ -22,10 +22,16 @@ use crate::validation::GeoValidation;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum RoundingMode {
     /// Round to nearest grid point (standard).
+    ///
+    /// `(v / scale).round() * scale` — the usual rounding behaviour.
     Round,
     /// Always floor (for conservative envelope expansions).
+    ///
+    /// `(v / scale).floor() * scale` — never rounds upward.
     Floor,
     /// Always ceil.
+    ///
+    /// `(v / scale).ceil() * scale` — never rounds downward.
     Ceil,
 }
 
@@ -40,6 +46,9 @@ pub struct PrecisionModel {
 }
 
 impl PrecisionModel {
+    /// Create a new precision model with the given grid scale.
+    ///
+    /// Uses [`RoundingMode::Round`] (standard rounding to nearest).
     pub fn new(scale: f64) -> Self {
         Self {
             scale,
@@ -47,10 +56,12 @@ impl PrecisionModel {
         }
     }
 
+    /// Create a precision model with explicit scale and rounding mode.
     pub fn with_mode(scale: f64, mode: RoundingMode) -> Self {
         Self { scale, mode }
     }
 
+    /// Snap a single coordinate to this model's precision grid.
     pub fn reduce_coord(&self, c: Coord<f64>) -> Coord<f64> {
         let round = |v: f64| -> f64 {
             if !v.is_finite() {
@@ -69,15 +80,19 @@ impl PrecisionModel {
     }
 
     /// Common precision models.
+    /// 1e-6 precision (~1 metre at geographic scale).
     pub fn fixed_6() -> Self {
         Self::new(1e-6)
     }
+    /// 1e-8 precision (~1 cm at geographic scale). Default for most operations.
     pub fn fixed_8() -> Self {
         Self::new(1e-8)
     }
+    /// 1e-10 precision (~0.1 mm at geographic scale).
     pub fn fixed_10() -> Self {
         Self::new(1e-10)
     }
+    /// 1e-4 precision (~10 m at geographic scale). Coarsest useful grid.
     pub fn fixed_4() -> Self {
         Self::new(1e-4)
     }
@@ -101,6 +116,7 @@ pub struct GeometryPrecisionReducer {
 }
 
 impl GeometryPrecisionReducer {
+    /// Create a reducer with the given precision model and default config.
     pub fn new(model: PrecisionModel) -> Self {
         Self {
             model,
@@ -108,10 +124,12 @@ impl GeometryPrecisionReducer {
         }
     }
 
+    /// Create a reducer with explicit model and repair config.
     pub fn with_config(model: PrecisionModel, config: MakeValidConfig) -> Self {
         Self { model, config }
     }
 
+    /// Borrow the precision model.
     pub fn model(&self) -> &PrecisionModel {
         &self.model
     }

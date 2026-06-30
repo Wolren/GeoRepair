@@ -5,6 +5,11 @@
 
 use geo::{Coord, Line};
 
+/// Default grid resolution for coordinate snapping: 1e-10 (0.1 nm).
+///
+/// Used by [`snap_coord_default`] and the geometry precision reducer.
+/// Equivalent to ~0.1 nanometre — fine enough that normal GIS data is
+/// unchanged while eliminating floating-point noise from computation.
 pub const DEFAULT_GRID: f64 = 1e-10;
 
 /// Snap a coordinate to a grid of the given resolution.

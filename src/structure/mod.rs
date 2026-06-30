@@ -1,3 +1,29 @@
+//! GEOS-compatible fast-path polygon repair via planar graph extraction.
+//!
+//! The Structure strategy is the default fast path for polygon repair. It
+//! mirrors GEOS's ST_MakeValid algorithm:
+//!
+//! 1. Build a planar graph from polygon edges
+//! 2. Classify edges and extract faces
+//! 3. Face walking to find ring boundaries
+//! 4. Winding-number assembly into OGC-valid output
+//!
+//! Strengths:
+//! - 10-100x faster than CDT-based approaches on valid/simple inputs
+//! - No external dependencies beyond `geo`
+//! - Handles the vast majority of real-world invalid polygons
+//!
+//! Falls back to the Arrange strategy when the topology is too complex
+//! (many holes, nested self-intersections).
+//!
+//! # Submodules
+//!
+//! - `classify`: Edge classification and planar graph building
+//! - `fix_ring`: Ring repair (self-intersection, winding correction)
+//! - `fix_ring_graph`: Graph-based ring intersection resolution
+//! - `merge`: Face merging after graph extraction
+//! - `subtract`: Hole subtraction during face assembly
+//! - `sweep`: Plane-sweep intersection detection
 pub mod classify;
 pub mod fix_ring;
 pub mod fix_ring_graph;
@@ -74,10 +100,11 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
             .interiors()
             .par_iter()
             .map(|h| {
-                if !bboxes_overlap(shell_bbox, ring_bbox(&h.0)) {
+                let hole_bbox = ring_bbox(&h.0);
+                if !bboxes_overlap(shell_bbox, hole_bbox) {
                     return vec![h.clone()];
                 }
-                if !fix_ring::has_self_intersections(&h.0) {
+                if !fix_ring::has_self_intersections_with_bbox(&h.0, hole_bbox) {
                     return vec![h.clone()];
                 }
                 fix_ring::repair_ring(h).unwrap_or_else(|| vec![h.clone()])
@@ -93,11 +120,12 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
     let hole_rings_cw: Vec<LineString<f64>> = {
         let mut hole_rings: Vec<LineString<f64>> = Vec::new();
         for h in poly.interiors() {
-            if !bboxes_overlap(shell_bbox, ring_bbox(&h.0)) {
+            let hole_bbox = ring_bbox(&h.0);
+            if !bboxes_overlap(shell_bbox, hole_bbox) {
                 hole_rings.push(ensure_cw(h.clone()));
                 continue;
             }
-            if !fix_ring::has_self_intersections(&h.0) {
+            if !fix_ring::has_self_intersections_with_bbox(&h.0, hole_bbox) {
                 hole_rings.push(ensure_cw(h.clone()));
                 continue;
             }
@@ -162,17 +190,7 @@ fn point_in_ring_exclusive(pt: Coord<f64>, ring: &[Coord<f64>]) -> bool {
 
 /// Compute bounding box of a coordinate ring as (min_x, max_x, min_y, max_y).
 fn ring_bbox(coords: &[Coord<f64>]) -> (f64, f64, f64, f64) {
-    let mut min_x = f64::MAX;
-    let mut max_x = f64::MIN;
-    let mut min_y = f64::MAX;
-    let mut max_y = f64::MIN;
-    for c in coords {
-        min_x = min_x.min(c.x);
-        max_x = max_x.max(c.x);
-        min_y = min_y.min(c.y);
-        max_y = max_y.max(c.y);
-    }
-    (min_x, max_x, min_y, max_y)
+    crate::simd::aabb_minmax_simd(coords)
 }
 
 /// Check if two bounding boxes overlap.

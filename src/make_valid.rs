@@ -1,3 +1,17 @@
+//! Geometry repair implementations via the MakeValid and ValidateAndFix traits.
+//!
+//! This module implements the core repair logic for all geometry types:
+//!
+//! - **Points**: NaN/Inf filtering, deduplication
+//! - **Lines**: Zero-length detection, self-intersection noding
+//! - **Polygons**: Structure fast path or Arrange CDT fallback
+//! - **Multi-geometries**: Per-component repair with optional parallelism
+//! - **GeometryCollection**: Recursive repair of children
+//!
+//! The main entry points are:
+//! - [`MakeValid::make_valid`] — repair with default config
+//! - [`MakeValid::make_valid_with_config`] — repair with custom config
+//! - [`ValidateAndFix::validate_and_fix`] — combined validation + repair
 use geo::{
     Coord, CoordNum, GeoFloat, Geometry, GeometryCollection, Line, LineString, MultiLineString,
     MultiPoint, MultiPolygon, Point, Polygon, Rect, Triangle, Winding,
@@ -622,10 +636,35 @@ impl<T: NodingFloat> MakeValid for GeometryCollection<T> {
 // ---------------------------------------------------------------------------
 
 /// Combine validation and repair into a single pipeline.
-/// Mirrors GEOS's pattern of checking validity before/comparing to repair.
+///
+/// Mirrors GEOS's pattern of checking validity before/after repair.
+/// Implemented automatically for all types that implement both
+/// [`MakeValid`] and [`GeoValidation`].
+///
+/// # Methods
+///
+/// - [`validate_and_fix`](ValidateAndFix::validate_and_fix): validate first, fix if invalid
+/// - [`validate_and_fix_always`](ValidateAndFix::validate_and_fix_always): always run both validation and repair
+/// - [`validate_or_fix`](ValidateAndFix::validate_or_fix): return `Ok(fixed)` if valid after repair, `Err` otherwise
+///
+/// # Example
+///
+/// ```rust
+/// # use geo::{Geometry, Point};
+/// # let geometry = Geometry::Point(Point::new(0.0, 0.0));
+/// use geo_repair::ValidateAndFix;
+///
+/// let (result, fixed) = geometry.validate_and_fix();
+/// if !result.valid {
+///     println!("Repaired {} violations", result.errors.len());
+/// }
+/// ```
 pub trait ValidateAndFix: MakeValid<Scalar = f64> + GeoValidation<Scalar = f64> {
     /// Validate the geometry, then fix it if invalid.
     /// Returns (validation_result, fixed_geometry).
+    ///
+    /// If the geometry is already valid, `fixed_geometry` is a clone of
+    /// the input and `validation_result.valid` is `true`.
     fn validate_and_fix(&self) -> (ValidationResult, Geometry<f64>) {
         let result = <Self as GeoValidation>::validate(self);
         if result.valid {

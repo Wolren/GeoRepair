@@ -274,7 +274,30 @@ fn read_polygon_inner(
 // Writer (always little-endian, 2D only)
 // ---------------------------------------------------------------------------
 
-/// Encode a geometry as little-endian WKB bytes (2D only, no SRID).
+/// Encode a geometry as little-endian WKB bytes.
+///
+/// Produces standard OGC WKB (2D only, no SRID flag). The output can
+/// be decoded with [`read_wkb`]. Concatenate multiple outputs for
+/// [`read_wkb_concat`].
+///
+/// # Format
+///
+/// - Byte order: little-endian (NDR)
+/// - Dimensions: 2D only (X, Y). Z/M values are not encoded.
+/// - SRID: not included
+/// - Geometry types: Point, LineString, Polygon, MultiPoint,
+///   MultiLineString, MultiPolygon, GeometryCollection
+///
+/// # Examples
+///
+/// ```rust
+/// use geo_repair::{write_wkb, read_wkb};
+///
+/// let geom = geo::Geometry::Point(geo::point!(x: 1.0, y: 2.0));
+/// let bytes = write_wkb(&geom);
+/// let roundtrip = read_wkb(&bytes).unwrap();
+/// assert_eq!(geom, roundtrip);
+/// ```
 pub fn write_wkb(geom: &Geometry<f64>) -> Vec<u8> {
     write_wkb_impl(geom)
 }
@@ -446,7 +469,36 @@ pub fn estimate_wkb_size(buf: &[u8]) -> Result<usize, MakeValidError> {
     Ok(pos)
 }
 
-/// Parse a concatenated sequence of WKB geometries.
+/// Parse a concatenated sequence of WKB geometries from a single buffer.
+///
+/// Reads back-to-back WKB geometries from the same byte buffer,
+/// stopping at the end of the buffer. Supports mixed byte orders
+/// and geometry types.
+///
+/// Useful for batch formats where multiple geometries are written
+/// sequentially via [`write_wkb`]. For a single geometry, use
+/// [`read_wkb`].
+///
+/// # Errors
+///
+/// Returns [`MakeValidError::ParseError`] if any geometry has invalid
+/// WKB structure. Parsing stops at the first error.
+///
+/// # Examples
+///
+/// ```rust
+/// use geo_repair::{read_wkb_concat, write_wkb};
+///
+/// let geom1 = geo::Geometry::Point(geo::point!(x: 1.0, y: 2.0));
+/// let geom2 = geo::Geometry::Point(geo::point!(x: 3.0, y: 4.0));
+///
+/// let mut buf = Vec::new();
+/// buf.extend_from_slice(&write_wkb(&geom1));
+/// buf.extend_from_slice(&write_wkb(&geom2));
+///
+/// let geoms = read_wkb_concat(&buf).unwrap();
+/// assert_eq!(geoms.len(), 2);
+/// ```
 pub fn read_wkb_concat(buf: &[u8]) -> Result<Vec<Geometry<f64>>, MakeValidError> {
     let mut offset = 0;
     let mut geoms = Vec::new();

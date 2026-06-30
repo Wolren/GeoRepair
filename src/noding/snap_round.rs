@@ -90,13 +90,12 @@ struct HpEntry {
 #[cfg(feature = "rstar")]
 impl HpEntry {
     fn new(center: Coord<f64>) -> Self {
+        let cx = if center.x.is_finite() { center.x } else { 0.0 };
+        let cy = if center.y.is_finite() { center.y } else { 0.0 };
         let r = HOT_PIXEL_RADIUS;
         HpEntry {
-            center,
-            env: rstar::AABB::from_corners(
-                [center.x - r, center.y - r],
-                [center.x + r, center.y + r],
-            ),
+            center: Coord { x: cx, y: cy },
+            env: rstar::AABB::from_corners([cx - r, cy - r], [cx + r, cy + r]),
         }
     }
 }
@@ -411,6 +410,9 @@ impl SnapRoundingNoder {
 
         // Step 2 & 3: Create hot pixels, merging near-coincident points
         for &c in &coords {
+            if !c.x.is_finite() || !c.y.is_finite() {
+                continue;
+            }
             let key = grid_key(c);
             let mut found = false;
             for dc in -1i64..=1 {

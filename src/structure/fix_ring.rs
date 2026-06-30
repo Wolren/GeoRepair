@@ -95,6 +95,17 @@ pub(crate) fn is_collinear_ring(coords: &[Coord<f64>]) -> bool {
 }
 
 pub(crate) fn has_self_intersections(coords: &[Coord<f64>]) -> bool {
+    has_self_intersections_impl(coords, None)
+}
+
+pub(crate) fn has_self_intersections_with_bbox(
+    coords: &[Coord<f64>],
+    bbox: (f64, f64, f64, f64),
+) -> bool {
+    has_self_intersections_impl(coords, Some(bbox))
+}
+
+fn has_self_intersections_impl(coords: &[Coord<f64>], bbox: Option<(f64, f64, f64, f64)>) -> bool {
     let n = coords.len();
     if n < 4 {
         return false;
@@ -109,13 +120,10 @@ pub(crate) fn has_self_intersections(coords: &[Coord<f64>]) -> bool {
         }
     }
 
-    let (mut min_x, mut max_x, mut min_y, mut max_y) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
-    for &c in coords {
-        min_x = min_x.min(c.x);
-        max_x = max_x.max(c.x);
-        min_y = min_y.min(c.y);
-        max_y = max_y.max(c.y);
-    }
+    let (min_x, max_x, min_y, max_y) = match bbox {
+        Some(b) => b,
+        None => crate::simd::aabb_minmax_simd(coords),
+    };
     let coord_scale = (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
     let eps = core::EPS * coord_scale;
 
@@ -545,7 +553,7 @@ fn split_edges_rtree(edges: &[Line<f64>], split_points: &mut [SplitPoint], eps: 
         }
     }
 
-    let envs: Vec<SegEnv> = edges
+    let (envs, edge_bboxes): (Vec<SegEnv>, Vec<AABB<[f64; 2]>>) = edges
         .iter()
         .enumerate()
         .map(|(i, e)| {
@@ -553,23 +561,17 @@ fn split_edges_rtree(edges: &[Line<f64>], split_points: &mut [SplitPoint], eps: 
             let hi_x = e.start.x.max(e.end.x);
             let lo_y = e.start.y.min(e.end.y);
             let hi_y = e.start.y.max(e.end.y);
-            SegEnv {
-                idx: i,
-                env: AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]),
-            }
+            let env = AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]);
+            (SegEnv { idx: i, env }, env)
         })
-        .collect();
+        .unzip();
 
     let tree = RTree::bulk_load(envs);
 
     // Collect hits per edge (local Vec avoids double-mutable-borrow on split_points).
     // Each element is (edge_idx, param_t, intersection_point).
     let query_edge = |i: usize, out: &mut Vec<(usize, f64, Coord<f64>)>| {
-        let lo_x = edges[i].start.x.min(edges[i].end.x);
-        let hi_x = edges[i].start.x.max(edges[i].end.x);
-        let lo_y = edges[i].start.y.min(edges[i].end.y);
-        let hi_y = edges[i].start.y.max(edges[i].end.y);
-        let query_env = AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]);
+        let query_env = &edge_bboxes[i];
 
         let _: std::ops::ControlFlow<()> =
             tree.locate_in_envelope_intersecting_int(&query_env, |candidate| {
