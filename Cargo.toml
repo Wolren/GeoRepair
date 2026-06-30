@@ -1,20 +1,32 @@
 [package]
 name = "geo-repair"
 description = "Fix invalid GIS geometries using optimal algorithms per type: CDT arrangement for polygons, noding for lines, structure method as fast path"
-version = "0.2.0"
+version = "0.10.0"
 license = "Apache-2.0"
 repository = "https://github.com/Wolren/GeoRepair"
-keywords = ["gis", "geo", "geospatial", "validation", "repair"]
+homepage = "https://github.com/Wolren/GeoRepair"
+documentation = "https://docs.rs/geo-repair"
+readme = "README.md"
+keywords = ["gis", "geo", "validation", "repair", "no-std"]
 categories = ["science::geo"]
 edition = "2024"
-rust-version = "1.95"
+rust-version = "1.85"
+exclude = ["tests/*.py", "*.py"]
 
 [features]
-default = ["arrange", "structure", "parallel", "simd", "validate"]
+default = ["std", "arrange", "structure", "parallel", "simd", "validate"]
+
+# no_std support: disable `std` feature to build without file I/O,
+# alloc-only. WKB parsing, geometry validation, and repair work
+# without std — only file/network I/O requires it.
+std = ["thiserror/std"]
 arrange = ["dep:spade", "geo/spade", "dep:rstar"]
 structure = ["simd", "dep:rstar"]
 validate = ["dep:rstar"]
 parallel = ["dep:rayon", "geo/multithreading"]
+# SIMD acceleration
+# - `simd`: x86_64 AVX2 intrinsics on x86_64, scalar fallback elsewhere
+# - `simd-portable`: `core::simd` on all platforms (requires nightly)
 simd = []
 simd-portable = []
 
@@ -23,10 +35,29 @@ bench-geos = ["dep:geos"]
 bench-criterion = []
 
 python = ["dep:pyo3"]
-ffi = []
+ffi = ["dep:wkb", "dep:geo-traits"]
+
+# WASM browser fetch (synchronous XHR — blocks main thread)
+wasm = ["dep:js-sys", "dep:wasm-bindgen", "dep:web-sys"]
 
 proj = []
 serde = ["geo/serde"]
+
+# Optional format backends
+io-shp = ["dep:shapefile"]
+io-wkt = ["dep:wkt"]
+io-csv = ["dep:csv", "io-wkt"]
+io-gml = ["dep:quick-xml"]
+io-gpkg = ["dep:rusqlite"]
+io-all = ["io-shp", "io-wkt", "io-csv", "io-gml"]
+# gpkg requires C compilation (bundled SQLite), not available on WASM
+# No-op features: always compiled in, kept for CI compatibility
+io-geojson = []
+io-wkb = []
+
+io-all-native = ["io-all", "io-gpkg"]
+
+memmap = ["dep:memmap2"]
 
 [dependencies]
 geo = { version = "0.33", default-features = false }
@@ -34,14 +65,27 @@ spade = { version = "2.15", optional = true }
 rstar = { version = "0.12", optional = true }
 log = { version = "0.4", default-features = false }
 robust = "1.2"
-thiserror = "2.0"
+thiserror = { version = "2.0", default-features = false }
 rustc-hash = "2.1"
 smallvec = { version = "1.15", default-features = false, features = ["union"] }
 serde_json = "1.0"
+shapefile = { version = "0.8", features = ["geo-types"], optional = true }
+wkt = { version = "0.14", features = ["geo-types"], optional = true }
+csv = { version = "1.3", optional = true }
+quick-xml = { version = "0.36", optional = true }
+rusqlite = { version = "0.40.1", features = ["bundled"], optional = true }
+memmap2 = { version = "0.9.11", optional = true }
+geo-traits = { version = "0.3", optional = true }
+wkb = { version = "0.9", optional = true }
+js-sys = { version = "0.3", optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+web-sys = { version = "0.3", optional = true, features = [
+    "XmlHttpRequest", "Window", "ProgressEvent", "console",
+] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rayon = { version = "1.12", optional = true }
-geos = { version = "11.1", optional = true, features = ["v3_8_0"] }
+geos = { version = "11.1", optional = true, default-features = false, features = ["v3_8_0", "static"] }
 mimalloc = { version = "0.1", default-features = false, optional = true }
 pyo3 = { version = "0.29", features = ["extension-module"], optional = true }
 
@@ -57,6 +101,7 @@ crate-type = ["cdylib", "lib"]
 [[bin]]
 name = "geo-repair-cli"
 path = "src/main.rs"
+required-features = ["std"]
 
 [[bench]]
 name = "bench"
