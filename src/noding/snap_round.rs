@@ -1,6 +1,4 @@
 use geo::{Coord, Line};
-#[cfg(feature = "rstar")]
-use rstar::{RTree, RTreeObject, AABB};
 use rustc_hash::FxHashMap;
 #[cfg(feature = "rstar")]
 use rustc_hash::FxHashSet;
@@ -215,7 +213,7 @@ impl rstar::RTreeObject for ChainEnv {
 fn collect_intersections_mcindex(
     segments: &[Line<f64>],
     chains: &[MonoChain],
-    chain_tree: &RTree<ChainEnv>,
+    chain_tree: &rstar::RTree<ChainEnv>,
     coords: &mut Vec<Coord<f64>>,
     checked: &mut FxHashSet<(usize, usize)>,
 ) {

@@ -19,8 +19,6 @@ use self::intersection::{
 use geo::{
     Coord, CoordNum, GeoFloat, Geometry, GeometryCollection, Line, LineString, MultiLineString,
 };
-#[cfg(feature = "rstar")]
-use rstar::{RTree, RTreeObject, AABB};
 use rustc_hash::FxHashMap;
 #[cfg(feature = "rstar")]
 use rustc_hash::FxHashSet;

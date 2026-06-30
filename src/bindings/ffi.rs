@@ -215,7 +215,7 @@ pub unsafe extern "C" fn geo_repair_make_valid_with_config_full(
 /// [`geo_repair_free_result`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_is_valid(wkb_data: *const u8, wkb_len: usize) -> u8 {
-    match catch_unwind(AssertUnwindSafe(|| {
+    catch_unwind(AssertUnwindSafe(|| {
         let geom = match geometry_from_wkb(wkb_data, wkb_len) {
             Ok(g) => g,
             Err(_) => return 0,
@@ -225,10 +225,8 @@ pub unsafe extern "C" fn geo_repair_is_valid(wkb_data: *const u8, wkb_len: usize
         } else {
             0
         }
-    })) {
-        Ok(v) => v,
-        Err(_) => 0,
-    }
+    }))
+    .unwrap_or_default()
 }
 
 /// Validate a WKB-encoded geometry and return a human-readable reason.

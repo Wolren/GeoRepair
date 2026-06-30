@@ -1,7 +1,5 @@
 use crate::orient::orient2d as orient2d_robust;
 use geo::{Coord, GeoFloat, Line};
-#[cfg(feature = "rstar")]
-use rstar::{RTree, RTreeObject, AABB};
 use std::mem;
 
 // ── Sealed trait: safe f64 downcast ────────────────────────────────────

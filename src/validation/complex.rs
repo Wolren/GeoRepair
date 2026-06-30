@@ -3,8 +3,6 @@ use geo::{
     Coord, Geometry, GeometryCollection, Line, LineString, MultiLineString, MultiPoint,
     MultiPolygon, Point, Polygon, Rect, Triangle,
 };
-#[cfg(feature = "rstar")]
-use rstar::{RTree, RTreeObject, AABB};
 
 use crate::validation::core::*;
 

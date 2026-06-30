@@ -96,41 +96,46 @@ pub fn load(path: &str) -> Result<Vec<Geometry<f64>>, String> {
             #[cfg(feature = "io-shp")]
             return load_shp(path);
             #[cfg(not(feature = "io-shp"))]
-            Err(format!(
+            Err(
                 "'.shp' requires feature 'io-shp': cargo add geo-repair --features io-shp"
-            ))
+                    .to_string(),
+            )
         }
         "wkt" => {
             #[cfg(feature = "io-wkt")]
             return load_wkt(path);
             #[cfg(not(feature = "io-wkt"))]
-            Err(format!(
+            Err(
                 "'.wkt' requires feature 'io-wkt': cargo add geo-repair --features io-wkt"
-            ))
+                    .to_string(),
+            )
         }
         "csv" => {
             #[cfg(feature = "io-csv")]
             return load_csv(path);
             #[cfg(not(feature = "io-csv"))]
-            Err(format!(
+            Err(
                 "'.csv' requires feature 'io-csv': cargo add geo-repair --features io-csv"
-            ))
+                    .to_string(),
+            )
         }
         "gml" => {
             #[cfg(feature = "io-gml")]
             return load_gml(path);
             #[cfg(not(feature = "io-gml"))]
-            Err(format!(
+            Err(
                 "'.gml' requires feature 'io-gml': cargo add geo-repair --features io-gml"
-            ))
+                    .to_string(),
+            )
         }
         "gpkg" => {
             #[cfg(feature = "io-gpkg")]
             return load_gpkg(path);
             #[cfg(not(feature = "io-gpkg"))]
-            Err(format!(
+            Err(
                 "'.gpkg' requires feature 'io-gpkg': cargo add geo-repair --features io-gpkg"
-            ))
+                    .to_string(),
+            )
         }
         other => Err(format!("unsupported format '.{other}' for '{path}'")),
     }
@@ -193,7 +198,7 @@ pub fn repair_file(input: &str, output: &str, config: &MakeValidConfig) -> Resul
 /// ```
 pub fn diagnose_file(path: &str) -> Result<Vec<ValidationResult>, String> {
     let geoms = load(path)?;
-    Ok(geoms.iter().map(|g| validate(g)).collect())
+    Ok(geoms.iter().map(validate).collect())
 }
 
 // ---------------------------------------------------------------------------

@@ -53,7 +53,7 @@ fn main() {
             });
             polys
                 .into_iter()
-                .map(|p| geo::Geometry::Polygon(p))
+                .map(geo::Geometry::Polygon)
                 .collect::<Vec<_>>()
         }
         _ => {

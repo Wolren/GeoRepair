@@ -10,8 +10,6 @@
 use crate::orient::orient2d;
 use geo::{Coord, Line};
 #[cfg(feature = "rstar")]
-use rstar::{RTree, RTreeObject, AABB};
-#[cfg(feature = "rstar")]
 use rustc_hash::FxHashSet;
 
 /// A violation found by [`NodingValidator`].

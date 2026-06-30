@@ -260,20 +260,14 @@ pub(crate) fn split_ring_at_intersection(
 ) -> (Vec<Coord<f64>>, Vec<Coord<f64>>) {
     let n = coords.len();
     let mut ring1 = Vec::with_capacity(j - i + 2);
-    for k in (i + 1)..=j {
-        ring1.push(coords[k]);
-    }
+    ring1.extend(coords[(i + 1)..=j].iter().copied());
     ring1.push(pt);
     ring1.push(ring1[0]);
 
     let mut ring2 = Vec::with_capacity(i + 1 + 1 + (n - 1 - j - 1) + 1);
-    for k in 0..=i {
-        ring2.push(coords[k]);
-    }
+    ring2.extend(coords[0..=i].iter().copied());
     ring2.push(pt);
-    for k in (j + 1)..(n - 1) {
-        ring2.push(coords[k]);
-    }
+    ring2.extend(coords[(j + 1)..(n - 1)].iter().copied());
     ring2.push(coords[0]);
 
     (ring1, ring2)
@@ -574,7 +568,7 @@ fn split_edges_rtree(edges: &[Line<f64>], split_points: &mut [SplitPoint], eps: 
         let query_env = &edge_bboxes[i];
 
         let _: std::ops::ControlFlow<()> =
-            tree.locate_in_envelope_intersecting_int(&query_env, |candidate| {
+            tree.locate_in_envelope_intersecting_int(query_env, |candidate| {
                 let j = candidate.idx;
                 if j <= i {
                     return std::ops::ControlFlow::Continue(());
