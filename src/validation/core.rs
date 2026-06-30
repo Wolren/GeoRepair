@@ -1,6 +1,4 @@
 use geo::{Coord, GeoFloat, Line, LineString, MultiLineString, MultiPoint, Point, Rect, Triangle};
-#[cfg(feature = "rstar")]
-use rstar::{RTree, RTreeObject, AABB};
 use thiserror::Error;
 
 /// Errors reported by OGC geometry validation.
