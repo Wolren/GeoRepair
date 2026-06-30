@@ -64,78 +64,118 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
         }
     }
 
-    // Fix the shell ring — may produce multiple rings if self-intersecting
-    let shell_rings = match fix_ring::repair_ring(poly.exterior()) {
-        Some(rings) => rings,
-        None => {
-            warn!("Structure: shell ring repair failed, falling back to CDT arrange");
-            #[cfg(feature = "arrange")]
-            if !poly.exterior().0.is_empty() {
-                let lines: Vec<_> = poly.lines_iter().collect();
-                return Some(
-                    crate::arrange::fix_from_lines(lines)
-                        .map(Geometry::MultiPolygon)
-                        .unwrap_or(Geometry::GeometryCollection(GeometryCollection(Vec::new()))),
-                );
+    // Compute shell bbox once (needed for hole Type C bypass)
+    let shell_bbox = ring_bbox(poly.exterior().0.as_slice());
+
+    // Run shell repair + hole processing concurrently (both are independent).
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    let (valid_shells, hole_rings_cw) = {
+        use rayon::prelude::*;
+        let (shell_res, holes) = rayon::join(
+            || {
+                let shell_rings = match fix_ring::repair_ring(poly.exterior()) {
+                    Some(rings) => rings,
+                    None => return None,
+                };
+                if shell_rings.is_empty() {
+                    return None;
+                }
+                let valid: Vec<LineString<f64>> = shell_rings
+                    .into_iter()
+                    .filter(|s| s.0.len() >= 4)
+                    .collect();
+                if valid.is_empty() { None } else { Some(valid) }
+            },
+            || {
+                let mut hole_results: Vec<Vec<LineString<f64>>> = poly
+                    .interiors()
+                    .par_iter()
+                    .map(|h| {
+                        let hole_bbox = ring_bbox(&h.0);
+                        if !bboxes_overlap(shell_bbox, hole_bbox) {
+                            return vec![h.clone()];
+                        }
+                        if !fix_ring::has_self_intersections_with_bbox(&h.0, hole_bbox) {
+                            return vec![h.clone()];
+                        }
+                        fix_ring::repair_ring(h).unwrap_or_else(|| vec![h.clone()])
+                    })
+                    .collect();
+                hole_results
+                    .iter_mut()
+                    .flat_map(|rings| rings.drain(..))
+                    .map(ensure_cw)
+                    .collect::<Vec<_>>()
+            },
+        );
+        let valid_shells = match shell_res {
+            Some(v) => v,
+            None => {
+                warn!("Structure: shell ring repair failed, falling back to CDT arrange");
+                #[cfg(feature = "arrange")]
+                if !poly.exterior().0.is_empty() {
+                    let lines: Vec<_> = poly.lines_iter().collect();
+                    return Some(
+                        crate::arrange::fix_from_lines(lines)
+                            .map(Geometry::MultiPolygon)
+                            .unwrap_or(Geometry::GeometryCollection(GeometryCollection(Vec::new()))),
+                    );
+                }
+                return handle_collapse_result(poly.exterior(), config);
             }
+        };
+        (valid_shells, holes)
+    };
+
+    // Serial path: shell repair first, then holes sequentially.
+    #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
+    let (valid_shells, hole_rings_cw) = {
+        let shell_rings = match fix_ring::repair_ring(poly.exterior()) {
+            Some(rings) => rings,
+            None => {
+                warn!("Structure: shell ring repair failed, falling back to CDT arrange");
+                #[cfg(feature = "arrange")]
+                if !poly.exterior().0.is_empty() {
+                    let lines: Vec<_> = poly.lines_iter().collect();
+                    return Some(
+                        crate::arrange::fix_from_lines(lines)
+                            .map(Geometry::MultiPolygon)
+                            .unwrap_or(Geometry::GeometryCollection(GeometryCollection(Vec::new()))),
+                    );
+                }
+                return handle_collapse_result(poly.exterior(), config);
+            }
+        };
+        if shell_rings.is_empty() {
             return handle_collapse_result(poly.exterior(), config);
         }
-    };
-    if shell_rings.is_empty() {
-        return handle_collapse_result(poly.exterior(), config);
-    }
-    let valid_shells: Vec<LineString<f64>> =
-        shell_rings.into_iter().filter(|s| s.0.len() >= 4).collect();
-    if valid_shells.is_empty() {
-        return handle_collapse_result(poly.exterior(), config);
-    }
+        let valid_shells: Vec<LineString<f64>> =
+            shell_rings.into_iter().filter(|s| s.0.len() >= 4).collect();
+        if valid_shells.is_empty() {
+            return handle_collapse_result(poly.exterior(), config);
+        }
 
-    // Fix holes — each hole may produce multiple rings (parallel via rayon)
-    // Type C: skip fix_ring for outer holes (bbox outside shell) or simple valid holes.
-    let shell_bbox = ring_bbox(poly.exterior().0.as_slice());
-    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-    let hole_rings_cw: Vec<LineString<f64>> = {
-        use rayon::prelude::*;
-        let mut hole_results: Vec<Vec<LineString<f64>>> = poly
-            .interiors()
-            .par_iter()
-            .map(|h| {
+        let hole_rings_cw: Vec<LineString<f64>> = {
+            let mut hole_rings: Vec<LineString<f64>> = Vec::new();
+            for h in poly.interiors() {
                 let hole_bbox = ring_bbox(&h.0);
                 if !bboxes_overlap(shell_bbox, hole_bbox) {
-                    return vec![h.clone()];
+                    hole_rings.push(ensure_cw(h.clone()));
+                    continue;
                 }
                 if !fix_ring::has_self_intersections_with_bbox(&h.0, hole_bbox) {
-                    return vec![h.clone()];
+                    hole_rings.push(ensure_cw(h.clone()));
+                    continue;
                 }
-                fix_ring::repair_ring(h).unwrap_or_else(|| vec![h.clone()])
-            })
-            .collect();
-        hole_results
-            .iter_mut()
-            .flat_map(|rings| rings.drain(..))
-            .map(ensure_cw)
-            .collect()
-    };
-    #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
-    let hole_rings_cw: Vec<LineString<f64>> = {
-        let mut hole_rings: Vec<LineString<f64>> = Vec::new();
-        for h in poly.interiors() {
-            let hole_bbox = ring_bbox(&h.0);
-            if !bboxes_overlap(shell_bbox, hole_bbox) {
-                hole_rings.push(ensure_cw(h.clone()));
-                continue;
+                if let Some(rings) = fix_ring::repair_ring(h) {
+                    hole_rings.extend(rings);
+                } else {
+                    hole_rings.push(ensure_cw(h.clone()));
+                }
             }
-            if !fix_ring::has_self_intersections_with_bbox(&h.0, hole_bbox) {
-                hole_rings.push(ensure_cw(h.clone()));
-                continue;
-            }
-            if let Some(rings) = fix_ring::repair_ring(h) {
-                hole_rings.extend(rings);
-            } else {
-                hole_rings.push(ensure_cw(h.clone()));
-            }
-        }
-        hole_rings.into_iter().map(ensure_cw).collect()
+            hole_rings.into_iter().map(ensure_cw).collect()
+        };
+        (valid_shells, hole_rings_cw)
     };
 
     // For each valid shell ring, classify and subtract holes
