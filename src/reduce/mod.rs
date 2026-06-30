@@ -145,6 +145,12 @@ impl GeometryPrecisionReducer {
     }
 
     fn snap_coords(&self, coords: &[Coord<f64>]) -> Vec<Coord<f64>> {
+        #[cfg(feature = "simd")]
+        if self.model.mode == RoundingMode::Round {
+            let mut snapped = coords.to_vec();
+            crate::simd::snap_coords_simd(&mut snapped, self.model.scale);
+            return snapped;
+        }
         coords.iter().map(|&c| self.snap_coord(c)).collect()
     }
 

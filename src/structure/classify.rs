@@ -59,17 +59,7 @@ pub(crate) fn classify_holes(
 type Bbox = (f64, f64, f64, f64);
 
 fn bbox(ring: &LineString<f64>) -> Bbox {
-    let mut min_x = f64::MAX;
-    let mut max_x = f64::MIN;
-    let mut min_y = f64::MAX;
-    let mut max_y = f64::MIN;
-    for c in &ring.0 {
-        min_x = min_x.min(c.x);
-        max_x = max_x.max(c.x);
-        min_y = min_y.min(c.y);
-        max_y = max_y.max(c.y);
-    }
-    (min_x, max_x, min_y, max_y)
+    crate::simd::aabb_minmax_simd(&ring.0)
 }
 
 fn bboxes_overlap(a: Bbox, b: Bbox) -> bool {

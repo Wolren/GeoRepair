@@ -71,3 +71,50 @@ pub(crate) fn has_self_intersections(coords: &[Coord<f64>], eps: f64) -> bool {
 
     false
 }
+
+/// Find the FIRST proper edge intersection using an R-tree.
+/// Returns `(edge_i, edge_j, intersection_point)` with `i < j`.
+///
+/// This is the early-exit variant of `has_self_intersections` that also
+/// returns the intersection geometry — used by the ATR fast-path ring
+/// splitter.  O(n log n) average, exits after the first crossing found.
+pub(crate) fn find_first_intersection(
+    coords: &[Coord<f64>],
+    eps: f64,
+) -> Option<(usize, usize, Coord<f64>)> {
+    let n = coords.len();
+    let n_edges = n.saturating_sub(1);
+
+    let edges: Vec<EdgeEnvelope> = (0..n_edges)
+        .map(|i| EdgeEnvelope {
+            index: i as u32,
+            envelope: edge_envelope(coords, i),
+        })
+        .collect();
+
+    let tree = RTree::bulk_load(edges);
+
+    for i in 0..n_edges {
+        let query_env = edge_envelope(coords, i);
+        let result: std::ops::ControlFlow<Option<(usize, usize, Coord<f64>)>> = tree
+            .locate_in_envelope_intersecting_int(&query_env, |candidate| {
+                let j = candidate.index as usize;
+                if j <= i {
+                    return std::ops::ControlFlow::Continue(());
+                }
+                if i.abs_diff(j) <= 1 || (i == 0 && j == n_edges - 1) {
+                    return std::ops::ControlFlow::Continue(());
+                }
+                match super::fix_ring::edge_intersection(coords, i, j, eps) {
+                    Some(pair) => std::ops::ControlFlow::Break(Some(pair)),
+                    None => std::ops::ControlFlow::Continue(()),
+                }
+            });
+
+        if let std::ops::ControlFlow::Break(Some(pair)) = result {
+            return Some(pair);
+        }
+    }
+
+    None
+}

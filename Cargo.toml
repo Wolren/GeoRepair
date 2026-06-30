@@ -14,7 +14,7 @@ rust-version = "1.85"
 exclude = ["tests/*.py", "*.py"]
 
 [features]
-default = ["std", "arrange", "structure", "parallel", "simd", "validate"]
+default = ["std", "arrange", "structure", "parallel", "simd", "validate", "mimalloc"]
 
 # no_std support: disable `std` feature to build without file I/O,
 # alloc-only. WKB parsing, geometry validation, and repair work

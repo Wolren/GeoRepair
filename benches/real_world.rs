@@ -550,7 +550,7 @@ fn main() {
     // Full-dataset timing: process N random polys through both methods
     // =========================================================================
     let full_n = n_polys;
-    eprintln!("\n[5/5] Full dataset: {full_n} polys (parallel Structure vs sequential GEOS)");
+    eprintln!("\n[5/5] Full dataset: {full_n} polys (parallel Structure vs parallel GEOS)");
 
     let t0 = Instant::now();
     let cfg = MakeValidConfig {
