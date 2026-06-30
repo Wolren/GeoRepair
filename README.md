@@ -2,18 +2,30 @@
 
 [![crate](https://img.shields.io/crates/v/geo-repair.svg)](https://crates.io/crates/geo-repair)
 [![docs](https://docs.rs/geo-repair/badge.svg)](https://docs.rs/geo-repair)
-![MSRV](https://img.shields.io/badge/rustc-1.95+-ab6000.svg)
+![MSRV](https://img.shields.io/badge/rustc-1.85+-ab6000.svg)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://github.com/georust/geo-repair?tab=License-1-ov-file)
+[![Status](https://img.shields.io/badge/status-experimental-orange.svg)]()
+
+> **This crate is experimental.**  The API is actively evolving — expect
+> breaking changes between 0.x releases.  Core algorithms, I/O backends,
+> FFI bindings, and feature flags are all subject to change as we improve
+> correctness and performance.
 
 OGC geometry repair and validation for Rust.  Detects and fixes invalid
 GIS geometries (self-intersections, unclosed rings, degenerate shapes, NaN
 coordinates, and more) using algorithms selected by geometry type.
 
-- **Polygons:** CDT arrangement (Arrange) or planar-graph structure fast path (Structure)
+The **Structure** strategy (default) mirrors GEOS's ST_MakeValid
+algorithm: planar graph extraction, face walking, and winding-number
+assembly.  The **Arrange** strategy uses CDT-based repair as a robust
+fallback for complex topologies.  Passes 2490/2490 GEOS XML validation
+tests, with per-geometry benchmark performance within 1-7% of GEOS on
+real-world production datasets.
+
+- **Polygons:** Structure (GEOS-compatible fast path) or Arrange (CDT fallback)
 - **Lines:** Self-intersection noding with snap-rounding fallback
 - **Points:** NaN/Inf filtering, deduplication
 - **Validation:** 18 OGC Simple Features predicates, Shewchuk adaptive-precision arithmetic
-- **Correctness:** 2490/2490 GEOS XML validation suite passing
 
 ## Contents
 
@@ -147,6 +159,10 @@ let result: ValidationResult = validate(&geom);
 let reason: String = validate_reason(&geom);
 ```
 
+> **Experimental** — the two repair strategies and their auto-selection
+> logic are still being tuned.  Heuristics, fallback thresholds, and
+> algorithm details will change.
+
 ## Polygon repair strategies
 
 | Strategy | Approach | Strengths | Weaknesses |
@@ -217,59 +233,73 @@ built from CoordSeq (no WKT overhead, ~1.4 s setup).  i5-12400F (6C/12T).
 ### Run benchmarks
 
 ```shell
-# Quick sweep
-cargo bench
+# Quick sweep (no GEOS)
+cargo bench --bench bench
 
-# Real-world dataset with GEOS comparison
-scripts/bench-geos.ps1              # Windows (conda)
-scripts/bench-geos.sh               # Linux/macOS
+# With GEOS comparison (requires libgeos-dev / geos-sys-build deps)
+cargo bench --features bench-geos --bench bench
 
-# Criterion benchmarks
+# Criterion detailed benchmarks
 cargo bench --features bench-criterion --bench criterion
 ```
 
-### Internal optimizations
-
-- **R-tree spatial indexing** for intersection detection in ring validation
-  and snap-rounding (O(log h) per segment vs O(h)).
-- **Rotation-invariant ring fingerprints** for O(1) duplicate ring detection.
-- **O(n) BFS topological sort** replaces O(n^2) depth propagation.
-- **DD (double-double) arithmetic** for 106-bit precision in critical
-  intersection computations.
-- **GeometryPrecisionReducer** as last-resort fallback with progressive
-  coarsening (1e-10, 1e-8, 1e-6, 1e-4).
-- **Parallelism:** Batch-level (rayon, independent polygons) plus
-  intra-polygon hot loops (hole fixing, edge-edge tests, etc.).
-- **SIMD:** AVX2-accelerated orientation tests (1.5-3x on rings >= 100
-  vertices), with Shewchuk fallback for near-collinear cases.
-
 ## I/O
 
-GeoRepair provides minimal built-in I/O — a custom binary format for bulk
-polygon loading and a zero-dependency WKB parser/encoder.  All other
-format handling (GeoJSON, Shapefile, GeoPackage, GML, CSV, WKT) is left to
-external tools such as GEOS bindings, GDAL, or dedicated conversion
-scripts.
+> **Experimental** — the unified `load()`/`save()` API is new.  Format
+> detection, error handling, and backend dispatch are still stabilising.
 
-| Format | Load | Export | Description |
-|--------|------|--------|-------------|
-| **Binary** (.bin) | `load_bin()` / `load_bin_stream()` | — | Custom format, bulk polygon I/O, ~950 MB/s throughput |
-| **WKB** (.wkb) | `read_wkb()` / `read_wkb_concat()` | `write_wkb()` | Standard OGC WKB, LE/BE, EWKB SRID |
-
-**SHP to .bin conversion:**
-
-```bash
-python scripts/convert_shp_to_bin.py input.shp output.bin
-```
-
-**WKB roundtrip example:**
+GeoRepair provides a unified `load()` / `save()` API with extension-based
+format dispatch.  No external dependencies required — the core backends
+(WKB, binary, GeoJSON) are built in.
 
 ```rust
-use geo_repair::{read_wkb, write_wkb};
+use geo_repair::{load, save, repair_file};
 
-let bytes: Vec<u8> = write_wkb(&geometry);
-let geom = read_wkb(&bytes).unwrap();
+// Load any supported format by path — extension detected automatically
+let features = load("input.geojson")?;
+
+// Save to any supported format
+save("output.wkb", &features)?;
+
+// One-shot repair: load → repair → save
+let stats = repair_file("broken.geojson", "fixed.wkb")?;
+println!("Repaired {}/{} geometries", stats.total - stats.invalid_before, stats.total);
 ```
+
+| Extension | Formats | Backend |
+|-----------|---------|---------|
+| `.wkb` | Concatenated WKB (LE/BE, EWKB SRID, all geometry types) | Zero-dep built-in |
+| `.bin` | Custom binary bulk polygon format | Zero-dep built-in |
+| `.json` / `.geojson` | GeoJSON FeatureCollection / bare geometry | Built-in via `serde_json` |
+
+**Low-level access** (when you need direct control):
+
+```rust
+use geo_repair::{read_wkb, write_wkb, write_ewkb, load_bin, load_bin_stream};
+
+// WKB roundtrip
+let bytes: Vec<u8> = write_wkb(&geometry);
+let geom = read_wkb(&bytes)?;
+
+// EWKB with Z/M values
+let ewkb = write_ewkb(&geometry, &zm_values);
+
+// Binary bulk format (streaming iterator yields Result<Polygon, IoError>)
+for result in load_bin_stream("dataset.bin")? {
+    let poly = result?;
+    // process polygon
+}
+```
+
+**Supported GeoJSON types:** Point, MultiPoint, LineString, MultiLineString,
+Polygon, MultiPolygon, GeometryCollection, Feature, FeatureCollection.
+Properties and CRS (EPSG) are preserved through roundtrip.
+
+**For other formats** (Shapefile, GeoPackage, WKT, GML), use GDAL or GEOS
+bindings to convert to WKB or GeoJSON first — or add a light backend
+behind the `io-*` feature flag and send a PR.
+
+**SHP to .bin conversion:** `python scripts/convert_shp_to_bin.py input.shp output.bin`
 
 ## Features
 
@@ -290,6 +320,9 @@ let geom = read_wkb(&bytes).unwrap();
 | `mimalloc` | Use mimalloc global allocator | no |
 
 ## Python bindings
+
+> **Experimental** — the Python API (function names, error handling, type
+> signatures) is still settling.  Expect changes in naming and behaviour.
 
 Build and install:
 
@@ -337,6 +370,9 @@ to this engine.
 
 ## C FFI
 
+> **Experimental** — the C API is a work in progress.  Function names,
+> type definitions, and memory ownership rules may change without notice.
+
 Enable the `ffi` feature for a C-compatible API using WKB:
 
 ```c
@@ -376,14 +412,6 @@ void            geo_repair_free_result(GeoRepairResult* result);
   formally verified against the full Simple Features specification.
 - **GeometryCollection cross-component intersection** is not validated.
 - **Z/M coordinate consistency** is not validated.
-
-### Performance
-
-- **Large polygons (10k+ vertices)** are expensive in both modes.
-  Consider simplifying or tiling very large polygons first.
-- **Hole-heavy polygons (50+ holes)** stress the structure algorithm's
-  classification phase.  R-tree acceleration provides O(n log n) expected
-  performance.
 
 ### Portability
 
