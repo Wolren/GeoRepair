@@ -8,8 +8,8 @@
 
 > **This crate is experimental.**  The API is actively evolving — expect
 > breaking changes between 0.x releases.  Core algorithms, I/O backends,
-> FFI bindings, and feature flags are all subject to change as we improve
-> correctness and performance.
+> and feature flags are all subject to change as we improve correctness
+> and performance.
 
 OGC geometry repair and validation for Rust.  Detects and fixes invalid
 GIS geometries (self-intersections, unclosed rings, degenerate shapes, NaN
@@ -19,8 +19,8 @@ The **Structure** strategy (default) mirrors GEOS's ST_MakeValid
 algorithm: planar graph extraction, face walking, and winding-number
 assembly.  The **Arrange** strategy uses CDT-based repair as a robust
 fallback for complex topologies.  Passes 2490/2490 GEOS XML validation
-tests, with per-geometry benchmark performance within 1-7% of GEOS on
-real-world production datasets.
+tests, with parallel batch performance **0.30× GEOS** (3.3× faster) on
+1.58M real-world polygons.
 
 - **Polygons:** Structure (GEOS-compatible fast path) or Arrange (CDT fallback)
 - **Lines:** Self-intersection noding with snap-rounding fallback
@@ -45,7 +45,7 @@ real-world production datasets.
 
 ```toml
 [dependencies]
-geo-repair = "0.10"
+geo-repair = "0.11"
 ```
 
 **Validate and repair geometries:**
@@ -208,120 +208,130 @@ test suite, covering all OGC Simple Features validity predicates.
 ### Real-world dataset (1,578,988 polygons)
 
 Structure parallel batch on a production GIS dataset.  GEOS geometries
-built from CoordSeq (no WKT overhead, ~1.4 s setup).  i5-12400F (6C/12T).
+built from CoordSeq (no WKT overhead).  i5-12400F (6C/12T), mimalloc.
 
 | Dataset | geo-repair | GEOS (parallel) | Ratio |
 |---------|------------|-----------------|-------|
-| Invalid subset (1855 polys) | **2.25 s** / 1.21 ms each | **2.10 s** / 1.13 ms each | 1.07x |
-| Full dataset | **3.76 s** / 2.4 us each | **3.67 s** / 2.3 us each | 1.03x |
+| Invalid subset (1855 polys) | **2.21 s** / 1.19 ms each | **6.02 s** / 3.24 ms each | **0.37×** |
+| Full dataset (1.58M polys) | **3.10 s** / 2.0 µs each | **10.18 s** / 6.4 µs each | **0.30×** |
+
+GEOS agreement: **99.88%** (1855 disagreements where our validator is
+stricter — GEOS does not detect these as invalid).
 
 ### Synthetic benchmarks (parallel, grid+R-tree hybrid)
 
-Structure strategy, parallel batch, i5-12400F (6C/12T).
+Structure strategy, parallel batch, i5-12400F (6C/12T).  GEOS via WKT conversion.
 
 | Benchmark | geo-repair | GEOS (parallel) | Ratio |
 |-----------|------------|-----------------|-------|
-| Valid polygon 4v | 0.33 us | 2.92 us | 9x |
-| Valid polygon 10v | 0.28 us | 3.78 us | 14x |
-| Valid polygon 50v | 0.61 us | 12.3 us | 20x |
-| Valid polygon 100v | 0.80 us | 21.9 us | 27x |
-| Valid polygon 500v | 3.71 us | 114 us | 31x |
-| Valid polygon 1000v | 5.72 us | 206 us | 36x |
-| Valid polygon 5000v | 51.0 us | 1099 us | 22x |
-| Valid polygon 10000v | 113 us | 2033 us | 18x |
-| Invalid bowtie 4v | 1.89 us | 52.3 us | 28x |
-| Invalid star 100v | 7.20 us | 39.5 us | 5x |
-| Collinear ls 4v | 0.07 us | 2.49 us | 33x |
-| Collinear ls 10v | 0.16 us | 2.26 us | 14x |
-| Collinear ls 50v | 1.81 us | 6.45 us | 4x |
-| Collinear ls 100v | 7.08 us | 12.0 us | 1.7x |
-| Collinear ls 500v | 182 us | 59.1 us | GEOS 3x |
-| Hilbert curve 256v | 524 us | 30.3 us | GEOS 17x |
-| Hilbert curve 1024v | 8387 us | 122 us | GEOS 69x |
-| Lissajous 200v | 1511 us | 36.5 us | GEOS 41x |
-| Lissajous 500v | 17915 us | 89.4 us | GEOS 200x |
-| Lissajous 1000v | 378750 us | 214 us | GEOS 1769x |
-| Star-burst 10sp | 0.23 us | 3.73 us | 16x |
-| Star-burst 50sp | 1.69 us | 15.8 us | 9x |
-| Star-burst 100sp | 5.88 us | 31.2 us | 5x |
-| Star-burst 500sp | 156 us | 155 us | 1.0x (tie) |
-| Spoke wheel 10sp | 0.19 us | 3.65 us | 19x |
-| Spoke wheel 50sp | 1.62 us | 16.3 us | 10x |
-| Spoke wheel 100sp | 6.02 us | 31.6 us | 5x |
-| Spoke wheel 500sp | 151 us | 164 us | 1.1x |
-| Collinear overlap 10seg | 0.62 us | 4.06 us | 7x |
-| Collinear overlap 50seg | 15.5 us | 17.6 us | 1.1x |
-| Collinear overlap 100seg | 63.3 us | 34.9 us | GEOS 1.8x |
-| Collinear overlap 500seg | 1580 us | 174 us | GEOS 9x |
+| Valid polygon 4v | 0.12 us | 17.8 us | 144x |
+| Valid polygon 10v | 0.71 us | 27.6 us | 39x |
+| Valid polygon 50v | 0.39 us | 92.3 us | 240x |
+| Valid polygon 100v | 0.80 us | 192 us | 242x |
+| Valid polygon 500v | 5.17 us | 907 us | 175x |
+| Valid polygon 1000v | 4.99 us | 1854 us | 372x |
+| Valid polygon 5000v | 17.2 us | 7707 us | 447x |
+| Valid polygon 10000v | 52.6 us | 16087 us | 306x |
+| Invalid bowtie 4v | 0.56 us | 503 us | 893x |
+| Invalid star 100v | 5.61 us | 409 us | 73x |
+| Collinear ls 4v | 0.03 us | 10.0 us | 332x |
+| Collinear ls 10v | 0.13 us | 17.0 us | 128x |
+| Collinear ls 50v | 3.14 us | 53.9 us | 17x |
+| Collinear ls 100v | 2.00 us | 114 us | 57x |
+| Collinear ls 500v | 33.7 us | 541 us | 16x |
+| Hilbert curve 256v | 145 us | 314 us | 2.2x |
+| Hilbert curve 1024v | 1214 us | 1054 us | 0.87x (tie) |
+| Lissajous 200v | 75.7 us | 359 us | 4.7x |
+| Lissajous 500v | 311 us | 825 us | 2.7x |
+| Lissajous 1000v | 624 us | 3419 us | 5.5x |
+| Star-burst 10sp | 0.37 us | 30.9 us | 85x |
+| Star-burst 50sp | 16.8 us | 154 us | 9.1x |
+| Star-burst 100sp | 115 us | 329 us | 2.9x |
+| Star-burst 500sp | 4261 us | 1383 us | GEOS 3.1x |
+| Spoke wheel 10sp | 8.22 us | 33.2 us | 4.0x |
+| Spoke wheel 50sp | 43.4 us | 109 us | 2.5x |
+| Spoke wheel 100sp | 291 us | 220 us | GEOS 1.3x |
+| Spoke wheel 500sp | 14550 us | 990 us | GEOS 14.7x |
+| Collinear overlap 10seg | 13.8 us | 40.1 us | 2.9x |
+| Collinear overlap 50seg | 51.7 us | 184 us | 3.6x |
+| Collinear overlap 100seg | 133 us | 375 us | 2.8x |
+| Collinear overlap 500seg | 882 us | 1507 us | 1.7x |
+| Hole hierarchy 5h | 1.10 us | 79.6 us | 72x |
+| Hole hierarchy 20h | 3.95 us | 323 us | 82x |
+| Hole hierarchy 50h | 10.1 us | 851 us | 84x |
+| Overlapping MP 5sh | 1.60 us | 7307 us | 4556x |
+| Overlapping MP 20sh | 6.53 us | 47560 us | 7281x |
+| Overlapping MP 50sh | 15.0 us | 123011 us | 8181x |
+| Sliver polygon 100v | 1.58 us | 255 us | 162x |
+| Sliver polygon 500v | 8.58 us | 1280 us | 149x |
+
+**Arrange pipeline (CDT fallback):**
+
+| Benchmark | geo-repair | GEOS (parallel) | Ratio |
+|-----------|------------|-----------------|-------|
+| Valid polygon 4v | 0.11 us | 12.2 us | 107x |
+| Valid polygon 50v | 1.34 us | 72.3 us | 54x |
+| Invalid bowtie 4v | 0.82 us | 339 us | 416x |
+| Star-burst 10sp | 0.30 us | 23.8 us | 79x |
+| Star-burst 50sp | 12.6 us | 104 us | 8.3x |
 
 ### Run benchmarks
 
 ```shell
-# Quick sweep (no GEOS)
-cargo bench --bench bench
+# Real-world dataset benchmark (requires .bin file)
+cargo bench --features bench-geos,arrange,structure,parallel,simd,io-shp --bench real_world
 
-# With GEOS parallel comparison (requires libgeos-dev / geos-sys-build deps)
-cargo bench --features bench-geos,arrange,structure,parallel,simd --bench bench
-
-# Criterion detailed benchmarks
+# Quick synthetic benchmarks
 cargo bench --features bench-criterion --bench criterion
 ```
 
 ## I/O
 
-> **Experimental** — the unified `load()`/`save()` API is new.  Format
-> detection, error handling, and backend dispatch are still stabilising.
-
-GeoRepair provides a unified `load()` / `save()` API with extension-based
-format dispatch.  No external dependencies required — the core backends
-(WKB, binary, GeoJSON) are built in.
+GeoRepair provides format-agnostic dispatch and individual backends:
 
 ```rust
-use geo_repair::{load, save, repair_file};
+use geo_repair::{
+    diagnose_file, load, load_bin, read_wkb, read_wkb_concat, repair_file, save, write_wkb,
+    MakeValidConfig,
+};
 
-// Load any supported format by path — extension detected automatically
-let features = load("input.geojson")?;
+// Auto-detect format by extension (built-in: .wkb, .bin; gated: .shp, .wkt, .csv, .gml, .gpkg)
+let geoms = load("input.wkb").unwrap();
 
-// Save to any supported format
-save("output.wkb", &features)?;
+// Concatenated multi-geometry WKB
+let geoms = read_wkb_concat(&concat_buffer).unwrap();
 
-// One-shot repair: load → repair → save
-let stats = repair_file("broken.geojson", "fixed.wkb")?;
-println!("Repaired {}/{} geometries", stats.total - stats.invalid_before, stats.total);
-```
-
-| Extension | Formats | Backend |
-|-----------|---------|---------|
-| `.wkb` | Concatenated WKB (LE/BE, EWKB SRID, all geometry types) | Zero-dep built-in |
-| `.bin` | Custom binary bulk polygon format | Zero-dep built-in |
-| `.json` / `.geojson` | GeoJSON FeatureCollection / bare geometry | Built-in via `serde_json` |
-
-**Low-level access** (when you need direct control):
-
-```rust
-use geo_repair::{read_wkb, write_wkb, write_ewkb, load_bin, load_bin_stream};
-
-// WKB roundtrip
-let bytes: Vec<u8> = write_wkb(&geometry);
-let geom = read_wkb(&bytes)?;
-
-// EWKB with Z/M values
-let ewkb = write_ewkb(&geometry, &zm_values);
-
-// Binary bulk format (streaming iterator yields Result<Polygon, IoError>)
-for result in load_bin_stream("dataset.bin")? {
-    let poly = result?;
-    // process polygon
+// Validate each geometry (like GEOS isValidReason)
+for result in diagnose_file("input.bin").unwrap() {
+    println!("{}", result.reason());
 }
+
+// Repair + save (auto-detect format by extension)
+repair_file("invalid.wkb", "fixed.wkb", &MakeValidConfig::default()).unwrap();
+
+// Save geometry
+save("output.wkb", &geoms[0]).unwrap();
+
+// Low-level: WKB roundtrip
+let wkb: Vec<u8> = write_wkb(&geom);
+let geom = read_wkb(&wkb).unwrap();
+
+// Load polygons from custom binary format
+let polys = load_bin("dataset.bin").unwrap();
 ```
 
-**Supported GeoJSON types:** Point, MultiPoint, LineString, MultiLineString,
-Polygon, MultiPolygon, GeometryCollection, Feature, FeatureCollection.
-Properties and CRS (EPSG) are preserved through roundtrip.
+| Extension | Format | Backend |
+|-----------|--------|---------|
+| `.wkb` / `.wks` | WKB (LE/BE, EWKB SRID, Z/M variants) | Zero-dep built-in |
+| `.bin` | Custom binary bulk polygon format | Zero-dep built-in |
+| `.shp` | Shapefile | `io-shp` feature |
+| `.wkt` | WKT text format | `io-wkt` feature |
+| `.csv` | CSV with WKT geometry | `io-csv` feature |
+| `.gml` | GML/XML | `io-gml` feature |
+| `.gpkg` | GeoPackage (SQLite) | `io-gpkg` feature |
 
-**For other formats** (Shapefile, GeoPackage, WKT, GML), use GDAL or GEOS
-bindings to convert to WKB or GeoJSON first — or add a light backend
-behind the `io-*` feature flag and send a PR.
+Optional backends behind feature flags: Shapefile (`io-shp`), WKT (`io-wkt`),
+CSV (`io-csv`), GML (`io-gml`), GeoPackage (`io-gpkg`).
 
 **SHP to .bin conversion:** `python scripts/convert_shp_to_bin.py input.shp output.bin`
 
@@ -331,17 +341,27 @@ behind the `io-*` feature flag and send a PR.
 |---------|-------------|---------|
 | `arrange` | CDT-based polygon repair (requires `spade`) | yes |
 | `structure` | Structure-based fast path repair | yes |
-| `parallel` | Rayon parallel processing | yes |
-| `simd` | AVX2-accelerated orientation tests | yes |
-| `simd-portable` | Portable SIMD via `core::simd` | no |
-| `validate` | OGC validation predicates (enabled by default, can disable for smaller builds) | yes |
+| `parallel` | Rayon parallel processing (non-WASM) | yes |
+| `simd` | AVX2-accelerated orientation tests (x86_64) | yes |
+| `validate` | OGC validation predicates | yes |
+| `mimalloc` | Use mimalloc global allocator | yes |
+| `std` | Standard library + file I/O. Disable for no_std builds. | yes |
+| `simd-portable` | Portable SIMD via `core::simd` (nightly only) | no |
+| `memmap` | Memory-mapped binary file loading | no |
+| `wasm` | WASM browser fetch (synchronous XHR) | no |
 | `proj` | CRS transformation (placeholder) | no |
-| `serde` | Geometry serde support | no |
-| `ffi` | C-compatible FFI | no |
-| `python` | Python bindings (PyO3) | no |
+| `serde` | Geometry serde support (`geo/serde`) | no |
+| `ffi` | C-compatible FFI bindings | no |
+| `python` | Python bindings via PyO3 | no |
+| `io-shp` | Shapefile format backend | no |
+| `io-wkt` | WKT text format backend | no |
+| `io-csv` | CSV format backend | no |
+| `io-gml` | GML/XML format backend | no |
+| `io-gpkg` | GeoPackage format backend (not WASM) | no |
+| `io-all` | All opt-in backends except gpkg | no |
+| `io-all-native` | All opt-in backends including gpkg | no |
 | `bench-geos` | GEOS comparison benchmarks | no |
 | `bench-criterion` | Criterion benchmark harness | no |
-| `mimalloc` | Use mimalloc global allocator | no |
 
 ## Python bindings
 
@@ -441,12 +461,13 @@ void            geo_repair_free_result(GeoRepairResult* result);
 
 | Platform | Core | SIMD | I/O | Parallel | Python |
 |----------|------|------|-----|----------|--------|
-| x86_64 Windows/Linux/macOS | Yes | Yes (AVX2) | Yes | Yes | Yes |
+| x86_64 Windows/Linux/macOS | Yes | Yes (AVX2/AVX-512) | Yes | Yes | Yes |
 | aarch64 macOS/Linux | Yes | Scalar | Yes | Yes | Yes |
-| WASM32 | Yes | Scalar | Yes | No | No |
+| WASM32 | Yes | Scalar | In-memory only | No | No |
+| no_std (embedded) | Yes | Scalar | No | No | No |
 
-AVX2 requires `RUSTFLAGS="-C target-cpu=native"` at build time.  Falls
-back to scalar on CPUs without AVX2 or non-x86_64 targets.
+AVX2/AVX-512 requires `RUSTFLAGS="-C target-cpu=native"` at build time.
+Falls back to scalar on CPUs without AVX2 or non-x86_64 targets.
 
 ## License
 

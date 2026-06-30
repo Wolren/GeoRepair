@@ -1,3 +1,9 @@
+//! Rayon-based parallel batch geometry repair.
+//!
+//! Provides parallel implementations of MakeValid for Multi-geometries,
+//! processing each component on a separate rayon thread.
+//!
+//! Feature: `parallel` (enabled by default, non-WASM only).
 use geo::{
     GeoFloat, Geometry, GeometryCollection, LineString, MultiLineString, MultiPoint, MultiPolygon,
     Point, Polygon,

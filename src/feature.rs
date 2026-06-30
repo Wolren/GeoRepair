@@ -106,6 +106,8 @@ impl Feature {
     }
 }
 
+/// Convert any geometry into a [`Feature`] with no attributes.
+/// Convert any geometry into a [`Feature`] with no attributes.
 impl From<Geometry<f64>> for Feature {
     fn from(geometry: Geometry<f64>) -> Self {
         Feature::new(geometry)

@@ -1,3 +1,22 @@
+//! Custom binary bulk polygon format loader and streaming iterator.
+//!
+//! Provides [`load_bin`] for loading all polygons at once and
+//! [`load_bin_stream`] for memory-efficient streaming.
+//!
+//! # Format
+//!
+//! Little-endian binary format for polygon batches:
+//! - u32 LE: polygon count
+//! - Per polygon:
+//!   - u32 LE: exterior ring vertex count
+//!   - f64 LE × N: (x, y) pairs
+//!   - u32 LE: interior ring count
+//!   - Per interior ring:
+//!     - u32 LE: vertex count
+//!     - f64 LE × N: (x, y) pairs
+//!
+//! This format is designed for bulk transfer from GDAL/QGIS and is not
+//! an OGC standard. For portable interchange, use WKB.
 use std::fs::File;
 use std::io::Read;
 
@@ -72,6 +91,38 @@ pub fn load_bin(path: &str) -> Result<Vec<Polygon<f64>>, String> {
     Ok(polys)
 }
 
+/// Stream polygons from a binary file without loading everything into memory.
+///
+/// Returns an iterator that reads polygons one at a time from a custom
+/// binary format file. Useful for processing datasets too large to fit
+/// in memory.
+///
+/// # Format
+///
+/// Same format as [`load_bin`]:
+/// - u32 LE: number of polygons
+/// - For each polygon:
+///   - u32 LE: exterior ring coord count
+///   - f64 LE × N: (x, y) pairs
+///   - u32 LE: interior ring count
+///   - For each interior ring:
+///     - u32 LE: coord count
+///     - f64 LE × N: (x, y) pairs
+///
+/// # Panics
+///
+/// Panics on I/O errors (file not found, read failure).
+/// Use [`load_bin`] for fallible access.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use geo_repair::load_bin_stream;
+///
+/// for poly in load_bin_stream("dataset.bin") {
+///     process(poly);
+/// }
+/// ```
 pub fn load_bin_stream(path: &str) -> impl Iterator<Item = Polygon<f64>> {
     let file = std::fs::File::open(path).unwrap_or_else(|e| panic!("Cannot open {path}: {e}"));
     let reader = std::io::BufReader::new(file);

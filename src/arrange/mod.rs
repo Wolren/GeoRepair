@@ -1,3 +1,33 @@
+//! CDT-based polygon repair for complex topologies (LEDOUX et al. 2014).
+//!
+//! The Arrange strategy uses Constrained Delaunay Triangulation as a robust
+//! fallback for polygons that the Structure fast path cannot handle. It is
+//! based on the approach described by Ledoux et al. (2014) for repairing
+//! invalid polygons via constrained triangulation.
+//!
+//! Algorithm:
+//! 1. Constrained Delaunay triangulation of polygon edges
+//! 2. Triangle labeling (interior/exterior via winding)
+//! 3. Face extraction from labeled triangles
+//! 4. Ring assembly with winding correction
+//!
+//! Strengths:
+//! - Handles any topology, no self-intersection limit
+//! - Works on all-collinear and near-degenerate inputs
+//!
+//! Weaknesses:
+//! - Slower than Structure, especially on large rings
+//! - Requires the `spade` crate
+//! - Can panic on extreme degeneracies (all-collinear rings, coords near f64::MAX)
+//!
+//! # Submodules
+//!
+//! - `cdt`: Constrained Delaunay triangulation wrapper
+//! - `extract`: Triangle-to-ring extraction
+//! - `label`: Face labeling (interior/exterior)
+//! - `prep`: Input preparation, intersection pre-checks
+//! - `prep_intersect`: Parallel intersection pre-filter
+//! - `assemble`: Ring assembly from labeled faces
 pub mod assemble;
 pub mod cdt;
 pub mod extract;

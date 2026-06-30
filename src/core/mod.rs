@@ -30,14 +30,43 @@ pub(crate) const SNAP_SCALE: f64 = 1e8;
 // Config
 // ---------------------------------------------------------------------------
 
+/// Configuration for geometry repair operations.
+///
+/// Controls which polygon repair strategy to use, whether collapsed
+/// geometries should be kept, and CRS-aware tolerance settings.
+///
+/// # Default
+///
+/// ```rust
+/// use geo_repair::MakeValidConfig;
+///
+/// let config = MakeValidConfig::default();
+/// // Equivalent to:
+/// //   poly_method: PolyMethod::Auto,
+/// //   keep_collapsed: false,
+/// //   fill_rule: FillRule::EvenOdd,
+/// //   crs: None,
+/// //   target_crs: None,
+/// ```
 #[derive(Clone, Debug)]
 pub struct MakeValidConfig {
+    /// When true, geometries that collapse to empty during repair
+    /// (e.g. zero-area after self-intersection resolution) are kept
+    /// rather than discarded.
     pub keep_collapsed: bool,
+
+    /// Which polygon repair strategy to use.
+    ///
+    /// Default: [`PolyMethod::Auto`] (fast path with fallback).
     pub poly_method: PolyMethod,
+
+    /// Fill rule for polygon assembly.
     pub fill_rule: FillRule,
+
     /// CRS of the input geometry.
     /// When set, used for CRS-aware tolerance and metadata preservation.
     pub crs: Option<Crs>,
+
     /// Target output CRS.
     /// When set, geometries are transformed to this CRS after repair
     /// via PROJ (requires the `proj` feature).
@@ -56,10 +85,25 @@ impl Default for MakeValidConfig {
     }
 }
 
+/// Polygon repair strategy selector.
+///
+/// Controls which algorithm is used for polygon repair.
+///
+/// - [`Auto`](PolyMethod::Auto): Try Structure first (fast path), fall back
+///   to Arrange for complex topology
+/// - [`Structure`](PolyMethod::Structure): Planar graph fast path only
+/// - [`Arrange`](PolyMethod::Arrange): CDT triangulation only
+///
+/// See the [`structure`](crate::structure) and [`arrange`](crate::arrange)
+/// module docs for algorithm details.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PolyMethod {
+    /// Automatic selection: try Structure first, fall back to Arrange.
     Auto,
+    /// Structure fast path (planar graph extraction).
+    /// 10-100x faster on valid/simple inputs.
     Structure,
+    /// CDT-based repair (handles any topology, slower).
     Arrange,
 }
 
@@ -67,29 +111,48 @@ pub enum PolyMethod {
 // Errors
 // ---------------------------------------------------------------------------
 
+/// Errors that can occur during geometry repair, validation, or I/O.
+///
+/// This is the crate's unified error type, used by repair, validation,
+/// WKB parsing, and all I/O backends.
+///
+/// # Feature gating
+///
+/// The `std::error::Error` impl is only available when the `std` feature
+/// is enabled. In no_std mode, only `Display` is available.
 #[derive(Error, Clone, Debug)]
 pub enum MakeValidError {
+    /// A coordinate value was NaN at the given index.
     #[error("coordinate value is NaN at index {idx}")]
     CoordinateIsNaN { idx: usize },
 
+    /// A coordinate value was infinite at the given index.
     #[error("coordinate value is infinite at index {idx}")]
     CoordinateIsInfinite { idx: usize },
 
+    /// CDT constraint edge insertion failed — likely a numerical precision
+    /// issue with near-collinear or degenerate input.
     #[error("constraint edge insertion failed in CDT — likely numerical precision issue")]
     ConstraintFailure,
 
+    /// The constrained Delaunay triangulation failed.
     #[error("triangulation error: {0}")]
     TriangulationError(String),
 
+    /// An I/O error occurred (file not found, permission denied, etc.).
+    /// Only available with the `std` feature.
     #[error("I/O error: {0}")]
     IoError(String),
 
+    /// A parsing error occurred (invalid WKB, malformed GeoJSON, etc.).
     #[error("parse error: {0}")]
     ParseError(String),
 
+    /// The requested format is not supported.
     #[error("unsupported format: {0}")]
     UnsupportedFormat(String),
 
+    /// A CRS-related error occurred.
     #[error("CRS error: {0}")]
     CrsError(String),
 }

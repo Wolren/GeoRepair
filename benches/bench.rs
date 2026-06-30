@@ -3,7 +3,7 @@
 //!        cargo bench --features bench-geos --bench quick_bench (with GEOS)
 use std::time::Instant;
 
-use geo::{Coord, Geometry, Line, LineString, MultiLineString, Polygon};
+use geo::{Coord, Geometry, Line, LineString, MultiLineString, MultiPolygon, Polygon};
 #[cfg(feature = "parallel")]
 use geo_repair::parallel::par_fix_polygon_batch;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
@@ -223,6 +223,102 @@ fn make_spoke_wheel(spokes: usize, r: f64) -> Geometry<f64> {
     }
     coords.push((r, 0.0));
     make_linestring(&coords)
+}
+
+fn make_multipoly_overlap(n: usize, size: f64) -> Geometry<f64> {
+    let polys: Vec<Polygon<f64>> = (0..n)
+        .map(|i| {
+            let off = i as f64 * size * 0.3;
+            Polygon::new(
+                LineString::new(vec![
+                    Coord { x: off, y: off },
+                    Coord {
+                        x: off + size,
+                        y: off,
+                    },
+                    Coord {
+                        x: off + size,
+                        y: off + size,
+                    },
+                    Coord {
+                        x: off,
+                        y: off + size,
+                    },
+                    Coord { x: off, y: off },
+                ]),
+                Vec::new(),
+            )
+        })
+        .collect();
+    Geometry::MultiPolygon(MultiPolygon::new(polys))
+}
+
+fn make_hole_hierarchy(n_holes: usize, size: f64) -> Polygon<f64> {
+    let shell = LineString::new(vec![
+        Coord { x: 0.0, y: 0.0 },
+        Coord { x: size, y: 0.0 },
+        Coord { x: size, y: size },
+        Coord { x: 0.0, y: size },
+        Coord { x: 0.0, y: 0.0 },
+    ]);
+    let grid = (n_holes as f64).sqrt().ceil() as usize;
+    let cell = size / (grid + 1) as f64;
+    let mut holes = Vec::new();
+    let mut idx = 0usize;
+    for gi in 0..grid {
+        for gj in 0..grid {
+            if idx >= n_holes {
+                break;
+            }
+            let cx = (gi + 1) as f64 * cell;
+            let cy = (gj + 1) as f64 * cell;
+            let hs = cell * 0.3;
+            holes.push(LineString::new(vec![
+                Coord {
+                    x: cx - hs,
+                    y: cy - hs,
+                },
+                Coord {
+                    x: cx + hs,
+                    y: cy - hs,
+                },
+                Coord {
+                    x: cx + hs,
+                    y: cy + hs,
+                },
+                Coord {
+                    x: cx - hs,
+                    y: cy + hs,
+                },
+                Coord {
+                    x: cx - hs,
+                    y: cy - hs,
+                },
+            ]));
+            idx += 1;
+        }
+        if idx >= n_holes {
+            break;
+        }
+    }
+    Polygon::new(shell, holes)
+}
+
+fn make_sliver_polygon(segments: usize, gap: f64) -> Polygon<f64> {
+    let n = segments;
+    let mut coords = Vec::with_capacity(n * 2 + 1);
+    for i in 0..n {
+        let x = i as f64 * 10.0;
+        let y = (i as f64 * 0.3).sin() * gap;
+        coords.push(Coord { x, y });
+    }
+    for i in (0..n).rev() {
+        let x = i as f64 * 10.0;
+        let y = (i as f64 * 0.3).sin() * gap - gap;
+        coords.push(Coord { x, y });
+    }
+    coords.push(coords[0]);
+    Polygon::new(LineString::new(coords), Vec::new())
 }
 
 fn bench_line(label: &str, g: &Geometry<f64>, batch: usize, cfg: &MakeValidConfig) {
@@ -547,5 +643,67 @@ fn main() {
     for &(spokes, batch) in &[(10usize, 50000usize), (50, 5000), (100, 500), (500, 50)] {
         let g = make_spoke_wheel(spokes, 1000.0);
         bench_line(&format!("spoke {}sp", spokes), &g, batch, &cfg);
+    }
+
+    // ─── MultiPolygon / hole hierarchy / sliver ────────────────────
+    eprintln!("{}", "-".repeat(55));
+
+    // Hole hierarchy: shell with many nested holes
+    for &(nh, batch) in &[(5usize, 10000usize), (20, 1000), (50, 200)] {
+        let poly = make_hole_hierarchy(nh, 500.0);
+        let polys: Vec<Polygon<f64>> = (0..batch).map(|_| poly.clone()).collect();
+        bench_polygons(&format!("hole hier {}h", nh), &polys, batch, &cfg);
+    }
+
+    // MultiPolygon with overlapping shells
+    for &(ns, batch) in &[(5usize, 1000usize), (20, 200), (50, 50)] {
+        let g = make_multipoly_overlap(ns, 100.0);
+        bench_line(&format!("overlap mp {}sh", ns), &g, batch, &cfg);
+    }
+
+    // Sliver edges: near-collinear, very thin polygon
+    for &(n, batch) in &[(100usize, 1000usize), (500, 100)] {
+        let poly = make_sliver_polygon(n, 0.001);
+        let polys: Vec<Polygon<f64>> = (0..batch).map(|_| poly.clone()).collect();
+        bench_polygons(&format!("sliver {}v", n), &polys, batch, &cfg);
+    }
+
+    // ─── Arrange pipeline (CDT fallback) ───────────────────────────
+    #[cfg(feature = "arrange")]
+    {
+        eprintln!("{}", "-".repeat(55));
+        let acfg = MakeValidConfig {
+            poly_method: PolyMethod::Arrange,
+            ..Default::default()
+        };
+
+        for &(n, batch) in &[(4usize, 10000usize), (10, 5000), (50, 1000)] {
+            let poly = make_valid_ring(n, 100.0);
+            let polys: Vec<Polygon<f64>> = (0..batch).map(|_| poly.clone()).collect();
+            bench_polygons(&format!("arrange valid {}v", n), &polys, batch, &acfg);
+        }
+
+        {
+            let poly = make_bowtie();
+            let polys: Vec<Polygon<f64>> = (0..5000)
+                .map(|i| {
+                    let mut p = poly.clone();
+                    p.exterior_mut(|ext| {
+                        for c in &mut ext.0 {
+                            c.x += i as f64 * 20.0;
+                            c.y += i as f64 * 20.0;
+                        }
+                    });
+                    p
+                })
+                .collect();
+            bench_polygons("arrange bowtie 4v", &polys, 5000, &acfg);
+        }
+
+        // Star polygon through Arrange (challenging for CDT)
+        for &(spikes, batch) in &[(10usize, 5000usize), (50, 500)] {
+            let g = make_starburst(spikes, 1000.0);
+            bench_line(&format!("arrange star {}sp", spikes), &g, batch, &acfg);
+        }
     }
 }
