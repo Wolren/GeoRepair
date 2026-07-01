@@ -116,7 +116,8 @@
 //! | `python` | Python bindings via PyO3 | no |
 //! | `proj` | CRS transformation via PROJ | no |
 //! | `serde` | Geometry serde support | no |
-//! | `bench-geos` | GEOS comparison benchmarks | no |
+//! | `bench-geos` | GEOS comparison benchmarks (static — MSVC, no LTO) | no |
+//! | `bench-geos-system` | GEOS comparison benchmarks (system — conda LLVM, full LTO) | no |
 //!
 //! *`memmap` was default in 0.10 but moved to opt-in in 0.11.
 //!

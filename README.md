@@ -46,81 +46,95 @@ these via OGC-style validation and repairs them:
 
 ### Real-world dataset (1,578,988 polygons)
 
-Structure parallel batch on a production GIS dataset.  GEOS geometries
-built from CoordSeq (no WKT overhead).  i5-12400F (6C/12T), mimalloc.
+Structure parallel batch on a production GIS dataset.  GEOS linked via
+conda (LLVM build, parallel, full LTO).  i5-12400F (6C/12T), mimalloc.
 
-| Dataset | geo-repair | GEOS (parallel) | Ratio |
-|---------|------------|-----------------|-------|
-| Invalid subset (1855 polys) | **2.21 s** / 1.19 ms each | **6.02 s** / 3.24 ms each | **0.37×** |
-| Full dataset (1.58M polys) | **3.10 s** / 2.0 µs each | **10.18 s** / 6.4 µs each | **0.30×** |
+| Dataset | geo-repair | GEOS (system LLVM) | Ratio |
+|---------|------------|-------------------|-------|
+| Invalid subset (1855 polys) | **2.54 s** / 1.37 ms each | **3.28 s** / 1.77 ms each | **0.77×** |
+| Full dataset (1.58M polys) | **3.51 s** / 2.2 µs each | **3.82 s** / 2.4 µs each | **0.92×** |
 
-GEOS agreement: **99.88%** (1855 disagreements where our validator is
-stricter — GEOS does not detect these as invalid).
+Validation comparison on full dataset — our validator is **5.2× faster**:
+
+| Validator | total | per-poly |
+|-----------|-------|----------|
+| Geo-repair | 0.79 s | 0.50 µs |
+| GEOS isValid | 4.16 s | 2.64 µs |
 
 ### Synthetic benchmarks (parallel, grid+R-tree hybrid)
 
-Structure strategy, parallel batch, i5-12400F (6C/12T).  GEOS via WKT conversion.
+Structure strategy, parallel batch, i5-12400F (6C/12T).  GEOS via WKT conversion
+(system LLVM build, parallel, full LTO — maxed out).
 
-| Benchmark | geo-repair | GEOS (parallel) | Ratio |
-|-----------|------------|-----------------|-------|
-| Valid polygon 4v | 0.12 us | 17.8 us | 144x |
-| Valid polygon 10v | 0.71 us | 27.6 us | 39x |
-| Valid polygon 50v | 0.39 us | 92.3 us | 240x |
-| Valid polygon 100v | 0.80 us | 192 us | 242x |
-| Valid polygon 500v | 5.17 us | 907 us | 175x |
-| Valid polygon 1000v | 4.99 us | 1854 us | 372x |
-| Valid polygon 5000v | 17.2 us | 7707 us | 447x |
-| Valid polygon 10000v | 52.6 us | 16087 us | 306x |
-| Invalid bowtie 4v | 0.56 us | 503 us | 893x |
-| Invalid star 100v | 5.61 us | 409 us | 73x |
-| Collinear ls 4v | 0.03 us | 10.0 us | 332x |
-| Collinear ls 10v | 0.13 us | 17.0 us | 128x |
-| Collinear ls 50v | 3.14 us | 53.9 us | 17x |
-| Collinear ls 100v | 2.00 us | 114 us | 57x |
-| Collinear ls 500v | 33.7 us | 541 us | 16x |
-| Hilbert curve 256v | 145 us | 314 us | 2.2x |
-| Hilbert curve 1024v | 1214 us | 1054 us | 0.87x (tie) |
-| Lissajous 200v | 75.7 us | 359 us | 4.7x |
-| Lissajous 500v | 311 us | 825 us | 2.7x |
-| Lissajous 1000v | 624 us | 3419 us | 5.5x |
-| Star-burst 10sp | 0.37 us | 30.9 us | 85x |
-| Star-burst 50sp | 16.8 us | 154 us | 9.1x |
-| Star-burst 100sp | 115 us | 329 us | 2.9x |
-| Star-burst 500sp | 4261 us | 1383 us | GEOS 3.1x |
-| Spoke wheel 10sp | 8.22 us | 33.2 us | 4.0x |
-| Spoke wheel 50sp | 43.4 us | 109 us | 2.5x |
-| Spoke wheel 100sp | 291 us | 220 us | GEOS 1.3x |
-| Spoke wheel 500sp | 14550 us | 990 us | GEOS 14.7x |
-| Collinear overlap 10seg | 13.8 us | 40.1 us | 2.9x |
-| Collinear overlap 50seg | 51.7 us | 184 us | 3.6x |
-| Collinear overlap 100seg | 133 us | 375 us | 2.8x |
-| Collinear overlap 500seg | 882 us | 1507 us | 1.7x |
-| Hole hierarchy 5h | 1.10 us | 79.6 us | 72x |
-| Hole hierarchy 20h | 3.95 us | 323 us | 82x |
-| Hole hierarchy 50h | 10.1 us | 851 us | 84x |
-| Overlapping MP 5sh | 1.60 us | 7307 us | 4556x |
-| Overlapping MP 20sh | 6.53 us | 47560 us | 7281x |
-| Overlapping MP 50sh | 15.0 us | 123011 us | 8181x |
-| Sliver polygon 100v | 1.58 us | 255 us | 162x |
-| Sliver polygon 500v | 8.58 us | 1280 us | 149x |
+| Benchmark | geo-repair | GEOS (LLVM) | Ratio |
+|-----------|-----------:|------------:|------:|
+| Valid polygon 4v | 0.09 us | 4.37 us | 48× |
+| Valid polygon 10v | 0.18 us | 7.61 us | 44× |
+| Valid polygon 50v | 0.44 us | 26.7 us | 61× |
+| Valid polygon 100v | 0.47 us | 50.5 us | 107× |
+| Valid polygon 500v | 2.12 us | 259 us | 122× |
+| Valid polygon 1000v | 2.90 us | 502 us | 173× |
+| Valid polygon 5000v | 17.0 us | 2239 us | 132× |
+| Valid polygon 10000v | 34.3 us | 4452 us | 130× |
+| Invalid bowtie 4v | 0.38 us | 94.1 us | 250× |
+| Invalid star 100v | 4.82 us | 92.8 us | 19× |
+| Collinear ls 4v | 0.03 us | 2.15 us | 65× |
+| Collinear ls 10v | 0.10 us | 3.20 us | 34× |
+| Collinear ls 50v | 1.63 us | 9.20 us | 6× |
+| Collinear ls 100v | 1.53 us | 16.3 us | 11× |
+| Collinear ls 500v | 9.76 us | 74.1 us | 8× |
+| Hilbert curve 256v | 86.0 us | 43.2 us | GEOS 2× |
+| Hilbert curve 1024v | 649 us | 166 us | GEOS 4× |
+| Lissajous 200v | 60.4 us | 89.7 us | 1.5× |
+| Lissajous 500v | 140 us | 222 us | 1.6× |
+| Lissajous 1000v | 282 us | 455 us | 1.6× |
+| Star-burst 10sp | 0.29 us | 7.08 us | 24× |
+| Star-burst 50sp | 10.3 us | 34.7 us | 3.4× |
+| Star-burst 100sp | 36.7 us | 59.0 us | 1.6× |
+| Star-burst 500sp | 1028 us | 294 us | GEOS 3.5× |
+| Spoke wheel 10sp | 4.92 us | 7.17 us | 1.5× |
+| Spoke wheel 50sp | 40.7 us | 31.1 us | GEOS 1.3× |
+| Spoke wheel 100sp | 159 us | 62.1 us | GEOS 2.6× |
+| Spoke wheel 500sp | 9415 us | 295 us | GEOS 32× |
+| Collinear overlap 10seg | 4.39 us | 6.14 us | 1.4× |
+| Collinear overlap 50seg | 22.6 us | 24.7 us | 1.1× |
+| Collinear overlap 100seg | 48.6 us | 46.9 us | GEOS 1.0× |
+| Collinear overlap 500seg | 282 us | 228 us | GEOS 1.2× |
+| Hole hierarchy 5h | 1.00 us | 24.5 us | 25× |
+| Hole hierarchy 20h | 3.66 us | 123 us | 34× |
+| Hole hierarchy 50h | 9.32 us | 299 us | 32× |
+| Overlapping MP 5sh | 1.70 us | 2561 us | 1507× |
+| Overlapping MP 20sh | 5.96 us | 15044 us | 2524× |
+| Overlapping MP 50sh | 15.8 us | 38399 us | 2427× |
+| Sliver polygon 100v | 1.56 us | 79.2 us | 51× |
+| Sliver polygon 500v | 9.19 us | 406 us | 44× |
 
 **Arrange pipeline (CDT fallback):**
 
-| Benchmark | geo-repair | GEOS (parallel) | Ratio |
-|-----------|------------|-----------------|-------|
-| Valid polygon 4v | 0.11 us | 12.2 us | 107x |
-| Valid polygon 50v | 1.34 us | 72.3 us | 54x |
-| Invalid bowtie 4v | 0.82 us | 339 us | 416x |
-| Star-burst 10sp | 0.30 us | 23.8 us | 79x |
-| Star-burst 50sp | 12.6 us | 104 us | 8.3x |
+| Benchmark | geo-repair | GEOS (LLVM) | Ratio |
+|-----------|-----------:|------------:|------:|
+| Valid polygon 4v | 0.12 us | 3.91 us | 33× |
+| Valid polygon 50v | 1.48 us | 26.4 us | 18× |
+| Invalid bowtie 4v | 0.67 us | 90.7 us | 136× |
+| Star-burst 10sp | 0.32 us | 7.33 us | 23× |
+| Star-burst 50sp | 11.5 us | 32.1 us | 2.8× |
 
 ### Run benchmarks
 
 ```shell
-# Real-world dataset benchmark (requires .bin file)
+# Real-world dataset benchmark (system GEOS — conda LLVM, fastest)
+cargo bench --features bench-geos-system,arrange,structure,parallel,simd,io-shp --bench real_world
+
+# Real-world dataset benchmark (static GEOS — MSVC, no LTO)
 cargo bench --features bench-geos,arrange,structure,parallel,simd,io-shp --bench real_world
 
-# Quick synthetic benchmarks
+# Quick synthetic benchmarks (no GEOS)
+cargo bench --bench bench
+
+# Synthetic benchmarks with GEOS comparison
+cargo bench --features bench-geos-system --bench bench
+
+# Criterion microbenchmarks
 cargo bench --features bench-criterion --bench criterion
 ```
 
@@ -149,7 +163,8 @@ cargo bench --features bench-criterion --bench criterion
 | `io-gpkg` | GeoPackage format backend (not WASM) | no |
 | `io-all` | All opt-in backends except gpkg | no |
 | `io-all-native` | All opt-in backends including gpkg | no |
-| `bench-geos` | GEOS comparison benchmarks | no |
+| `bench-geos` | GEOS comparison benchmarks (static — MSVC, no LTO) | no |
+| `bench-geos-system` | GEOS comparison benchmarks (system — conda LLVM) | no |
 | `bench-criterion` | Criterion benchmark harness | no |
 
 ## License

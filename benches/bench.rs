@@ -1,6 +1,7 @@
 //! Sweep structure parallel vs GEOS across all geometry shapes.
 //! Usage: cargo bench --bench quick_bench (no GEOS)
-//!        cargo bench --features bench-geos --bench quick_bench (with GEOS)
+//!        cargo bench --features bench-geos --bench quick_bench (GEOS static)
+//!        cargo bench --features bench-geos-system --bench quick_bench (GEOS system LLVM)
 use std::time::Instant;
 
 use geo::{Coord, Geometry, Line, LineString, MultiLineString, MultiPolygon, Polygon};
@@ -8,12 +9,12 @@ use geo::{Coord, Geometry, Line, LineString, MultiLineString, MultiPolygon, Poly
 use geo_repair::parallel::par_fix_polygon_batch;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 
-#[cfg(feature = "bench-geos")]
+#[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
 use geos::Geom;
-#[cfg(feature = "bench-geos")]
+#[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
 use wkt::ToWkt;
 
-#[cfg(feature = "bench-geos")]
+#[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
 fn run_geos_batch(wkts: &[String]) -> f64 {
     let t0 = Instant::now();
     for wkt in wkts {
@@ -324,7 +325,7 @@ fn make_sliver_polygon(segments: usize, gap: f64) -> Polygon<f64> {
 fn bench_line(label: &str, g: &Geometry<f64>, batch: usize, cfg: &MakeValidConfig) {
     let items: Vec<Geometry<f64>> = (0..batch).map(|_| g.clone()).collect();
     let par = run_line_par(&items, cfg);
-    #[cfg(feature = "bench-geos")]
+    #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
     {
         let wkts: Vec<String> = items.iter().map(|g| g.to_wkt().to_string()).collect();
         let geos = run_geos_batch(&wkts);
@@ -335,7 +336,7 @@ fn bench_line(label: &str, g: &Geometry<f64>, batch: usize, cfg: &MakeValidConfi
             geos * 1_000_000.0 / batch as f64,
         );
     }
-    #[cfg(not(feature = "bench-geos"))]
+    #[cfg(not(any(feature = "bench-geos", feature = "bench-geos-system")))]
     {
         let ser = run_line_ser(&items, cfg);
         eprintln!(
@@ -350,7 +351,7 @@ fn bench_line(label: &str, g: &Geometry<f64>, batch: usize, cfg: &MakeValidConfi
 fn bench_polygons(label: &str, polys: &[Polygon<f64>], batch: usize, cfg: &MakeValidConfig) {
     let refs: Vec<&Polygon<f64>> = polys.iter().collect();
     let par = run_par(&refs, cfg);
-    #[cfg(feature = "bench-geos")]
+    #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
     {
         let wkts: Vec<String> = polys.iter().map(|p| p.to_wkt().to_string()).collect();
         let geos = run_geos_batch(&wkts);
@@ -361,7 +362,7 @@ fn bench_polygons(label: &str, polys: &[Polygon<f64>], batch: usize, cfg: &MakeV
             geos * 1_000_000.0 / batch as f64,
         );
     }
-    #[cfg(not(feature = "bench-geos"))]
+    #[cfg(not(any(feature = "bench-geos", feature = "bench-geos-system")))]
     {
         let ser = run_ser(polys, cfg);
         eprintln!(
@@ -389,9 +390,9 @@ fn main() {
     run_ser(&warm, &cfg);
     run_par(&wrefs, &cfg);
 
-    #[cfg(feature = "bench-geos")]
+    #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
     let header = ("parallel", "geos");
-    #[cfg(not(feature = "bench-geos"))]
+    #[cfg(not(any(feature = "bench-geos", feature = "bench-geos-system")))]
     let header = ("serial", "parallel");
 
     eprintln!(
