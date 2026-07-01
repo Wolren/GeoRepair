@@ -37,7 +37,8 @@ simd = []
 simd-portable = []
 
 # Built-in WKB parser is always available — no extra deps needed
-bench-geos = ["dep:geos"]
+bench-geos = ["geos/static"]
+bench-geos-system = ["dep:geos"]
 bench-criterion = []
 
 python = ["dep:pyo3"]
@@ -90,7 +91,7 @@ web-sys = { version = "0.3", optional = true, features = [
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rayon = { version = "1.12", optional = true }
-geos = { version = "11.1", optional = true, default-features = false, features = ["v3_8_0", "static"] }
+geos = { version = "11.1", optional = true, default-features = false, features = ["v3_8_0"] }
 mimalloc = { version = "0.1", default-features = false, optional = true }
 pyo3 = { version = "0.29", features = ["extension-module"], optional = true }
 
