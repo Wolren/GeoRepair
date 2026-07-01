@@ -1,7 +1,7 @@
 [package]
 name = "geo-repair"
-description = "Fix invalid GIS geometries using optimal algorithms per type: CDT arrangement for polygons, noding for lines, structure method as fast path"
-version = "0.11.0"
+description = "Fix invalid GIS geometries in parallel using rewritten GEOS/JTS repair module"
+version = "0.12.0"
 license = "Apache-2.0"
 repository = "https://github.com/Wolren/GeoRepair"
 homepage = "https://github.com/Wolren/GeoRepair"
@@ -11,7 +11,7 @@ keywords = ["gis", "geo", "validation", "repair", "no-std"]
 categories = ["science::geo"]
 edition = "2024"
 rust-version = "1.85"
-exclude = ["tests/*.py", "*.py"]
+exclude = ["tests/*.py", "*.py", ".history/"]
 
 [features]
 default = ["std", "arrange", "structure", "parallel", "simd", "validate", "mimalloc"]
@@ -46,7 +46,7 @@ serde = ["geo/serde"]
 
 # Optional format backends
 io-shp = ["dep:shapefile"]
-io-wkt = ["dep:wkt"]
+io-wkt = []
 io-csv = ["dep:csv", "io-wkt"]
 io-gml = ["dep:quick-xml"]
 io-gpkg = ["dep:rusqlite"]
@@ -71,7 +71,6 @@ rustc-hash = "2.1"
 smallvec = { version = "1.15", default-features = false, features = ["union"] }
 serde_json = "1.0"
 shapefile = { version = "0.8", features = ["geo-types"], optional = true }
-wkt = { version = "0.14", features = ["geo-types"], optional = true }
 csv = { version = "1.3", optional = true }
 quick-xml = { version = "0.36", optional = true }
 rusqlite = { version = "0.40.1", features = ["bundled"], optional = true }
@@ -110,6 +109,10 @@ harness = false
 
 [[bench]]
 name = "real_world"
+harness = false
+
+[[bench]]
+name = "wkt_iobench"
 harness = false
 
 [[bench]]

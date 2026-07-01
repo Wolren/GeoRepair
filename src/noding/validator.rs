@@ -16,8 +16,11 @@ use rustc_hash::FxHashSet;
 #[derive(Clone, Debug)]
 #[allow(dead_code)]
 pub struct NodingViolation {
+    /// Index of the first intersecting edge.
     pub edge_a: usize,
+    /// Index of the second intersecting edge.
     pub edge_b: usize,
+    /// The location where the edges cross or overlap.
     pub at: Coord<f64>,
 }
 
@@ -310,6 +313,10 @@ fn check_chain_pair(
 }
 
 impl NodingValidator {
+    /// Create a new validator for the given edge set.
+    ///
+    /// Validation is not performed until [`validate`](NodingValidator::validate)
+    /// is called.
     pub fn new(edges: Vec<Line<f64>>) -> Self {
         Self {
             edges,
@@ -317,15 +324,18 @@ impl NodingValidator {
         }
     }
 
+    /// Return the edge set being validated.
     #[allow(dead_code)]
     pub fn edges(&self) -> &[Line<f64>] {
         &self.edges
     }
 
+    /// Return the list of violations found after validation.
     pub fn violations(&self) -> &[NodingViolation] {
         &self.violations
     }
 
+    /// Whether any violations were found (shortcut for `!violations().is_empty()`).
     pub fn has_violations(&self) -> bool {
         !self.violations.is_empty()
     }

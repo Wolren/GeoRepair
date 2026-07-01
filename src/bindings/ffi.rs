@@ -1,3 +1,46 @@
+//! C-compatible FFI bindings for geo-repair.
+//!
+//! Enable the `ffi` feature for a C-compatible API using WKB.
+//!
+//! # C header
+//!
+//! ```c
+//! #include <stdint.h>
+//! #include <stdbool.h>
+//!
+//! typedef struct {
+//!     bool      success;
+//!     uint8_t*  wkb_data;
+//!     size_t    wkb_len;
+//!     char*     error_msg;
+//! } GeoRepairResult;
+//!
+//! // --- Repair ---
+//! GeoRepairResult geo_repair_make_valid(const uint8_t* wkb_data, size_t wkb_len);
+//! GeoRepairResult geo_repair_make_valid_with_config(
+//!     const uint8_t* wkb_data, size_t wkb_len,
+//!     bool keep_collapsed, uint8_t poly_method);
+//! GeoRepairResult geo_repair_make_valid_with_config_full(
+//!     const uint8_t* wkb_data, size_t wkb_len,
+//!     bool keep_collapsed, uint8_t poly_method,
+//!     uint8_t fill_rule, int32_t epsg_code);
+//!
+//! // --- Validation ---
+//! uint8_t         geo_repair_is_valid(const uint8_t* wkb_data, size_t wkb_len);
+//! GeoRepairResult geo_repair_validate(const uint8_t* wkb_data, size_t wkb_len);
+//! GeoRepairResult geo_repair_validate_reason(const uint8_t* wkb_data, size_t wkb_len);
+//!
+//! // --- Combined validate + fix ---
+//! // Returns fixed WKB on success.  error_msg is null when input was valid,
+//! // or contains validation errors when input was invalid.
+//! GeoRepairResult geo_repair_validate_and_fix(const uint8_t* wkb_data, size_t wkb_len);
+//! GeoRepairResult geo_repair_validate_and_fix_with_config(
+//!     const uint8_t* wkb_data, size_t wkb_len,
+//!     bool keep_collapsed, uint8_t poly_method);
+//!
+//! // --- Memory management ---
+//! void            geo_repair_free_result(GeoRepairResult* result);
+//! ```
 use std::ffi::{c_char, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr;
@@ -20,9 +63,13 @@ use geo::Geometry;
 #[repr(C)]
 #[derive(Debug)]
 pub struct GeoRepairResult {
+    /// Whether the operation succeeded. When `true`, `wkb_data`/`wkb_len` are valid.
     pub success: bool,
+    /// Pointer to the output WKB byte buffer (valid when `success` is true).
     pub wkb_data: *mut u8,
+    /// Length of the output WKB buffer in bytes.
     pub wkb_len: usize,
+    /// NUL-terminated error message string (non-null when `success` is false).
     pub error_msg: *mut c_char,
 }
 
@@ -254,6 +301,147 @@ pub unsafe extern "C" fn geo_repair_validate_reason(
     })) {
         Ok(r) => r,
         Err(_) => GeoRepairResult::error("internal error: validation panicked"),
+    }
+}
+
+/// Validate a WKB-encoded geometry.
+///
+/// Returns a result with:
+/// - `success = true` and `wkb_len == 0` when the geometry is valid.
+/// - `success = false` and `error_msg` set to the violation reasons when invalid.
+///
+/// # Safety
+///
+/// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes.
+/// The returned [`GeoRepairResult`] must be freed with
+/// [`geo_repair_free_result`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn geo_repair_validate(
+    wkb_data: *const u8,
+    wkb_len: usize,
+) -> GeoRepairResult {
+    match catch_unwind(AssertUnwindSafe(|| {
+        let geom = match geometry_from_wkb(wkb_data, wkb_len) {
+            Ok(g) => g,
+            Err(e) => return GeoRepairResult::error(&e),
+        };
+        if geom.is_valid() {
+            GeoRepairResult::success(Vec::new())
+        } else {
+            let reason = geom.validate_reason();
+            GeoRepairResult::error(&reason)
+        }
+    })) {
+        Ok(r) => r,
+        Err(_) => GeoRepairResult::error("internal error: validation panicked"),
+    }
+}
+
+/// Validate a WKB geometry, then repair it if invalid.
+///
+/// On success (`result.success == true`):
+/// - `wkb_data` / `wkb_len` contain the (possibly repaired) WKB geometry.
+/// - `error_msg` is `NULL` when the input was already valid, or contains
+///   the validation error reasons when the input was repaired.
+///
+/// # Safety
+///
+/// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes.
+/// The returned [`GeoRepairResult`] must be freed with
+/// [`geo_repair_free_result`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn geo_repair_validate_and_fix(
+    wkb_data: *const u8,
+    wkb_len: usize,
+) -> GeoRepairResult {
+    match catch_unwind(AssertUnwindSafe(|| {
+        let geom = match geometry_from_wkb(wkb_data, wkb_len) {
+            Ok(g) => g,
+            Err(e) => return GeoRepairResult::error(&e),
+        };
+        let errors = if geom.is_valid() {
+            None
+        } else {
+            Some(geom.validate_reason())
+        };
+        let fixed = geom.make_valid();
+        let wkb = match geometry_to_wkb(&fixed) {
+            Ok(w) => w,
+            Err(e) => return GeoRepairResult::error(&e),
+        };
+        match errors {
+            Some(reason) => {
+                let mut res = GeoRepairResult::success(wkb);
+                res.error_msg = CString::new(reason).unwrap_or_default().into_raw();
+                res
+            }
+            None => GeoRepairResult::success(wkb),
+        }
+    })) {
+        Ok(r) => r,
+        Err(_) => GeoRepairResult::error("internal error: validate_and_fix panicked"),
+    }
+}
+
+/// Validate a WKB geometry, then repair it with configuration.
+///
+/// `poly_method`: 0 = Auto, 1 = Arrange, 2 = Structure.
+///
+/// On success (`result.success == true`):
+/// - `wkb_data` / `wkb_len` contain the (possibly repaired) WKB geometry.
+/// - `error_msg` is `NULL` when the input was already valid, or contains
+///   the validation error reasons when the input was repaired.
+///
+/// # Safety
+///
+/// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes.
+/// The returned [`GeoRepairResult`] must be freed with
+/// [`geo_repair_free_result`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn geo_repair_validate_and_fix_with_config(
+    wkb_data: *const u8,
+    wkb_len: usize,
+    keep_collapsed: bool,
+    poly_method: u8,
+) -> GeoRepairResult {
+    match catch_unwind(AssertUnwindSafe(|| {
+        let geom = match geometry_from_wkb(wkb_data, wkb_len) {
+            Ok(g) => g,
+            Err(e) => return GeoRepairResult::error(&e),
+        };
+        let errors = if geom.is_valid() {
+            None
+        } else {
+            Some(geom.validate_reason())
+        };
+        let config = MakeValidConfig {
+            keep_collapsed,
+            poly_method: match poly_method {
+                0 => crate::PolyMethod::Auto,
+                1 => crate::PolyMethod::Arrange,
+                2 => crate::PolyMethod::Structure,
+                _ => crate::PolyMethod::Auto,
+            },
+            fill_rule: Default::default(),
+            crs: None,
+            target_crs: None,
+        };
+        let fixed = geom.make_valid_with_config(&config);
+        let wkb = match geometry_to_wkb(&fixed) {
+            Ok(w) => w,
+            Err(e) => return GeoRepairResult::error(&e),
+        };
+        match errors {
+            Some(reason) => {
+                let mut res = GeoRepairResult::success(wkb);
+                res.error_msg = CString::new(reason).unwrap_or_default().into_raw();
+                res
+            }
+            None => GeoRepairResult::success(wkb),
+        }
+    })) {
+        Ok(r) => r,
+        Err(_) => GeoRepairResult::error("internal error: validate_and_fix panicked"),
     }
 }
 

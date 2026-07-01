@@ -24,11 +24,17 @@
 //! - `merge`: Face merging after graph extraction
 //! - `subtract`: Hole subtraction during face assembly
 //! - `sweep`: Plane-sweep intersection detection
+/// Edge classification and planar graph building for polygon faces.
 pub mod classify;
+/// Ring repair: self-intersection resolution, winding correction.
 pub mod fix_ring;
+/// Graph-based ring intersection resolution.
 pub mod fix_ring_graph;
+/// Face merging after planar graph extraction.
 pub mod merge;
+/// Hole subtraction during polygon face assembly.
 pub mod subtract;
+/// Plane-sweep intersection detection for edge segments.
 pub mod sweep;
 
 use geo::{

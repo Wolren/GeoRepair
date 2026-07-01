@@ -195,6 +195,7 @@ fn read_u32(buf: &[u8], pos: &mut usize, le: bool) -> Result<u32, MakeValidError
 }
 
 #[inline(always)]
+#[allow(dead_code)]
 fn read_f64(buf: &[u8], pos: &mut usize, le: bool) -> Result<f64, MakeValidError> {
     if *pos + 8 > buf.len() {
         return Err(MakeValidError::ParseError(
@@ -212,20 +213,50 @@ fn read_f64(buf: &[u8], pos: &mut usize, le: bool) -> Result<f64, MakeValidError
     })
 }
 
-/// Read a coordinate pair, skipping Z/M values if present.
-fn read_coord(
+// ---------------------------------------------------------------------------
+// Batch coordinate reader: reads N coordinates with a single bounds check.
+// ---------------------------------------------------------------------------
+
+#[inline]
+fn read_coords_batch(
     buf: &[u8],
     pos: &mut usize,
+    n: usize,
     le: bool,
     dims: u32,
-) -> Result<Coord<f64>, MakeValidError> {
-    let x = read_f64(buf, pos, le)?;
-    let y = read_f64(buf, pos, le)?;
-    // Skip Z and/or M values
-    for _ in 2..dims {
-        let _ = read_f64(buf, pos, le)?;
+) -> Result<Vec<Coord<f64>>, MakeValidError> {
+    let stride = (dims as usize) * 8;
+    let byte_size = n * stride;
+    if *pos + byte_size > buf.len() {
+        return Err(MakeValidError::ParseError(
+            "unexpected EOF reading coordinate batch".into(),
+        ));
     }
-    Ok(Coord { x, y })
+    let start = *pos;
+    *pos += byte_size;
+
+    let mut coords = Vec::with_capacity(n);
+    // fast path: LE-on-LE or BE-on-BE → no byte swapping
+    if le == cfg!(target_endian = "little") {
+        for i in 0..n {
+            let base = start + i * stride;
+            let x = unsafe { (buf.as_ptr().add(base) as *const f64).read_unaligned() };
+            let y = unsafe { (buf.as_ptr().add(base + 8) as *const f64).read_unaligned() };
+            coords.push(Coord { x, y });
+        }
+    } else {
+        for i in 0..n {
+            let base = start + i * stride;
+            let x = f64::from_bits(
+                unsafe { (buf.as_ptr().add(base) as *const u64).read_unaligned() }.swap_bytes(),
+            );
+            let y = f64::from_bits(
+                unsafe { (buf.as_ptr().add(base + 8) as *const u64).read_unaligned() }.swap_bytes(),
+            );
+            coords.push(Coord { x, y });
+        }
+    }
+    Ok(coords)
 }
 
 fn read_point_inner(
@@ -234,8 +265,9 @@ fn read_point_inner(
     le: bool,
     dims: u32,
 ) -> Result<Point<f64>, MakeValidError> {
-    let c = read_coord(buf, pos, le, dims)?;
-    Ok(Point(c))
+    let mut batch = read_coords_batch(buf, pos, 1, le, dims)?;
+    // SAFETY: batch has exactly 1 element
+    Ok(Point(batch.swap_remove(0)))
 }
 
 fn read_linestring_inner(
@@ -245,10 +277,7 @@ fn read_linestring_inner(
     dims: u32,
 ) -> Result<LineString<f64>, MakeValidError> {
     let n = read_u32(buf, pos, le)? as usize;
-    let mut coords = Vec::with_capacity(n);
-    for _ in 0..n {
-        coords.push(read_coord(buf, pos, le, dims)?);
-    }
+    let coords = read_coords_batch(buf, pos, n, le, dims)?;
     Ok(LineString::new(coords))
 }
 

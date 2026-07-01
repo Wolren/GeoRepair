@@ -11,6 +11,10 @@ use std::mem;
 mod private {
     use geo::{Coord, GeoFloat};
 
+    /// Trait for numeric types usable in noding algorithms.
+    ///
+    /// Extends [`GeoFloat`] with a deterministic coordinate hashing method
+    /// used for HashMap-based deduplication during noding.
     pub trait NodingFloat: GeoFloat {
         /// Deterministic hash from coordinate bits for HashMap keys.
         fn coord_hash_key(c: &Coord<Self>) -> u64;
