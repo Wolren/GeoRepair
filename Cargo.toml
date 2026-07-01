@@ -11,7 +11,12 @@ keywords = ["gis", "geo", "validation", "repair", "no-std"]
 categories = ["science::geo"]
 edition = "2024"
 rust-version = "1.85"
-exclude = ["tests/*.py", "*.py", ".history/"]
+exclude = ["tests/*.py", "*.py", ".history/",
+    "benches/real_world/*.bin", "benches/real_world/*.shp",
+    "benches/real_world/*.shx", "benches/real_world/*.dbf",
+    "benches/real_world/*.prj", "benches/real_world/*.cpg",
+    "benches/real_world/*.gpkg", "benches/real_world/*.qmd",
+    "benches/real_world/*.geojson"]
 
 [features]
 default = ["std", "arrange", "structure", "parallel", "simd", "validate", "mimalloc"]
