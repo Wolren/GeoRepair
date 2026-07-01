@@ -46,7 +46,7 @@ impl<'a> Parser<'a> {
     }
 
     fn err(&self, msg: &str) -> String {
-        let ctx_start = if self.i > 20 { self.i - 20 } else { 0 };
+        let ctx_start = self.i.saturating_sub(20);
         let ctx = String::from_utf8_lossy(&self.s[ctx_start..self.s.len().min(self.i + 20)]);
         format!(
             "WKT parse error at position {}: {msg}\n  near: {ctx}",
@@ -96,10 +96,7 @@ impl<'a> Parser<'a> {
         if self.i + 1 < self.s.len() && &self.s[self.i..self.i + 2] == b"ZM" {
             self.i += 2;
             Ok(4)
-        } else if self.i < self.s.len() && self.s[self.i] == b'Z' {
-            self.i += 1;
-            Ok(3)
-        } else if self.i < self.s.len() && self.s[self.i] == b'M' {
+        } else if self.i < self.s.len() && (self.s[self.i] == b'Z' || self.s[self.i] == b'M') {
             self.i += 1;
             Ok(3)
         } else {

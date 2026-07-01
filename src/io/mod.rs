@@ -176,7 +176,7 @@ fn extract_polygons(geom: &Geometry<f64>) -> Vec<Polygon<f64>> {
     match geom {
         Geometry::Polygon(p) => vec![p.clone()],
         Geometry::MultiPolygon(mp) => mp.0.clone(),
-        Geometry::GeometryCollection(gc) => gc.0.iter().flat_map(|g| extract_polygons(g)).collect(),
+        Geometry::GeometryCollection(gc) => gc.0.iter().flat_map(extract_polygons).collect(),
         _ => Vec::new(),
     }
 }
