@@ -7,16 +7,16 @@
 //! You can benchmark any dataset by setting `BENCH_FILE` or passing file as first arg:
 //!
 //!   $env:BENCH_FILE = "benches/real_world/data_0.bin"
-//!   cargo bench --features bench-geos --bench real_world
+//!   cargo bench --features bench-geos-system --bench real_world   # system (LLVM-optimized)
+//!   cargo bench --features bench-geos --bench real_world          # static (MSVC)
 //!
 //! Run with:
-//!   scripts/bench-geos.ps1          # Windows — auto-detects conda GEOS
-//!   scripts/bench-geos.sh           # Linux/macOS — auto-detects system GEOS
+//!   cargo bench --features bench-geos-system,arrange,structure,parallel,simd,io-shp --bench real_world   # system GEOS (conda LLVM)
+//!   cargo bench --features bench-geos,arrange,structure,parallel,simd,io-shp --bench real_world          # static GEOS (MSVC)
 //!
-//! Or manually:
-//!   cargo bench --features bench-geos --bench real_world "benches/real_world/data_0.bin"
-//!
-//! Prerequisites: GEOS must be installed on the system.
+//! Prerequisites:
+//!   System GEOS (conda): set GEOS_LIB_DIR, GEOS_INCLUDE_DIR, GEOS_VERSION, and PATH.
+//!   Static GEOS: GEOS compiled from C source automatically.
 //!   conda install -c conda-forge geos   # Windows
 //!   sudo apt install libgeos-dev        # Debian/Ubuntu
 //!   brew install geos                   # macOS
@@ -26,18 +26,20 @@ use std::io::Write;
 use std::path::Path;
 use std::time::Instant;
 
-use geo::{Coord, Geometry, Polygon};
+use geo::{Coord, Polygon};
+#[cfg(any(feature = "bench-geos", feature = "bench-geos-system", not(feature = "parallel")))]
+use geo::Geometry;
 use geo_repair::arrange::validate_polygon;
 use geo_repair::io::load_bin;
 use geo_repair::orient::orient2d;
 #[cfg(feature = "parallel")]
 use geo_repair::parallel::par_fix_polygon_batch;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
-#[cfg(feature = "bench-geos")]
+#[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
 use geos::Geometry as GeosGeometry;
-#[cfg(feature = "bench-geos")]
+#[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
 use geos::{CoordSeq, CoordType, Geom};
-#[cfg(feature = "bench-geos")]
+#[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
 fn poly_to_geos(poly: &Polygon<f64>) -> Option<GeosGeometry> {
     fn coords_to_ring(coords: &[Coord<f64>]) -> Option<GeosGeometry> {
         let n = coords.len();
@@ -59,13 +61,13 @@ fn poly_to_geos(poly: &Polygon<f64>) -> Option<GeosGeometry> {
         .collect();
     GeosGeometry::create_polygon(ring, holes).ok()
 }
-#[cfg(feature = "bench-geos")]
+#[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
 fn geo_polys_to_geos_batch<'a>(
     polys: impl Iterator<Item = &'a Polygon<f64>>,
 ) -> Vec<Option<GeosGeometry>> {
     polys.map(|p| poly_to_geos(p)).collect()
 }
-#[cfg(feature = "bench-geos")]
+#[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
 fn geom_to_geos(geom: &Geometry<f64>) -> Option<GeosGeometry> {
     use geo::Geometry::*;
     match geom {
@@ -304,7 +306,7 @@ fn main() {
     // =========================================================================
     // Validation head-to-head: our validate_polygon vs GEOS isValid
     // =========================================================================
-    #[cfg(feature = "bench-geos")]
+    #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
     {
         eprint!("[2b/5] Validation head-to-head (all {n_polys} polys, parallel)...");
         std::io::stderr().flush().ok();
@@ -391,7 +393,7 @@ fn main() {
         eprintln!("  │ Agreement          │    {rate:.2}%     │           │");
         eprintln!("  └────────────────────┴──────────┴──────────┘");
     }
-    #[cfg(not(feature = "bench-geos"))]
+    #[cfg(not(any(feature = "bench-geos", feature = "bench-geos-system")))]
     eprintln!("  (skip: bench-geos feature not enabled)");
 
     // =========================================================================
@@ -419,7 +421,7 @@ fn main() {
                     eprintln!("  why invalid:      self-intersections (only remaining check)");
                 }
 
-                #[cfg(feature = "bench-geos")]
+                #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
                 if let Some(t) = geo_repair::arrange::diagnose_arrange(poly) {
                     eprintln!("  CDT prep:         {:.6}s", t.prep_secs);
                     eprintln!(
@@ -431,7 +433,7 @@ fn main() {
                     eprintln!("  CDT total:        {:.6}s", t.total_secs);
                 }
 
-                #[cfg(feature = "bench-geos")]
+                #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
                 {
                     let t0 = Instant::now();
                     match poly_to_geos(poly) {
@@ -497,7 +499,7 @@ fn main() {
     // Validate all Structure outputs through GEOS is_valid()
     #[allow(unused_mut)]
     let mut stru_invalid_outputs = 0usize;
-    #[cfg(feature = "bench-geos")]
+    #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
     {
         for g in &results {
             match geom_to_geos(g) {
@@ -510,7 +512,7 @@ fn main() {
             }
         }
     }
-    #[cfg(not(feature = "bench-geos"))]
+    #[cfg(not(any(feature = "bench-geos", feature = "bench-geos-system")))]
     {
         use geo_repair::GeoValidation;
         for g in &results {
@@ -522,7 +524,7 @@ fn main() {
 
     // Pre-create GEOS geometries outside GEOS timer
     let geos_total: f64;
-    #[cfg(feature = "bench-geos")]
+    #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
     {
         let geos_geoms: Vec<Option<GeosGeometry>> =
             geo_polys_to_geos_batch(invalid_polys.iter().copied());
@@ -541,7 +543,7 @@ fn main() {
         }
         geos_total = t0.elapsed().as_secs_f64();
     }
-    #[cfg(not(feature = "bench-geos"))]
+    #[cfg(not(any(feature = "bench-geos", feature = "bench-geos-system")))]
     {
         geos_total = 0.0;
     }
@@ -568,7 +570,7 @@ fn main() {
     let full_stru = t0.elapsed().as_secs_f64();
 
     let (geos_setup, full_geos, full_geos_total): (f64, f64, f64);
-    #[cfg(feature = "bench-geos")]
+    #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
     {
         eprint!("  Pre-building {} GEOS geometries...", full_n);
         let t0 = Instant::now();
@@ -592,7 +594,7 @@ fn main() {
         full_geos = t0.elapsed().as_secs_f64();
         full_geos_total = full_geos;
     }
-    #[cfg(not(feature = "bench-geos"))]
+    #[cfg(not(any(feature = "bench-geos", feature = "bench-geos-system")))]
     {
         geos_setup = 0.0;
         full_geos = 0.0;
