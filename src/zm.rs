@@ -6,11 +6,11 @@
 //! through the repair pipeline via nearest-coordinate matching.
 //!
 //! The main types are:
-//! - [`ZmValue`]: a single Z/M pair for one coordinate
-//! - [`ZmGeometry`]: a geometry paired with per-coordinate Z/M data
-//! - [`preserve_zm`]: match Z/M from original to repaired geometry
-//! - [`zm_pairs`]: iterate coords with their Z/M values
-//! - [`count_coords`]: count vertices in a geometry
+//! - \[`ZmValue`\]: a single Z/M pair for one coordinate
+//! - \[`ZmGeometry`\]: a geometry paired with per-coordinate Z/M data
+//! - \[`preserve_zm`\]: match Z/M from original to repaired geometry
+//! - \[`zm_pairs`\]: iterate coords with their Z/M values
+//! - \[`count_coords`\]: count vertices in a geometry
 use geo::{Coord, Geometry};
 
 /// A single Z (elevation) and M (measure) value associated with a coordinate.
