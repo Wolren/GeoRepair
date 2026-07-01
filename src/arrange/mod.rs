@@ -211,9 +211,9 @@ fn orient2d(p1: geo::Coord<f64>, p2: geo::Coord<f64>, p3: geo::Coord<f64>) -> f6
 }
 
 /// Timing breakdown for the CDT arrange pipeline.
-/// Only available with `--features bench-geos`.
-#[cfg(feature = "bench-geos")]
-#[derive(Default, Debug)]
+/// Only available with `--features bench-geos` or `--features bench-geos-system`.
+#[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
+#[derive(Default)]
 pub struct ArrangeTiming {
     /// Seconds spent in input preparation (snapping, dedup, intersection splitting).
     pub prep_secs: f64,
@@ -231,7 +231,7 @@ pub struct ArrangeTiming {
 
 /// Profile the CDT arrange pipeline on a polygon, returning stage timing.
 /// Returns `None` if the polygon has no edges or preparation fails.
-#[cfg(feature = "bench-geos")]
+#[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
 pub fn diagnose_arrange(poly: &Polygon<f64>) -> Option<ArrangeTiming> {
     use std::time::Instant;
     let mut t = ArrangeTiming::default();
