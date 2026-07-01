@@ -14,6 +14,7 @@ use crate::core::MakeValidConfig;
 use crate::make_valid::MakeValid;
 use crate::noding::NodingFloat;
 
+/// Repair a MultiPoint in parallel — each point is processed on a separate rayon thread.
 pub fn par_fix_multi_point<T: GeoFloat + Send + Sync>(
     mp: &MultiPoint<T>,
     config: &MakeValidConfig,
@@ -37,6 +38,7 @@ pub fn par_fix_multi_point<T: GeoFloat + Send + Sync>(
     }
 }
 
+/// Repair a MultiLineString in parallel — each linestring is processed on a separate rayon thread.
 pub fn par_fix_multi_line_string<T: NodingFloat + Send + Sync>(
     mls: &MultiLineString<T>,
     config: &MakeValidConfig,
@@ -84,6 +86,8 @@ pub fn par_fix_multi_line_string<T: NodingFloat + Send + Sync>(
     }
 }
 
+/// Repair a MultiPolygon in parallel — each polygon is processed on a separate rayon thread.
+/// Requires the `arrange` or `structure` feature.
 #[cfg(any(feature = "arrange", feature = "structure"))]
 pub fn par_fix_multi_polygon(mp: &MultiPolygon<f64>, config: &MakeValidConfig) -> Geometry<f64> {
     let polys: Vec<Geometry<f64>> =
@@ -153,6 +157,8 @@ where
     results
 }
 
+/// Repair a GeometryCollection in parallel (without arrange/structure features).
+/// Each sub-geometry is processed on a separate rayon thread.
 #[cfg(not(any(feature = "arrange", feature = "structure")))]
 pub fn par_fix_collection<T: GeoFloat + Send + Sync>(
     gc: &GeometryCollection<T>,
@@ -170,6 +176,7 @@ pub fn par_fix_collection<T: GeoFloat + Send + Sync>(
     }
 }
 
+/// Repair a GeometryCollection in parallel — each sub-geometry is processed on a separate rayon thread.
 #[cfg(any(feature = "arrange", feature = "structure"))]
 pub fn par_fix_collection(gc: &GeometryCollection<f64>, config: &MakeValidConfig) -> Geometry<f64> {
     let fixed =

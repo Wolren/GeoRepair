@@ -34,14 +34,27 @@ use log::warn;
 /// [`make_valid_with_config`](MakeValid::make_valid_with_config) for
 /// fine-grained control over the repair strategy.
 pub trait MakeValid {
+    /// The scalar coordinate type (e.g. `f64`, `f32`).
     type Scalar: GeoFloat;
 
+    /// Repair this geometry using default configuration.
+    ///
+    /// Returns a valid geometry (possibly empty or simplified) when the
+    /// input contains OGC violations.
     fn make_valid(&self) -> Geometry<Self::Scalar> {
         self.make_valid_with_config(&MakeValidConfig::default())
     }
 
+    /// Repair this geometry with the given configuration.
+    ///
+    /// See [`MakeValidConfig`] for available options (polygon strategy,
+    /// collapsed geometry preservation, CRS target, etc.).
     fn make_valid_with_config(&self, config: &MakeValidConfig) -> Geometry<Self::Scalar>;
 
+    /// Repair this geometry in parallel using default configuration.
+    ///
+    /// Only available when the `parallel` feature is enabled (non-WASM).
+    /// Multi-geometry components are processed on separate rayon threads.
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     fn par_make_valid(&self) -> Geometry<Self::Scalar>
     where
@@ -50,6 +63,10 @@ pub trait MakeValid {
         self.par_make_valid_with_config(&MakeValidConfig::default())
     }
 
+    /// Repair this geometry in parallel with the given configuration.
+    ///
+    /// Falls back to [`make_valid_with_config`](MakeValid::make_valid_with_config)
+    /// when the default implementation is used (single-threaded dispatch).
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     fn par_make_valid_with_config(&self, _config: &MakeValidConfig) -> Geometry<Self::Scalar>
     where

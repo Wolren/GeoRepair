@@ -43,7 +43,11 @@
 //! ```
 //!
 //! Passes **2490/2490** tests from the GEOS XML validation test suite.
+/// Complex validation rules (polygon nesting, multi-geometry checks).
 mod complex;
+/// Core validation types, traits, and per-geometry implementations.
 mod core;
 
+/// Re-export all core validation items: [`GeoValidation`], [`GeometryValidationError`],
+/// [`ValidationResult`], [`is_valid`], [`validate`], [`validate_reason`].
 pub use core::*;

@@ -6,8 +6,11 @@ use crate::snap;
 use geo::{Coord, Line};
 use rstar::{RTree, RTreeObject, AABB};
 
+/// Prepared edge set: snapped, deduplicated, and intersection-split segments
+/// ready for CDT construction.
 #[derive(Debug)]
 pub(crate) struct PreparedLines {
+    /// The processed line segments (snapped, deduped, split at intersections).
     pub lines: Vec<Line<f64>>,
 }
 

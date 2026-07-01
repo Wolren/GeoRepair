@@ -41,7 +41,10 @@ pub enum RoundingMode {
 /// The grid is always origin-centered.
 #[derive(Clone, Copy, Debug)]
 pub struct PrecisionModel {
+    /// Grid resolution: coordinate values are snapped to multiples of this.
+    /// Smaller values give finer precision (e.g. `1e-8` ≈ 1 cm at geographic scale).
     pub scale: f64,
+    /// Rounding mode: standard round-to-nearest, floor, or ceil.
     pub mode: RoundingMode,
 }
 

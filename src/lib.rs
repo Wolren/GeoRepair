@@ -4,20 +4,22 @@
 //! degenerate shapes, NaN coordinates, and more — using algorithms selected
 //! by geometry type. The **Structure** strategy (default) mirrors GEOS's
 //! ST_MakeValid algorithm; the **Arrange** strategy uses CDT-based repair
-//! as a robust fallback for complex topologies.
+//! as a robust fallback for complex topologies. Passes 2490/2490 GEOS XML
+//! validation tests, with parallel batch performance **0.30× GEOS** (3.3×
+//! faster) on 1.58M data set polygons.
 //!
 //! # Quick start
 //!
 //! ```toml
 //! [dependencies]
-//! geo-repair = "0.11"
+//! geo-repair = "0.12"
 //! ```
 //!
 //! ```rust
 //! # use geo::{Geometry, Point};
 //! # let geometry = Geometry::Point(Point::new(0.0, 0.0));
 //! use geo_repair::{is_valid, validate, MakeValid, ValidateAndFix};
-//! use geo_repair::{read_wkb, write_wkb};
+//! use geo_repair::{read_wkb, write_wkb, read_wkt, write_wkt};
 //!
 //! // Check validity
 //! let result = validate(&geometry);
@@ -36,6 +38,57 @@
 //! // WKB roundtrip
 //! let bytes: Vec<u8> = write_wkb(&geometry);
 //! let geom = read_wkb(&bytes).unwrap();
+//!
+//! // WKT roundtrip
+//! let text: String = write_wkt(&geometry);
+//! let geom = read_wkt(&text).unwrap();
+//! ```
+//!
+//! ## With method selection
+//!
+//! ```rust
+//! # use geo::{Geometry, Point};
+//! # let geometry = Geometry::Point(Point::new(0.0, 0.0));
+//! use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
+//!
+//! let config = MakeValidConfig {
+//!     poly_method: PolyMethod::Arrange,
+//!     keep_collapsed: false,
+//!     ..Default::default()
+//! };
+//! let fixed = geometry.make_valid_with_config(&config);
+//! ```
+//!
+//! ## WKB I/O (built-in, no dependencies)
+//!
+//! ```rust
+//! # use geo::{Geometry, Point};
+//! # let geom = Geometry::Point(Point::new(0.0, 0.0));
+//! # let concat_buffer = vec![];
+//! use geo_repair::{read_wkb, write_wkb, read_wkb_concat};
+//!
+//! let wkb: Vec<u8> = write_wkb(&geom);
+//! let geom = read_wkb(&wkb).unwrap();
+//! let geoms: Vec<Geometry<f64>> = read_wkb_concat(&concat_buffer).unwrap();
+//! ```
+//!
+//! ## WKT I/O (built-in, no dependencies)
+//!
+//! ```rust
+//! # use geo::{Geometry, Point};
+//! # let geom = Geometry::Point(Point::new(0.0, 0.0));
+//! use geo_repair::{read_wkt, write_wkt};
+//!
+//! let wkt: String = write_wkt(&geom);
+//! let geom = read_wkt(&wkt).unwrap();
+//! ```
+//!
+//! ## Binary format loading (custom `.bin` format, fast bulk I/O)
+//!
+//! ```rust,no_run
+//! use geo_repair::load_bin;
+//!
+//! let polys: Vec<geo::Polygon<f64>> = load_bin("dataset.bin").unwrap();
 //! ```
 //!
 //! # Feature flags
@@ -53,7 +106,7 @@
 //! | `wasm` | WASM browser fetch (synchronous XHR) | no |
 //! | `mimalloc` | Use mimalloc global allocator | yes |
 //! | `io-shp` | Shapefile format backend | no |
-//! | `io-wkt` | WKT text format backend | no |
+//! | `io-wkt` | No-op (WKT is now built-in) | — |
 //! | `io-csv` | CSV format backend | no |
 //! | `io-gml` | GML/XML format backend | no |
 //! | `io-gpkg` | GeoPackage format backend (not WASM) | no |
@@ -89,24 +142,115 @@
 //! cargo check --no-default-features --features arrange,structure,simd
 //! ```
 //!
+//! # Validation
+//!
+//! The [`GeoValidation`] trait checks 18 OGC validity rules using Shewchuk
+//! adaptive-precision orientation tests (via the `robust` crate):
+//!
+//! | Rule | Applies to |
+//! |------|-----------|
+//! | Coordinate finiteness | All geometries |
+//! | Ring closure | Polygon rings |
+//! | Ring minimum vertices (≥4) | Polygon rings |
+//! | Ring self-intersection | Polygon rings |
+//! | Pinch points (non-consecutive duplicates) | Rings |
+//! | Hole containment (inside shell) | Polygon |
+//! | No nested holes | Polygon |
+//! | Interior ring connectivity | Polygon |
+//! | Ring orientation (exterior CCW, interior CW) | Polygon |
+//! | Non-collinear rings | Polygon |
+//! | Consecutive duplicates | Lines/rings |
+//! | Duplicate rings | Polygon |
+//! | Duplicate points | MultiPoint |
+//! | Duplicate lines | MultiLineString |
+//! | Non-zero-length lines | Line |
+//! | Non-degenerate exterior | Polygon |
+//! | Simplicity (no interior intersections) | LineString, MultiLineString |
+//! | Nesting depth limit | GeometryCollection |
+//!
+//! ```rust
+//! # use geo::{Geometry, Point};
+//! # let geom = Geometry::Point(Point::new(0.0, 0.0));
+//! use geo_repair::{is_valid, validate, validate_reason, GeoValidation, ValidationResult};
+//!
+//! let ok: bool = geom.is_valid();
+//! let ok2: bool = is_valid(&geom);
+//!
+//! let result: ValidationResult = validate(&geom);
+//! let reason: String = validate_reason(&geom);
+//! ```
+//!
 //! # Polygon repair strategies
 //!
-//! | Strategy | Approach | When to use |
-//! |----------|----------|-------------|
-//! | **Structure** | Planar graph extraction → face walking → winding assembly | Fast path for valid/simple inputs. 10-100x faster. |
-//! | **Arrange** | CDT triangulation → face labeling → ring extraction | Complex topologies, any input. Slower on large rings. |
-//! | **Auto** (default) | Try Structure first, fall back to Arrange | Best of both worlds. |
+//! | Strategy | Approach | Strengths | Weaknesses |
+//! |----------|----------|-----------|------------|
+//! | **Arrange** (CDT) | Constrained Delaunay triangulation → face labeling → ring extraction | Handles any topology. No self-intersection limit. | Slower, especially on large rings. Requires `spade`. |
+//! | **Structure** (fast path) | Planar graph extraction → face walking → winding-number assembly | 10-100× faster for valid/simple inputs. No external deps. | Falls back on complex topologies (many holes, nested self-intersections). |
 //!
-//! # I/O formats
+//! **Auto** (default) tries Structure first and falls back to Arrange.
+//! The repair pipeline enforces OGC-correct winding order (CCW exterior,
+//! CW interior) on all output.
 //!
-//! | Format | Extension | Backend | Feature |
-//! |--------|-----------|---------|---------|
-//! | WKB | `.wkb` | `read_wkb` / `write_wkb` | always (zero-dep) |
-//! | Binary | `.bin` | `load_bin` / `load_bin_stream` | always |
-//! | GeoJSON | `.json` / `.geojson` | serde_json | always |
+//! # CRS support
 //!
-//! Optional backends behind feature flags: Shapefile (`.shp`), WKT (`.wkt`),
-//! CSV (`.csv`), GML (`.gml`), GeoPackage (`.gpkg`).
+//! The [`Crs`] type stores EPSG codes and provides CRS-aware tolerance heuristics:
+//! - Geographic (lon/lat): `1e-10` degrees
+//! - Projected (metres): `1e-6` metres
+//! - Unknown: `1e-12`
+//!
+//! CRS is set directly on [`MakeValidConfig`]:
+//!
+//! ```rust
+//! use geo_repair::{Crs, MakeValidConfig};
+//!
+//! let config = MakeValidConfig {
+//!     crs: Some(Crs::from_epsg(4326)),
+//!     ..Default::default()
+//! };
+//! ```
+//!
+//! # I/O
+//!
+//! GeoRepair provides format-agnostic dispatch and individual backends:
+//!
+//! ```rust,no_run
+//! # use geo::{Geometry, Point};
+//! # let geom = Geometry::Point(Point::new(0.0, 0.0));
+//! # let concat_buffer = vec![];
+//! use geo_repair::{
+//!     diagnose_file, load, load_bin, read_wkb, read_wkb_concat, repair_file, save, write_wkb,
+//!     read_wkt, write_wkt,
+//!     MakeValidConfig,
+//! };
+//!
+//! let geoms = load("input.wkb").unwrap();
+//! let geoms = read_wkb_concat(&concat_buffer).unwrap();
+//!
+//! for result in diagnose_file("input.bin").unwrap() {
+//!     println!("{}", result.reason());
+//! }
+//!
+//! repair_file("invalid.wkb", "fixed.wkb", &MakeValidConfig::default()).unwrap();
+//! save("output.wkt", &geoms[0]).unwrap();
+//!
+//! let wkb: Vec<u8> = write_wkb(&geom);
+//! let geom = read_wkb(&wkb).unwrap();
+//!
+//! let wkt: String = write_wkt(&geom);
+//! let geom = read_wkt(&wkt).unwrap();
+//!
+//! let polys = load_bin("dataset.bin").unwrap();
+//! ```
+//!
+//! | Extension | Format | Backend |
+//! |-----------|--------|---------|
+//! | `.wkb` / `.wks` | WKB (LE/BE, EWKB SRID, Z/M variants) | Zero-dep built-in |
+//! | `.bin` | Custom binary bulk polygon format | Zero-dep built-in |
+//! | `.shp` | Shapefile | `io-shp` feature |
+//! | `.wkt` | WKT text format | Zero-dep built-in |
+//! | `.csv` | CSV with WKT geometry | `io-csv` feature |
+//! | `.gml` | GML/XML | `io-gml` feature |
+//! | `.gpkg` | GeoPackage (SQLite) | `io-gpkg` feature |
 //!
 //! # Geometry type coverage
 //!
@@ -118,6 +262,17 @@
 //! | `Point` / `MultiPoint` | NaN/Inf filtering, deduplication |
 //! | `Rect` / `Triangle` | Basic degeneracy checks |
 //! | `GeometryCollection` | Recursive repair of children |
+//!
+//! # Known limitations
+//!
+//! - **CDT arranger may panic** on certain degenerate inputs (all-collinear
+//!   exterior rings, coordinates near f64::MAX). This is a known limitation
+//!   of `spade`.
+//! - **OGC compliance** is a key goal but not yet formally certified. The
+//!   validation module checks 18 OGC predicates and passes 2490/2490 GEOS XML
+//!   tests.
+//! - **GeometryCollection cross-component intersection** is not validated.
+//! - **Z/M coordinate consistency** is not validated.
 //!
 //! # License
 //!
@@ -140,51 +295,73 @@ const _: () = {
     );
 };
 
+/// Core configuration types for geometry repair.
 pub mod core;
+/// Coordinate reference system (CRS) handling and transformation.
 pub mod crs;
+/// Double-double arithmetic for robust geometric computations.
 pub mod dd;
+/// Feature metadata associated with geometries.
 pub mod feature;
+/// Geometry I/O: WKB, binary format, and format-dispatch helpers.
 pub mod io;
+/// Geometry repair implementation via the [`MakeValid`] trait.
 pub mod make_valid;
+/// Ring orientation utilities (CW/CCW winding).
 pub mod orient;
+/// Coordinate snapping to a precision grid.
 pub mod snap;
 pub(crate) mod util;
+/// OGC Simple Features geometry validation predicates.
 pub mod validation;
+/// Z/M coordinate value preservation through the repair pipeline.
 pub mod zm;
 
 #[cfg(feature = "arrange")]
+/// CDT-based polygon repair for complex topologies (Arrange strategy).
 pub mod arrange;
+/// Segment noding: intersection detection, snap-rounding, and validation.
 pub mod noding;
+/// Geometry precision reduction with topology preservation.
 pub mod reduce;
 #[cfg(feature = "structure")]
+/// GEOS-compatible fast-path polygon repair via planar graph extraction.
 pub mod structure;
 
 #[cfg(feature = "ffi")]
 #[path = "bindings/ffi.rs"]
+/// C-compatible FFI bindings for geo-repair.
 pub mod ffi;
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+/// Rayon-based parallel batch geometry repair.
 pub mod parallel;
 #[cfg(feature = "python")]
 #[path = "bindings/python.rs"]
+/// Python bindings via PyO3.
 pub mod python;
 #[cfg(feature = "simd")]
+/// AVX2-accelerated geometric predicates (x86_64).
 pub mod simd;
 
+/// Repair configuration, error types, and polygon method selection.
 pub use core::{MakeValidConfig, MakeValidError, PolyMethod};
+/// Coordinate reference system wrapper.
 pub use crs::Crs;
+/// A feature combining geometry with optional attributes and CRS.
 pub use feature::Feature;
-// IO: only binary format loading + WKB parsing (no format-specific loaders).
-// For file format loading use GEOS bindings or external tools.
 pub use io::{
-    diagnose_file, load, load_bin, load_bin_stream, read_wkb, read_wkb_concat, repair_file, save,
-    write_wkb,
+    diagnose_file, load, load_bin, load_bin_stream, read_wkb, read_wkb_concat, read_wkt,
+    repair_file, save, write_wkb, write_wkt,
 };
+/// Trait for repairing invalid geometries.
 pub use make_valid::MakeValid;
 #[cfg(any(feature = "arrange", feature = "structure"))]
 /// Combines validation and repair in a single step, returning errors for
 /// violations that could not be automatically repaired.
 pub use make_valid::ValidateAndFix;
+/// Coordinate snapping functions.
 pub use snap::{snap_coord, snap_coord_default, snap_line, snap_lines, DEFAULT_GRID};
+/// OGC validation predicates and result types.
 pub use validation::{
     is_valid, validate, validate_reason, GeoValidation, GeometryValidationError, ValidationResult,
 };

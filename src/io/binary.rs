@@ -19,6 +19,7 @@
 //! an OGC standard. For portable interchange, use WKB.
 use std::fs::File;
 use std::io::Read;
+use std::io::Write;
 
 use geo::{Coord, LineString, Polygon};
 
@@ -188,5 +189,50 @@ impl Iterator for LoadBinStream {
             holes.push(read_ring(&mut self.reader)?);
         }
         Some(Polygon::new(ext, holes))
+    }
+}
+
+/// Write polygons to the custom binary format.
+///
+/// Same format as [`load_bin`]:
+/// - u32 LE: number of polygons
+/// - For each polygon:
+///   - u32 LE: exterior ring coord count
+///   - f64 LE × N: (x, y) pairs
+///   - u32 LE: interior ring count
+///   - For each interior ring:
+///     - u32 LE: coord count
+///     - f64 LE × N: (x, y) pairs
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use geo_repair::{load_bin, write_bin};
+///
+/// let polys = load_bin("input.bin").unwrap();
+/// write_bin("output.bin", &polys).unwrap();
+/// ```
+pub fn write_bin(path: &str, polys: &[Polygon<f64>]) -> Result<(), String> {
+    let mut buf = Vec::with_capacity(polys.len() * 128);
+    buf.extend_from_slice(&(polys.len() as u32).to_le_bytes());
+    for poly in polys {
+        write_ring(&mut buf, poly.exterior());
+        buf.extend_from_slice(&(poly.interiors().len() as u32).to_le_bytes());
+        for hole in poly.interiors() {
+            write_ring(&mut buf, hole);
+        }
+    }
+    let mut file = File::create(path).map_err(|e| format!("cannot create {path}: {e}"))?;
+    file.write_all(&buf)
+        .map_err(|e| format!("cannot write {path}: {e}"))?;
+    Ok(())
+}
+
+fn write_ring(buf: &mut Vec<u8>, ring: &LineString<f64>) {
+    let coords = &ring.0;
+    buf.extend_from_slice(&(coords.len() as u32).to_le_bytes());
+    for c in coords {
+        buf.extend_from_slice(&c.x.to_le_bytes());
+        buf.extend_from_slice(&c.y.to_le_bytes());
     }
 }

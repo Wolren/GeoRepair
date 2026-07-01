@@ -28,11 +28,17 @@
 //! - `prep`: Input preparation, intersection pre-checks
 //! - `prep_intersect`: Parallel intersection pre-filter
 //! - `assemble`: Ring assembly from labeled faces
+/// Ring assembly from labeled triangle faces.
 pub mod assemble;
+/// Constrained Delaunay triangulation wrapper around spade.
 pub mod cdt;
+/// Triangle-to-ring extraction from labeled faces.
 pub mod extract;
+/// Face labeling (interior/exterior) via winding.
 pub mod label;
+/// Input preparation: snapping, dedup, intersection splitting.
 pub mod prep;
+/// Parallel intersection pre-filter via R-tree.
 pub mod prep_intersect;
 
 use crate::core::MakeValidConfig;
@@ -209,14 +215,22 @@ fn orient2d(p1: geo::Coord<f64>, p2: geo::Coord<f64>, p3: geo::Coord<f64>) -> f6
 #[cfg(feature = "bench-geos")]
 #[derive(Default, Debug)]
 pub struct ArrangeTiming {
+    /// Seconds spent in input preparation (snapping, dedup, intersection splitting).
     pub prep_secs: f64,
+    /// Seconds spent building the constrained Delaunay triangulation.
     pub cdt_build_secs: f64,
+    /// Number of faces in the constructed CDT.
     pub cdt_faces: usize,
+    /// Seconds spent labeling faces as interior/exterior.
     pub label_secs: f64,
+    /// Seconds spent extracting rings from labeled faces.
     pub extract_secs: f64,
+    /// Total seconds across all pipeline stages.
     pub total_secs: f64,
 }
 
+/// Profile the CDT arrange pipeline on a polygon, returning stage timing.
+/// Returns `None` if the polygon has no edges or preparation fails.
 #[cfg(feature = "bench-geos")]
 pub fn diagnose_arrange(poly: &Polygon<f64>) -> Option<ArrangeTiming> {
     use std::time::Instant;

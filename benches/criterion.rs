@@ -526,6 +526,78 @@ fn bench_simple_types(c: &mut Criterion) {
     group.finish();
 }
 
+// =========================================================================
+// I/O format roundtrip benchmarks (WKT vs WKB)
+// =========================================================================
+
+fn bench_io_roundtrip(c: &mut Criterion) {
+    let poly = Geometry::Polygon(Polygon::new(
+        LineString::new(vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 1000.0, y: 0.0 },
+            Coord {
+                x: 1000.0,
+                y: 1000.0,
+            },
+            Coord { x: 0.0, y: 1000.0 },
+        ]),
+        Vec::new(),
+    ));
+    let config = MakeValidConfig::default();
+
+    let mut group = c.benchmark_group("io_roundtrip");
+
+    group.bench_function("wkt_parse", |b| {
+        let wkt = geo_repair::write_wkt(&poly);
+        b.iter(|| black_box(geo_repair::read_wkt(black_box(&wkt))))
+    });
+
+    group.bench_function("wkt_serialize", |b| {
+        b.iter(|| black_box(geo_repair::write_wkt(black_box(&poly))))
+    });
+
+    group.bench_function("wkt_full_roundtrip", |b| {
+        b.iter(|| {
+            let wkt = geo_repair::write_wkt(black_box(&poly));
+            black_box(geo_repair::read_wkt(&wkt))
+        })
+    });
+
+    group.bench_function("wkb_parse", |b| {
+        let wkb = geo_repair::write_wkb(&poly);
+        b.iter(|| black_box(geo_repair::read_wkb(black_box(&wkb))))
+    });
+
+    group.bench_function("wkb_serialize", |b| {
+        b.iter(|| black_box(geo_repair::write_wkb(black_box(&poly))))
+    });
+
+    group.bench_function("wkb_full_roundtrip", |b| {
+        b.iter(|| {
+            let wkb = geo_repair::write_wkb(black_box(&poly));
+            black_box(geo_repair::read_wkb(&wkb))
+        })
+    });
+
+    group.bench_function("make_valid_from_wkt", |b| {
+        let wkt = geo_repair::write_wkt(&poly);
+        b.iter(|| {
+            let geom = geo_repair::read_wkt(black_box(&wkt)).unwrap();
+            black_box(geom.make_valid_with_config(black_box(&config)))
+        })
+    });
+
+    group.bench_function("make_valid_from_wkb", |b| {
+        let wkb = geo_repair::write_wkb(&poly);
+        b.iter(|| {
+            let geom = geo_repair::read_wkb(black_box(&wkb)).unwrap();
+            black_box(geom.make_valid_with_config(black_box(&config)))
+        })
+    });
+
+    group.finish();
+}
+
 fn bench_multi_types(c: &mut Criterion) {
     let pts = MultiPoint::new(vec![
         Point::new(0.0, 0.0),
@@ -572,5 +644,6 @@ criterion_group!(
         bench_make_valid,
         bench_geos_fixtures,
         bench_missing_shapes,
+        bench_io_roundtrip,
 );
 criterion_main!(benches);

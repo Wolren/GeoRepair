@@ -16,11 +16,14 @@ use geo::{Coord, Geometry};
 /// A single Z (elevation) and M (measure) value associated with a coordinate.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ZmValue {
+    /// Elevation (Z) value, or `None` if Z is not present.
     pub z: Option<f64>,
+    /// Measure (M) value, or `None` if M is not present.
     pub m: Option<f64>,
 }
 
 impl ZmValue {
+    /// A ZmValue with neither Z nor M set (all `None`).
     pub const NONE: ZmValue = ZmValue { z: None, m: None };
 
     /// Create a new ZmValue from optional Z and M values.

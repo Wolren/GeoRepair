@@ -1,3 +1,42 @@
+//! Python bindings via PyO3.
+//!
+//! The Python package exposes WKB-based batch processing — ideal for use
+//! with QGIS or GDAL where WKB is the native geometry format.
+//!
+//! # Build and install
+//!
+//! ```bash
+//! pip install maturin
+//! python -m maturin build --features python
+//! pip install target/wheels/geo_repair-*.whl
+//! ```
+//!
+//! # Python usage
+//!
+//! ```python
+//! import geo_repair
+//!
+//! # Single geometry repair (WKB in, WKB out)
+//! wkb_out = geo_repair.repair_wkb(wkb_in, method="auto")
+//!
+//! # Batch repair (sequential)
+//! results = geo_repair.repair_wkb_batch(wkb_batch, method="structure")
+//!
+//! # Batch repair (parallel)
+//! results = geo_repair.par_repair_wkb_batch(wkb_batch, method="auto")
+//!
+//! # Validate a single geometry
+//! is_valid, errors = geo_repair.validate_wkb(wkb_in)
+//!
+//! # Combined repair + validation batch
+//! results = geo_repair.repair_validate_wkb_batch(wkb_batch, method="auto")
+//! for out_wkb, was_valid, errors in results:
+//!     if not was_valid:
+//!         print("  Errors:", errors)
+//! ```
+//!
+//! **QGIS integration:** See `qgis/qgis_geo_repair.py` for a complete
+//! processing script.
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
@@ -19,9 +58,8 @@ fn make_config(method: Option<&str>) -> MakeValidConfig {
     }
 }
 
-fn validation_errors(geom: &geo::Geometry<f64>) -> Vec<String> {
-    let result = geom.validate();
-    result.errors.iter().map(|e| format!("{e}")).collect()
+fn parse_wkb(wkb: &[u8]) -> PyResult<geo::Geometry<f64>> {
+    read_wkb(wkb).map_err(|e| PyValueError::new_err(format!("WKB parse error: {e}")))
 }
 
 fn repair_one(geom: geo::Geometry<f64>, config: &MakeValidConfig) -> geo::Geometry<f64> {
@@ -44,6 +82,13 @@ fn geo_repair_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     {
         m.add_function(wrap_pyfunction!(par_repair_wkb_batch, m)?)?;
     }
+
+    m.add_function(wrap_pyfunction!(is_valid_wkb, m)?)?;
+    m.add_function(wrap_pyfunction!(is_valid_wkb_batch, m)?)?;
+    m.add_function(wrap_pyfunction!(validate_wkb, m)?)?;
+    m.add_function(wrap_pyfunction!(validate_wkb_batch, m)?)?;
+    m.add_function(wrap_pyfunction!(validate_and_fix_wkb, m)?)?;
+    m.add_function(wrap_pyfunction!(validate_and_fix_wkb_batch, m)?)?;
     Ok(())
 }
 
@@ -63,8 +108,7 @@ fn geo_repair_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[pyo3(signature = (wkb, method = None))]
 fn repair_wkb(wkb: Vec<u8>, method: Option<&str>) -> PyResult<Vec<u8>> {
     let config = make_config(method);
-    let geom =
-        read_wkb(&wkb).map_err(|e| PyValueError::new_err(format!("WKB parse error: {e}")))?;
+    let geom = parse_wkb(&wkb)?;
     let fixed = repair_one(geom, &config);
     Ok(write_wkb(&fixed))
 }
@@ -82,7 +126,7 @@ fn repair_wkb_batch(wkbs: Vec<Vec<u8>>, method: Option<&str>) -> PyResult<Vec<Ve
     let config = make_config(method);
     let mut results = Vec::with_capacity(wkbs.len());
     for wkb in wkbs {
-        let r = match read_wkb(&wkb) {
+        let r = match parse_wkb(&wkb) {
             Ok(geom) => {
                 let fixed = repair_one(geom, &config);
                 write_wkb(&fixed)
@@ -103,7 +147,7 @@ fn par_repair_wkb_batch(wkbs: Vec<Vec<u8>>, method: Option<&str>) -> PyResult<Ve
     let config = make_config(method);
     let results: Vec<Vec<u8>> = wkbs
         .par_iter()
-        .map(|wkb| match read_wkb(wkb) {
+        .map(|wkb| match parse_wkb(wkb) {
             Ok(geom) => {
                 let fixed = repair_one(geom, &config);
                 write_wkb(&fixed)
@@ -115,7 +159,144 @@ fn par_repair_wkb_batch(wkbs: Vec<Vec<u8>>, method: Option<&str>) -> PyResult<Ve
 }
 
 // ---------------------------------------------------------------------------
-// Combined repair + validate (batch)
+// Single WKB validation
+// ---------------------------------------------------------------------------
+
+/// Check whether a WKB geometry is OGC-valid.
+///
+/// Args:
+///     wkb: Raw WKB bytes.
+///
+/// Returns:
+///     ``True`` if the geometry is valid, ``False`` otherwise.
+#[pyfunction]
+fn is_valid_wkb(wkb: Vec<u8>) -> PyResult<bool> {
+    let geom = parse_wkb(&wkb)?;
+    Ok(geom.is_valid())
+}
+
+/// Validate a WKB geometry and return (is_valid, [errors]).
+///
+/// Args:
+///     wkb: Raw WKB bytes.
+///
+/// Returns:
+///     A tuple ``(is_valid, error_list)``.
+#[pyfunction]
+fn validate_wkb(wkb: Vec<u8>) -> PyResult<(bool, Vec<String>)> {
+    let geom = parse_wkb(&wkb)?;
+    let valid = geom.is_valid();
+    let errors: Vec<String> = geom
+        .validate()
+        .errors
+        .iter()
+        .map(|e| format!("{e}"))
+        .collect();
+    Ok((valid, errors))
+}
+
+/// Validate a WKB geometry, then fix it if invalid.
+///
+/// Args:
+///     wkb: Raw WKB bytes.
+///     method: Optional repair method (``"auto"``, ``"arrange"``, ``"structure"``).
+///
+/// Returns:
+///     ``(was_valid, errors_before_repair, fixed_wkb_bytes)``
+///     If the geometry was already valid, `errors_before_repair` is empty
+///     and `fixed_wkb_bytes` equals the original input.
+#[pyfunction]
+#[pyo3(signature = (wkb, method = None))]
+fn validate_and_fix_wkb(
+    wkb: Vec<u8>,
+    method: Option<&str>,
+) -> PyResult<(bool, Vec<String>, Vec<u8>)> {
+    let config = make_config(method);
+    let geom = parse_wkb(&wkb)?;
+    let valid = geom.is_valid();
+    let errors: Vec<String> = geom
+        .validate()
+        .errors
+        .iter()
+        .map(|e| format!("{e}"))
+        .collect();
+    let fixed = repair_one(geom, &config);
+    Ok((valid, errors, write_wkb(&fixed)))
+}
+
+// ---------------------------------------------------------------------------
+// Batch WKB validation
+// ---------------------------------------------------------------------------
+
+/// Check whether each WKB geometry is OGC-valid.
+#[pyfunction]
+fn is_valid_wkb_batch(wkbs: Vec<Vec<u8>>) -> PyResult<Vec<bool>> {
+    let mut results = Vec::with_capacity(wkbs.len());
+    for wkb in wkbs {
+        results.push(match parse_wkb(&wkb) {
+            Ok(geom) => geom.is_valid(),
+            Err(_) => false,
+        });
+    }
+    Ok(results)
+}
+
+/// Validate each WKB geometry, returning ``[(is_valid, [errors]), ...]``.
+#[pyfunction]
+fn validate_wkb_batch(wkbs: Vec<Vec<u8>>) -> PyResult<Vec<(bool, Vec<String>)>> {
+    let mut results = Vec::with_capacity(wkbs.len());
+    for wkb in wkbs {
+        let r = match parse_wkb(&wkb) {
+            Ok(geom) => {
+                let valid = geom.is_valid();
+                let errors: Vec<String> = geom
+                    .validate()
+                    .errors
+                    .iter()
+                    .map(|e| format!("{e}"))
+                    .collect();
+                (valid, errors)
+            }
+            Err(e) => (false, vec![format!("{e}")]),
+        };
+        results.push(r);
+    }
+    Ok(results)
+}
+
+/// Validate then fix each WKB geometry.
+///
+/// Returns ``[(was_valid, errors_before_repair, fixed_wkb_bytes), ...]``.
+#[pyfunction]
+#[pyo3(signature = (wkbs, method = None))]
+fn validate_and_fix_wkb_batch(
+    wkbs: Vec<Vec<u8>>,
+    method: Option<&str>,
+) -> PyResult<Vec<(bool, Vec<String>, Vec<u8>)>> {
+    let config = make_config(method);
+    let mut results = Vec::with_capacity(wkbs.len());
+    for wkb in wkbs {
+        let r = match parse_wkb(&wkb) {
+            Ok(geom) => {
+                let valid = geom.is_valid();
+                let errors: Vec<String> = geom
+                    .validate()
+                    .errors
+                    .iter()
+                    .map(|e| format!("{e}"))
+                    .collect();
+                let fixed = repair_one(geom, &config);
+                (valid, errors, write_wkb(&fixed))
+            }
+            Err(e) => (false, vec![format!("{e}")], wkb.to_vec()),
+        };
+        results.push(r);
+    }
+    Ok(results)
+}
+
+// ---------------------------------------------------------------------------
+// Combined repair + validate (batch) — kept for backward compatibility
 // ---------------------------------------------------------------------------
 
 /// Repair + validate a list of WKB buffers.
@@ -130,13 +311,17 @@ fn repair_validate_wkb_batch(
     let config = make_config(method);
     let mut results = Vec::with_capacity(wkbs.len());
     for wkb in wkbs {
-        let r = match read_wkb(&wkb) {
+        let r = match parse_wkb(&wkb) {
             Ok(geom) => {
                 let valid = geom.is_valid();
-                let errors = validation_errors(&geom);
+                let errors: Vec<String> = geom
+                    .validate()
+                    .errors
+                    .iter()
+                    .map(|e| format!("{e}"))
+                    .collect();
                 let fixed = repair_one(geom, &config);
-                let out = write_wkb(&fixed);
-                (out, valid, errors)
+                (write_wkb(&fixed), valid, errors)
             }
             Err(e) => (wkb.to_vec(), false, vec![format!("{e}")]),
         };

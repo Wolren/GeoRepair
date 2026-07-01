@@ -11,7 +11,9 @@ use geo::Coord;
 /// A double-double number: hi + lo, where |lo| ≤ 0.5 ulp(hi).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct DD {
+    /// High (most significant) part of the double-double value.
     pub hi: f64,
+    /// Low (least significant) part of the double-double value, |lo| ≤ 0.5 ulp(hi).
     pub lo: f64,
 }
 
