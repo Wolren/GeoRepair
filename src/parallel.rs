@@ -90,6 +90,9 @@ pub fn par_fix_multi_line_string<T: NodingFloat + Send + Sync>(
 /// Requires the `arrange` or `structure` feature.
 #[cfg(any(feature = "arrange", feature = "structure"))]
 pub fn par_fix_multi_polygon(mp: &MultiPolygon<f64>, config: &MakeValidConfig) -> Geometry<f64> {
+    if mp.0.is_empty() {
+        return Geometry::GeometryCollection(GeometryCollection(Vec::new()));
+    }
     let polys: Vec<Geometry<f64>> =
         mp.0.par_iter()
             .map(|p| p.make_valid_with_config(config))
@@ -103,7 +106,7 @@ pub fn par_fix_multi_polygon(mp: &MultiPolygon<f64>, config: &MakeValidConfig) -
         }
     }
     if shells.is_empty() {
-        return Geometry::GeometryCollection(GeometryCollection(Vec::new()));
+        return Geometry::MultiPolygon(MultiPolygon::new(Vec::new()));
     }
     if shells.len() == 1 {
         // Safe: len==1 verified above on local Vec
