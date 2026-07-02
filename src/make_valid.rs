@@ -438,6 +438,9 @@ impl MakeValid for MultiPolygon<f64> {
     type Scalar = f64;
 
     fn make_valid_with_config(&self, config: &MakeValidConfig) -> Geometry<f64> {
+        if self.0.is_empty() {
+            return empty_geom::<f64>();
+        }
         let polys: Vec<Geometry<f64>> = self
             .0
             .iter()
@@ -453,7 +456,7 @@ impl MakeValid for MultiPolygon<f64> {
             }
         }
         if shells.is_empty() {
-            return empty_geom::<f64>();
+            return Geometry::MultiPolygon(MultiPolygon::new(Vec::new()));
         }
         if shells.len() == 1 {
             // Safe: len==1 verified above on local Vec

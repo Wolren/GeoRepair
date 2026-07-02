@@ -306,10 +306,7 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
 
     if result_polys.is_empty() {
         warn!("Structure: subtract/merge produced no result polygons");
-        #[cfg(not(feature = "arrange"))]
         return None;
-        #[cfg(feature = "arrange")]
-        return Some(Geometry::MultiPolygon(MultiPolygon::new(Vec::new())));
     }
 
     let result = if result_polys.len() == 1 {
