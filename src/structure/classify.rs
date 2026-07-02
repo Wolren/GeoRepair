@@ -1,5 +1,30 @@
 use geo::LineString;
 
+/// Check if a hole ring is entirely outside a shell ring by testing its first point.
+/// A simple non-self-intersecting ring is either entirely inside or entirely outside
+/// a simple shell — partial overlap is impossible. So the first point is sufficient.
+/// If the first point is on the shell boundary (rare), we classify as outer; the
+/// boolean difference and merge steps handle this correctly either way.
+fn is_hole_outside(hole: &LineString<f64>, shell: &LineString<f64>) -> bool {
+    let first = match hole.0.first() {
+        Some(pt) => *pt,
+        None => return true,
+    };
+    // If the first point is strictly inside the shell, the hole is inner.
+    if crate::simd::point_in_ring_exclusive(first, &shell.0) {
+        return false;
+    }
+    // First point was outside or on the shell boundary.  Holes that share
+    // boundary with the shell (rare) may have their first vertex exactly on
+    // the shell.  Check all vertices as a robustness fallback.
+    for pt in &hole.0 {
+        if crate::simd::point_in_ring_exclusive(*pt, &shell.0) {
+            return false;
+        }
+    }
+    true
+}
+
 pub(crate) fn classify_holes(
     shell: &LineString<f64>,
     holes: &[LineString<f64>],
@@ -14,10 +39,7 @@ pub(crate) fn classify_holes(
                 if !bboxes_overlap(shell_bbox, bbox(hole)) {
                     return (hole.clone(), true);
                 }
-                let is_outside = hole
-                    .0
-                    .iter()
-                    .all(|pt| !crate::simd::point_in_ring_exclusive(*pt, &shell.0));
+                let is_outside = is_hole_outside(hole, shell);
                 (hole.clone(), is_outside)
             })
             .collect();
@@ -42,10 +64,7 @@ pub(crate) fn classify_holes(
                 outer.push(hole.clone());
                 continue;
             }
-            let is_outside = hole
-                .0
-                .iter()
-                .all(|pt| !crate::simd::point_in_ring_exclusive(*pt, &shell.0));
+            let is_outside = is_hole_outside(hole, shell);
             if is_outside {
                 outer.push(hole.clone());
             } else {

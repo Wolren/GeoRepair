@@ -1,8 +1,31 @@
 use geo::{MultiPolygon, Polygon};
 
 pub(crate) fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
+    if shells.len() <= 1 {
+        return MultiPolygon::new(shells);
+    }
+    // Fast path: if all shell bboxes are disjoint, unary_union is a no-op
+    if shells_are_disjoint(&shells) {
+        return MultiPolygon::new(shells);
+    }
     let mp = MultiPolygon::new(shells);
     geo::algorithm::bool_ops::unary_union(&mp)
+}
+
+fn shells_are_disjoint(shells: &[Polygon<f64>]) -> bool {
+    let bboxes: Vec<_> = shells
+        .iter()
+        .map(|p| crate::simd::aabb_minmax_simd(&p.exterior().0))
+        .collect();
+    for i in 0..shells.len() {
+        let (min_x, max_x, min_y, max_y) = bboxes[i];
+        for &(m2x, m2x2, m2y, m2y2) in bboxes.iter().skip(i + 1) {
+            if min_x <= m2x2 && max_x >= m2x && min_y <= m2y2 && max_y >= m2y {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 #[cfg(test)]

@@ -42,15 +42,69 @@ use geo::{
     Winding,
 };
 use rstar::{RTree, RTreeObject, AABB};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 
 use crate::core;
 use crate::core::MakeValidConfig;
 use crate::util;
 use log::warn;
 
+// ── Profiling counters (cumulative ns) ──
+pub(crate) static PROFILE_FP_NS: AtomicU64 = AtomicU64::new(0);
+pub(crate) static PROFILE_SR_NS: AtomicU64 = AtomicU64::new(0);
+pub(crate) static PROFILE_HR_NS: AtomicU64 = AtomicU64::new(0);
+pub(crate) static PROFILE_HN_NS: AtomicU64 = AtomicU64::new(0);
+pub(crate) static PROFILE_MG_NS: AtomicU64 = AtomicU64::new(0);
+pub(crate) static PROFILE_FSI_NS: AtomicU64 = AtomicU64::new(0);
+pub(crate) static PROFILE_CL_NS: AtomicU64 = AtomicU64::new(0);
+pub(crate) static PROFILE_NEST_NS: AtomicU64 = AtomicU64::new(0);
+pub(crate) static PROFILE_SUB_NS: AtomicU64 = AtomicU64::new(0);
+
+pub fn reset_profile() {
+    PROFILE_FP_NS.store(0, Ordering::Relaxed);
+    PROFILE_SR_NS.store(0, Ordering::Relaxed);
+    PROFILE_HR_NS.store(0, Ordering::Relaxed);
+    PROFILE_HN_NS.store(0, Ordering::Relaxed);
+    PROFILE_MG_NS.store(0, Ordering::Relaxed);
+    PROFILE_FSI_NS.store(0, Ordering::Relaxed);
+    PROFILE_CL_NS.store(0, Ordering::Relaxed);
+    PROFILE_NEST_NS.store(0, Ordering::Relaxed);
+    PROFILE_SUB_NS.store(0, Ordering::Relaxed);
+}
+
+pub fn print_profile(n_polys: usize) {
+    let fp = PROFILE_FP_NS.load(Ordering::Relaxed);
+    let sr = PROFILE_SR_NS.load(Ordering::Relaxed);
+    let hr = PROFILE_HR_NS.load(Ordering::Relaxed);
+    let hn = PROFILE_HN_NS.load(Ordering::Relaxed);
+    let mg = PROFILE_MG_NS.load(Ordering::Relaxed);
+    let fsi = PROFILE_FSI_NS.load(Ordering::Relaxed);
+    let cl = PROFILE_CL_NS.load(Ordering::Relaxed);
+    let nest = PROFILE_NEST_NS.load(Ordering::Relaxed);
+    let sub = PROFILE_SUB_NS.load(Ordering::Relaxed);
+    let total_ns = fp + sr + hr + hn + mg;
+    let total_ms = total_ns as f64 / 1e6;
+    let pct = |v: f64| if total_ms > 0.0 { v / total_ms * 100.0 } else { 0.0 };
+    let ms = |v: u64| v as f64 / 1e6;
+    eprintln!("\n=== Structure profile: {n_polys} polys ===");
+    eprintln!("  fast_path     {:>9.3}ms  {:>5.1}%", ms(fp), pct(ms(fp)));
+    eprintln!("  shell_repair  {:>9.3}ms  {:>5.1}%", ms(sr), pct(ms(sr)));
+    eprintln!("    (self_intx) {:>9.3}ms", ms(fsi));
+    eprintln!("  hole_repair   {:>9.3}ms  {:>5.1}%", ms(hr), pct(ms(hr)));
+    eprintln!("  hole_nest_sub {:>9.3}ms  {:>5.1}%  break:", ms(hn), pct(ms(hn)));
+    eprintln!("    classify    {:>9.3}ms  {:>5.1}%", ms(cl), pct(ms(cl)));
+    eprintln!("    nesting     {:>9.3}ms  {:>5.1}%", ms(nest), pct(ms(nest)));
+    eprintln!("    subtract    {:>9.3}ms  {:>5.1}%", ms(sub), pct(ms(sub)));
+    eprintln!("  merge         {:>9.3}ms  {:>5.1}%", ms(mg), pct(ms(mg)));
+    eprintln!("  ─────────────────────────────────");
+    eprintln!("  total         {:>9.3}ms", ms(total_ns));
+}
+
 pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geometry<f64>> {
     // Fast path: valid polygons can return immediately. Use a total-verts limit
     // to avoid the monotone-chain has_no_intersections cost on very large rings.
+    let _t_fp = Instant::now();
     #[cfg(feature = "arrange")]
     {
         let total_verts: usize =
@@ -65,10 +119,12 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
                 && crate::arrange::prep::has_no_intersections(&lines)
                 && crate::arrange::holes_are_valid(poly)
             {
+                PROFILE_FP_NS.fetch_add(_t_fp.elapsed().as_nanos() as u64, Ordering::Relaxed);
                 return Some(Geometry::Polygon(poly.clone()));
             }
         }
     }
+    PROFILE_FP_NS.fetch_add(_t_fp.elapsed().as_nanos() as u64, Ordering::Relaxed);
 
     // Compute shell bbox once (needed for hole Type C bypass)
     let shell_bbox = ring_bbox(poly.exterior().0.as_slice());
@@ -79,6 +135,7 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
         use rayon::prelude::*;
         let (shell_res, holes) = rayon::join(
             || {
+                let _t = Instant::now();
                 let shell_rings = match fix_ring::repair_ring(poly.exterior()) {
                     Some(rings) => rings,
                     None => return None,
@@ -90,9 +147,11 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
                     .into_iter()
                     .filter(|s| s.0.len() >= 4)
                     .collect();
+                PROFILE_SR_NS.fetch_add(_t.elapsed().as_nanos() as u64, Ordering::Relaxed);
                 if valid.is_empty() { None } else { Some(valid) }
             },
             || {
+                let _t = Instant::now();
                 let mut hole_results: Vec<Vec<LineString<f64>>> = poly
                     .interiors()
                     .par_iter()
@@ -107,6 +166,7 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
                         fix_ring::repair_ring(h).unwrap_or_else(|| vec![h.clone()])
                     })
                     .collect();
+                PROFILE_HR_NS.fetch_add(_t.elapsed().as_nanos() as u64, Ordering::Relaxed);
                 hole_results
                     .iter_mut()
                     .flat_map(|rings| rings.drain(..))
@@ -136,6 +196,7 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
     // Serial path: shell repair first, then holes sequentially.
     #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
     let (valid_shells, hole_rings_cw) = {
+        let _t_sr = Instant::now();
         let shell_rings = match fix_ring::repair_ring(poly.exterior()) {
             Some(rings) => rings,
             None => {
@@ -160,8 +221,10 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
         if valid_shells.is_empty() {
             return handle_collapse_result(poly.exterior(), config);
         }
+        PROFILE_SR_NS.fetch_add(_t_sr.elapsed().as_nanos() as u64, Ordering::Relaxed);
 
         let hole_rings_cw: Vec<LineString<f64>> = {
+            let _t_hr = Instant::now();
             let mut hole_rings: Vec<LineString<f64>> = Vec::new();
             for h in poly.interiors() {
                 let hole_bbox = ring_bbox(&h.0);
@@ -179,36 +242,67 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
                     hole_rings.push(ensure_cw(h.clone()));
                 }
             }
+            PROFILE_HR_NS.fetch_add(_t_hr.elapsed().as_nanos() as u64, Ordering::Relaxed);
             hole_rings.into_iter().map(ensure_cw).collect()
         };
         (valid_shells, hole_rings_cw)
     };
 
     // For each valid shell ring, classify and subtract holes
-    let mut result_polys: Vec<Polygon<f64>> = Vec::new();
-    for shell in valid_shells {
+    let process_shell = |shell: LineString<f64>| -> Vec<Polygon<f64>> {
         let shell_poly = Polygon::new(ensure_ccw(shell), Vec::new());
 
+        let _t_cl = Instant::now();
         let (inner_holes, outer_holes) =
             classify::classify_holes(shell_poly.exterior(), &hole_rings_cw);
+        PROFILE_CL_NS.fetch_add(_t_cl.elapsed().as_nanos() as u64, Ordering::Relaxed);
 
+        let _t_nest = Instant::now();
         let (to_subtract, islands) = resolve_nesting(&inner_holes);
+        PROFILE_NEST_NS.fetch_add(_t_nest.elapsed().as_nanos() as u64, Ordering::Relaxed);
 
         let inner_polys: Vec<Polygon<f64>> = to_subtract
             .into_iter()
             .map(|h| Polygon::new(h, Vec::new()))
             .collect();
 
+        let mut local = Vec::new();
+        let _t_sub = Instant::now();
         if let Some(current) = subtract::subtract_holes(&shell_poly, &inner_polys) {
-            result_polys.push(current);
+            local.push(current);
         }
+        PROFILE_SUB_NS.fetch_add(_t_sub.elapsed().as_nanos() as u64, Ordering::Relaxed);
 
-        result_polys.extend(islands);
+        local.extend(islands);
 
         for hole in outer_holes {
-            result_polys.push(Polygon::new(hole, Vec::new()));
+            local.push(Polygon::new(hole, Vec::new()));
         }
-    }
+        local
+    };
+
+    let mut result_polys: Vec<Polygon<f64>> = {
+        let _t_hn = Instant::now();
+        let r = {
+            #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+            {
+                use rayon::prelude::*;
+                valid_shells
+                    .into_par_iter()
+                    .flat_map(process_shell)
+                    .collect()
+            }
+            #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
+            {
+                valid_shells
+                    .into_iter()
+                    .flat_map(process_shell)
+                    .collect()
+            }
+        };
+        PROFILE_HN_NS.fetch_add(_t_hn.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        r
+    };
 
     if result_polys.is_empty() {
         warn!("Structure: subtract/merge produced no result polygons");
@@ -222,7 +316,10 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
         // Safe: len==1 verified above on local Vec
         Geometry::Polygon(result_polys.pop().expect("len==1 verified"))
     } else {
-        Geometry::MultiPolygon(MultiPolygon::new(merge::merge_shells(result_polys).0))
+        let _t_mg = Instant::now();
+        let mp = Geometry::MultiPolygon(MultiPolygon::new(merge::merge_shells(result_polys).0));
+        PROFILE_MG_NS.fetch_add(_t_mg.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        mp
     };
 
     Some(result)
@@ -296,12 +393,8 @@ fn resolve_nesting(holes: &[LineString<f64>]) -> (Vec<LineString<f64>>, Vec<Poly
     let tree = RTree::bulk_load(envs);
 
     let parent_of: Vec<Option<usize>> = {
-        let mut p = vec![None; n];
-        for j in 0..n {
-            let pt = match holes[j].0.first() {
-                Some(pt) => *pt,
-                None => continue,
-            };
+        let find_parent = |j: usize| -> Option<usize> {
+            let pt = *holes[j].0.first()?;
             let query = AABB::from_corners([pt.x, pt.y], [pt.x, pt.y]);
             let mut best: Option<usize> = None;
             let mut best_area = f64::MAX;
@@ -315,9 +408,19 @@ fn resolve_nesting(holes: &[LineString<f64>]) -> (Vec<LineString<f64>>, Vec<Poly
                 }
                 std::ops::ControlFlow::<(), ()>::Continue(())
             });
-            p[j] = best;
+            best
+        };
+        #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+        if n >= 8 {
+            use rayon::prelude::*;
+            (0..n).into_par_iter().map(find_parent).collect()
+        } else {
+            (0..n).map(find_parent).collect()
         }
-        p
+        #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
+        {
+            (0..n).map(find_parent).collect()
+        }
     };
 
     // Compute containment depth for each hole via BFS topological sort

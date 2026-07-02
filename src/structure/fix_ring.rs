@@ -2,10 +2,13 @@ use geo::{Coord, Line, LineString};
 use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
 use smallvec::SmallVec;
+use std::sync::atomic::Ordering;
+use std::time::Instant;
 
 use crate::core;
 use crate::noding;
 use crate::orient::{orient2d, orient2d_fast};
+use crate::structure::PROFILE_FSI_NS;
 use log::warn;
 use rstar::{RTree, RTreeObject, AABB};
 use crate::structure::fix_ring_graph::{
@@ -19,7 +22,6 @@ pub(crate) fn repair_ring(ring: &LineString<f64>) -> Option<Vec<LineString<f64>>
     if coords.len() < 4 {
         return None;
     }
-    // Type B: Collinear ring is degenerate, cannot form a valid polygon.
     if is_collinear_ring(&coords) {
         return None;
     }
@@ -36,12 +38,11 @@ pub(crate) fn repair_ring(ring: &LineString<f64>) -> Option<Vec<LineString<f64>>
             .filter(|r| r.0.len() >= 4)
             .collect();
         if !cleaned.is_empty() {
-            // Fast-path output should be valid for simple crossings.
-            // Fallback handles any degenerate cases.
             return Some(cleaned);
         }
     }
 
+    // Full graph-based fix for multi-intersection, collinear overlap, etc.
     if let Some(rings) = fix_self_intersecting(&coords) {
         let cleaned: Vec<LineString<f64>> = rings
             .into_iter()
@@ -354,6 +355,7 @@ fn find_first_intersection_bruteforce(
 /// Self-intersecting ring fixer
 /// ---------------------------------------------------------------------------
 pub(crate) fn fix_self_intersecting(coords: &[Coord<f64>]) -> Option<Vec<LineString<f64>>> {
+    let _t = Instant::now();
     let edges = edges_from_coords(coords);
     let mut noded = split_edges(&edges);
     if noded.is_empty() {
@@ -476,6 +478,7 @@ pub(crate) fn fix_self_intersecting(coords: &[Coord<f64>]) -> Option<Vec<LineStr
             result.push(LineString::new(ring_coords));
         }
     }
+    PROFILE_FSI_NS.fetch_add(_t.elapsed().as_nanos() as u64, Ordering::Relaxed);
     if result.is_empty() {
         None
     } else {
