@@ -21,8 +21,8 @@ The **Structure** strategy (default) mirrors GEOS's ST_MakeValid
 algorithm: planar graph extraction, face walking, and winding-number
 assembly.  The **Arrange** strategy uses CDT-based repair as a robust
 fallback for complex topologies.  Passes 2490/2490 GEOS XML validation
-tests, with parallel batch performance **1.05× GEOS** on
-1.58M data set polygons (invalid-subset repair 1.10×, validation 4×).
+tests, with parallel batch performance **on par with GEOS** on
+1.58M data set polygons (full dataset 0.92×, validation 3.4×).
 
 See the [full documentation](https://docs.rs/geo-repair) for quick-start
 examples, validation rules, CRS support, I/O backends, Python bindings,
@@ -53,15 +53,15 @@ polygons (GEOS per-poly serial, but many polys run concurrently).
 
 | Dataset | geo-repair | GEOS | Ratio |
 |---------|------------|------|-------|
-| Invalid subset (1855 polys) | **2.13 s** / 1.15 ms each | **1.94 s** / 1.05 ms each | **0.91×** |
-| Full dataset (1.58M polys) | **3.29 s** / 2.1 µs each | **3.46 s** / 2.2 µs each | **1.05×** |
+| Invalid subset (1855 polys) | — | **1.88 s** / 1.02 ms each | — |
+| Full dataset (1.58M polys) | **3.34 s** / 2.1 µs each | **3.61 s** / 2.3 µs each | **0.92×** |
 
-Validation comparison on full dataset — our validator is **4× faster**:
+Validation comparison on full dataset — our validator is **3.4× faster**:
 
 | Validator | total | per-poly |
 |-----------|-------|----------|
-| Geo-repair | 0.82 s | 0.52 µs |
-| GEOS isValid | 3.32 s | 2.10 µs |
+| Geo-repair | 1.13 s | 0.71 µs |
+| GEOS isValid | 3.78 s | 2.40 µs |
 
 ### Synthetic benchmarks
 
@@ -72,45 +72,45 @@ WKT, decode by GEOS).  GeoRepair serial column is apples-to-apples
 
 | Benchmark | GeoRepair (ser) | GeoRepair (par) | GEOS (par batch) | Ratio (ser) |
 |-----------|----------------:|----------------:|-----------------:|------------:|
-| Valid polygon 4v | 0.21 | 0.10 µs | 3.79 µs | 18× |
-| Valid polygon 50v | 0.43 | 0.32 µs | 5.13 µs | 12× |
-| Valid polygon 500v | 3.06 | 1.77 µs | 34.1 µs | 11× |
-| Valid polygon 10000v | 49.5 | 37.6 µs | 647 µs | 13× |
-| Invalid bowtie 4v | 2.09 | 0.33 µs | 17.8 µs | 8.5× |
-| Invalid star 100v | 25.6 | 4.46 µs | 22.5 µs | 0.9× |
-| Self-touching poly | 4.13 | 1.10 µs | 20.8 µs | 5.0× |
-| Collapsed poly | 0.76 | 0.19 µs | 27.9 µs | 37× |
-| Near-collinear poly | 1.40 | 0.44 µs | 42.5 µs | 30× |
-| Hilbert curve 256v | 0.58 | 0.56 µs | 14.3 µs | 25× |
-| Hilbert curve 1024v | 2.38 | 1.93 µs | 34.7 µs | 15× |
-| Lissajous 200v | 0.39 | 0.46 µs | 20.5 µs | 52× |
-| Lissajous 1000v | 3.50 | 4.28 µs | 98.7 µs | 28× |
-| Star-burst 10sp | 0.27 | 0.07 µs | 7.26 µs | 27× |
-| Star-burst 50sp | 0.95 | 0.21 µs | 12.9 µs | 14× |
-| Star-burst 100sp | 1.97 | 0.32 µs | 24.7 µs | 13× |
-| Star-burst 500sp | 8.99 | 1.26 µs | 122 µs | 14× |
-| Spoke wheel 10sp | 0.22 | 0.06 µs | 5.91 µs | 27× |
-| Spoke wheel 50sp | 0.73 | 0.15 µs | 8.06 µs | 11× |
-| Spoke wheel 100sp | 2.10 | 0.43 µs | 14.0 µs | 6.7× |
-| Spoke wheel 500sp | 8.71 | 1.32 µs | 71.6 µs | 8.2× |
-| Star-comb 20sp | 0.23 | 0.10 µs | 6.73 µs | 29× |
-| Star-comb 100sp | 0.81 | 0.20 µs | 12.1 µs | 15× |
-| Star-comb 500sp | 4.02 | 0.83 µs | 48.3 µs | 12× |
-| Collinear overlap 10seg | 0.29 | 0.08 µs | 5.11 µs | 18× |
-| Collinear overlap 50seg | 1.19 | 0.24 µs | 5.21 µs | 4.4× |
-| Collinear overlap 100seg | 2.50 | 0.49 µs | 8.15 µs | 3.3× |
-| Collinear overlap 500seg | 10.8 | 1.95 µs | 41.3 µs | 3.8× |
-| Hole hierarchy 5h | 1.85 | 1.17 µs | 8.24 µs | 4.5× |
-| Hole hierarchy 20h | 5.56 | 3.65 µs | 14.2 µs | 2.6× |
-| Hole hierarchy 50h | 17.5 | 12.8 µs | 59.7 µs | 3.4× |
-| Overlapping MP 5sh | 3.98 | 1.41 µs | 421 µs | 106× |
-| Overlapping MP 20sh | 19.3 | 6.72 µs | 2581 µs | 134× |
-| Overlapping MP 50sh | 44.8 | 15.2 µs | 6649 µs | 148× |
-| Dense grid 5×5=25 | 13.8 | 5.19 µs | 1631 µs | 118× |
-| Dense grid 10×10=100 | 63.8 | 28.0 µs | 14005 µs | 220× |
-| Dense grid 20×20=400 | 283 | 136 µs | 100012 µs | 353× |
-| Sliver polygon 100v | 3.38 | 2.02 µs | 18.2 µs | 5.4× |
-| Sliver polygon 500v | 16.6 | 7.60 µs | 72.4 µs | 4.4× |
+| Valid polygon 4v | 0.21 µs | 0.10 µs | 3.79 µs | 18× |
+| Valid polygon 50v | 0.43 µs | 0.32 µs | 5.13 µs | 12× |
+| Valid polygon 500v | 3.06 µs | 1.77 µs | 34.1 µs | 11× |
+| Valid polygon 10000v | 49.5 µs | 37.6 µs | 647 µs | 13× |
+| Invalid bowtie 4v | 2.09 µs | 0.33 µs | 17.8 µs | 8.5× |
+| Invalid star 100v | 25.6 µs | 4.46 µs | 22.5 µs | 0.9× |
+| Self-touching poly | 4.13 µs | 1.10 µs | 20.8 µs | 5.0× |
+| Collapsed poly | 0.76 µs | 0.19 µs | 27.9 µs | 37× |
+| Near-collinear poly | 1.40 µs | 0.44 µs | 42.5 µs | 30× |
+| Hilbert curve 256v | 0.58 µs | 0.56 µs | 14.3 µs | 25× |
+| Hilbert curve 1024v | 2.38 µs | 1.93 µs | 34.7 µs | 15× |
+| Lissajous 200v | 0.39 µs | 0.46 µs | 20.5 µs | 52× |
+| Lissajous 1000v | 3.50 µs | 4.28 µs | 98.7 µs | 28× |
+| Star-burst 10sp | 0.27 µs | 0.07 µs | 7.26 µs | 27× |
+| Star-burst 50sp | 0.95 µs | 0.21 µs | 12.9 µs | 14× |
+| Star-burst 100sp | 1.97 µs | 0.32 µs | 24.7 µs | 13× |
+| Star-burst 500sp | 8.99 µs | 1.26 µs | 122 µs | 14× |
+| Spoke wheel 10sp | 0.22 µs | 0.06 µs | 5.91 µs | 27× |
+| Spoke wheel 50sp | 0.73 µs | 0.15 µs | 8.06 µs | 11× |
+| Spoke wheel 100sp | 2.10 µs | 0.43 µs | 14.0 µs | 6.7× |
+| Spoke wheel 500sp | 8.71 µs | 1.32 µs | 71.6 µs | 8.2× |
+| Star-comb 20sp | 0.23 µs | 0.10 µs | 6.73 µs | 29× |
+| Star-comb 100sp | 0.81 µs | 0.20 µs | 12.1 µs | 15× |
+| Star-comb 500sp | 4.02 µs | 0.83 µs | 48.3 µs | 12× |
+| Collinear overlap 10seg | 0.29 µs | 0.08 µs | 5.11 µs | 18× |
+| Collinear overlap 50seg | 1.19 µs | 0.24 µs | 5.21 µs | 4.4× |
+| Collinear overlap 100seg | 2.50 µs | 0.49 µs | 8.15 µs | 3.3× |
+| Collinear overlap 500seg | 10.8 µs | 1.95 µs | 41.3 µs | 3.8× |
+| Hole hierarchy 5h | 1.85 µs | 1.17 µs | 8.24 µs | 4.5× |
+| Hole hierarchy 20h | 5.56 µs | 3.65 µs | 14.2 µs | 2.6× |
+| Hole hierarchy 50h | 17.5 µs | 12.8 µs | 59.7 µs | 3.4× |
+| Overlapping MP 5sh | 3.98 µs | 1.41 µs | 421 µs | 106× |
+| Overlapping MP 20sh | 19.3 µs | 6.72 µs | 2581 µs | 134× |
+| Overlapping MP 50sh | 44.8 µs | 15.2 µs | 6649 µs | 148× |
+| Dense grid 5×5=25 | 13.8 µs | 5.19 µs | 1631 µs | 118× |
+| Dense grid 10×10=100 | 63.8 µs | 28.0 µs | 14005 µs | 220× |
+| Dense grid 20×20=400 | 283 µs | 136 µs | 100012 µs | 353× |
+| Sliver polygon 100v | 3.38 µs | 2.02 µs | 18.2 µs | 5.4× |
+| Sliver polygon 500v | 16.6 µs | 7.60 µs | 72.4 µs | 4.4× |
 
 **Arrange pipeline (CDT fallback):**
 
@@ -125,7 +125,7 @@ WKT, decode by GEOS).  GeoRepair serial column is apples-to-apples
 **Notes on GEOS comparison:**
 - conda-forge `libgeos` on Windows is compiled with MSVC, runs single-threaded internally, and does not use LTO. The "par batch" columns run many GEOS calls concurrently via Rayon (throughput parallelism), since GEOS per-call is serial.
 - Synthetic GEOS numbers include WKT serialization/deserialization overhead. The real-world benchmark uses GEOS CoordSeq direct construction (no WKT) for fair comparison.
-- GeoRepair parallel speedup is typically 2-4× on 12 cores for synthetic shapes (sub-5µs per call — Rayon overhead dominates). For real-world batches of 1.58M polygons, the throughput advantage is larger due to better amortization.
+- GeoRepair parallel speedup is typically 1-3× on 12 cores for synthetic shapes (sub-5µs per call — Rayon overhead dominates). For real-world batches of 1.58M polygons, the throughput advantage is larger due to better amortization.
 
 ### Run benchmarks
 
