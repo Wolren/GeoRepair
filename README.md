@@ -51,10 +51,10 @@ conda-forge (MSVC, serial internally, no LTO).  i5-12400F (6C/12T),
 mimalloc.  Both benchmarks run in parallel via Rayon batch over all
 polygons (GEOS per-poly serial, but many polys run concurrently).
 
-| Dataset | geo-repair | GEOS | Ratio |
-|---------|------------|------|-------|
-| Invalid subset (1855 polys) | — | **1.88 s** / 1.02 ms each | — |
-| Full dataset (1.58M polys) | **3.34 s** / 2.1 µs each | **3.61 s** / 2.3 µs each | **0.92×** |
+| Dataset | GeoRepair | Per-poly | GEOS | Per-poly | vs GEOS |
+|---------|-----------|----------|------|----------|---------|
+| Invalid subset (1855 polys) | **1.96 s** | 1.06 ms | **1.88 s** | 1.02 ms | *1.04×* |
+| Full dataset (1.58M polys) | **3.34 s** | 2.1 µs | **3.61 s** | 2.3 µs | *0.92×* |
 
 Validation comparison on full dataset — our validator is **3.4× faster**:
 
@@ -70,47 +70,50 @@ Structure strategy, i5-12400F (6C/12T).  GEOS linked via conda-forge
 WKT, decode by GEOS).  GeoRepair serial column is apples-to-apples
 (single-threaded); parallel column shows the Rayon batch speedup.
 
-| Benchmark | GeoRepair (ser) | GeoRepair (par) | GEOS (par batch) | Ratio (ser) |
-|-----------|----------------:|----------------:|-----------------:|------------:|
-| Valid polygon 4v | 0.21 µs | 0.10 µs | 3.79 µs | 18× |
-| Valid polygon 50v | 0.43 µs | 0.32 µs | 5.13 µs | 12× |
-| Valid polygon 500v | 3.06 µs | 1.77 µs | 34.1 µs | 11× |
-| Valid polygon 10000v | 49.5 µs | 37.6 µs | 647 µs | 13× |
-| Invalid bowtie 4v | 2.09 µs | 0.33 µs | 17.8 µs | 8.5× |
-| Invalid star 100v | 25.6 µs | 4.46 µs | 22.5 µs | 0.9× |
-| Self-touching poly | 4.13 µs | 1.10 µs | 20.8 µs | 5.0× |
-| Collapsed poly | 0.76 µs | 0.19 µs | 27.9 µs | 37× |
-| Near-collinear poly | 1.40 µs | 0.44 µs | 42.5 µs | 30× |
-| Hilbert curve 256v | 0.58 µs | 0.56 µs | 14.3 µs | 25× |
-| Hilbert curve 1024v | 2.38 µs | 1.93 µs | 34.7 µs | 15× |
-| Lissajous 200v | 0.39 µs | 0.46 µs | 20.5 µs | 52× |
-| Lissajous 1000v | 3.50 µs | 4.28 µs | 98.7 µs | 28× |
-| Star-burst 10sp | 0.27 µs | 0.07 µs | 7.26 µs | 27× |
-| Star-burst 50sp | 0.95 µs | 0.21 µs | 12.9 µs | 14× |
-| Star-burst 100sp | 1.97 µs | 0.32 µs | 24.7 µs | 13× |
-| Star-burst 500sp | 8.99 µs | 1.26 µs | 122 µs | 14× |
-| Spoke wheel 10sp | 0.22 µs | 0.06 µs | 5.91 µs | 27× |
-| Spoke wheel 50sp | 0.73 µs | 0.15 µs | 8.06 µs | 11× |
-| Spoke wheel 100sp | 2.10 µs | 0.43 µs | 14.0 µs | 6.7× |
-| Spoke wheel 500sp | 8.71 µs | 1.32 µs | 71.6 µs | 8.2× |
-| Star-comb 20sp | 0.23 µs | 0.10 µs | 6.73 µs | 29× |
-| Star-comb 100sp | 0.81 µs | 0.20 µs | 12.1 µs | 15× |
-| Star-comb 500sp | 4.02 µs | 0.83 µs | 48.3 µs | 12× |
-| Collinear overlap 10seg | 0.29 µs | 0.08 µs | 5.11 µs | 18× |
-| Collinear overlap 50seg | 1.19 µs | 0.24 µs | 5.21 µs | 4.4× |
-| Collinear overlap 100seg | 2.50 µs | 0.49 µs | 8.15 µs | 3.3× |
-| Collinear overlap 500seg | 10.8 µs | 1.95 µs | 41.3 µs | 3.8× |
-| Hole hierarchy 5h | 1.85 µs | 1.17 µs | 8.24 µs | 4.5× |
-| Hole hierarchy 20h | 5.56 µs | 3.65 µs | 14.2 µs | 2.6× |
-| Hole hierarchy 50h | 17.5 µs | 12.8 µs | 59.7 µs | 3.4× |
-| Overlapping MP 5sh | 3.98 µs | 1.41 µs | 421 µs | 106× |
-| Overlapping MP 20sh | 19.3 µs | 6.72 µs | 2581 µs | 134× |
-| Overlapping MP 50sh | 44.8 µs | 15.2 µs | 6649 µs | 148× |
-| Dense grid 5×5=25 | 13.8 µs | 5.19 µs | 1631 µs | 118× |
-| Dense grid 10×10=100 | 63.8 µs | 28.0 µs | 14005 µs | 220× |
-| Dense grid 20×20=400 | 283 µs | 136 µs | 100012 µs | 353× |
-| Sliver polygon 100v | 3.38 µs | 2.02 µs | 18.2 µs | 5.4× |
-| Sliver polygon 500v | 16.6 µs | 7.60 µs | 72.4 µs | 4.4× |
+**Bold** ratio = ≥ 100× (massive).  *Italic* ratio = < 10× (modest).
+**Bold** Ser/Par = ≥ 5× (good parallel scaling).
+
+| Benchmark | Ser (µs) | Par (µs) | GEOS (µs) | Ratio (ser) | Ratio (par) | Ser/Par |
+|-----------|---------:|---------:|----------:|------------:|------------:|--------:|
+| Valid polygon 4v | 0.21 | 0.10 | 3.79 | 18× | *38×* | 2.1× |
+| Valid polygon 50v | 0.43 | 0.32 | 5.13 | 12× | *16×* | 1.3× |
+| Valid polygon 500v | 3.06 | 1.77 | 34.1 | 11× | *19×* | 1.7× |
+| Valid polygon 10000v | 49.5 | 37.6 | 647 | 13× | *17×* | 1.3× |
+| Invalid bowtie 4v | 2.09 | 0.33 | 17.8 | *8.5×* | *54×* | **6.3×** |
+| Invalid star 100v | 25.6 | 4.46 | 22.5 | *0.9×* | *5.0×* | **5.7×** |
+| Self-touching poly | 4.13 | 1.10 | 20.8 | *5.0×* | *19×* | 3.8× |
+| Collapsed poly | 0.76 | 0.19 | 27.9 | *37×* | **147×** | 4.0× |
+| Near-collinear poly | 1.40 | 0.44 | 42.5 | *30×* | *97×* | 3.2× |
+| Hilbert curve 256v | 0.58 | 0.56 | 14.3 | *25×* | *26×* | 1.0× |
+| Hilbert curve 1024v | 2.38 | 1.93 | 34.7 | *15×* | *18×* | 1.2× |
+| Lissajous 200v | 0.39 | 0.46 | 20.5 | *53×* | *45×* | 0.8× |
+| Lissajous 1000v | 3.50 | 4.28 | 98.7 | *28×* | *23×* | 0.8× |
+| Star-burst 10sp | 0.27 | 0.07 | 7.26 | *27×* | **104×** | 3.9× |
+| Star-burst 50sp | 0.95 | 0.21 | 12.9 | *14×* | *61×* | 4.5× |
+| Star-burst 100sp | 1.97 | 0.32 | 24.7 | *13×* | *77×* | **6.2×** |
+| Star-burst 500sp | 8.99 | 1.26 | 122 | *14×* | *97×* | **7.1×** |
+| Spoke wheel 10sp | 0.22 | 0.06 | 5.91 | *27×* | *99×* | 3.7× |
+| Spoke wheel 50sp | 0.73 | 0.15 | 8.06 | *11×* | *54×* | 4.9× |
+| Spoke wheel 100sp | 2.10 | 0.43 | 14.0 | *6.7×* | *33×* | 4.9× |
+| Spoke wheel 500sp | 8.71 | 1.32 | 71.6 | *8.2×* | *54×* | **6.6×** |
+| Star-comb 20sp | 0.23 | 0.10 | 6.73 | *29×* | *67×* | 2.3× |
+| Star-comb 100sp | 0.81 | 0.20 | 12.1 | *15×* | *61×* | 4.0× |
+| Star-comb 500sp | 4.02 | 0.83 | 48.3 | *12×* | *58×* | 4.8× |
+| Collinear overlap 10seg | 0.29 | 0.08 | 5.11 | *18×* | *64×* | 3.6× |
+| Collinear overlap 50seg | 1.19 | 0.24 | 5.21 | *4.4×* | *22×* | **5.0×** |
+| Collinear overlap 100seg | 2.50 | 0.49 | 8.15 | *3.3×* | *17×* | **5.1×** |
+| Collinear overlap 500seg | 10.8 | 1.95 | 41.3 | *3.8×* | *21×* | **5.5×** |
+| Hole hierarchy 5h | 1.85 | 1.17 | 8.24 | *4.5×* | *7.0×* | 1.6× |
+| Hole hierarchy 20h | 5.56 | 3.65 | 14.2 | *2.6×* | *3.9×* | 1.5× |
+| Hole hierarchy 50h | 17.5 | 12.8 | 59.7 | *3.4×* | *4.7×* | 1.4× |
+| Overlapping MP 5sh | 3.98 | 1.41 | 421 | **106×** | **299×** | 2.8× |
+| Overlapping MP 20sh | 19.3 | 6.72 | 2581 | **134×** | **384×** | 2.9× |
+| Overlapping MP 50sh | 44.8 | 15.2 | 6649 | **148×** | **437×** | 2.9× |
+| Dense grid 5×5=25 | 13.8 | 5.19 | 1631 | **118×** | **314×** | 2.7× |
+| Dense grid 10×10=100 | 63.8 | 28.0 | 14005 | **220×** | **500×** | 2.3× |
+| Dense grid 20×20=400 | 283 | 136 | 100012 | **353×** | **735×** | 2.1× |
+| Sliver polygon 100v | 3.38 | 2.02 | 18.2 | *5.4×* | *9.0×* | 1.7× |
+| Sliver polygon 500v | 16.6 | 7.60 | 72.4 | *4.4×* | *9.5×* | 2.2× |
 
 **Arrange pipeline (CDT fallback):**
 
