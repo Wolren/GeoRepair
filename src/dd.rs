@@ -523,7 +523,6 @@ mod tests {
             Coord { x: 1.0, y: 0.0 },
         );
         assert!(dd_call_count() > prev, "counter should have incremented");
-        let count = dd_call_count();
         reset_dd_count();
         assert_eq!(dd_call_count(), 0, "reset should zero counter");
     }
