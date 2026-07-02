@@ -5,6 +5,25 @@
 //!
 //! Based on the algorithms of Dekker, Knuth, and Ogita–Rump–Oishi.
 //! Used by GEOS and JTS for exact line intersection and coordinate computation.
+//!
+//! # Profiling
+//! [`dd_call_count`] and [`reset_dd_count`] track total invocations of
+//! [`segment_intersection_dd`] across the repair pipeline.
+
+use std::sync::atomic::{AtomicU64, Ordering};
+
+pub(crate) static DD_CALL_COUNT: AtomicU64 = AtomicU64::new(0);
+
+/// Reset the DD call counter to zero.  Call before a profiling run.
+pub fn reset_dd_count() {
+    DD_CALL_COUNT.store(0, Ordering::Relaxed);
+}
+
+/// Return the total number of [`segment_intersection_dd`] calls since the
+/// last reset (or program start).
+pub fn dd_call_count() -> u64 {
+    DD_CALL_COUNT.load(Ordering::Relaxed)
+}
 
 use geo::Coord;
 
@@ -244,6 +263,7 @@ pub(crate) fn segment_intersection_dd(
     c: Coord<f64>,
     d: Coord<f64>,
 ) -> Option<(Coord<f64>, DD, DD)> {
+    DD_CALL_COUNT.fetch_add(1, Ordering::Relaxed);
     // Normalize large coordinates to prevent overflow in DD intermediate products.
     let large_threshold = 1e15;
     let needs_norm = a.x.abs() > large_threshold
@@ -490,5 +510,44 @@ mod tests {
         let raw = DD::new(1.0, 1e-16);
         let renorm = DD::renormalize(raw.hi, raw.lo);
         assert!((renorm.to_f64() - 1.0000000000000001).abs() < 1e-16);
+    }
+
+    #[test]
+    fn test_dd_call_counter() {
+        // Also tests that DD_CALL_COUNT tracks segment_intersection_dd calls.
+        let prev = dd_call_count();
+        segment_intersection_dd(
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 1.0, y: 1.0 },
+            Coord { x: 0.0, y: 1.0 },
+            Coord { x: 1.0, y: 0.0 },
+        );
+        assert!(dd_call_count() > prev, "counter should have incremented");
+        let count = dd_call_count();
+        reset_dd_count();
+        assert_eq!(dd_call_count(), 0, "reset should zero counter");
+    }
+
+    #[cfg(feature = "structure")]
+    #[test]
+    fn test_dd_called_during_polygon_repair() {
+        use crate::MakeValid;
+        use geo::Polygon;
+        // Bowtie polygon — classic self-intersecting case
+        let poly = Polygon::new(
+            geo::LineString::new(vec![
+                Coord { x: 0.0, y: 0.0 },
+                Coord { x: 10.0, y: 10.0 },
+                Coord { x: 10.0, y: 0.0 },
+                Coord { x: 0.0, y: 10.0 },
+                Coord { x: 0.0, y: 0.0 },
+            ]),
+            vec![],
+        );
+        reset_dd_count();
+        let _result = poly.make_valid();
+        let n = dd_call_count();
+        eprintln!("DD calls for bowtie repair: {n}");
+        assert!(n > 0, "DD should be called during polygon repair");
     }
 }

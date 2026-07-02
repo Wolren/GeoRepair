@@ -28,20 +28,6 @@ See the [full documentation](https://docs.rs/geo-repair) for quick-start
 examples, validation rules, CRS support, I/O backends, Python bindings,
 C FFI, and known limitations.
 
-## What it does
-
-Real-world GIS data often contains geometry defects.  GeoRepair detects
-these via OGC-style validation and repairs them:
-
-| Geometry | Repair approach |
-|----------|----------------|
-| `Polygon` / `MultiPolygon` | Two strategies (Structure fast path / Arrange CDT fallback) |
-| `LineString` / `MultiLineString` | NaN filtering, duplicate removal, self-intersection noding |
-| `Line` | Zero-length and NaN detection |
-| `Point` / `MultiPoint` | NaN/Inf filtering, deduplication |
-| `Rect` / `Triangle` | Basic degeneracy checks |
-| `GeometryCollection` | Recursive repair of children |
-
 ## Performance
 
 ### Real-world dataset (1,578,988 polygons)
@@ -51,11 +37,11 @@ conda-forge (MSVC, serial internally, no LTO).  i5-12400F (6C/12T),
 mimalloc.  All columns are parallel batch (Rayon 12 threads); serial
 included for reference.
 
-| Dataset | GeoRepair (ser) | Per-poly | GeoRepair (par) | Per-poly | GEOS (par batch) | Per-poly | vs GEOS |
-|---------|----------------:|---------:|----------------:|---------:|-----------------:|---------:|:-------:|
-| Validation (1.58M) | 3.14 s | 2.0 µs | **1.13 s** | 0.71 µs | **3.78 s** | 2.40 µs | **3.3×** |
-| Invalid subset (1855 polys) | 5.78 s | 3.12 ms | **1.96 s** | 1.06 ms | **1.88 s** | 1.02 ms | **1.04×** |
-| Full dataset (1.58M polys) | 9.40 s | 5.96 µs | **3.34 s** | 2.1 µs | **3.61 s** | 2.3 µs | **0.92×** |
+| Dataset | GeoRepair (ser) | GeoRepair (par) | GEOS (par batch) | vs GEOS |
+|---------|----------------:|----------------:|-----------------:|:-------:|
+| Validation (1.58M) | 3.14 s | **1.13 s** | **3.78 s** | **3.3×** |
+| Invalid subset (1855 polys) | 5.78 s | **1.96 s** | **1.88 s** | **1.04×** |
+| Full dataset (1.58M polys) | 9.40 s | **3.34 s** | **3.61 s** | **0.92×** |
 
 ### Synthetic benchmarks (CoordSeq direct — no WKT overhead)
 

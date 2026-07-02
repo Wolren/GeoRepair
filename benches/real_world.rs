@@ -30,6 +30,7 @@ use geo::{Coord, Polygon};
 #[cfg(any(feature = "bench-geos", feature = "bench-geos-system", not(feature = "parallel")))]
 use geo::Geometry;
 use geo_repair::arrange::validate_polygon;
+use geo_repair::dd::{dd_call_count, reset_dd_count};
 use geo_repair::io::load_bin;
 use geo_repair::orient::orient2d;
 #[cfg(feature = "parallel")]
@@ -482,6 +483,9 @@ fn main() {
     let invalid_polys: Vec<&Polygon<f64>> = sample_idx.iter().map(|&idx| &polys[idx]).collect();
 
     // Parallel Structure batch processing
+    reset_dd_count();
+    #[cfg(feature = "structure")]
+    geo_repair::structure::reset_profile();
     let t0 = Instant::now();
     let cfg = MakeValidConfig {
         poly_method: PolyMethod::Structure,
@@ -495,6 +499,13 @@ fn main() {
         .map(|p| p.make_valid_with_config(&cfg))
         .collect();
     let stru_total = t0.elapsed().as_secs_f64();
+    let dd_calls = dd_call_count();
+    eprintln!("  DD calls: {dd_calls} ({:.0} per poly, {:.3}µs per call est = {:.3}s)",
+        dd_calls as f64 / sample_n as f64,
+        0.2, // estimated 200ns per DD call
+        dd_calls as f64 * 0.2e-6);
+    #[cfg(feature = "structure")]
+    geo_repair::structure::print_profile(sample_n);
 
     // Validate all Structure outputs through GEOS is_valid()
     #[allow(unused_mut)]
