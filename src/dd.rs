@@ -19,7 +19,7 @@ pub fn reset_dd_count() {
     DD_CALL_COUNT.store(0, Ordering::Relaxed);
 }
 
-/// Return the total number of [`segment_intersection_dd`] calls since the
+/// Return the total number of `segment_intersection_dd` calls since the
 /// last reset (or program start).
 pub fn dd_call_count() -> u64 {
     DD_CALL_COUNT.load(Ordering::Relaxed)
