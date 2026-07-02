@@ -22,7 +22,7 @@ algorithm: planar graph extraction, face walking, and winding-number
 assembly.  The **Arrange** strategy uses CDT-based repair as a robust
 fallback for complex topologies.  Passes 2490/2490 GEOS XML validation
 tests, with parallel batch performance roughly **on par with GEOS** on
-1.58M data set polygons (full dataset 1.10×, validation 4.3×).
+1.58M data set polygons (full dataset 0.92×, validation 3.3×).
 
 See the [full documentation](https://docs.rs/geo-repair) for quick-start
 examples, validation rules, CRS support, I/O backends, Python bindings,
@@ -46,18 +46,16 @@ these via OGC-style validation and repairs them:
 
 ### Real-world dataset (1,578,988 polygons)
 
-Structure pipeline on a production GIS dataset.  GEOS linked via
+Structure batch on a production GIS dataset.  GEOS linked via
 conda-forge (MSVC, serial internally, no LTO).  i5-12400F (6C/12T),
-mimalloc.  Both run Rayon parallel batch (GEOS per-call serial,
-many calls run concurrently).
+mimalloc.  All columns are parallel batch (Rayon 12 threads); serial
+included for reference.
 
-| Dataset | GeoRepair (par) | Per-poly | GEOS (par batch) | Per-poly | vs GEOS |
-|---------|----------------:|---------:|-----------------:|---------:|:-------:|
-| Validation (1.58M) | **0.99 s** | 0.63 µs | **4.27 s** | 2.70 µs | **4.3×** \* |
-| Invalid subset (1855 polys) | **2.63 s** | 1.42 ms | **2.51 s** | 1.35 ms | **1.05×** |
-| Full dataset (1.58M polys) | **4.38 s** | 2.77 µs | **3.99 s** | 2.53 µs | **1.10×** |
-
-> `*` GeoRepair validation is **4.3× faster** than GEOS isValid.
+| Dataset | GeoRepair (ser) | Per-poly | GeoRepair (par) | Per-poly | GEOS (par batch) | Per-poly | vs GEOS |
+|---------|----------------:|---------:|----------------:|---------:|-----------------:|---------:|:-------:|
+| Validation (1.58M) | 3.14 s | 2.0 µs | **1.13 s** | 0.71 µs | **3.78 s** | 2.40 µs | **3.3×** |
+| Invalid subset (1855 polys) | 5.78 s | 3.12 ms | **1.96 s** | 1.06 ms | **1.88 s** | 1.02 ms | **1.04×** |
+| Full dataset (1.58M polys) | 9.40 s | 5.96 µs | **3.34 s** | 2.1 µs | **3.61 s** | 2.3 µs | **0.92×** |
 
 ### Synthetic benchmarks (CoordSeq direct — no WKT overhead)
 
