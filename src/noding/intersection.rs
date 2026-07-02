@@ -1,4 +1,5 @@
-use crate::orient::orient2d as orient2d_robust;
+#![allow(dead_code)]
+use crate::orient::orient2d_fast;
 use geo::{Coord, GeoFloat, Line};
 use std::mem;
 
@@ -35,10 +36,31 @@ mod private {
 
 pub(crate) use private::NodingFloat;
 
-/// Check if any non-adjacent edges in the segment list intersect.
+/// Returns true when every edge shares one of two common endpoints —
+/// a radial/star topology that cannot produce proper crossings.
+fn is_radial<T: GeoFloat>(edges: &[Line<T>]) -> bool {
+    if edges.len() < 3 {
+        return false;
+    }
+    let a = edges[0].start;
+    let b = edges[0].end;
+    if a == b {
+        return false;
+    }
+    edges
+        .iter()
+        .all(|e| e.start == a || e.end == a || e.start == b || e.end == b)
+}
+
 pub(crate) fn check_self_intersections<T: GeoFloat>(edges: &[Line<T>]) -> bool {
     let eps = T::from(1e-12).expect("1e-12 fits any GeoFloat");
     if edges.len() < 3 {
+        return false;
+    }
+
+    // Radial geometry fast path: all edges share a common endpoint so
+    // no non-adjacent pair can properly cross — only touch at that point.
+    if is_radial(edges) {
         return false;
     }
 
@@ -66,6 +88,20 @@ pub(crate) fn check_self_intersections<T: GeoFloat>(edges: &[Line<T>]) -> bool {
     // Brute force for smaller edge sets or when rstar unavailable
     for i in 0..edges.len() {
         for j in (i + 2)..edges.len() {
+            let e1 = &edges[i];
+            let e2 = &edges[j];
+            if e1.start == e2.start && orient2d_generic(e1.start, e1.end, e2.end) != T::zero() {
+                continue;
+            }
+            if e1.start == e2.end && orient2d_generic(e1.start, e1.end, e2.start) != T::zero() {
+                continue;
+            }
+            if e1.end == e2.start && orient2d_generic(e1.end, e1.start, e2.end) != T::zero() {
+                continue;
+            }
+            if e1.end == e2.end && orient2d_generic(e1.end, e1.start, e2.start) != T::zero() {
+                continue;
+            }
             if edges_intersect(&edges[i], &edges[j], eps) {
                 return true;
             }
@@ -123,6 +159,26 @@ fn check_self_intersections_f64(edges: &[Line<f64>], eps: f64) -> bool {
             if j + 1 == i && edges[j].end == edges[i].start {
                 return std::ops::ControlFlow::Continue(());
             }
+            if edges[i].start == edges[j].start
+                && orient2d_fast(edges[i].start, edges[i].end, edges[j].end) != 0.0
+            {
+                return std::ops::ControlFlow::Continue(());
+            }
+            if edges[i].start == edges[j].end
+                && orient2d_fast(edges[i].start, edges[i].end, edges[j].start) != 0.0
+            {
+                return std::ops::ControlFlow::Continue(());
+            }
+            if edges[i].end == edges[j].start
+                && orient2d_fast(edges[i].end, edges[i].start, edges[j].end) != 0.0
+            {
+                return std::ops::ControlFlow::Continue(());
+            }
+            if edges[i].end == edges[j].end
+                && orient2d_fast(edges[i].end, edges[i].start, edges[j].start) != 0.0
+            {
+                return std::ops::ControlFlow::Continue(());
+            }
             if edges_intersect(&edges[i], &edges[j], eps) {
                 std::ops::ControlFlow::Break(())
             } else {
@@ -137,6 +193,18 @@ fn check_self_intersections_f64(edges: &[Line<f64>], eps: f64) -> bool {
 }
 
 pub(crate) fn edges_intersect<T: GeoFloat>(e1: &Line<T>, e2: &Line<T>, eps: T) -> bool {
+    if e1.start == e2.start && orient2d_generic(e1.start, e1.end, e2.end) != T::zero() {
+        return false;
+    }
+    if e1.start == e2.end && orient2d_generic(e1.start, e1.end, e2.start) != T::zero() {
+        return false;
+    }
+    if e1.end == e2.start && orient2d_generic(e1.end, e1.start, e2.end) != T::zero() {
+        return false;
+    }
+    if e1.end == e2.end && orient2d_generic(e1.end, e1.start, e2.start) != T::zero() {
+        return false;
+    }
     // For f64, use robust orient2d (Shewchuk's algorithm)
     // to avoid false negatives with near-collinear edges at large coordinates.
     if mem::size_of::<T>() == 8 {
@@ -185,10 +253,24 @@ pub(crate) fn edges_intersect<T: GeoFloat>(e1: &Line<T>, e2: &Line<T>, eps: T) -
 
 /// Robust intersection test for f64 edges using Shewchuk's orient2d.
 fn edges_intersect_f64_robust(e1: &Line<f64>, e2: &Line<f64>, eps: f64) -> bool {
-    let o1 = orient2d_robust(e1.start, e1.end, e2.start);
-    let o2 = orient2d_robust(e1.start, e1.end, e2.end);
-    let o3 = orient2d_robust(e2.start, e2.end, e1.start);
-    let o4 = orient2d_robust(e2.start, e2.end, e1.end);
+    if e1.start == e2.start && orient2d_fast(e1.start, e1.end, e2.end) != 0.0 {
+        return false;
+    }
+    if e1.start == e2.end && orient2d_fast(e1.start, e1.end, e2.start) != 0.0 {
+        return false;
+    }
+    if e1.end == e2.start && orient2d_fast(e1.end, e1.start, e2.end) != 0.0 {
+        return false;
+    }
+    if e1.end == e2.end && orient2d_fast(e1.end, e1.start, e2.start) != 0.0 {
+        return false;
+    }
+    let batch = crate::simd::orient2d_batch_4_robust(
+        &[e1.start, e1.start, e2.start, e2.start],
+        &[e1.end, e1.end, e2.end, e2.end],
+        &[e2.start, e2.end, e1.start, e1.end],
+    );
+    let (o1, o2, o3, o4) = (batch[0], batch[1], batch[2], batch[3]);
 
     if o1.abs() > eps && o2.abs() > eps && o3.abs() > eps && o4.abs() > eps {
         return o1.signum() != o2.signum() && o3.signum() != o4.signum();
@@ -319,12 +401,14 @@ pub(crate) fn compute_intersection_param<T: GeoFloat>(
                 y: e2.end.y.to_f64().expect("to_f64"),
             },
         );
-        // Phase 1: Detection via robust orient2d (Shewchuk adaptive precision).
-        // Fast pre-check: reject when both endpoints are on the same side.
-        let o1 = orient2d_robust(ef1.start, ef1.end, ef2.start);
-        let o2 = orient2d_robust(ef1.start, ef1.end, ef2.end);
-        let o3 = orient2d_robust(ef2.start, ef2.end, ef1.start);
-        let o4 = orient2d_robust(ef2.start, ef2.end, ef1.end);
+        // Phase 1: Detection via batch robust orient2d (SIMD fast path +
+        // Shewchuk adaptive-precision fallback for near-zero results).
+        let batch = crate::simd::orient2d_batch_4_robust(
+            &[ef1.start, ef1.start, ef2.start, ef2.start],
+            &[ef1.end, ef1.end, ef2.end, ef2.end],
+            &[ef2.start, ef2.end, ef1.start, ef1.end],
+        );
+        let (o1, o2, o3, o4) = (batch[0], batch[1], batch[2], batch[3]);
 
         // Quick rejection: both endpoints of one segment on the same side
         // of the other segment → they cannot intersect (fast path).

@@ -1,7 +1,7 @@
 //! Sweep structure parallel vs GEOS across all geometry shapes.
-//! Usage: cargo bench --bench quick_bench (no GEOS)
-//!        cargo bench --features bench-geos --bench quick_bench (GEOS static)
-//!        cargo bench --features bench-geos-system --bench quick_bench (GEOS system LLVM)
+//! Usage: cargo bench --bench bench (no GEOS — serial + parallel columns)
+//!        cargo bench --features bench-geos --bench bench (GEOS from source)
+//!        cargo bench --features bench-geos-system --bench bench (system GEOS)
 use std::time::Instant;
 
 use geo::{Coord, Geometry, Line, LineString, MultiLineString, MultiPolygon, Polygon};
@@ -12,16 +12,18 @@ use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
 use geos::Geom;
 #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
+use rayon::prelude::*;
+#[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
 use wkt::ToWkt;
 
 #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
 fn run_geos_batch(wkts: &[String]) -> f64 {
     let t0 = Instant::now();
-    for wkt in wkts {
+    wkts.par_iter().for_each(|wkt| {
         if let Ok(gg) = geos::Geometry::new_from_wkt(wkt) {
             let _ = gg.make_valid();
         }
-    }
+    });
     t0.elapsed().as_secs_f64()
 }
 
@@ -226,6 +228,111 @@ fn make_spoke_wheel(spokes: usize, r: f64) -> Geometry<f64> {
     make_linestring(&coords)
 }
 
+fn make_star_comb(spikes: usize) -> Geometry<f64> {
+    // Boost Geometry classic worst-case: alternating long/short radii
+    // Non-adjacent spikes have near-intersections — NO shared endpoints
+    // (Unlike star-burst where all edges share origin)
+    let mut coords = Vec::with_capacity(spikes + 1);
+    for i in 0..spikes {
+        let a = 2.0 * std::f64::consts::PI * i as f64 / spikes as f64;
+        let r = if i % 2 == 0 { 1000.0 } else { 50.0 };
+        coords.push((r * a.cos(), r * a.sin()));
+    }
+    coords.push(coords[0]);
+    make_linestring(&coords)
+}
+
+fn make_self_touching_polygon() -> Polygon<f64> {
+    // Shell that touches itself at (150,0), forming a hole ("banana polygon")
+    Polygon::new(
+        LineString::new(vec![
+            Coord { x: 100.0, y: 0.0 },
+            Coord { x: 100.0, y: 100.0 },
+            Coord { x: 200.0, y: 100.0 },
+            Coord { x: 200.0, y: 0.0 },
+            Coord { x: 150.0, y: 0.0 },
+            Coord { x: 170.0, y: 40.0 },
+            Coord { x: 130.0, y: 40.0 },
+            Coord { x: 150.0, y: 0.0 },
+            Coord { x: 100.0, y: 0.0 },
+        ]),
+        Vec::new(),
+    )
+}
+
+fn make_nearly_collinear_polygon() -> Polygon<f64> {
+    // Shewchuk classic stress case: nearly-collinear vertices
+    // small perturbation from collinear stresses orient2d adaptive precision
+    Polygon::new(
+        LineString::new(vec![
+            Coord { x: -0.01, y: -0.59 },
+            Coord { x: 0.01, y: 0.57 },
+            Coord { x: 5000.0, y: 0.0 }, // long edge to create large bounding box
+            Coord { x: 0.0, y: -0.01 },
+            Coord { x: -0.01, y: -0.59 },
+        ]),
+        Vec::new(),
+    )
+}
+
+fn make_collapsed_polygon() -> Polygon<f64> {
+    // Shell with a backtrack edge — partial zero area, tests collapsed output
+    Polygon::new(
+        LineString::new(vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 10.0, y: 0.0 },
+            Coord { x: 5.0, y: 0.0 }, // backtrack — zero-area spike
+            Coord { x: 10.0, y: 10.0 },
+            Coord { x: 0.0, y: 10.0 },
+            Coord { x: 0.0, y: 0.0 },
+        ]),
+        Vec::new(),
+    )
+}
+
+fn make_dense_overlap_grid(per_side: usize) -> Geometry<f64> {
+    // Grid of small overlapping squares as MultiPolygon
+    // Each square overlaps neighbors by ~30% — tests batch overlap performance
+    let size = 10.0;
+    let stride = size * 0.7;
+    let polys: Vec<Polygon<f64>> = (0..per_side)
+        .flat_map(|i| {
+            (0..per_side).map(move |j| {
+                let x = i as f64 * stride;
+                let y = j as f64 * stride;
+                Polygon::new(
+                    LineString::new(vec![
+                        Coord { x, y },
+                        Coord { x: x + size, y },
+                        Coord {
+                            x: x + size,
+                            y: y + size,
+                        },
+                        Coord { x, y: y + size },
+                        Coord { x, y },
+                    ]),
+                    Vec::new(),
+                )
+            })
+        })
+        .collect();
+    Geometry::MultiPolygon(MultiPolygon::new(polys))
+}
+
+fn make_large_coord_polygon() -> Polygon<f64> {
+    // Polygon with coordinates at ±1e12 — tests numerical stability
+    Polygon::new(
+        LineString::new(vec![
+            Coord { x: -1e12, y: -1e12 },
+            Coord { x: 1e12, y: -1e12 },
+            Coord { x: 1e12, y: 1e12 },
+            Coord { x: -1e12, y: 1e12 },
+            Coord { x: -1e12, y: -1e12 },
+        ]),
+        Vec::new(),
+    )
+}
+
 fn make_multipoly_overlap(n: usize, size: f64) -> Geometry<f64> {
     let polys: Vec<Polygon<f64>> = (0..n)
         .map(|i| {
@@ -391,7 +498,7 @@ fn main() {
     run_par(&wrefs, &cfg);
 
     #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
-    let header = ("parallel", "geos");
+    let header = ("geo-repair", "geos");
     #[cfg(not(any(feature = "bench-geos", feature = "bench-geos-system")))]
     let header = ("serial", "parallel");
 
@@ -461,6 +568,34 @@ fn main() {
             })
             .collect();
         bench_polygons("invalid star 100v", &polys, 1000, &cfg);
+    }
+
+    // Self-touching (banana) polygon — tests self-touch forming hole
+    {
+        let poly = make_self_touching_polygon();
+        let polys: Vec<Polygon<f64>> = (0..50000).map(|_| poly.clone()).collect();
+        bench_polygons("self-touch poly", &polys, 50000, &cfg);
+    }
+
+    // Collapsed polygon (zero-area spike) — tests collapsed output handling
+    {
+        let poly = make_collapsed_polygon();
+        let polys: Vec<Polygon<f64>> = (0..50000).map(|_| poly.clone()).collect();
+        bench_polygons("collapsed poly", &polys, 50000, &cfg);
+    }
+
+    // Nearly-collinear polygon — Shewchuk orient2d stress case
+    {
+        let poly = make_nearly_collinear_polygon();
+        let polys: Vec<Polygon<f64>> = (0..50000).map(|_| poly.clone()).collect();
+        bench_polygons("near-collinear", &polys, 50000, &cfg);
+    }
+
+    // Large coordinate polygon (±1e12) — tests numerical stability vs GEOS
+    {
+        let poly = make_large_coord_polygon();
+        let polys: Vec<Polygon<f64>> = (0..5000).map(|_| poly.clone()).collect();
+        bench_polygons("large coord 1e12", &polys, 5000, &cfg);
     }
 
     // ─── Line benchmarks ─────────────────────────────────────────────
@@ -646,6 +781,12 @@ fn main() {
         bench_line(&format!("spoke {}sp", spokes), &g, batch, &cfg);
     }
 
+    // Star comb: alternating long/short spikes — NO shared endpoints (differs from star-burst)
+    for &(spikes, batch) in &[(20usize, 50000usize), (100, 5000), (500, 100)] {
+        let g = make_star_comb(spikes);
+        bench_line(&format!("star-comb {}sp", spikes), &g, batch, &cfg);
+    }
+
     // ─── MultiPolygon / hole hierarchy / sliver ────────────────────
     eprintln!("{}", "-".repeat(55));
 
@@ -660,6 +801,20 @@ fn main() {
     for &(ns, batch) in &[(5usize, 1000usize), (20, 200), (50, 50)] {
         let g = make_multipoly_overlap(ns, 100.0);
         bench_line(&format!("overlap mp {}sh", ns), &g, batch, &cfg);
+    }
+
+    // Dense grid of overlapping small polygons
+    {
+        let g = make_dense_overlap_grid(5);
+        bench_line("dense grid 5x5=25", &g, 1000, &cfg);
+    }
+    {
+        let g = make_dense_overlap_grid(10);
+        bench_line("dense grid 10x10=100", &g, 200, &cfg);
+    }
+    {
+        let g = make_dense_overlap_grid(20);
+        bench_line("dense grid 20x20=400", &g, 50, &cfg);
     }
 
     // Sliver edges: near-collinear, very thin polygon

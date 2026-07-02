@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Noding utilities for linear geometry repair.
 //!
 //! Linear geometries are fixed by:
@@ -6,6 +7,7 @@
 
 pub(crate) mod intersection;
 pub(crate) mod snap_round;
+pub(crate) mod sweep_line;
 pub(crate) mod validator;
 
 pub(crate) use self::intersection::NodingFloat;
@@ -183,6 +185,26 @@ fn split_edges_at_intersections<T: GeoFloat>(edges: &[Line<T>]) -> Vec<Line<T>> 
                 if i + 1 == j && edges[i].end == edges[j].start {
                     continue;
                 }
+                if edges[i].start == edges[j].start
+                    && orient2d_generic(edges[i].start, edges[i].end, edges[j].end) != T::zero()
+                {
+                    continue;
+                }
+                if edges[i].start == edges[j].end
+                    && orient2d_generic(edges[i].start, edges[i].end, edges[j].start) != T::zero()
+                {
+                    continue;
+                }
+                if edges[i].end == edges[j].start
+                    && orient2d_generic(edges[i].end, edges[i].start, edges[j].end) != T::zero()
+                {
+                    continue;
+                }
+                if edges[i].end == edges[j].end
+                    && orient2d_generic(edges[i].end, edges[i].start, edges[j].start) != T::zero()
+                {
+                    continue;
+                }
                 match compute_intersection_param(&edges[i], &edges[j], eps) {
                     Some((ti, tj, _pt)) => {
                         if ti > zero && ti < one {
@@ -292,6 +314,27 @@ fn split_edges_rtree(edges: &[Line<f64>], split_points: &mut [Vec<f64>], eps: f6
                 return std::ops::ControlFlow::<(), ()>::Continue(());
             }
             if j + 1 == i && edges[j].end == edges[i].start {
+                return std::ops::ControlFlow::<(), ()>::Continue(());
+            }
+
+            if edges[i].start == edges[j].start
+                && crate::orient::orient2d_fast(edges[i].start, edges[i].end, edges[j].end) != 0.0
+            {
+                return std::ops::ControlFlow::<(), ()>::Continue(());
+            }
+            if edges[i].start == edges[j].end
+                && crate::orient::orient2d_fast(edges[i].start, edges[i].end, edges[j].start) != 0.0
+            {
+                return std::ops::ControlFlow::<(), ()>::Continue(());
+            }
+            if edges[i].end == edges[j].start
+                && crate::orient::orient2d_fast(edges[i].end, edges[i].start, edges[j].end) != 0.0
+            {
+                return std::ops::ControlFlow::<(), ()>::Continue(());
+            }
+            if edges[i].end == edges[j].end
+                && crate::orient::orient2d_fast(edges[i].end, edges[i].start, edges[j].start) != 0.0
+            {
                 return std::ops::ControlFlow::<(), ()>::Continue(());
             }
 

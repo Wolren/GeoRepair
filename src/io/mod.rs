@@ -2,9 +2,10 @@
 //!
 //! Built-in backends (no extra dependencies):
 //! - **WKB** (`read_wkb`, `write_wkb`): OGC Well-Known Binary, handles byte
-//!   order, EWKB SRID flags, all geometry types including Z/M variants.
-//! - **WKT** (`read_wkt`, `write_wkt`): OGC Well-Known Text, all geometry
-//!   types including Z/M/ZM modifiers.
+//!   order, EWKB SRID flags, all standard 2D geometry types.
+//! - **WKT** (`read_wkt`, `read_wkt_from`, `write_wkt`, `write_wkt_to`): OGC
+//!   Well-Known Text, all standard 2D geometry types. Supports streaming
+//!   I/O via `io::Read` / `io::Write`.
 //! - **Binary** (`load_bin`, `load_bin_stream`, `write_bin`): Custom bulk
 //!   format for polygons, optimized for batch processing.
 //!
@@ -60,9 +61,12 @@ pub mod wkt;
 /// Load polygons from a custom binary file.
 pub use binary::{load_bin, load_bin_stream, write_bin};
 /// Read/write OGC WKB geometry format.
-pub use wkb::{estimate_wkb_size, read_wkb, read_wkb_concat, write_wkb};
+pub use wkb::{
+    estimate_wkb_size, read_ewkb, read_wkb, read_wkb_concat, read_wkb_from, write_ewkb, write_wkb,
+    write_wkb_to, write_wkb_with_opts, Endianness, EwkbDims, EwkbGeometry, WkbError, WriteOptions,
+};
 /// Read/write OGC WKT text format.
-pub use wkt::{read_wkt, write_wkt};
+pub use wkt::{infer_wkt_type, read_wkt, read_wkt_from, write_wkt, write_wkt_to, WktError};
 
 // ---------------------------------------------------------------------------
 // File-format dispatch by extension
@@ -236,7 +240,7 @@ fn load_shp(_path: &str) -> Result<Vec<Geometry<f64>>, String> {
 
 fn load_wkt(path: &str) -> Result<Vec<Geometry<f64>>, String> {
     let text = fs::read_to_string(path).map_err(|e| format!("cannot read {path}: {e}"))?;
-    let geom = read_wkt(&text)?;
+    let geom = read_wkt(&text).map_err(|e| e.to_string())?;
     Ok(vec![geom])
 }
 

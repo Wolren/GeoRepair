@@ -106,7 +106,8 @@
 //! | `wasm` | WASM browser fetch (synchronous XHR) | no |
 //! | `mimalloc` | Use mimalloc global allocator | yes |
 //! | `io-shp` | Shapefile format backend | no |
-//! | `io-wkt` | No-op (WKT is now built-in) | — |
+//! | `io-wkb` | No-op (WKB is always compiled in) | — |
+//! | `io-wkt` | No-op (WKT is always compiled in) | — |
 //! | `io-csv` | CSV format backend | no |
 //! | `io-gml` | GML/XML format backend | no |
 //! | `io-gpkg` | GeoPackage format backend (not WASM) | no |
@@ -219,9 +220,11 @@
 //! # let geom = Geometry::Point(Point::new(0.0, 0.0));
 //! # let concat_buffer = vec![];
 //! use geo_repair::{
-//!     diagnose_file, load, load_bin, read_wkb, read_wkb_concat, repair_file, save, write_wkb,
-//!     read_wkt, write_wkt,
-//!     MakeValidConfig,
+//!     diagnose_file, load, load_bin, read_wkb, read_wkb_concat, read_wkb_from,
+//!     read_ewkb, write_ewkb, EwkbGeometry, EwkbDims,
+//!     read_wkt, read_wkt_from, write_wkt, write_wkt_to, infer_wkt_type,
+//!     write_wkb, write_wkb_to, write_wkb_with_opts, Endianness, WriteOptions,
+//!     repair_file, save, MakeValidConfig,
 //! };
 //!
 //! let geoms = load("input.wkb").unwrap();
@@ -234,21 +237,43 @@
 //! repair_file("invalid.wkb", "fixed.wkb", &MakeValidConfig::default()).unwrap();
 //! save("output.wkt", &geoms[0]).unwrap();
 //!
+//! // Standard LE WKB
 //! let wkb: Vec<u8> = write_wkb(&geom);
-//! let geom = read_wkb(&wkb).unwrap();
+//! // Big-endian WKB
+//! let be_wkb: Vec<u8> = write_wkb_with_opts(&geom, &WriteOptions { endianness: Endianness::BigEndian });
+//! // Write to any io::Write target
+//! write_wkb_to(&geom, &mut std::io::stdout()).unwrap();
+//! // Read from any io::Read source
+//! let geom = read_wkb_from(&wkb[..]).unwrap();
 //!
+//! // EWKB with SRID and Z/M preservation
+//! let ewkb = EwkbGeometry {
+//!     geometry: geom.clone(),
+//!     srid: Some(4326),
+//!     dims: EwkbDims::XYZ,
+//!     extra_coords: vec![100.0],
+//! };
+//! let ewkb_bytes = write_ewkb(&ewkb);
+//! let back = read_ewkb(&ewkb_bytes).unwrap();
+//!
+//! // WKT with streaming I/O
 //! let wkt: String = write_wkt(&geom);
 //! let geom = read_wkt(&wkt).unwrap();
+//! write_wkt_to(&geom, &mut std::io::stdout()).unwrap();
+//! let geom = read_wkt_from(wkt.as_bytes()).unwrap();
+//!
+//! // Peek at WKT type without parsing
+//! let (type_name, _dims) = infer_wkt_type("POLYGON ((0 0, 1 0, 1 1, 0 1, 0 0))").unwrap();
 //!
 //! let polys = load_bin("dataset.bin").unwrap();
 //! ```
 //!
 //! | Extension | Format | Backend |
 //! |-----------|--------|---------|
-//! | `.wkb` / `.wks` | WKB (LE/BE, EWKB SRID, Z/M variants) | Zero-dep built-in |
+//! | `.wkb` / `.wks` | WKB (LE/BE, EWKB SRID, Z/M variants, io::Read/Write) | Zero-dep built-in |
 //! | `.bin` | Custom binary bulk polygon format | Zero-dep built-in |
 //! | `.shp` | Shapefile | `io-shp` feature |
-//! | `.wkt` | WKT text format | Zero-dep built-in |
+//! | `.wkt` | WKT (io::Read/Write, type inference) | Zero-dep built-in |
 //! | `.csv` | CSV with WKT geometry | `io-csv` feature |
 //! | `.gml` | GML/XML | `io-gml` feature |
 //! | `.gpkg` | GeoPackage (SQLite) | `io-gpkg` feature |
@@ -351,8 +376,10 @@ pub use crs::Crs;
 /// A feature combining geometry with optional attributes and CRS.
 pub use feature::Feature;
 pub use io::{
-    diagnose_file, load, load_bin, load_bin_stream, read_wkb, read_wkb_concat, read_wkt,
-    repair_file, save, write_wkb, write_wkt,
+    diagnose_file, infer_wkt_type, load, load_bin, load_bin_stream, read_ewkb, read_wkb,
+    read_wkb_concat, read_wkb_from, read_wkt, read_wkt_from, repair_file, save, write_ewkb,
+    write_wkb, write_wkb_to, write_wkb_with_opts, write_wkt, write_wkt_to, Endianness, EwkbDims,
+    EwkbGeometry, WkbError, WktError, WriteOptions,
 };
 /// Trait for repairing invalid geometries.
 pub use make_valid::MakeValid;

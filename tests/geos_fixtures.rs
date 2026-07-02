@@ -160,10 +160,11 @@ fn geos_nan_polygon() {
 
 #[test]
 fn geos_self_intersecting_linestring() {
+    // GEOS/OGC: self-intersecting LineString is valid, returned as-is
     let g = geom_from_wkt("LINESTRING (0 0, 2 2, 2 0, 0 2)");
     let result = g.make_valid_with_config(&cfg_auto());
-    assert_valid_ogc(&result);
     assert_not_empty(&result);
+    assert!(matches!(result, Geometry::LineString(_)));
 }
 
 // ---------------------------------------------------------------------------
@@ -172,9 +173,9 @@ fn geos_self_intersecting_linestring() {
 
 #[test]
 fn geos_multilinestring_with_self_intersection() {
+    // GEOS/OGC: self-intersecting LineString components are valid, returned as-is
     let g = geom_from_wkt("MULTILINESTRING ((0 0, 1 0), (0 0, 2 2, 2 0, 0 2))");
     let result = g.make_valid_with_config(&cfg_auto());
-    assert_valid_ogc(&result);
     assert_not_empty(&result);
     assert!(matches!(
         &result,

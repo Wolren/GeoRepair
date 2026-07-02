@@ -20,7 +20,7 @@ use geo::{
 use crate::core::MakeValidConfig;
 #[cfg(any(feature = "arrange", feature = "structure"))]
 use crate::core::PolyMethod;
-use crate::noding::{node_line_string, remove_consecutive_duplicates, NodingFloat};
+use crate::noding::{remove_consecutive_duplicates, NodingFloat};
 use crate::validation::{GeoValidation, ValidationResult};
 use log::warn;
 
@@ -184,7 +184,7 @@ impl<T: NodingFloat> MakeValid for LineString<T> {
         if deduped.len() == 1 {
             return Geometry::Point(Point(deduped[0]));
         }
-        node_line_string(&LineString::new(deduped))
+        Geometry::LineString(LineString::new(deduped))
     }
 }
 

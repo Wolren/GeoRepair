@@ -83,6 +83,7 @@ rusqlite = { version = "0.40.1", features = ["bundled"], optional = true }
 memmap2 = { version = "0.9.11", optional = true }
 geo-traits = { version = "0.3", optional = true }
 wkb = { version = "0.9", optional = true }
+ryu = "1.0"
 js-sys = { version = "0.3", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 web-sys = { version = "0.3", optional = true, features = [
@@ -99,6 +100,8 @@ pyo3 = { version = "0.29", features = ["extension-module"], optional = true }
 criterion = { version = "0.8", features = ["html_reports"] }
 proptest = "1.11"
 wkt = { version = "0.14", features = ["geo-types"] }
+wkb = { version = "0.9" }
+geo-traits = { version = "0.3" }
 
 [lib]
 name = "geo_repair"
@@ -125,6 +128,10 @@ harness = false
 name = "criterion"
 harness = false
 required-features = ["bench-criterion"]
+
+[[bench]]
+name = "wkb_cmp"
+harness = false
 
 [profile.release]
 lto = "fat"
