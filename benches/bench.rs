@@ -13,16 +13,99 @@ use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 use geos::Geom;
 #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
 use rayon::prelude::*;
+
+/// Convert a geo Geometry to a GEOS Geometry via CoordSeq direct construction
+/// (no WKT round-trip).
 #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
-use wkt::ToWkt;
+fn geometry_to_geos(geom: &Geometry<f64>) -> Option<geos::Geometry> {
+    use geos::{CoordSeq, CoordType};
+    match geom {
+        Geometry::Point(p) => {
+            let mut cs = CoordSeq::new(1, CoordType::XY).ok()?;
+            cs.set_x(0, p.0.x).ok()?;
+            cs.set_y(0, p.0.y).ok()?;
+            geos::Geometry::create_point(cs).ok()
+        }
+        Geometry::Line(l) => {
+            let mut cs = CoordSeq::new(2, CoordType::XY).ok()?;
+            cs.set_x(0, l.start.x).ok()?;
+            cs.set_y(0, l.start.y).ok()?;
+            cs.set_x(1, l.end.x).ok()?;
+            cs.set_y(1, l.end.y).ok()?;
+            geos::Geometry::create_line_string(cs).ok()
+        }
+        Geometry::LineString(ls) => {
+            let n = ls.0.len() as u32;
+            let mut cs = CoordSeq::new(n, CoordType::XY).ok()?;
+            for (i, c) in ls.0.iter().enumerate() {
+                cs.set_x(i, c.x).ok()?;
+                cs.set_y(i, c.y).ok()?;
+            }
+            geos::Geometry::create_line_string(cs).ok()
+        }
+        Geometry::Polygon(p) => polygon_to_geos(p),
+        Geometry::MultiPoint(mp) => {
+            let geoms: Vec<_> =
+                mp.0.iter()
+                    .filter_map(|p| geometry_to_geos(&Geometry::Point(*p)))
+                    .collect();
+            if geoms.is_empty() {
+                None
+            } else {
+                geos::Geometry::create_multipoint(geoms).ok()
+            }
+        }
+        Geometry::MultiLineString(mls) => {
+            let geoms: Vec<_> = mls
+                .0
+                .iter()
+                .filter_map(|ls| geometry_to_geos(&Geometry::LineString(ls.clone())))
+                .collect();
+            if geoms.is_empty() {
+                None
+            } else {
+                geos::Geometry::create_multiline_string(geoms).ok()
+            }
+        }
+        Geometry::MultiPolygon(mp) => {
+            let geoms: Vec<_> = mp.0.iter().filter_map(|p| polygon_to_geos(p)).collect();
+            if geoms.is_empty() {
+                None
+            } else {
+                geos::Geometry::create_multipolygon(geoms).ok()
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Convert a geo Polygon to a GEOS Polygon via CoordSeq direct construction.
+#[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
+fn polygon_to_geos(poly: &Polygon<f64>) -> Option<geos::Geometry> {
+    use geos::{CoordSeq, CoordType};
+    fn coords_to_ring(coords: &[Coord<f64>]) -> Option<geos::Geometry> {
+        let n = coords.len() as u32;
+        let mut cs = CoordSeq::new(n, CoordType::XY).ok()?;
+        for (i, c) in coords.iter().enumerate() {
+            cs.set_x(i, c.x).ok()?;
+            cs.set_y(i, c.y).ok()?;
+        }
+        geos::Geometry::create_linear_ring(cs).ok()
+    }
+    let ring = coords_to_ring(&poly.exterior().0)?;
+    let holes: Vec<geos::Geometry> = poly
+        .interiors()
+        .iter()
+        .filter_map(|h| coords_to_ring(&h.0))
+        .collect();
+    geos::Geometry::create_polygon(ring, holes).ok()
+}
 
 #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
-fn run_geos_batch(wkts: &[String]) -> f64 {
+fn run_geos_batch(geoms: &[geos::Geometry]) -> f64 {
     let t0 = Instant::now();
-    wkts.par_iter().for_each(|wkt| {
-        if let Ok(gg) = geos::Geometry::new_from_wkt(wkt) {
-            let _ = gg.make_valid();
-        }
+    geoms.par_iter().for_each(|gg| {
+        let _ = gg.make_valid();
     });
     t0.elapsed().as_secs_f64()
 }
@@ -434,8 +517,9 @@ fn bench_line(label: &str, g: &Geometry<f64>, batch: usize, cfg: &MakeValidConfi
     let par = run_line_par(&items, cfg);
     #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
     {
-        let wkts: Vec<String> = items.iter().map(|g| g.to_wkt().to_string()).collect();
-        let geos = run_geos_batch(&wkts);
+        // CoordSeq direct construction — no WKT overhead
+        let geos_geoms: Vec<geos::Geometry> = items.iter().filter_map(geometry_to_geos).collect();
+        let geos = run_geos_batch(&geos_geoms);
         eprintln!(
             "  {:<20} {:>10.3} {:>10.3} µs",
             label,
@@ -460,8 +544,9 @@ fn bench_polygons(label: &str, polys: &[Polygon<f64>], batch: usize, cfg: &MakeV
     let par = run_par(&refs, cfg);
     #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
     {
-        let wkts: Vec<String> = polys.iter().map(|p| p.to_wkt().to_string()).collect();
-        let geos = run_geos_batch(&wkts);
+        // CoordSeq direct construction — no WKT overhead
+        let geos_geoms: Vec<geos::Geometry> = polys.iter().filter_map(polygon_to_geos).collect();
+        let geos = run_geos_batch(&geos_geoms);
         eprintln!(
             "  {:<20} {:>10.3} {:>10.3} µs",
             label,
