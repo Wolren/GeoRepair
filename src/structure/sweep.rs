@@ -1,6 +1,8 @@
 use geo::Coord;
 use rstar::{RTree, RTreeObject, AABB};
 
+use crate::orient::orient2d_fast;
+
 /// Edge with 2D bounding envelope for R-tree spatial indexing.
 struct EdgeEnvelope {
     index: u32,
@@ -57,6 +59,27 @@ pub(crate) fn has_self_intersections(coords: &[Coord<f64>], eps: f64) -> bool {
             if i.abs_diff(j) <= 1 || (i == 0 && j == n_edges - 1) {
                 return std::ops::ControlFlow::Continue(());
             }
+            if coords[i] == coords[j]
+                && orient2d_fast(coords[i], coords[i + 1], coords[j + 1]) != 0.0
+            {
+                return std::ops::ControlFlow::Continue(());
+            }
+            if coords[i] == coords[j + 1]
+                && orient2d_fast(coords[i], coords[i + 1], coords[j]) != 0.0
+            {
+                return std::ops::ControlFlow::Continue(());
+            }
+            if coords[i + 1] == coords[j]
+                && orient2d_fast(coords[i + 1], coords[i], coords[j + 1]) != 0.0
+            {
+                return std::ops::ControlFlow::Continue(());
+            }
+            if coords[i + 1] == coords[j + 1]
+                && orient2d_fast(coords[i + 1], coords[i], coords[j]) != 0.0
+            {
+                return std::ops::ControlFlow::Continue(());
+            }
+
             if super::fix_ring::check_edge_pair(coords, i, j, eps) {
                 std::ops::ControlFlow::Break(())
             } else {
@@ -103,6 +126,26 @@ pub(crate) fn find_first_intersection(
                     return std::ops::ControlFlow::Continue(());
                 }
                 if i.abs_diff(j) <= 1 || (i == 0 && j == n_edges - 1) {
+                    return std::ops::ControlFlow::Continue(());
+                }
+                if coords[i] == coords[j]
+                    && orient2d_fast(coords[i], coords[i + 1], coords[j + 1]) != 0.0
+                {
+                    return std::ops::ControlFlow::Continue(());
+                }
+                if coords[i] == coords[j + 1]
+                    && orient2d_fast(coords[i], coords[i + 1], coords[j]) != 0.0
+                {
+                    return std::ops::ControlFlow::Continue(());
+                }
+                if coords[i + 1] == coords[j]
+                    && orient2d_fast(coords[i + 1], coords[i], coords[j + 1]) != 0.0
+                {
+                    return std::ops::ControlFlow::Continue(());
+                }
+                if coords[i + 1] == coords[j + 1]
+                    && orient2d_fast(coords[i + 1], coords[i], coords[j]) != 0.0
+                {
                     return std::ops::ControlFlow::Continue(());
                 }
                 match super::fix_ring::edge_intersection(coords, i, j, eps) {

@@ -1,13 +1,13 @@
+use geo::{Coord, Line, LineString};
+use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
 use smallvec::SmallVec;
 
-use geo::{Coord, Line, LineString};
-use rstar::{RTree, RTreeObject, AABB};
-
 use crate::core;
 use crate::noding;
-use crate::orient::orient2d;
+use crate::orient::{orient2d, orient2d_fast};
 use log::warn;
+use rstar::{RTree, RTreeObject, AABB};
 use crate::structure::fix_ring_graph::{
     build_graph, extract_all_faces, label_interior_faces, split_face_at_pinch_points,
 };
@@ -157,6 +157,19 @@ pub(crate) fn check_edge_pair(coords: &[Coord<f64>], i: usize, j: usize, eps: f6
     let b1 = coords[j];
     let b2 = coords[j + 1];
 
+    if a1 == b1 && orient2d_fast(a1, a2, b2) != 0.0 {
+        return false;
+    }
+    if a1 == b2 && orient2d_fast(a1, a2, b1) != 0.0 {
+        return false;
+    }
+    if a2 == b1 && orient2d_fast(a2, a1, b2) != 0.0 {
+        return false;
+    }
+    if a2 == b2 && orient2d_fast(a2, a1, b1) != 0.0 {
+        return false;
+    }
+
     let o = crate::simd::orient2d_batch_4_robust(
         &[a1, a1, b1, b1],
         &[a2, a2, b2, b2],
@@ -229,11 +242,26 @@ pub(crate) fn edge_intersection(
     j: usize,
     eps: f64,
 ) -> Option<(usize, usize, Coord<f64>)> {
-    if !check_edge_pair(coords, i, j, eps) {
+    let a1 = coords[i];
+    let a2 = coords[i + 1];
+    let b1 = coords[j];
+    let b2 = coords[j + 1];
+
+    if a1 == b1 && orient2d_fast(a1, a2, b2) != 0.0 {
         return None;
     }
-    let e1 = Line::new(coords[i], coords[i + 1]);
-    let e2 = Line::new(coords[j], coords[j + 1]);
+    if a1 == b2 && orient2d_fast(a1, a2, b1) != 0.0 {
+        return None;
+    }
+    if a2 == b1 && orient2d_fast(a2, a1, b2) != 0.0 {
+        return None;
+    }
+    if a2 == b2 && orient2d_fast(a2, a1, b1) != 0.0 {
+        return None;
+    }
+
+    let e1 = Line::new(a1, a2);
+    let e2 = Line::new(b1, b2);
     let (ti, tj) = intersect_param(&e1, &e2, eps)?;
     if (ti > eps && ti < 1.0 - eps) || (tj > eps && tj < 1.0 - eps) {
         let pi = lerp(e1, ti);
@@ -462,6 +490,24 @@ pub(crate) fn edges_from_coords(coords: &[Coord<f64>]) -> Vec<Line<f64>> {
 /// ---------------------------------------------------------------------------
 /// Edge splitting at intersection points
 /// ---------------------------------------------------------------------------
+/// Choose split strategy based on topology.
+/// - If many edges share a single endpoint (radial-like, e.g. spoke wheel),
+///   sweep-line avoids R-tree degeneracy where all bboxes overlap.
+/// - Otherwise R-tree spatial clustering is more efficient.
+fn should_use_sweepline(edges: &[Line<f64>], n: usize) -> bool {
+    if n < 128 {
+        return false;
+    }
+    let mut freq: FxHashMap<u64, usize> = FxHashMap::default();
+    for e in edges {
+        let k1 = e.start.x.to_bits() ^ e.start.y.to_bits().wrapping_mul(0x9e3779b97f4a7c15);
+        let k2 = e.end.x.to_bits() ^ e.end.y.to_bits().wrapping_mul(0x9e3779b97f4a7c15);
+        *freq.entry(k1).or_insert(0) += 1;
+        *freq.entry(k2).or_insert(0) += 1;
+    }
+    freq.into_values().max().unwrap_or(0) > n / 4
+}
+
 pub(crate) fn split_edges(edges: &[Line<f64>]) -> Vec<Line<f64>> {
     let n = edges.len();
     let mut split_points: Vec<SplitPoint> = vec![SmallVec::new(); n];
@@ -477,7 +523,11 @@ pub(crate) fn split_edges(edges: &[Line<f64>]) -> Vec<Line<f64>> {
     let eps = core::EPS * coord_scale;
 
     if n > core::GRID_THRESHOLD_N {
-        split_edges_rtree(edges, &mut split_points, eps);
+        if should_use_sweepline(edges, n) {
+            split_edges_sweepline(edges, &mut split_points, eps);
+        } else {
+            split_edges_rtree(edges, &mut split_points, eps);
+        }
     } else {
         split_edges_bruteforce(edges, &mut split_points, eps);
     }
@@ -503,6 +553,66 @@ pub(crate) fn split_edges(edges: &[Line<f64>]) -> Vec<Line<f64>> {
     result
 }
 
+fn split_edges_rtree(edges: &[Line<f64>], split_points: &mut [SplitPoint], eps: f64) {
+    let n = edges.len();
+
+    #[derive(Clone, Copy)]
+    struct EdgeEnv { idx: usize, env: AABB<[f64; 2]> }
+    impl RTreeObject for EdgeEnv {
+        type Envelope = AABB<[f64; 2]>;
+        fn envelope(&self) -> Self::Envelope { self.env }
+    }
+
+    let envs: Vec<EdgeEnv> = edges.iter().enumerate().map(|(i, e)| EdgeEnv {
+        idx: i,
+        env: AABB::from_corners(
+            [e.start.x.min(e.end.x), e.start.y.min(e.end.y)],
+            [e.start.x.max(e.end.x), e.start.y.max(e.end.y)],
+        ),
+    }).collect();
+    let tree = RTree::bulk_load(envs);
+
+    for i in 0..n {
+        let e = &edges[i];
+        let query = AABB::from_corners(
+            [e.start.x.min(e.end.x), e.start.y.min(e.end.y)],
+            [e.start.x.max(e.end.x), e.start.y.max(e.end.y)],
+        );
+        let _ = tree.locate_in_envelope_intersecting_int(&query, |c| {
+            let j = c.idx;
+            if j <= i { return std::ops::ControlFlow::<(), ()>::Continue(()); }
+
+            if i.abs_diff(j) <= 1 || (i == 0 && j == n - 1) {
+                return std::ops::ControlFlow::<(), ()>::Continue(());
+            }
+
+            if edges[i].start == edges[j].start
+                && orient2d_fast(edges[i].start, edges[i].end, edges[j].end) != 0.0
+            { return std::ops::ControlFlow::<(), ()>::Continue(()); }
+            if edges[i].start == edges[j].end
+                && orient2d_fast(edges[i].start, edges[i].end, edges[j].start) != 0.0
+            { return std::ops::ControlFlow::<(), ()>::Continue(()); }
+            if edges[i].end == edges[j].start
+                && orient2d_fast(edges[i].end, edges[i].start, edges[j].end) != 0.0
+            { return std::ops::ControlFlow::<(), ()>::Continue(()); }
+            if edges[i].end == edges[j].end
+                && orient2d_fast(edges[i].end, edges[i].start, edges[j].start) != 0.0
+            { return std::ops::ControlFlow::<(), ()>::Continue(()); }
+
+            if let Some((ti, tj)) = intersect_param(&edges[i], &edges[j], eps)
+                && ((ti > eps && ti < 1.0 - eps) || (tj > eps && tj < 1.0 - eps))
+            {
+                let pi = lerp(edges[i], ti);
+                let pj = lerp(edges[j], tj);
+                let pt = Coord { x: (pi.x + pj.x) * 0.5, y: (pi.y + pj.y) * 0.5 };
+                if ti > eps && ti < 1.0 - eps { split_points[i].push((ti, pt)); }
+                if tj > eps && tj < 1.0 - eps { split_points[j].push((tj, pt)); }
+            }
+            std::ops::ControlFlow::<(), ()>::Continue(())
+        });
+    }
+}
+
 fn split_edges_bruteforce(edges: &[Line<f64>], split_points: &mut [SplitPoint], eps: f64) {
     let n = edges.len();
     for i in 0..n {
@@ -511,6 +621,26 @@ fn split_edges_bruteforce(edges: &[Line<f64>], split_points: &mut [SplitPoint], 
                 continue;
             }
             if i == 0 && j == n - 1 && edges[i].start == edges[j].end {
+                continue;
+            }
+            if edges[i].start == edges[j].start
+                && orient2d_fast(edges[i].start, edges[i].end, edges[j].end) != 0.0
+            {
+                continue;
+            }
+            if edges[i].start == edges[j].end
+                && orient2d_fast(edges[i].start, edges[i].end, edges[j].start) != 0.0
+            {
+                continue;
+            }
+            if edges[i].end == edges[j].start
+                && orient2d_fast(edges[i].end, edges[i].start, edges[j].end) != 0.0
+            {
+                continue;
+            }
+            if edges[i].end == edges[j].end
+                && orient2d_fast(edges[i].end, edges[i].start, edges[j].start) != 0.0
+            {
                 continue;
             }
             if let Some((ti, tj)) = intersect_param(&edges[i], &edges[j], eps)
@@ -533,94 +663,47 @@ fn split_edges_bruteforce(edges: &[Line<f64>], split_points: &mut [SplitPoint], 
     }
 }
 
-fn split_edges_rtree(edges: &[Line<f64>], split_points: &mut [SplitPoint], eps: f64) {
-    let n = edges.len();
-
-    struct SegEnv {
-        idx: usize,
-        env: AABB<[f64; 2]>,
-    }
-    impl RTreeObject for SegEnv {
-        type Envelope = AABB<[f64; 2]>;
-        fn envelope(&self) -> Self::Envelope {
-            self.env
+fn split_edges_sweepline(edges: &[Line<f64>], split_points: &mut [SplitPoint], eps: f64) {
+    let pairs = crate::noding::sweep_line::find_intersecting_pairs(edges, eps);
+    for &(i, j) in &pairs {
+        if i.abs_diff(j) <= 1 || (i == 0 && j == edges.len() - 1) {
+            continue;
         }
-    }
-
-    let (envs, edge_bboxes): (Vec<SegEnv>, Vec<AABB<[f64; 2]>>) = edges
-        .iter()
-        .enumerate()
-        .map(|(i, e)| {
-            let lo_x = e.start.x.min(e.end.x);
-            let hi_x = e.start.x.max(e.end.x);
-            let lo_y = e.start.y.min(e.end.y);
-            let hi_y = e.start.y.max(e.end.y);
-            let env = AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]);
-            (SegEnv { idx: i, env }, env)
-        })
-        .unzip();
-
-    let tree = RTree::bulk_load(envs);
-
-    // Collect hits per edge (local Vec avoids double-mutable-borrow on split_points).
-    // Each element is (edge_idx, param_t, intersection_point).
-    let query_edge = |i: usize, out: &mut Vec<(usize, f64, Coord<f64>)>| {
-        let query_env = &edge_bboxes[i];
-
-        let _: std::ops::ControlFlow<()> =
-            tree.locate_in_envelope_intersecting_int(query_env, |candidate| {
-                let j = candidate.idx;
-                if j <= i {
-                    return std::ops::ControlFlow::Continue(());
-                }
-                if i.abs_diff(j) <= 1 || (i == 0 && j == n - 1) {
-                    return std::ops::ControlFlow::Continue(());
-                }
-                if let Some((ti, tj)) = intersect_param(&edges[i], &edges[j], eps)
-                    && ((ti > eps && ti < 1.0 - eps) || (tj > eps && tj < 1.0 - eps))
-                {
-                    let pi = lerp(edges[i], ti);
-                    let pj = lerp(edges[j], tj);
-                    let pt = Coord {
-                        x: (pi.x + pj.x) * 0.5,
-                        y: (pi.y + pj.y) * 0.5,
-                    };
-                    if ti > eps && ti < 1.0 - eps {
-                        out.push((i, ti, pt));
-                    }
-                    if tj > eps && tj < 1.0 - eps {
-                        out.push((j, tj, pt));
-                    }
-                }
-                std::ops::ControlFlow::Continue(())
-            });
-    };
-
-    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-    {
-        use rayon::prelude::*;
-        let all_hits: Vec<Vec<(usize, f64, Coord<f64>)>> = (0..n)
-            .into_par_iter()
-            .map(|i| {
-                let mut local_hits = Vec::new();
-                query_edge(i, &mut local_hits);
-                local_hits
-            })
-            .collect();
-        for hits in all_hits {
-            for (ei, t, pt) in hits {
-                split_points[ei].push((t, pt));
+        if edges[i].start == edges[j].start
+            && orient2d_fast(edges[i].start, edges[i].end, edges[j].end) != 0.0
+        {
+            continue;
+        }
+        if edges[i].start == edges[j].end
+            && orient2d_fast(edges[i].start, edges[i].end, edges[j].start) != 0.0
+        {
+            continue;
+        }
+        if edges[i].end == edges[j].start
+            && orient2d_fast(edges[i].end, edges[i].start, edges[j].end) != 0.0
+        {
+            continue;
+        }
+        if edges[i].end == edges[j].end
+            && orient2d_fast(edges[i].end, edges[i].start, edges[j].start) != 0.0
+        {
+            continue;
+        }
+        if let Some((ti, tj)) = intersect_param(&edges[i], &edges[j], eps)
+            && ((ti > eps && ti < 1.0 - eps) || (tj > eps && tj < 1.0 - eps))
+        {
+            let pi = lerp(edges[i], ti);
+            let pj = lerp(edges[j], tj);
+            let pt = Coord {
+                x: (pi.x + pj.x) * 0.5,
+                y: (pi.y + pj.y) * 0.5,
+            };
+            if ti > eps && ti < 1.0 - eps {
+                split_points[i].push((ti, pt));
             }
-        }
-    }
-    #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
-    {
-        let mut all_hits: Vec<(usize, f64, Coord<f64>)> = Vec::new();
-        for i in 0..n {
-            query_edge(i, &mut all_hits);
-        }
-        for (ei, t, pt) in all_hits {
-            split_points[ei].push((t, pt));
+            if tj > eps && tj < 1.0 - eps {
+                split_points[j].push((tj, pt));
+            }
         }
     }
 }

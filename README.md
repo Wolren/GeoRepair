@@ -21,8 +21,8 @@ The **Structure** strategy (default) mirrors GEOS's ST_MakeValid
 algorithm: planar graph extraction, face walking, and winding-number
 assembly.  The **Arrange** strategy uses CDT-based repair as a robust
 fallback for complex topologies.  Passes 2490/2490 GEOS XML validation
-tests, with parallel batch performance **0.30× GEOS** (3.3× faster) on
-1.58M data set polygons.
+tests, with parallel batch performance **1.05× GEOS** on
+1.58M data set polygons (invalid-subset repair 1.10×, validation 4×).
 
 See the [full documentation](https://docs.rs/geo-repair) for quick-start
 examples, validation rules, CRS support, I/O backends, Python bindings,
@@ -47,92 +47,100 @@ these via OGC-style validation and repairs them:
 ### Real-world dataset (1,578,988 polygons)
 
 Structure parallel batch on a production GIS dataset.  GEOS linked via
-conda (LLVM build, parallel, full LTO).  i5-12400F (6C/12T), mimalloc.
+conda-forge (MSVC, serial internally, no LTO).  i5-12400F (6C/12T),
+mimalloc.  Both benchmarks run in parallel via Rayon batch over all
+polygons (GEOS per-poly serial, but many polys run concurrently).
 
-| Dataset | geo-repair | GEOS (system LLVM) | Ratio |
-|---------|------------|-------------------|-------|
-| Invalid subset (1855 polys) | **2.54 s** / 1.37 ms each | **3.28 s** / 1.77 ms each | **0.77×** |
-| Full dataset (1.58M polys) | **3.51 s** / 2.2 µs each | **3.82 s** / 2.4 µs each | **0.92×** |
+| Dataset | geo-repair | GEOS | Ratio |
+|---------|------------|------|-------|
+| Invalid subset (1855 polys) | **2.13 s** / 1.15 ms each | **1.94 s** / 1.05 ms each | **0.91×** |
+| Full dataset (1.58M polys) | **3.29 s** / 2.1 µs each | **3.46 s** / 2.2 µs each | **1.05×** |
 
-Validation comparison on full dataset — our validator is **5.2× faster**:
+Validation comparison on full dataset — our validator is **4× faster**:
 
 | Validator | total | per-poly |
 |-----------|-------|----------|
-| Geo-repair | 0.79 s | 0.50 µs |
-| GEOS isValid | 4.16 s | 2.64 µs |
+| Geo-repair | 0.82 s | 0.52 µs |
+| GEOS isValid | 3.32 s | 2.10 µs |
 
-### Synthetic benchmarks (parallel, grid+R-tree hybrid)
+### Synthetic benchmarks
 
-Structure strategy, parallel batch, i5-12400F (6C/12T).  GEOS via WKT conversion
-(system LLVM build, parallel, full LTO — maxed out).
+Structure strategy, i5-12400F (6C/12T).  GEOS linked via conda-forge
+(MSVC, serial, no LTO).  GEOS call includes WKT round-trip (encode to
+WKT, decode by GEOS).  GeoRepair serial column is apples-to-apples
+(single-threaded); parallel column shows the Rayon batch speedup.
 
-| Benchmark | geo-repair | GEOS (LLVM) | Ratio |
-|-----------|-----------:|------------:|------:|
-| Valid polygon 4v | 0.09 us | 4.37 us | 48× |
-| Valid polygon 10v | 0.18 us | 7.61 us | 44× |
-| Valid polygon 50v | 0.44 us | 26.7 us | 61× |
-| Valid polygon 100v | 0.47 us | 50.5 us | 107× |
-| Valid polygon 500v | 2.12 us | 259 us | 122× |
-| Valid polygon 1000v | 2.90 us | 502 us | 173× |
-| Valid polygon 5000v | 17.0 us | 2239 us | 132× |
-| Valid polygon 10000v | 34.3 us | 4452 us | 130× |
-| Invalid bowtie 4v | 0.38 us | 94.1 us | 250× |
-| Invalid star 100v | 4.82 us | 92.8 us | 19× |
-| Collinear ls 4v | 0.03 us | 2.15 us | 65× |
-| Collinear ls 10v | 0.10 us | 3.20 us | 34× |
-| Collinear ls 50v | 1.63 us | 9.20 us | 6× |
-| Collinear ls 100v | 1.53 us | 16.3 us | 11× |
-| Collinear ls 500v | 9.76 us | 74.1 us | 8× |
-| Hilbert curve 256v | 86.0 us | 43.2 us | GEOS 2× |
-| Hilbert curve 1024v | 649 us | 166 us | GEOS 4× |
-| Lissajous 200v | 60.4 us | 89.7 us | 1.5× |
-| Lissajous 500v | 140 us | 222 us | 1.6× |
-| Lissajous 1000v | 282 us | 455 us | 1.6× |
-| Star-burst 10sp | 0.29 us | 7.08 us | 24× |
-| Star-burst 50sp | 10.3 us | 34.7 us | 3.4× |
-| Star-burst 100sp | 36.7 us | 59.0 us | 1.6× |
-| Star-burst 500sp | 1028 us | 294 us | GEOS 3.5× |
-| Spoke wheel 10sp | 4.92 us | 7.17 us | 1.5× |
-| Spoke wheel 50sp | 40.7 us | 31.1 us | GEOS 1.3× |
-| Spoke wheel 100sp | 159 us | 62.1 us | GEOS 2.6× |
-| Spoke wheel 500sp | 9415 us | 295 us | GEOS 32× |
-| Collinear overlap 10seg | 4.39 us | 6.14 us | 1.4× |
-| Collinear overlap 50seg | 22.6 us | 24.7 us | 1.1× |
-| Collinear overlap 100seg | 48.6 us | 46.9 us | GEOS 1.0× |
-| Collinear overlap 500seg | 282 us | 228 us | GEOS 1.2× |
-| Hole hierarchy 5h | 1.00 us | 24.5 us | 25× |
-| Hole hierarchy 20h | 3.66 us | 123 us | 34× |
-| Hole hierarchy 50h | 9.32 us | 299 us | 32× |
-| Overlapping MP 5sh | 1.70 us | 2561 us | 1507× |
-| Overlapping MP 20sh | 5.96 us | 15044 us | 2524× |
-| Overlapping MP 50sh | 15.8 us | 38399 us | 2427× |
-| Sliver polygon 100v | 1.56 us | 79.2 us | 51× |
-| Sliver polygon 500v | 9.19 us | 406 us | 44× |
+| Benchmark | GeoRepair (ser) | GeoRepair (par) | GEOS (par batch) | Ratio (ser) |
+|-----------|----------------:|----------------:|-----------------:|------------:|
+| Valid polygon 4v | 0.21 | 0.10 µs | 3.79 µs | 18× |
+| Valid polygon 50v | 0.43 | 0.32 µs | 5.13 µs | 12× |
+| Valid polygon 500v | 3.06 | 1.77 µs | 34.1 µs | 11× |
+| Valid polygon 10000v | 49.5 | 37.6 µs | 647 µs | 13× |
+| Invalid bowtie 4v | 2.09 | 0.33 µs | 17.8 µs | 8.5× |
+| Invalid star 100v | 25.6 | 4.46 µs | 22.5 µs | 0.9× |
+| Self-touching poly | 4.13 | 1.10 µs | 20.8 µs | 5.0× |
+| Collapsed poly | 0.76 | 0.19 µs | 27.9 µs | 37× |
+| Near-collinear poly | 1.40 | 0.44 µs | 42.5 µs | 30× |
+| Hilbert curve 256v | 0.58 | 0.56 µs | 14.3 µs | 25× |
+| Hilbert curve 1024v | 2.38 | 1.93 µs | 34.7 µs | 15× |
+| Lissajous 200v | 0.39 | 0.46 µs | 20.5 µs | 52× |
+| Lissajous 1000v | 3.50 | 4.28 µs | 98.7 µs | 28× |
+| Star-burst 10sp | 0.27 | 0.07 µs | 7.26 µs | 27× |
+| Star-burst 50sp | 0.95 | 0.21 µs | 12.9 µs | 14× |
+| Star-burst 100sp | 1.97 | 0.32 µs | 24.7 µs | 13× |
+| Star-burst 500sp | 8.99 | 1.26 µs | 122 µs | 14× |
+| Spoke wheel 10sp | 0.22 | 0.06 µs | 5.91 µs | 27× |
+| Spoke wheel 50sp | 0.73 | 0.15 µs | 8.06 µs | 11× |
+| Spoke wheel 100sp | 2.10 | 0.43 µs | 14.0 µs | 6.7× |
+| Spoke wheel 500sp | 8.71 | 1.32 µs | 71.6 µs | 8.2× |
+| Star-comb 20sp | 0.23 | 0.10 µs | 6.73 µs | 29× |
+| Star-comb 100sp | 0.81 | 0.20 µs | 12.1 µs | 15× |
+| Star-comb 500sp | 4.02 | 0.83 µs | 48.3 µs | 12× |
+| Collinear overlap 10seg | 0.29 | 0.08 µs | 5.11 µs | 18× |
+| Collinear overlap 50seg | 1.19 | 0.24 µs | 5.21 µs | 4.4× |
+| Collinear overlap 100seg | 2.50 | 0.49 µs | 8.15 µs | 3.3× |
+| Collinear overlap 500seg | 10.8 | 1.95 µs | 41.3 µs | 3.8× |
+| Hole hierarchy 5h | 1.85 | 1.17 µs | 8.24 µs | 4.5× |
+| Hole hierarchy 20h | 5.56 | 3.65 µs | 14.2 µs | 2.6× |
+| Hole hierarchy 50h | 17.5 | 12.8 µs | 59.7 µs | 3.4× |
+| Overlapping MP 5sh | 3.98 | 1.41 µs | 421 µs | 106× |
+| Overlapping MP 20sh | 19.3 | 6.72 µs | 2581 µs | 134× |
+| Overlapping MP 50sh | 44.8 | 15.2 µs | 6649 µs | 148× |
+| Dense grid 5×5=25 | 13.8 | 5.19 µs | 1631 µs | 118× |
+| Dense grid 10×10=100 | 63.8 | 28.0 µs | 14005 µs | 220× |
+| Dense grid 20×20=400 | 283 | 136 µs | 100012 µs | 353× |
+| Sliver polygon 100v | 3.38 | 2.02 µs | 18.2 µs | 5.4× |
+| Sliver polygon 500v | 16.6 | 7.60 µs | 72.4 µs | 4.4× |
 
 **Arrange pipeline (CDT fallback):**
 
-| Benchmark | geo-repair | GEOS (LLVM) | Ratio |
-|-----------|-----------:|------------:|------:|
-| Valid polygon 4v | 0.12 us | 3.91 us | 33× |
-| Valid polygon 50v | 1.48 us | 26.4 us | 18× |
-| Invalid bowtie 4v | 0.67 us | 90.7 us | 136× |
-| Star-burst 10sp | 0.32 us | 7.33 us | 23× |
-| Star-burst 50sp | 11.5 us | 32.1 us | 2.8× |
+| Benchmark | GeoRepair (par) | GEOS (par batch) | Ratio |
+|-----------|----------------:|-----------------:|------:|
+| Valid polygon 4v | 0.09 µs | 3.93 µs | 42× |
+| Valid polygon 50v | 1.65 µs | 5.62 µs | 3.4× |
+| Invalid bowtie 4v | 0.65 µs | 18.1 µs | 28× |
+| Star-burst 10sp | 0.09 µs | 7.25 µs | 79× |
+| Star-burst 50sp | 0.51 µs | 12.8 µs | 25× |
+
+**Notes on GEOS comparison:**
+- conda-forge `libgeos` on Windows is compiled with MSVC, runs single-threaded internally, and does not use LTO. The "par batch" columns run many GEOS calls concurrently via Rayon (throughput parallelism), since GEOS per-call is serial.
+- Synthetic GEOS numbers include WKT serialization/deserialization overhead. The real-world benchmark uses GEOS CoordSeq direct construction (no WKT) for fair comparison.
+- GeoRepair parallel speedup is typically 2-4× on 12 cores for synthetic shapes (sub-5µs per call — Rayon overhead dominates). For real-world batches of 1.58M polygons, the throughput advantage is larger due to better amortization.
 
 ### Run benchmarks
 
 ```shell
-# Real-world dataset benchmark (system GEOS — conda LLVM, fastest)
+# Real-world dataset benchmark (system GEOS — conda-forge)
 cargo bench --features bench-geos-system,arrange,structure,parallel,simd,io-shp --bench real_world
 
-# Real-world dataset benchmark (static GEOS — MSVC, no LTO)
+# Real-world dataset benchmark (static GEOS — built from source)
 cargo bench --features bench-geos,arrange,structure,parallel,simd,io-shp --bench real_world
 
-# Quick synthetic benchmarks (no GEOS)
-cargo bench --bench bench
+# Synthetic benchmarks with serial + parallel columns (no GEOS)
+cargo bench --features arrange,structure,parallel,simd --bench bench
 
 # Synthetic benchmarks with GEOS comparison
-cargo bench --features bench-geos-system --bench bench
+cargo bench --features bench-geos-system,arrange,structure,parallel,simd --bench bench
 
 # Criterion microbenchmarks
 cargo bench --features bench-criterion --bench criterion
@@ -163,8 +171,8 @@ cargo bench --features bench-criterion --bench criterion
 | `io-gpkg` | GeoPackage format backend (not WASM) | no |
 | `io-all` | All opt-in backends except gpkg | no |
 | `io-all-native` | All opt-in backends including gpkg | no |
-| `bench-geos` | GEOS comparison benchmarks (static — MSVC, no LTO) | no |
-| `bench-geos-system` | GEOS comparison benchmarks (system — conda LLVM) | no |
+| `bench-geos` | GEOS comparison benchmarks (build from source — MSVC, no LTO) | no |
+| `bench-geos-system` | GEOS comparison benchmarks (link against system GEOS — conda-forge MSVC) | no |
 | `bench-criterion` | Criterion benchmark harness | no |
 
 ## License

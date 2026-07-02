@@ -1,14 +1,14 @@
 # GEOS benchmark setup (Windows x86_64 MSVC)
 
-GEOS is installed via conda at: `C:\Users\Wildbot\miniconda3`
+GEOS is installed via conda at: `D:\Miniconda`
 
 ## Required environment variables
 
 ```powershell
-$env:GEOS_LIB_DIR = "C:\Users\Wildbot\miniconda3\Library\lib"
-$env:GEOS_INCLUDE_DIR = "C:\Users\Wildbot\miniconda3\Library\include"
+$env:GEOS_LIB_DIR = "D:\Miniconda\Library\lib"
+$env:GEOS_INCLUDE_DIR = "D:\Miniconda\Library\include"
 $env:GEOS_VERSION = "3.14.1"
-$env:Path = "C:\Users\Wildbot\miniconda3\Library\bin;$env:Path"
+$env:Path = "D:\Miniconda\Library\bin;$env:Path"
 ```
 
 ## Run benchmark with GEOS comparison

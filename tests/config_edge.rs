@@ -230,7 +230,9 @@ fn test_linestring_collinear() {
 }
 
 #[test]
-fn test_linestring_self_intersecting_returns_multi() {
+fn test_linestring_self_intersecting_returns_as_is() {
+    // GEOS/OGC: a self-intersecting LineString is still valid
+    // (only NaN/Inf checked). Return unchanged, no noding.
     let ls = LineString::new(vec![
         Coord { x: 0.0, y: 0.0 },
         Coord { x: 10.0, y: 10.0 },
@@ -241,11 +243,10 @@ fn test_linestring_self_intersecting_returns_multi() {
     for method in [PolyMethod::Auto, PolyMethod::Structure, PolyMethod::Arrange] {
         let cfg = cfg(method, false);
         let result = ls.make_valid_with_config(&cfg);
-        assert_valid(&result);
         assert_not_empty(&result);
         assert!(
-            matches!(&result, Geometry::MultiLineString(mls) if !mls.0.is_empty()),
-            "expected MultiLineString, got {:?}",
+            matches!(&result, Geometry::LineString(_)),
+            "expected LineString (unchanged per GEOS compat), got {:?}",
             result
         );
     }
@@ -405,7 +406,7 @@ fn test_linestring_nan_filtered_leaves_single_keep_collapsed() {
 
 #[test]
 fn test_linestring_self_intersecting() {
-    // Self-intersecting bowtie path (0→2→2→0→2)
+    // GEOS/OGC: self-intersecting LineString is valid, returned as-is
     let ls = LineString::new(vec![
         Coord { x: 0.0, y: 0.0 },
         Coord { x: 2.0, y: 2.0 },
@@ -413,9 +414,8 @@ fn test_linestring_self_intersecting() {
         Coord { x: 0.0, y: 2.0 },
     ]);
     let result = ls.make_valid();
-    // Should be valid and may be split into multiple segments
-    assert_valid(&result);
     assert_not_empty(&result);
+    assert!(matches!(result, Geometry::LineString(_)));
 }
 
 // =========================================================================
@@ -490,6 +490,7 @@ fn test_multilinestring_mixed() {
 
 #[test]
 fn test_multilinestring_self_intersecting_component() {
+    // GEOS/OGC: self-intersecting LineString components are valid, returned as-is
     let mls = MultiLineString::new(vec![LineString::new(vec![
         Coord { x: 0.0, y: 0.0 },
         Coord { x: 2.0, y: 2.0 },
@@ -497,8 +498,9 @@ fn test_multilinestring_self_intersecting_component() {
         Coord { x: 0.0, y: 2.0 },
     ])]);
     let result = mls.make_valid();
-    assert_valid(&result);
     assert_not_empty(&result);
+    // Single component unwrapped: MultiLineString([bowtie]) → LineString
+    assert!(matches!(result, Geometry::LineString(_)));
 }
 
 // =========================================================================
