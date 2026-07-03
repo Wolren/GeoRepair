@@ -2209,6 +2209,123 @@ proptest! {
 
 
 
+
+// =========================================================================
+// ITERATION 8: Stress at fp bounds — Shewchuk limits, f64 extremes,
+// edge-sharing MP, fp limits
+// =========================================================================
+
+proptest! {
+    // -----------------------------------------------------------------------
+    // 8.1  Shewchuk-bound bowtie: coordinates at 1e15 where orient2d
+    //      approaches its precision limit.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn invariant_shewchuk_bound_bowtie(
+        scale in 1e12f64..1e15f64,
+    ) {
+        let poly = Polygon::new(
+            LineString::new(vec![
+                Coord { x: 0.0, y: 0.0 },
+                Coord { x: scale, y: scale },
+                Coord { x: scale, y: 0.0 },
+                Coord { x: 0.0, y: scale },
+                Coord { x: 0.0, y: 0.0 },
+            ]),
+            Vec::new(),
+        );
+        for cfg in &cfg_all() {
+            let result = poly.make_valid_with_config(cfg);
+            assert_valid(&result);
+            assert_not_empty(&result);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // 8.2  Orient2d near-collinear at large magnitude.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn invariant_orient2d_near_collinear(
+        scale in 1e6f64..1e14f64,
+        tiny in 1e-10f64..1e-4f64,
+    ) {
+        let coords = vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: scale, y: scale },
+            Coord { x: scale + tiny, y: scale - tiny },
+            Coord { x: 0.0, y: 0.0 },
+        ];
+        let poly = Polygon::new(LineString::new(coords), Vec::new());
+        for cfg in &cfg_all() {
+            let result = poly.make_valid_with_config(cfg);
+            assert_valid(&result);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // 8.3  F64 max range: MP mixing 1e15 and 1e-10 coordinates.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn invariant_f64_mixed_range(
+        big in 1e10f64..1e15f64,
+        small in 1e-10f64..1e-5f64,
+    ) {
+        let mp = MultiPolygon::new(vec![
+            Polygon::new(
+                LineString::new(vec![
+                    Coord { x: big, y: big }, Coord { x: big + 1.0, y: big },
+                    Coord { x: big, y: big + 1.0 }, Coord { x: big, y: big },
+                ]),
+                Vec::new(),
+            ),
+            Polygon::new(
+                LineString::new(vec![
+                    Coord { x: small, y: small }, Coord { x: small + 1e-8, y: small },
+                    Coord { x: small, y: small + 1e-8 }, Coord { x: small, y: small },
+                ]),
+                Vec::new(),
+            ),
+        ]);
+        for cfg in &cfg_all() {
+            let result = mp.make_valid_with_config(cfg);
+            assert_valid(&result);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // 8.4  Edge-sharing MultiPolygon: two polygons sharing exact
+    //      boundary edge.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn invariant_edge_sharing_multipolygon(
+        scale in 1.0f64..100.0f64,
+    ) {
+        let p1 = Polygon::new(
+            LineString::new(vec![
+                Coord { x: 0.0, y: 0.0 }, Coord { x: scale, y: 0.0 },
+                Coord { x: scale, y: scale }, Coord { x: 0.0, y: scale },
+                Coord { x: 0.0, y: 0.0 },
+            ]),
+            Vec::new(),
+        );
+        let p2 = Polygon::new(
+            LineString::new(vec![
+                Coord { x: 0.0, y: 0.0 }, Coord { x: scale, y: 0.0 },
+                Coord { x: scale, y: -scale }, Coord { x: 0.0, y: -scale },
+                Coord { x: 0.0, y: 0.0 },
+            ]),
+            Vec::new(),
+        );
+        let mp = MultiPolygon::new(vec![p1, p2]);
+        for cfg in &cfg_all() {
+            let result = mp.make_valid_with_config(cfg);
+            assert_valid(&result);
+            assert_not_empty(&result);
+        }
+    }
+}
+
+// =========================================================================
 // =========================================================================
 // =========================================================================
 // Legacy diagnostic module (preserved for debugging specific failures)
