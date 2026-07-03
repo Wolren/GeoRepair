@@ -1769,3 +1769,77 @@ fn jts_dimension_consistence() {
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     assert_valid_ogc(&result);
 }
+// =========================================================================
+// SECTION 6: PostGIS documentation regression tests
+// =========================================================================
+//
+// Ported from PostGIS ST_MakeValid documentation examples.
+// These test real-world patterns from the PostgreSQL spatial extension.
+//
+
+#[test]
+fn postgis_mp_2_overlap() {
+    use wkt::TryFromWkt;
+    let input: Geometry<f64> = Geometry::try_from_wkt_str(
+        "MULTIPOLYGON(((186 194,187 194,188 195,189 195,190 195,191 195,192 195,
+        193 194,194 194,194 193,195 192,195 191,195 190,195 189,195 188,194 187,
+        194 186,14 6,13 6,12 5,11 5,10 5,9 5,8 5,7 6,6 6,6 7,5 8,5 9,5 10,
+        5 11,5 12,6 13,6 14,186 194)),((150 90,149 80,146 71,142 62,135 55,
+        128 48,119 44,110 41,100 40,90 41,81 44,72 48,65 55,58 62,54 71,51 80,
+        50 90,51 100,54 109,58 118,65 125,72 132,81 136,90 139,100 140,110 139,
+        119 136,128 132,135 125,142 118,146 109,149 100,150 90)))")
+        .expect("valid WKT");
+    let result = input.make_valid_with_config(&MakeValidConfig::default());
+    assert_valid_ogc(&result);
+    assert_not_empty(&result);
+}
+
+#[test]
+fn postgis_mp_6_overlap() {
+    use wkt::TryFromWkt;
+    let input: Geometry<f64> = Geometry::try_from_wkt_str(
+        "MULTIPOLYGON(((91 50,79 22,51 10,23 22,11 50,23 78,51 90,79 78,91 50)),
+        ((91 100,79 72,51 60,23 72,11 100,23 128,51 140,79 128,91 100)),
+        ((91 150,79 122,51 110,23 122,11 150,23 178,51 190,79 178,91 150)),
+        ((141 50,129 22,101 10,73 22,61 50,73 78,101 90,129 78,141 50)),
+        ((141 100,129 72,101 60,73 72,61 100,73 128,101 140,129 128,141 100)),
+        ((141 150,129 122,101 110,73 122,61 150,73 178,101 190,129 178,141 150)))")
+        .expect("valid WKT");
+    let result = input.make_valid_with_config(&MakeValidConfig::default());
+    assert_valid_ogc(&result);
+    assert_not_empty(&result);
+}
+
+#[test]
+fn postgis_linestring_collapse() {
+    let input = Geometry::LineString(LineString::new(vec![
+        Coord { x: 0.0, y: 0.0 }, Coord { x: 0.0, y: 0.0 },
+    ]));
+    for &keep in &[false, true] {
+        let config = MakeValidConfig { keep_collapsed: keep, ..Default::default() };
+        let result = input.make_valid_with_config(&config);
+        assert_valid_ogc(&result);
+    }
+}
+#[test]
+fn postgis_makevalid_regression() {
+    // Ported from PostGIS liblwgeom/cunit/cu_geos.c test_geos_makevalid
+    // A polygon with a self-intersection at the 92122.136, 463412.826 vertex.
+    let input = Geometry::Polygon(Polygon::new(
+        LineString::new(vec![
+            Coord { x: 92114.014, y: 463463.469 },
+            Coord { x: 92115.51207431706, y: 463462.2069374289 },
+            Coord { x: 92115.512, y: 463462.207 },
+            Coord { x: 92127.546, y: 463452.075 },
+            Coord { x: 92117.173, y: 463439.755 },
+            Coord { x: 92133.675, y: 463425.942 },
+            Coord { x: 92122.136, y: 463412.826 },
+            Coord { x: 92092.377, y: 463437.77 },
+            Coord { x: 92114.014, y: 463463.469 },
+        ]),
+        Vec::new(),
+    ));
+    let result = input.make_valid_with_config(&MakeValidConfig::default());
+    assert_valid_ogc(&result);
+    assert_not_empty(&result);
+}
