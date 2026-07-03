@@ -1599,6 +1599,320 @@ proptest! {
 }
 
 // =========================================================================
+// ITERATION 6: Additional stress patterns — JTS regression patterns,
+// hole collapse, mixed violations, linear ring self-crossing, wraps
+// =========================================================================
+
+proptest! {
+    // -----------------------------------------------------------------------
+    // 6.1  Shell collapse with holes: exterior degenerates to line/point
+    //      but holes remain valid. Pipeline must handle collapse first,
+    //      then process remaining valid geometry.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn invariant_shell_collapse_with_holes(
+        shell_coords in proptest::collection::vec(coord_range(-100.0..=100.0), 3..=4),
+        hole_coords in proptest::collection::vec(coord_range(-100.0..=100.0), 4..=6),
+    ) {
+        let mut ext = shell_coords;
+        if ext.len() >= 3 && ext.first() != ext.last() { ext.push(ext[0]); }
+        let mut hole = hole_coords;
+        if hole.len() >= 3 && hole.first() != hole.last() { hole.push(hole[0]); }
+        let poly = Polygon::new(LineString::new(ext), vec![LineString::new(hole)]);
+        for cfg in &cfg_all() {
+            let result = poly.make_valid_with_config(cfg);
+            assert_valid(&result);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // 6.2  Hole collapse: valid exterior ring, interior ring is degenerate
+    //      (< 3 unique verts or collinear). Pipeline should remove the hole.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn invariant_hole_collapsed(
+        _n_ext in 4usize..8usize,
+        n_hole in 3usize..6usize,
+        dx in -50.0f64..50.0f64,
+        dy in -50.0f64..50.0f64,
+    ) {
+        // Build a valid shell (square) with a collapsed hole
+        let shell = LineString::new(vec![
+            Coord { x: -100.0, y: -100.0 }, Coord { x: 100.0, y: -100.0 },
+            Coord { x: 100.0, y: 100.0 }, Coord { x: -100.0, y: 100.0 },
+            Coord { x: -100.0, y: -100.0 },
+        ]);
+        // Hole: all coords along the same line (collinear)
+        let mut hole_coords: Vec<Coord<f64>> = (0..n_hole).map(|i| {
+            let t = i as f64 / (n_hole - 1) as f64;
+            Coord { x: dx + t * 50.0, y: dy }
+        }).collect();
+        if hole_coords.first() != hole_coords.last() { hole_coords.push(hole_coords[0]); }
+        let poly = Polygon::new(shell, vec![LineString::new(hole_coords)]);
+        for cfg in &cfg_all() {
+            let result = poly.make_valid_with_config(cfg);
+            assert_valid(&result);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // 6.3  Mixed hole violations: one polygon with overlapping holes,
+    //      holes outside shell, and holes touching shell boundary.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn invariant_mixed_hole_violations(
+        scale in 4.0f64..50.0f64,
+    ) {
+        let s = scale;
+        let shell = LineString::new(vec![
+            Coord { x: 0.0, y: 0.0 }, Coord { x: s, y: 0.0 },
+            Coord { x: s, y: s }, Coord { x: 0.0, y: s }, Coord { x: 0.0, y: 0.0 },
+        ]);
+        // Holes: overlapping pairs + one outside + one on boundary
+        let holes = vec![
+            // Two overlapping holes
+            LineString::new(vec![
+                Coord { x: s * 0.2, y: s * 0.2 }, Coord { x: s * 0.6, y: s * 0.2 },
+                Coord { x: s * 0.6, y: s * 0.6 }, Coord { x: s * 0.2, y: s * 0.6 },
+                Coord { x: s * 0.2, y: s * 0.2 },
+            ]),
+            LineString::new(vec![
+                Coord { x: s * 0.4, y: s * 0.4 }, Coord { x: s * 0.8, y: s * 0.4 },
+                Coord { x: s * 0.8, y: s * 0.8 }, Coord { x: s * 0.4, y: s * 0.8 },
+                Coord { x: s * 0.4, y: s * 0.4 },
+            ]),
+            // Hole outside shell
+            LineString::new(vec![
+                Coord { x: s * 2.0, y: s * 2.0 }, Coord { x: s * 2.5, y: s * 2.0 },
+                Coord { x: s * 2.5, y: s * 2.5 }, Coord { x: s * 2.0, y: s * 2.5 },
+                Coord { x: s * 2.0, y: s * 2.0 },
+            ]),
+            // Hole touching shell at boundary
+            LineString::new(vec![
+                Coord { x: s * 0.25, y: 0.0 }, Coord { x: s * 0.5, y: s * 0.5 },
+                Coord { x: s * 0.75, y: 0.0 }, Coord { x: s * 0.25, y: 0.0 },
+            ]),
+        ];
+        let poly = Polygon::new(shell, holes);
+        for cfg in &cfg_all() {
+            let result = poly.make_valid_with_config(cfg);
+            assert_valid(&result);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // 6.4  Flat ring: every vertex on the same line (all-collinear shell).
+    //      Pipeline must detect collapse and return empty.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn invariant_flat_ring(
+        x1 in -100.0f64..100.0f64,
+        x2 in -100.0f64..100.0f64,
+        y in -100.0f64..100.0f64,
+        n in 3usize..8usize,
+    ) {
+        let coords: Vec<Coord<f64>> = (0..n).map(|i| {
+            let t = i as f64 / (n - 1) as f64;
+            Coord { x: x1 + (x2 - x1) * t, y }
+        }).collect();
+        let poly = Polygon::new(LineString::new(coords), Vec::new());
+        for cfg in &cfg_all() {
+            let result = poly.make_valid_with_config(cfg);
+            assert_valid(&result);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // 6.5  Holes touching each other at a vertex (not overlapping interiors).
+    //      Valid OGC — two holes share a single vertex.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn invariant_holes_touching_at_vertex(
+        scale in 2.0f64..100.0f64,
+    ) {
+        let s = scale;
+        let shell = LineString::new(vec![
+            Coord { x: 0.0, y: 0.0 }, Coord { x: s, y: 0.0 },
+            Coord { x: s, y: s }, Coord { x: 0.0, y: s }, Coord { x: 0.0, y: 0.0 },
+        ]);
+        // Two square holes sharing a corner at (s*0.5, s*0.5)
+        let holes = vec![
+            LineString::new(vec![
+                Coord { x: s * 0.2, y: s * 0.2 }, Coord { x: s * 0.5, y: s * 0.2 },
+                Coord { x: s * 0.5, y: s * 0.5 }, Coord { x: s * 0.2, y: s * 0.5 },
+                Coord { x: s * 0.2, y: s * 0.2 },
+            ]),
+            LineString::new(vec![
+                Coord { x: s * 0.5, y: s * 0.5 }, Coord { x: s * 0.8, y: s * 0.5 },
+                Coord { x: s * 0.8, y: s * 0.8 }, Coord { x: s * 0.5, y: s * 0.8 },
+                Coord { x: s * 0.5, y: s * 0.5 },
+            ]),
+        ];
+        let poly = Polygon::new(shell, holes);
+        for cfg in &cfg_all() {
+            let result = poly.make_valid_with_config(cfg);
+            assert_valid(&result);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // 6.6  CW hole input: holes given in CCW (wrong per OGC) must be
+    //      reversed to CW by the pipeline.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn invariant_hole_ccw_input_corrected_to_cw(
+        scale in 1.0f64..100.0f64,
+        reverse in proptest::bool::ANY,
+    ) {
+        let s = scale;
+        let shell = LineString::new(vec![
+            Coord { x: 0.0, y: 0.0 }, Coord { x: s, y: 0.0 },
+            Coord { x: s, y: s }, Coord { x: 0.0, y: s }, Coord { x: 0.0, y: 0.0 },
+        ]);
+        // Hole: a square centered in the shell
+        let mut hole_coords = vec![
+            Coord { x: s * 0.3, y: s * 0.3 }, Coord { x: s * 0.7, y: s * 0.3 },
+            Coord { x: s * 0.7, y: s * 0.7 }, Coord { x: s * 0.3, y: s * 0.7 },
+            Coord { x: s * 0.3, y: s * 0.3 },
+        ];
+        let mut hole = LineString::new(hole_coords.clone());
+        // Default hole is CCW (OGC violation). If reverse, make it CW (correct).
+        if reverse {
+            hole_coords.reverse();
+            hole = LineString::new(hole_coords);
+        }
+        let poly = Polygon::new(shell, vec![hole]);
+        for cfg in &cfg_all() {
+            let result = poly.make_valid_with_config(cfg);
+            assert_valid_ogc(&result);
+            if cfg.keep_collapsed { continue; }
+            // After repair, holes must be CW
+            if let Geometry::Polygon(p) = &result {
+                for h in p.interiors() {
+                    if h.0.len() >= 4 {
+                        let cw = h.winding_order() == Some(geo::winding_order::WindingOrder::Clockwise);
+                        assert!(cw, "hole must be CW after repair");
+                    }
+                }
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // 6.7  Many holes (up to 20) in a single shell. Stress hole dedup
+    //      and processing pipeline.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn invariant_many_holes(
+        n_holes in 5usize..=20usize,
+        scale in 5.0f64..100.0f64,
+    ) {
+        let s = scale;
+        let holes: Vec<LineString<f64>> = (0..n_holes).map(|i| {
+            let frac = (i as f64 + 0.5) / (n_holes as f64);
+            let h = s * 0.03;
+            let cx = s * 0.1 + (frac * 0.8).max(0.0).min(0.8) * s;
+            let cy = s * 0.1 + ((i as f64 * 0.2371).fract() * 0.8).max(0.0).min(0.8) * s;
+            LineString::new(vec![
+                Coord { x: cx - h, y: cy - h }, Coord { x: cx + h, y: cy - h },
+                Coord { x: cx + h, y: cy + h }, Coord { x: cx - h, y: cy + h },
+                Coord { x: cx - h, y: cy - h },
+            ])
+        }).collect();
+        let poly = Polygon::new(
+            LineString::new(vec![
+                Coord { x: 0.0, y: 0.0 }, Coord { x: s, y: 0.0 },
+                Coord { x: s, y: s }, Coord { x: 0.0, y: s }, Coord { x: 0.0, y: 0.0 },
+            ]),
+            holes,
+        );
+        for cfg in &cfg_all() {
+            let result = poly.make_valid_with_config(cfg);
+            assert_valid(&result);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // 6.8  Coordinate wrap-around: coords spanning extreme range in small
+    //      steps, stressing precision of intersection/snap logic.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn invariant_coord_wrap_around(
+        base in -1e10f64..1e10f64,
+        step in 1e-5f64..1e-1f64,
+        n in 3usize..8usize,
+    ) {
+        let coords: Vec<Coord<f64>> = (0..n).map(|i| {
+            let t = i as f64;
+            Coord { x: base + t * step, y: base + t * step * 1.3 }
+        }).collect();
+        let poly = Polygon::new(LineString::new(coords), Vec::new());
+        for cfg in &cfg_all() {
+            let result = poly.make_valid_with_config(cfg);
+            assert_valid(&result);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // 6.9  Denormal coordinates: values near f64::MIN_POSITIVE
+    //      (subnormals and denormals).
+    // -----------------------------------------------------------------------
+    #[test]
+    fn invariant_denormal_coords(
+        coords in proptest::collection::vec(coord_range(-1e-300..=1e-300), 3..=8),
+    ) {
+        let mut ring = coords;
+        if ring.len() >= 3 && ring.first() != ring.last() { ring.push(ring[0]); }
+        let poly = Polygon::new(LineString::new(ring), Vec::new());
+        for cfg in &cfg_all() {
+            let result = poly.make_valid_with_config(cfg);
+            assert_valid(&result);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // 6.10 MultiPolygon with valid + collapsed + empty components.
+    //      Pipeline must handle mixed-component MPs.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn invariant_mp_mixed_components(
+        n_valid in 0usize..3usize,
+        n_collapsed in 0usize..3usize,
+        scale in 1.0f64..50.0f64,
+    ) {
+        let mut components = Vec::new();
+        for i in 0..n_valid {
+            components.push(Polygon::new(
+                LineString::new(vec![
+                    Coord { x: scale * (i as f64), y: 0.0 },
+                    Coord { x: scale * (i as f64 + 0.8), y: 0.0 },
+                    Coord { x: scale * (i as f64 + 0.8), y: scale * 0.8 },
+                    Coord { x: scale * (i as f64), y: scale * 0.8 },
+                    Coord { x: scale * (i as f64), y: 0.0 },
+                ]),
+                Vec::new(),
+            ));
+        }
+        for _ in 0..n_collapsed {
+            // Collapsed: all vertices identical
+            components.push(Polygon::new(
+                LineString::new(vec![
+                    Coord { x: 0.0, y: 0.0 }, Coord { x: 0.0, y: 0.0 },
+                    Coord { x: 0.0, y: 0.0 },
+                ]),
+                Vec::new(),
+            ));
+        }
+        if components.is_empty() { return Ok(()); }
+        let mp = MultiPolygon::new(components);
+        for cfg in &cfg_all() {
+            let result = mp.make_valid_with_config(cfg);
+            assert_valid(&result);
+        }
+    }
+}
+
+// =========================================================================
 // Legacy diagnostic module (preserved for debugging specific failures)
 // =========================================================================
 
