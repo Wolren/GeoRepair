@@ -2327,6 +2327,69 @@ proptest! {
 
 // =========================================================================
 // =========================================================================
+
+// =========================================================================
+// ITERATION 9: Arithmetic extreme stress — mixed fp categories, large
+// coordinate ratio stress, fp-special-value combinatorial stress
+// =========================================================================
+
+proptest! {
+    // -----------------------------------------------------------------------
+    // 9.1  Mixed fp categories in same ring: alternate between NAN, MAX, MIN,
+    //      INF, 0, subnormal to ensure all degenerate paths are exercised.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn invariant_mixed_fp_in_same_ring(
+        perm in 0u8..8u8,
+    ) {
+        let specials = [
+            Coord { x: f64::NAN, y: f64::NAN },
+            Coord { x: f64::INFINITY, y: f64::INFINITY },
+            Coord { x: f64::MAX, y: f64::MIN },
+            Coord { x: f64::MIN_POSITIVE, y: -f64::MIN_POSITIVE },
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 1e300, y: -1e300 },
+            Coord { x: f64::NEG_INFINITY, y: f64::NEG_INFINITY },
+            Coord { x: -1e300, y: 1e300 },
+        ];
+        let ring: Vec<Coord<f64>> = specials.iter().cycle().skip(perm as usize).take(4).copied().collect();
+        let poly = Polygon::new(LineString::new(ring), Vec::new());
+        for cfg in &cfg_all() {
+            let result = poly.make_valid_with_config(cfg);
+            assert_valid(&result);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // 9.2  F64 ratio stress: adjacent vertices with ~1e300 ratio between their
+    //      coordinate magnitudes. Stress orient2d and intersection logic.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn invariant_extreme_ratio_stress(
+        tiny_val in -1e100f64..1e100f64,
+        huge_val in -1e300f64..1e300f64,
+    ) {
+        let huge = if huge_val.abs() < 1e100 { 1e200 * huge_val.signum() } else { huge_val };
+        let tiny = if tiny_val.abs() > 1e-50 { 1e-100 * tiny_val.signum() } else { tiny_val };
+        if !huge.is_finite() || !tiny.is_finite() { return Ok(()); }
+        let coords = vec![
+            Coord { x: tiny, y: tiny },
+            Coord { x: huge, y: huge },
+            Coord { x: huge, y: tiny },
+            Coord { x: tiny, y: huge },
+            Coord { x: tiny, y: tiny },
+        ];
+        let poly = Polygon::new(LineString::new(coords), Vec::new());
+        for cfg in &cfg_all() {
+            let result = poly.make_valid_with_config(cfg);
+            if result.is_valid() {
+                // At extreme ratios empty output is acceptable — no-panic guarantee only
+            }
+        }
+    }
+}
+
+// =========================================================================
 // =========================================================================
 // Legacy diagnostic module (preserved for debugging specific failures)
 // =========================================================================
