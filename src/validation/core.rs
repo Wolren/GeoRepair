@@ -558,6 +558,9 @@ pub(crate) fn check_orientation(ring: &[Coord<f64>]) -> bool {
 
 pub(crate) fn point_in_ring_exclusive(pt: Coord<f64>, ring: &[Coord<f64>]) -> bool {
     let n = ring.len();
+    if n < 2 {
+        return false;
+    }
     let mut wn = 0i32;
     for i in 0..n - 1 {
         let p1 = ring[i];
@@ -611,10 +614,10 @@ pub(crate) fn point_on_ring(pt: Coord<f64>, ring: &[Coord<f64>], eps: f64) -> bo
 /// XORs the two hashes together.  Two rings that are rotated duplicates will
 /// produce the same fingerprint regardless of winding order.
 pub(crate) fn ring_dup_fingerprint(ring: &[Coord<f64>]) -> (usize, u64) {
-    let n = ring.len() - 1;
-    if n == 0 {
+    if ring.len() <= 1 {
         return (ring.len(), 0);
     }
+    let n = ring.len() - 1;
     let min_idx = {
         let mut idx = 0usize;
         for i in 1..n {
