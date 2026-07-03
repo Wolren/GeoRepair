@@ -1844,6 +1844,26 @@ fn postgis_makevalid_regression() {
     assert_not_empty(&result);
 }
 // =========================================================================
+
+#[test]
+fn jts_polygon_empty() {
+    // JTS testPolygonEmpty: POLYGON EMPTY → POLYGON EMPTY
+    let input = Geometry::Polygon(Polygon::new(LineString::new(Vec::new()), Vec::new()));
+    let result = input.make_valid_with_config(&MakeValidConfig::default());
+    assert_valid_ogc(&result);
+}
+
+#[test]
+fn jts_polygon_bowtie() {
+    // JTS testPolygonBowtie: classic bowtie → MULTIPOLYGON[2]
+    use wkt::TryFromWkt;
+    let input: Geometry<f64> = Geometry::try_from_wkt_str(
+        "POLYGON ((10 90, 90 10, 90 90, 10 10, 10 90))")
+        .expect("valid WKT");
+    let result = input.make_valid_with_config(&MakeValidConfig::default());
+    assert_valid_ogc(&result);
+    assert_not_empty(&result);
+}
 // SECTION 7: GEOS makevalid XML test suite — ported from
 // tests/xmltester/tests/misc/makevalid.xml
 // =========================================================================
