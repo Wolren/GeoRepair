@@ -805,7 +805,7 @@ fn test_hole_outside_shell() {
             Coord { x: 20.0, y: 20.0 },
         ])],
     );
-    let result = poly.make_valid_with_config(&config_structure());
+    let result = poly.make_valid_with_config(&MakeValidConfig::default());
     assert_geometry_valid(&result);
     assert_not_empty(&result);
 }

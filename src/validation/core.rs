@@ -722,12 +722,17 @@ pub(crate) fn check_holes_valid(
             return errors;
         }
 
-        // A hole touching the shell at ≥ 2 distinct points may disconnect the interior
-        let touch_count = hole
-            .0
-            .iter()
-            .filter(|&&hp| point_on_ring(hp, shell, eps))
-            .count();
+        // A hole touching the shell at ≥ 2 distinct points may disconnect the interior.
+        // Note: the same vertex can be on 2+ edges of the shell (outgoing + incoming),
+        // so we must deduplicate touch points.
+        let mut touch_count = 0usize;
+        let mut seen_touches: Vec<Coord<f64>> = Vec::new();
+        for &hp in &hole.0 {
+            if point_on_ring(hp, shell, eps) && !seen_touches.contains(&hp) {
+                touch_count += 1;
+                seen_touches.push(hp);
+            }
+        }
         if touch_count >= 2 {
             errors.push(GeometryValidationError::DisconnectedInteriorRing);
             return errors;

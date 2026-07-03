@@ -326,17 +326,22 @@ impl MakeValid for Polygon<f64> {
     type Scalar = f64;
 
     fn make_valid_with_config(&self, config: &MakeValidConfig) -> Geometry<f64> {
+        // Fuse the NaN scan into the collapse-check loop to avoid a separate pass.
+        // The collapse check already iterates all coords — piggyback the is_finite
+        // check there.  make_valid_clean handles the merged logic.
         if !config.keep_collapsed && self.exterior().0.len() >= 4 {
             let coords = &self.exterior().0;
-            let mut min_x = coords[0].x;
-            let mut max_x = coords[0].x;
-            let mut min_y = coords[0].y;
-            let mut max_y = coords[0].y;
+            let (mut min_x, mut max_x, mut min_y, mut max_y) =
+                (coords[0].x, coords[0].x, coords[0].y, coords[0].y);
+            let mut has_nan = !coords[0].x.is_finite() || !coords[0].y.is_finite();
             for w in coords.windows(2) {
                 min_x = min_x.min(w[1].x);
                 max_x = max_x.max(w[1].x);
                 min_y = min_y.min(w[1].y);
                 max_y = max_y.max(w[1].y);
+                if !has_nan && (!w[1].x.is_finite() || !w[1].y.is_finite()) {
+                    has_nan = true;
+                }
             }
             let scale = (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
             if (max_x - min_x).abs() < f64::EPSILON * scale
@@ -344,45 +349,145 @@ impl MakeValid for Polygon<f64> {
             {
                 return empty_geom();
             }
-        }
-
-        // Produce result via the selected method
-        let result = match config.poly_method {
-            PolyMethod::Arrange => {
-                let r = arrange_or_empty(self, config);
-                if is_valid_with_geo(&r) {
-                    r
-                } else {
-                    warn!("Arrange mode: result invalid, retrying with precision reduction");
-                    reduce_fallback(self, config)
+            if !has_nan {
+                // Also check interior rings — exterior might be clean but holes can have NaNs
+                if !self.interiors().is_empty() {
+                    for ring in self.interiors().iter() {
+                        if ring.0.iter().any(|c| !c.x.is_finite() || !c.y.is_finite()) {
+                            has_nan = true;
+                            break;
+                        }
+                    }
                 }
             }
-            PolyMethod::Structure => structure_fix(self, config).unwrap_or_else(|| {
+            if !has_nan {
+                return make_valid_impl(self, self, config, coords[0]);
+            }
+            // has_nan: fall through to NaN path
+        } else {
+            // Small polygon or keep-collapsed — separate quick scan
+            let has_nan = self.exterior().0.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
+                || self.interiors().iter().flat_map(|r| r.0.iter()).any(|c| !c.x.is_finite() || !c.y.is_finite());
+            if !has_nan {
+                if config.keep_collapsed && !self.exterior().0.is_empty() {
+                    return Geometry::Point(Point(self.exterior().0[0]));
+                }
+                return empty_geom();
+            }
+        }
+
+        // NaN path: filter, dedup, rebuild.
+        let ext_clean: Vec<Coord<f64>> = self
+            .exterior()
+            .0
+            .iter()
+            .copied()
+            .filter(|c| c.x.is_finite() && c.y.is_finite())
+            .collect();
+        if ext_clean.is_empty() {
+            return empty_geom();
+        }
+        let first_valid = ext_clean[0];
+        let int_clean: Vec<LineString<f64>> = self
+            .interiors()
+            .iter()
+            .map(|ring| {
+                LineString::new(
+                    ring.0
+                        .iter()
+                        .copied()
+                        .filter(|c| c.x.is_finite() && c.y.is_finite())
+                        .collect(),
+                )
+            })
+            .collect();
+        let deduped = crate::noding::remove_consecutive_duplicates(&ext_clean);
+        if deduped.len() < 3 {
+            if config.keep_collapsed && deduped.len() == 1 {
+                return Geometry::Point(Point(deduped[0]));
+            }
+            return empty_geom();
+        }
+        let ext_ring = if deduped.first() == deduped.last() {
+            LineString::new(deduped)
+        } else {
+            let mut c = deduped;
+            c.push(c[0]);
+            LineString::new(c)
+        };
+        let cleaned = Polygon::new(ext_ring, int_clean);
+        make_valid_impl(self, &cleaned, config, first_valid)
+    }
+}
+
+/// Fast path: polygon has no NaN coords, use self directly.
+#[cfg(any(feature = "arrange", feature = "structure"))]
+fn make_valid_clean(poly: &Polygon<f64>, config: &MakeValidConfig) -> Geometry<f64> {
+    if !config.keep_collapsed && poly.exterior().0.len() >= 4 {
+        let coords = &poly.exterior().0;
+        let (mut min_x, mut max_x, mut min_y, mut max_y) =
+            (coords[0].x, coords[0].x, coords[0].y, coords[0].y);
+        for w in coords.windows(2) {
+            min_x = min_x.min(w[1].x);
+            max_x = max_x.max(w[1].x);
+            min_y = min_y.min(w[1].y);
+            max_y = max_y.max(w[1].y);
+        }
+        let scale = (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
+        if (max_x - min_x).abs() < f64::EPSILON * scale
+            || (max_y - min_y).abs() < f64::EPSILON * scale
+        {
+            return empty_geom();
+        }
+    }
+    let first_valid = poly
+        .exterior()
+        .0
+        .first()
+        .copied()
+        .unwrap_or(Coord::default());
+    make_valid_impl(poly, poly, config, first_valid)
+}
+
+/// Common strategy dispatch after degeneracy checks.
+#[cfg(any(feature = "arrange", feature = "structure"))]
+fn make_valid_impl(
+    _self: &Polygon<f64>,
+    poly: &Polygon<f64>,
+    config: &MakeValidConfig,
+    _first_valid: Coord<f64>,
+) -> Geometry<f64> {
+    let result = match config.poly_method {
+            PolyMethod::Arrange => arrange_or_empty(poly, config),
+            PolyMethod::Structure => structure_fix(poly, config).unwrap_or_else(|| {
                 warn!("Structure mode: fix failed, retrying with precision reduction");
-                reduce_fallback(self, config)
+                reduce_fallback(poly, config)
             }),
             PolyMethod::Auto => {
-                if let Some(r) = structure_fix(self, config) {
-                    if is_valid_with_geo(&r) {
-                        r
-                    } else {
-                        warn!("Auto mode: structure_fix produced invalid output, falling back to CDT arrange");
-                        let arranged = arrange_or_empty(self, config);
-                        if is_valid_with_geo(&arranged) {
-                            arranged
-                        } else {
+                if let Some(r) = structure_fix(poly, config) {
+                    if is_valid_with_geo(&r) { r }
+                    else {
+                        warn!("Auto mode: structure_fix invalid, falling back to CDT arrange");
+                        let arranged = arrange_or_empty(poly, config);
+                        if is_valid_with_geo(&arranged) { arranged }
+                        else {
                             warn!("Auto mode: arrange also invalid, retrying with precision reduction");
-                            reduce_fallback(self, config)
+                            reduce_fallback(poly, config)
                         }
                     }
                 } else {
-                    arrange_or_empty(self, config)
+                    warn!("Auto mode: structure_fix failed, falling back to CDT arrange");
+                    let arranged = arrange_or_empty(poly, config);
+                    if is_valid_with_geo(&arranged) { arranged }
+                    else {
+                        warn!("Auto mode: arrange also invalid, retrying with precision reduction");
+                        reduce_fallback(poly, config)
+                    }
                 }
             }
         };
         enforce_ogc_winding(result)
     }
-}
 
 /// Enforce OGC winding: CCW exterior, CW interior rings.
 fn enforce_ogc_winding(g: Geometry<f64>) -> Geometry<f64> {
@@ -459,13 +564,49 @@ impl MakeValid for MultiPolygon<f64> {
             return Geometry::MultiPolygon(MultiPolygon::new(Vec::new()));
         }
         if shells.len() == 1 {
-            // Safe: len==1 verified above on local Vec
             return enforce_ogc_winding(Geometry::Polygon(shells.pop().expect("len==1 verified")));
         }
         let mp = MultiPolygon::new(shells);
-        enforce_ogc_winding(Geometry::MultiPolygon(
-            geo::algorithm::bool_ops::unary_union(&mp),
-        ))
+        // Fast-path: already valid, return unchanged (idempotency)
+        if is_valid_with_geo(&Geometry::MultiPolygon(mp.clone())) {
+            return enforce_ogc_winding(Geometry::MultiPolygon(mp));
+        }
+        // Check if shells have overlapping bboxes — if not, unary_union is overkill
+        let shells_overlap = shells_have_overlapping_bboxes(&mp);
+        if !shells_overlap {
+            enforce_ogc_winding(Geometry::MultiPolygon(mp))
+        } else {
+            let unioned = geo::algorithm::bool_ops::unary_union(&mp);
+            // Accept if valid AND no vertex containment (partial overlap w/o edge crossing)
+            if is_valid_with_geo(&Geometry::MultiPolygon(unioned.clone()))
+                && !shells_have_vertex_inside(&unioned)
+            {
+                enforce_ogc_winding(Geometry::MultiPolygon(unioned))
+            } else {
+                warn!("MultiPolygon: unary_union invalid, retrying with precision reduction");
+                let scales = [1e-8, 1e-6, 1e-4, 1e-2];
+                let mut best = None;
+                for &scale in &scales {
+                    let snapped = reduce_mp_at_scale(&mp, config, scale);
+                    let re_union = geo::algorithm::bool_ops::unary_union(&snapped);
+                    let re_valid = is_valid_with_geo(&Geometry::MultiPolygon(re_union.clone()))
+                        && !shells_have_vertex_inside(&re_union);
+                    if re_valid {
+                        best = Some(enforce_ogc_winding(Geometry::MultiPolygon(re_union)));
+                        break;
+                    }
+                    if best.is_none()
+                        || re_union.0.len() < best.as_ref().map_or(usize::MAX, |_| usize::MAX)
+                    {
+                        best = Some(enforce_ogc_winding(Geometry::MultiPolygon(re_union)));
+                    }
+                }
+                best.unwrap_or_else(|| {
+                    warn!("MultiPolygon: all precision reduction attempts failed, using pre-union shells");
+                    enforce_ogc_winding(Geometry::MultiPolygon(mp))
+                })
+            }
+        }
     }
 
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
@@ -602,6 +743,110 @@ fn reduce_fallback(poly: &Polygon<f64>, config: &MakeValidConfig) -> Geometry<f6
     let model = PrecisionModel::new(1e-4);
     let reducer = GeometryPrecisionReducer::with_config(model, config.clone());
     reducer.reduce_raw(poly)
+}
+
+/// Check if bounding boxes of any two shells in a MultiPolygon overlap.
+/// Used as a cheap pre-filter — if bboxes don't overlap, there's
+/// no chance of shell overlap, so we can safely skip the expensive union.
+#[cfg(any(feature = "arrange", feature = "structure"))]
+fn shells_have_overlapping_bboxes(mp: &MultiPolygon<f64>) -> bool {
+    let bboxes: Vec<(f64, f64, f64, f64)> = mp
+        .0
+        .iter()
+        .map(|p| {
+            let coords = &p.exterior().0;
+            if coords.is_empty() {
+                return (0.0, 0.0, 0.0, 0.0);
+            }
+            let (mut min_x, mut max_x, mut min_y, mut max_y) =
+                (coords[0].x, coords[0].x, coords[0].y, coords[0].y);
+            for c in coords.iter().skip(1) {
+                if c.x < min_x { min_x = c.x; }
+                if c.x > max_x { max_x = c.x; }
+                if c.y < min_y { min_y = c.y; }
+                if c.y > max_y { max_y = c.y; }
+            }
+            (min_x, max_x, min_y, max_y)
+        })
+        .collect();
+    for i in 0..bboxes.len() {
+        for j in (i + 1)..bboxes.len() {
+            let (min_ix, max_ix, min_iy, max_iy) = bboxes[i];
+            let (min_jx, max_jx, min_jy, max_jy) = bboxes[j];
+            if min_ix <= max_jx && min_jx <= max_ix && min_iy <= max_jy && min_jy <= max_iy {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Check if any vertex of one shell is strictly inside another shell's ring.
+/// Catches partial overlaps where is_valid_with_geo misses vertex containment.
+#[cfg(any(feature = "arrange", feature = "structure"))]
+fn shells_have_vertex_inside(mp: &MultiPolygon<f64>) -> bool {
+    for i in 0..mp.0.len() {
+        let ext_i = &mp.0[i].exterior().0;
+        if ext_i.len() < 4 { continue; }
+        for j in 0..mp.0.len() {
+            if i == j { continue; }
+            let ext_j = &mp.0[j].exterior().0;
+            if ext_j.len() < 4 { continue; }
+            let max_check = ext_i.len().min(32);
+            for k in 0..max_check {
+                if point_in_ring_exclusive(ext_i[k], ext_j) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Ray-casting point-in-ring test (strict interior, not on boundary).
+fn point_in_ring_exclusive(pt: Coord<f64>, ring: &[Coord<f64>]) -> bool {
+    if ring.len() < 4 { return false; }
+    let n = ring.len() - 1;
+    let mut inside = false;
+    for i in 0..n {
+        let (xi, yi) = (ring[i].x, ring[i].y);
+        let (xj, yj) = (ring[(i + 1) % n].x, ring[(i + 1) % n].y);
+        let intersect = ((yi > pt.y) != (yj > pt.y))
+            && (pt.x < (xj - xi) * (pt.y - yi) / (yj - yi) + xi);
+        if intersect { inside = !inside; }
+    }
+    inside
+}
+
+/// Snap all coordinates in a MultiPolygon to the default precision grid (1e-8).
+#[cfg(any(feature = "arrange", feature = "structure"))]
+fn reduce_mp(mp: &MultiPolygon<f64>, config: &MakeValidConfig) -> MultiPolygon<f64> {
+    reduce_mp_at_scale(mp, config, 1e-8)
+}
+
+/// Snap all coordinates in a MultiPolygon to a specific precision grid scale.
+#[cfg(any(feature = "arrange", feature = "structure"))]
+fn reduce_mp_at_scale(mp: &MultiPolygon<f64>, config: &MakeValidConfig, scale: f64) -> MultiPolygon<f64> {
+    use crate::reduce::{GeometryPrecisionReducer, PrecisionModel};
+    let model = PrecisionModel::new(scale);
+    let reducer = GeometryPrecisionReducer::with_config(model, config.clone());
+    let snapped: Vec<Polygon<f64>> = mp
+        .0
+        .iter()
+        .map(|p| {
+            let g = reducer.reduce_raw(p);
+            match g {
+                Geometry::Polygon(poly) => poly,
+                Geometry::MultiPolygon(mp) => {
+                    mp.0.into_iter().next().unwrap_or_else(|| {
+                        Polygon::new(LineString::new(Vec::new()), Vec::new())
+                    })
+                }
+                _ => Polygon::new(LineString::new(Vec::new()), Vec::new()),
+            }
+        })
+        .collect();
+    MultiPolygon::new(snapped)
 }
 
 // ---------------------------------------------------------------------------
