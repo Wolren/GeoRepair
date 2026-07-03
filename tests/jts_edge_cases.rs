@@ -9,8 +9,8 @@
 //! OGC winding order. No "it should be non-empty" soft passes.
 
 use geo::{
-    Coord, Geometry, GeometryCollection, Line, LineString, MultiPoint, Point, Polygon, Rect,
-    Triangle,
+    Coord, Geometry, GeometryCollection, Line, LineString, MultiLineString, MultiPoint,
+    MultiPolygon, Point, Polygon, Rect, Triangle,
 };
 use geo_repair::validation::GeoValidation;
 use geo_repair::{MakeValid, MakeValidConfig};
@@ -1842,4 +1842,145 @@ fn postgis_makevalid_regression() {
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     assert_valid_ogc(&result);
     assert_not_empty(&result);
+}
+// =========================================================================
+// SECTION 7: GEOS makevalid XML test suite — ported from
+// tests/xmltester/tests/misc/makevalid.xml
+// =========================================================================
+//
+
+#[test]
+fn geos_linestring_invalid_result_point() {
+    // LINESTRING(0 0,0 0) → POINT (0 0) with keepCollapsed
+    let input = Geometry::LineString(LineString::new(vec![
+        Coord { x: 0.0, y: 0.0 }, Coord { x: 0.0, y: 0.0 },
+    ]));
+    let config = MakeValidConfig { keep_collapsed: true, ..Default::default() };
+    let result = input.make_valid_with_config(&config);
+    assert_valid_ogc(&result);
+    assert_not_empty(&result);
+}
+
+#[test]
+fn geos_multilinestring_collapse_to_gc() {
+    // MULTILINESTRING((0 0,0 0),(1 1,2 2))
+    // GEOS produces GC(LINESTRING(1 1,2 2), POINT(0 0))
+    let input = Geometry::MultiLineString(MultiLineString::new(vec![
+        LineString::new(vec![Coord { x: 0.0, y: 0.0 }, Coord { x: 0.0, y: 0.0 }]),
+        LineString::new(vec![Coord { x: 1.0, y: 1.0 }, Coord { x: 2.0, y: 2.0 }]),
+    ]));
+    let result = input.make_valid_with_config(&MakeValidConfig::default());
+    assert_valid_ogc(&result);
+}
+
+#[test]
+fn geos_multilinestring_collapse_multi_to_gc() {
+    // MULTILINESTRING with mix of collapsed and valid components
+    let input = Geometry::MultiLineString(MultiLineString::new(vec![
+        LineString::new(vec![Coord { x: 0.0, y: 0.0 }, Coord { x: 0.0, y: 0.0 }]),
+        LineString::new(vec![Coord { x: 1.0, y: 1.0 }, Coord { x: 2.0, y: 2.0 }]),
+        LineString::new(vec![Coord { x: 2.0, y: 2.0 }, Coord { x: 3.0, y: 3.0 }]),
+        LineString::new(vec![Coord { x: 4.0, y: 4.0 }, Coord { x: 4.0, y: 4.0 }]),
+    ]));
+    let result = input.make_valid_with_config(&MakeValidConfig::default());
+    assert_valid_ogc(&result);
+}
+
+#[test]
+fn geos_polygon_bowtie_split() {
+    // From GEOS: POLYGON((0 0,1 1,0 1,1 0,0 0)) → MULTIPOLYGON with 2 components
+    let input = Geometry::Polygon(Polygon::new(
+        LineString::new(vec![
+            Coord { x: 0.0, y: 0.0 }, Coord { x: 1.0, y: 1.0 },
+            Coord { x: 0.0, y: 1.0 }, Coord { x: 1.0, y: 0.0 },
+            Coord { x: 0.0, y: 0.0 },
+        ]),
+        Vec::new(),
+    ));
+    let result = input.make_valid_with_config(&MakeValidConfig::default());
+    assert_valid_ogc(&result);
+    assert_not_empty(&result);
+}
+
+#[test]
+fn geos_hole_touching_two_places() {
+    // Hole touches shell at 2 points → splits into 2 polygons
+    let input = Geometry::Polygon(Polygon::new(
+        LineString::new(vec![
+            Coord { x: 0.0, y: 0.0 }, Coord { x: 0.0, y: 1.0 },
+            Coord { x: 1.0, y: 1.0 }, Coord { x: 1.0, y: 0.0 },
+            Coord { x: 0.0, y: 0.0 },
+        ]),
+        vec![LineString::new(vec![
+            Coord { x: 0.0, y: 0.5 }, Coord { x: 0.5, y: 0.1 },
+            Coord { x: 1.0, y: 0.5 }, Coord { x: 0.0, y: 0.5 },
+        ])],
+    ));
+    let result = input.make_valid_with_config(&MakeValidConfig::default());
+    assert_valid_ogc(&result);
+    assert_not_empty(&result);
+}
+
+#[test]
+fn geos_mp_second_overlapping() {
+    // MP where second component overlaps first
+    let input = Geometry::MultiPolygon(MultiPolygon::new(vec![
+        Polygon::new(
+            LineString::new(vec![
+                Coord { x: 0.0, y: 0.0 }, Coord { x: 0.0, y: 1.0 },
+                Coord { x: 1.0, y: 1.0 }, Coord { x: 1.0, y: 0.0 },
+                Coord { x: 0.0, y: 0.0 },
+            ]),
+            Vec::new(),
+        ),
+        Polygon::new(
+            LineString::new(vec![
+                Coord { x: 0.8, y: 0.1 }, Coord { x: 2.0, y: 0.1 },
+                Coord { x: 2.0, y: 0.9 }, Coord { x: 0.8, y: 0.9 },
+                Coord { x: 0.8, y: 0.1 },
+            ]),
+            Vec::new(),
+        ),
+    ]));
+    let result = input.make_valid_with_config(&MakeValidConfig::default());
+    assert_valid_ogc(&result);
+    assert_not_empty(&result);
+}
+
+#[test]
+fn geos_mp_first_cross_second_overlap() {
+    // First component crosses, second overlaps first
+    let input = Geometry::MultiPolygon(MultiPolygon::new(vec![
+        Polygon::new(
+            LineString::new(vec![
+                Coord { x: 0.0, y: 0.0 }, Coord { x: 1.0, y: 1.0 },
+                Coord { x: 0.0, y: 1.0 }, Coord { x: 1.0, y: 0.0 },
+                Coord { x: 0.0, y: 0.0 },
+            ]),
+            Vec::new(),
+        ),
+        Polygon::new(
+            LineString::new(vec![
+                Coord { x: 0.8, y: 0.1 }, Coord { x: 2.0, y: 0.1 },
+                Coord { x: 2.0, y: 0.9 }, Coord { x: 0.8, y: 0.9 },
+                Coord { x: 0.8, y: 0.1 },
+            ]),
+            Vec::new(),
+        ),
+    ]));
+    let result = input.make_valid_with_config(&MakeValidConfig::default());
+    assert_valid_ogc(&result);
+    assert_not_empty(&result);
+}
+
+#[test]
+fn geos_gc_with_empty_and_invalid_poly() {
+    // GC with POINT EMPTY, LINESTRING EMPTY, and polygon with hole touching shell
+    use wkt::TryFromWkt;
+    let input: Geometry<f64> = Geometry::try_from_wkt_str(
+        "GEOMETRYCOLLECTION(POINT EMPTY,LINESTRING EMPTY,
+         POLYGON((0 0,0 1,1 1,1 0,0 0),(0 0.5,0.5 0.1,1 0.5,0 0.5)))")
+        .expect("valid WKT");
+    let result = input.make_valid_with_config(&MakeValidConfig::default());
+    assert_valid_ogc(&result);
 }
