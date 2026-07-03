@@ -473,7 +473,7 @@ dependencies = [
  "quick-xml",
  "rayon",
  "robust",
- "rstar 0.12.2",
+ "rstar 0.13.0",
  "rusqlite",
  "rustc-hash",
  "ryu",
@@ -1333,6 +1333,17 @@ dependencies = [
  "heapless 0.8.0",
  "num-traits",
  "serde",
+ "smallvec",
+]
+
+[[package]]
+name = "rstar"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5912b862fa5ffb462607bfd1e35036c458c537921f508c8235a83d5f3987edfe"
+dependencies = [
+ "heapless 0.8.0",
+ "num-traits",
  "smallvec",
 ]
 
