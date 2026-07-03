@@ -22,11 +22,6 @@ use std::panic::{self, AssertUnwindSafe};
 // Panic-catch helper
 // ========================================================================
 
-/// Run a closure, return true if it panics.
-fn catches_panic<F: FnOnce() + std::panic::UnwindSafe>(f: F) -> bool {
-    panic::catch_unwind(AssertUnwindSafe(f)).is_err()
-}
-
 /// Assert that an expression does NOT panic.
 fn assert_no_panic<F: FnOnce() + std::panic::UnwindSafe>(f: F) {
     let r = panic::catch_unwind(AssertUnwindSafe(f));
@@ -39,25 +34,24 @@ fn assert_no_panic<F: FnOnce() + std::panic::UnwindSafe>(f: F) {
 
 /// All the fp value classes that could cause panics.
 struct FpClass {
-    name: &'static str,
     x: f64,
     y: f64,
 }
 
 const FP_CLASSES: &[FpClass] = &[
-    FpClass { name: "nan", x: f64::NAN, y: f64::NAN },
-    FpClass { name: "pos_inf", x: f64::INFINITY, y: f64::INFINITY },
-    FpClass { name: "neg_inf", x: f64::NEG_INFINITY, y: f64::NEG_INFINITY },
-    FpClass { name: "pos_max", x: f64::MAX, y: f64::MAX },
-    FpClass { name: "neg_max", x: f64::MIN, y: f64::MIN },
-    FpClass { name: "subnormal", x: f64::MIN_POSITIVE, y: f64::MIN_POSITIVE * 2.0 },
-    FpClass { name: "neg_subnormal", x: -f64::MIN_POSITIVE, y: -f64::MIN_POSITIVE * 2.0 },
-    FpClass { name: "mixed_large_tiny", x: 1e15, y: 1e-15 },
-    FpClass { name: "mixed_tiny_large", x: 1e-15, y: 1e15 },
-    FpClass { name: "zero", x: 0.0, y: 0.0 },
-    FpClass { name: "epsilon", x: f64::EPSILON, y: -f64::EPSILON },
-    FpClass { name: "large_negative", x: -1e300, y: -1e300 },
-    FpClass { name: "large_positive", x: 1e300, y: 1e300 },
+    FpClass { x: f64::NAN, y: f64::NAN },
+    FpClass { x: f64::INFINITY, y: f64::INFINITY },
+    FpClass { x: f64::NEG_INFINITY, y: f64::NEG_INFINITY },
+    FpClass { x: f64::MAX, y: f64::MAX },
+    FpClass { x: f64::MIN, y: f64::MIN },
+    FpClass { x: f64::MIN_POSITIVE, y: f64::MIN_POSITIVE * 2.0 },
+    FpClass { x: -f64::MIN_POSITIVE, y: -f64::MIN_POSITIVE * 2.0 },
+    FpClass { x: 1e15, y: 1e-15 },
+    FpClass { x: 1e-15, y: 1e15 },
+    FpClass { x: 0.0, y: 0.0 },
+    FpClass { x: f64::EPSILON, y: -f64::EPSILON },
+    FpClass { x: -1e300, y: -1e300 },
+    FpClass { x: 1e300, y: 1e300 },
 ];
 
 fn all_configs() -> Vec<MakeValidConfig> {
