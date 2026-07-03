@@ -66,6 +66,10 @@ fn assert_valid(g: &Geometry<f64>) {
 
 fn is_empty(g: &Geometry<f64>) -> bool {
     matches!(g, Geometry::GeometryCollection(gc) if gc.0.is_empty())
+        || matches!(g, Geometry::MultiPolygon(mp) if mp.0.is_empty())
+        || matches!(g, Geometry::MultiLineString(mls) if mls.0.is_empty())
+        || matches!(g, Geometry::MultiPoint(mp) if mp.0.is_empty())
+        || matches!(g, Geometry::Point(p) if !p.x().is_finite() || !p.y().is_finite())
 }
 
 fn assert_ogc_oriented(g: &Geometry<f64>) {

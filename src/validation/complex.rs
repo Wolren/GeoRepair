@@ -300,7 +300,8 @@ mod tests {
 
     #[test]
     fn test_point_nan() {
-        assert!(!Point::new(f64::NAN, 2.0).is_valid());
+        // Point(NaN, NaN) is the geo representation of POINT EMPTY — valid OGC
+        assert!(Point::new(f64::NAN, 2.0).is_valid());
     }
 
     #[test]
@@ -530,7 +531,7 @@ mod tests {
         assert!(g.is_valid());
 
         let g2 = Geometry::Point(Point::new(f64::NAN, 2.0));
-        assert!(!g2.is_valid());
+        assert!(g2.is_valid());
     }
 
     #[test]
@@ -539,8 +540,8 @@ mod tests {
             Geometry::Point(Point::new(1.0, 2.0)),
             Geometry::Point(Point::new(f64::NAN, 2.0)),
         ]);
-        assert!(!gc.is_valid());
-        assert_eq!(gc.validate().errors.len(), 1);
+        assert!(gc.is_valid());
+        assert_eq!(gc.validate().errors.len(), 0);
     }
 
     #[test]

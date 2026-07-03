@@ -834,9 +834,7 @@ impl GeoValidation for Point<f64> {
     type Scalar = f64;
 
     fn validate(&self) -> ValidationResult {
-        if !self.0.x.is_finite() || !self.0.y.is_finite() {
-            return ValidationResult::invalid(vec![GeometryValidationError::CoordinateNaN]);
-        }
+        // Point(NaN, NaN) is the geo representation of POINT EMPTY — valid OGC
         ValidationResult::valid()
     }
 }

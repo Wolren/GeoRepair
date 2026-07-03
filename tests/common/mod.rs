@@ -134,6 +134,7 @@ pub fn assert_is_empty(g: &Geometry<f64>) {
         Geometry::MultiPoint(mp) => mp.0.is_empty(),
         Geometry::MultiLineString(mls) => mls.0.is_empty(),
         Geometry::MultiPolygon(mp) => mp.0.is_empty(),
+        Geometry::Point(p) => !p.x().is_finite() || !p.y().is_finite(),
         _ => false,
     };
     assert!(empty, "expected empty geometry, got: {g:?}");

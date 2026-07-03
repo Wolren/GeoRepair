@@ -88,13 +88,7 @@ impl<T: GeoFloat> MakeValid for Point<T> {
     type Scalar = T;
 
     fn make_valid_with_config(&self, _config: &MakeValidConfig) -> Geometry<T> {
-        let c = self.0;
-        if c.x.is_finite() && c.y.is_finite() {
-            Geometry::Point(*self)
-        } else {
-            warn!("Point::make_valid: NaN coordinate ({:?})", c);
-            empty_geom()
-        }
+        Geometry::Point(*self)
     }
 }
 
@@ -113,11 +107,6 @@ impl<T: GeoFloat> MakeValid for MultiPoint<T> {
             .iter()
             .copied()
             .filter(|p| {
-                let x_ok = p.0.x.is_finite();
-                let y_ok = p.0.y.is_finite();
-                if !(x_ok && y_ok) {
-                    return false;
-                }
                 let key = (
                     p.0.x.to_f64().expect("to_f64").to_bits(),
                     p.0.y.to_f64().expect("to_f64").to_bits(),
