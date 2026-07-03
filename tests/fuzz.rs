@@ -126,6 +126,12 @@ fn assert_not_empty(g: &Geometry<f64>) {
     assert!(!empty, "expected non-empty geometry, got: {g:?}");
 }
 
+/// True if the polygon has a positive area exterior ring (non-degenerate).
+fn has_positive_area(poly: &Polygon<f64>) -> bool {
+    use geo::Area;
+    poly.exterior().0.len() >= 4 && poly.unsigned_area() > 1e-12
+}
+
 fn assert_polygon_rings(poly: &Polygon<f64>, label: &str) {
     assert_ring_invariants(&poly.exterior().0, &format!("{label} exterior"));
     for (i, h) in poly.interiors().iter().enumerate() {
@@ -745,8 +751,14 @@ proptest! {
             polys in proptest::collection::vec(polygon_points(-50.0..=50.0, 3, 6), 2..=5),
         ) {
             let mp = MultiPolygon::new(polys);
+            let was_valid = mp.is_valid();
+            let has_area = mp.0.iter().any(has_positive_area);
             for cfg in &cfg_all() {
                 let result = mp.make_valid_with_config(cfg);
+                if was_valid && has_area {
+                    assert_valid_ogc(&result);
+                    assert_not_empty(&result);
+                }
                 if let Geometry::MultiPolygon(r_mp) = &result {
                     for (i, p) in r_mp.0.iter().enumerate() {
                         assert_polygon_rings(p, &format!("olap_mp[{i}]"));

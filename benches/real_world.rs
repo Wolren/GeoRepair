@@ -26,9 +26,13 @@ use std::io::Write;
 use std::path::Path;
 use std::time::Instant;
 
-use geo::{Coord, Polygon};
-#[cfg(any(feature = "bench-geos", feature = "bench-geos-system", not(feature = "parallel")))]
+#[cfg(any(
+    feature = "bench-geos",
+    feature = "bench-geos-system",
+    not(feature = "parallel")
+))]
 use geo::Geometry;
+use geo::{Coord, Polygon};
 use geo_repair::arrange::validate_polygon;
 use geo_repair::dd::{dd_call_count, reset_dd_count};
 use geo_repair::io::load_bin;
@@ -254,7 +258,9 @@ fn load_polys(path: &str) -> Vec<Polygon<f64>> {
         "bin" => load_bin(path).unwrap_or_else(|e| {
             panic!("Failed to load {path}: {e}");
         }),
-        other => panic!("Unsupported file extension '.{other}'. Use .bin. For SHP files, convert first: python scripts/convert_shp_to_bin.py input.shp output.bin"),
+        other => panic!(
+            "Unsupported file extension '.{other}'. Use .bin. For SHP files, convert first: python scripts/convert_shp_to_bin.py input.shp output.bin"
+        ),
     }
 }
 
@@ -500,10 +506,12 @@ fn main() {
         .collect();
     let stru_total = t0.elapsed().as_secs_f64();
     let dd_calls = dd_call_count();
-    eprintln!("  DD calls: {dd_calls} ({:.0} per poly, {:.3}µs per call est = {:.3}s)",
+    eprintln!(
+        "  DD calls: {dd_calls} ({:.0} per poly, {:.3}µs per call est = {:.3}s)",
         dd_calls as f64 / sample_n as f64,
         0.2, // estimated 200ns per DD call
-        dd_calls as f64 * 0.2e-6);
+        dd_calls as f64 * 0.2e-6
+    );
     #[cfg(feature = "structure")]
     geo_repair::structure::print_profile(sample_n);
 
@@ -646,7 +654,9 @@ fn main() {
     eprintln!("─────────────────────────────────────────────────────────────────────");
     let full_stru_per = full_stru * 1000.0 / full_n as f64;
     let full_geos_per = full_geos * 1000.0 / full_n as f64;
-    eprintln!("  Full dataset ({full_n} poly) │ {full_stru:>9.4}s │ {full_stru_per:>9.4}    │ {full_ratio:>6.2}x");
+    eprintln!(
+        "  Full dataset ({full_n} poly) │ {full_stru:>9.4}s │ {full_stru_per:>9.4}    │ {full_ratio:>6.2}x"
+    );
     eprintln!(
         "  GEOS (full)           │ {full_geos_total:>9.4}s │ {full_geos_per:>9.4}    │      —"
     );

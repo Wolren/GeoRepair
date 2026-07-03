@@ -1,6 +1,6 @@
-use geo::coordinate_position::{coord_pos_relative_to_ring, CoordPos};
+use geo::coordinate_position::{CoordPos, coord_pos_relative_to_ring};
 use geo::{LineString, MultiPolygon, Polygon, Winding};
-use rstar::{RTree, RTreeObject, AABB};
+use rstar::{AABB, RTree, RTreeObject};
 
 use crate::util;
 

@@ -190,7 +190,9 @@ fn xml_multipolygon_crossing_overlapping() {
 // ---------------------------------------------------------------------------
 #[test]
 fn xml_geometry_collection_with_empties() {
-    let g = geom_from_wkt("GEOMETRYCOLLECTION (POINT EMPTY, LINESTRING EMPTY, POLYGON ((0 0, 0 1, 1 1, 1 0, 0 0), (0 0.5, 0.5 0.1, 1 0.5, 0 0.5)))");
+    let g = geom_from_wkt(
+        "GEOMETRYCOLLECTION (POINT EMPTY, LINESTRING EMPTY, POLYGON ((0 0, 0 1, 1 1, 1 0, 0 0), (0 0.5, 0.5 0.1, 1 0.5, 0 0.5)))",
+    );
     let result = g.make_valid_with_config(&cfg_auto());
     assert_not_empty(&result);
 }

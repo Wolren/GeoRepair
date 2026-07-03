@@ -368,7 +368,9 @@ fn geos_multipolygon_with_invalid() {
 
 #[test]
 fn geos_collection_mixed() {
-    let g = geom_from_wkt("GEOMETRYCOLLECTION (POINT (1 1), POLYGON ((0 0, 10 10, 10 0, 0 10, 0 0)), LINESTRING (0 0, 10 10))");
+    let g = geom_from_wkt(
+        "GEOMETRYCOLLECTION (POINT (1 1), POLYGON ((0 0, 10 10, 10 0, 0 10, 0 0)), LINESTRING (0 0, 10 10))",
+    );
     let result = g.make_valid_with_config(&cfg_auto());
     assert_valid_ogc(&result);
     assert_not_empty(&result);

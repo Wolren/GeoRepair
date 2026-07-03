@@ -112,23 +112,11 @@ impl rstar::RTreeObject for HpEntry {
 #[cfg(feature = "rstar")]
 fn quadrant(dx: f64, dy: f64) -> u8 {
     if dx > 0.0 {
-        if dy >= 0.0 {
-            0
-        } else {
-            1
-        }
+        if dy >= 0.0 { 0 } else { 1 }
     } else if dx < 0.0 {
-        if dy > 0.0 {
-            3
-        } else {
-            2
-        }
+        if dy > 0.0 { 3 } else { 2 }
     } else {
-        if dy > 0.0 {
-            0
-        } else {
-            2
-        }
+        if dy > 0.0 { 0 } else { 2 }
     }
 }
 

@@ -9,7 +9,7 @@ use geo::{Coord, Geometry};
 use serde_json::{Map, Value};
 
 use crate::crs::Crs;
-use crate::zm::{count_coords, preserve_zm, zm_pairs, ZmValue};
+use crate::zm::{ZmValue, count_coords, preserve_zm, zm_pairs};
 
 /// A GIS feature combining geometry with optional attributes, CRS, and Z/M values.
 ///

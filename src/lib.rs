@@ -305,7 +305,6 @@
 //! Apache-2.0
 #![cfg_attr(feature = "simd-portable", feature(portable_simd))]
 
-
 /// Compile-time guard: ensures `cfg(feature = "rstar")` is active when any
 /// rstar-dependent feature is enabled. Prevents silent O(n²) regression when
 /// `dep:rstar` is used in Cargo.toml feature lists instead of the explicit
@@ -376,10 +375,10 @@ pub use crs::Crs;
 /// A feature combining geometry with optional attributes and CRS.
 pub use feature::Feature;
 pub use io::{
-    diagnose_file, infer_wkt_type, load, load_bin, load_bin_stream, read_ewkb, read_wkb,
-    read_wkb_concat, read_wkb_from, read_wkt, read_wkt_from, repair_file, save, write_ewkb,
-    write_wkb, write_wkb_to, write_wkb_with_opts, write_wkt, write_wkt_to, Endianness, EwkbDims,
-    EwkbGeometry, WkbError, WktError, WriteOptions,
+    Endianness, EwkbDims, EwkbGeometry, WkbError, WktError, WriteOptions, diagnose_file,
+    infer_wkt_type, load, load_bin, load_bin_stream, read_ewkb, read_wkb, read_wkb_concat,
+    read_wkb_from, read_wkt, read_wkt_from, repair_file, save, write_ewkb, write_wkb, write_wkb_to,
+    write_wkb_with_opts, write_wkt, write_wkt_to,
 };
 /// Trait for repairing invalid geometries.
 pub use make_valid::MakeValid;
@@ -388,10 +387,10 @@ pub use make_valid::MakeValid;
 /// violations that could not be automatically repaired.
 pub use make_valid::ValidateAndFix;
 /// Coordinate snapping functions.
-pub use snap::{snap_coord, snap_coord_default, snap_line, snap_lines, DEFAULT_GRID};
+pub use snap::{DEFAULT_GRID, snap_coord, snap_coord_default, snap_line, snap_lines};
 /// OGC validation predicates and result types.
 pub use validation::{
-    is_valid, validate, validate_reason, GeoValidation, GeometryValidationError, ValidationResult,
+    GeoValidation, GeometryValidationError, ValidationResult, is_valid, validate, validate_reason,
 };
 
 #[cfg(feature = "mimalloc")]

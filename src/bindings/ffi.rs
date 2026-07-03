@@ -41,8 +41,8 @@
 //! // --- Memory management ---
 //! void            geo_repair_free_result(GeoRepairResult* result);
 //! ```
-use std::ffi::{c_char, CString};
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::ffi::{CString, c_char};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
 
 use crate::core::MakeValidConfig;
@@ -114,7 +114,7 @@ fn geometry_from_wkb(data: *const u8, len: usize) -> Result<Geometry<f64>, Strin
 
 fn geometry_to_wkb(geom: &Geometry<f64>) -> Result<Vec<u8>, String> {
     use std::io::Cursor;
-    use wkb::writer::{geometry_wkb_size, write_geometry, WriteOptions};
+    use wkb::writer::{WriteOptions, geometry_wkb_size, write_geometry};
 
     let opts = WriteOptions::default();
     let size = geometry_wkb_size(geom);
@@ -267,11 +267,7 @@ pub unsafe extern "C" fn geo_repair_is_valid(wkb_data: *const u8, wkb_len: usize
             Ok(g) => g,
             Err(_) => return 0,
         };
-        if geom.is_valid() {
-            1
-        } else {
-            0
-        }
+        if geom.is_valid() { 1 } else { 0 }
     }))
     .unwrap_or_default()
 }

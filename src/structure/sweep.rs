@@ -1,5 +1,5 @@
 use geo::Coord;
-use rstar::{RTree, RTreeObject, AABB};
+use rstar::{AABB, RTree, RTreeObject};
 
 use crate::orient::orient2d_fast;
 

@@ -143,7 +143,7 @@ impl<'a> Parser<'a> {
                 return Err(self.err(&format!(
                     "unknown geometry type '{}'",
                     String::from_utf8_lossy(kw)
-                )))
+                )));
             }
         };
         Ok((kw, dims))
