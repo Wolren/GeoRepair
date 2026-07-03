@@ -794,3 +794,173 @@ fn panic_massive_ring_1000_vertices_mixed_extreme() {
         let _ = poly.make_valid_with_config(&cfg);
     });
 }
+
+// ========================================================================
+// 20. Cross-module stress: GC with deeply nested extreme coords
+// ========================================================================
+
+#[test]
+fn panic_gc_nested_deep_with_extreme() {
+    for fp in FP_CLASSES {
+        for cfg in &all_configs() {
+            assert_no_panic(move || {
+                // Build GC with 5 levels of nesting, each containing extreme coords
+                let mut gc = Geometry::Point(Point::new(fp.x, fp.y));
+                for _ in 0..5 {
+                    gc = Geometry::GeometryCollection(GeometryCollection(vec![gc]));
+                }
+                let _ = gc.make_valid_with_config(cfg);
+            });
+        }
+    }
+}
+
+// ========================================================================
+// 21. GC with mixed types containing extreme fp values
+// ========================================================================
+
+#[test]
+fn panic_gc_mixed_types_extreme() {
+    for fp in FP_CLASSES {
+        for cfg in &all_configs() {
+            assert_no_panic(move || {
+                let gc = GeometryCollection(vec![
+                    Geometry::Point(Point::new(fp.x, fp.y)),
+                    Geometry::Line(Line::new(
+                        Coord { x: fp.x, y: fp.y },
+                        Coord { x: fp.y, y: fp.x },
+                    )),
+                    Geometry::LineString(make_ls_with(fp, 5)),
+                    Geometry::Polygon(make_poly_with(fp, 4)),
+                    Geometry::MultiPoint(MultiPoint::new(vec![
+                        Point::new(fp.x, fp.y), Point::new(fp.y, fp.x),
+                    ])),
+                    Geometry::MultiLineString(MultiLineString::new(vec![
+                        make_ls_with(fp, 3), make_ls_with(fp, 4),
+                    ])),
+                    Geometry::MultiPolygon(MultiPolygon::new(vec![
+                        make_poly_with(fp, 3), make_poly_with(fp, 4),
+                    ])),
+                ]);
+                let _ = gc.make_valid_with_config(cfg);
+            });
+        }
+    }
+}
+
+// ========================================================================
+// 22. ValidateOrFix on multiple geometry types with extreme fp
+// ========================================================================
+
+#[test]
+fn panic_validate_or_fix_all_types_extreme() {
+    use geo_repair::ValidateAndFix;
+    for fp in FP_CLASSES {
+        assert_no_panic(move || {
+            let pt = Point::new(fp.x, fp.y);
+            let _ = pt.validate_or_fix();
+        });
+        assert_no_panic(move || {
+            let ls = make_ls_with(fp, 4);
+            let _ = ls.validate_or_fix();
+        });
+        assert_no_panic(move || {
+            let poly = make_poly_with(fp, 4);
+            let _ = poly.validate_or_fix();
+        });
+        assert_no_panic(move || {
+            let mp = MultiPolygon::new(vec![make_poly_with(fp, 3), make_poly_with(fp, 4)]);
+            let _ = mp.validate_or_fix();
+        });
+        assert_no_panic(move || {
+            let mls = MultiLineString::new(vec![make_ls_with(fp, 3), make_ls_with(fp, 5)]);
+            let _ = mls.validate_or_fix();
+        });
+    }
+}
+
+// ========================================================================
+// 23. MultiPolygon extreme overlapping shells with fp extremes
+// ========================================================================
+
+#[test]
+fn panic_mp_extreme_overlap() {
+    for fp in FP_CLASSES {
+        for cfg in &all_configs() {
+            assert_no_panic(move || {
+                let mp = MultiPolygon::new(vec![
+                    Polygon::new(
+                        LineString::new(vec![
+                            Coord { x: fp.x, y: fp.y },
+                            Coord { x: fp.x + 10.0, y: fp.y },
+                            Coord { x: fp.x + 10.0, y: fp.y + 10.0 },
+                            Coord { x: fp.x, y: fp.y + 10.0 },
+                            Coord { x: fp.x, y: fp.y },
+                        ]),
+                        Vec::new(),
+                    ),
+                    Polygon::new(
+                        LineString::new(vec![
+                            Coord { x: fp.x + 5.0, y: fp.y + 5.0 },
+                            Coord { x: fp.x + 15.0, y: fp.y + 5.0 },
+                            Coord { x: fp.x + 15.0, y: fp.y + 15.0 },
+                            Coord { x: fp.x + 5.0, y: fp.y + 15.0 },
+                            Coord { x: fp.x + 5.0, y: fp.y + 5.0 },
+                        ]),
+                        Vec::new(),
+                    ),
+                ]);
+                let _ = mp.make_valid_with_config(cfg);
+            });
+        }
+    }
+}
+
+// ========================================================================
+// 24. Rect and Triangle with invalid/extreme fp dimensions
+// ========================================================================
+
+#[test]
+fn panic_rect_triangle_extreme() {
+    for fp in FP_CLASSES {
+        for cfg in &all_configs() {
+            assert_no_panic(move || {
+                let r = Rect::new(
+                    Coord { x: fp.x, y: fp.y },
+                    Coord { x: fp.x + 10.0, y: fp.y + 10.0 },
+                );
+                let _ = r.make_valid_with_config(cfg);
+            });
+            assert_no_panic(move || {
+                let tri = Triangle::new(
+                    Coord { x: fp.x, y: fp.y },
+                    Coord { x: fp.x + 10.0, y: fp.y },
+                    Coord { x: fp.x, y: fp.y + 10.0 },
+                );
+                let _ = tri.make_valid_with_config(cfg);
+            });
+        }
+    }
+}
+
+// ========================================================================
+// 25. Empty GC with all-mixed-empty sub-geometries
+// ========================================================================
+
+#[test]
+fn panic_gc_all_empty_types() {
+    for cfg in &all_configs() {
+        assert_no_panic(move || {
+            let gc = GeometryCollection(vec![
+                Geometry::Point(Point::new(f64::NAN, f64::NAN)),
+                Geometry::LineString(LineString::new(Vec::new())),
+                Geometry::Polygon(Polygon::new(LineString::new(Vec::new()), Vec::new())),
+                Geometry::MultiPoint(MultiPoint::new(Vec::new())),
+                Geometry::MultiLineString(MultiLineString::new(Vec::new())),
+                Geometry::MultiPolygon(MultiPolygon::new(Vec::new())),
+                Geometry::GeometryCollection(GeometryCollection(Vec::new())),
+            ]);
+            let _ = gc.make_valid_with_config(cfg);
+        });
+    }
+}
