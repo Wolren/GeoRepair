@@ -78,7 +78,7 @@ smallvec = { version = "1.15", default-features = false, features = ["union"] }
 serde_json = "1.0"
 shapefile = { version = "0.8", features = ["geo-types"], optional = true }
 csv = { version = "1.3", optional = true }
-quick-xml = { version = "0.36", optional = true }
+quick-xml = { version = "0.41", optional = true }
 rusqlite = { version = "0.40.1", features = ["bundled"], optional = true }
 memmap2 = { version = "0.9.11", optional = true }
 geo-traits = { version = "0.3", optional = true }
