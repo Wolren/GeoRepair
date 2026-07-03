@@ -1913,6 +1913,304 @@ proptest! {
 }
 
 // =========================================================================
+// ITERATION 7: Final batch — coincident edges, GC collapse, integer bowtie,
+// self-crossing ring, hole touching at 3+ shell vertices
+// =========================================================================
+
+proptest! {
+
+    // -----------------------------------------------------------------------
+
+    // 7.1  Exactly coincident edges: two non-adjacent edges on the same line.
+
+    // -----------------------------------------------------------------------
+
+    #[test]
+
+    fn invariant_coincident_edges(
+
+        offset in -50.0f64..50.0f64,
+
+        width in 1.0f64..50.0f64,
+
+    ) {
+
+        let coords = vec![
+
+            Coord { x: offset, y: offset },
+
+            Coord { x: offset + width, y: offset },
+
+            Coord { x: offset + width, y: offset + width },
+
+            Coord { x: offset + width * 0.5, y: offset + width * 0.5 },
+
+            Coord { x: offset + width * 0.6, y: offset + width * 0.4 },
+
+            Coord { x: offset + width * 0.5, y: offset + width * 0.5 },
+
+            Coord { x: offset, y: offset + width * 0.5 },
+
+            Coord { x: offset, y: offset },
+
+        ];
+
+        let poly = Polygon::new(LineString::new(coords), Vec::new());
+
+        for cfg in &cfg_all() {
+
+            let result = poly.make_valid_with_config(cfg);
+
+            assert_valid(&result);
+
+        }
+
+    }
+
+
+
+    // -----------------------------------------------------------------------
+
+    // 7.2  MultiLineString self-crossing: separate lines forming an X.
+
+    // -----------------------------------------------------------------------
+
+    #[test]
+
+    fn invariant_multilinestring_self_cross(
+
+        scale in 1.0f64..100.0f64,
+
+    ) {
+
+        let mls = MultiLineString::new(vec![
+
+            LineString::new(vec![
+
+                Coord { x: 0.0, y: 0.0 }, Coord { x: scale, y: scale },
+
+            ]),
+
+            LineString::new(vec![
+
+                Coord { x: 0.0, y: scale }, Coord { x: scale, y: 0.0 },
+
+            ]),
+
+        ]);
+
+        for cfg in &cfg_all() {
+
+            let result = mls.make_valid_with_config(cfg);
+
+            assert_valid(&result);
+
+        }
+
+    }
+
+
+
+    // -----------------------------------------------------------------------
+
+    // 7.3  GC with keep_collapsed: collapsed linestring + point.
+
+    // -----------------------------------------------------------------------
+
+    #[test]
+
+    fn invariant_gc_keep_collapsed(
+
+        x in -100.0f64..100.0f64,
+
+        y in -100.0f64..100.0f64,
+
+    ) {
+
+        let gc = GeometryCollection(vec![
+
+            Geometry::LineString(LineString::new(vec![
+
+                Coord { x, y }, Coord { x, y },
+
+            ])),
+
+            Geometry::Point(Point::new(x + 1.0, y + 1.0)),
+
+        ]);
+
+        for &keep in &[false, true] {
+
+            let cfg = MakeValidConfig { keep_collapsed: keep, ..Default::default() };
+
+            let result = gc.make_valid_with_config(&cfg);
+
+            assert_valid(&result);
+
+            if keep {
+
+                assert_not_empty(&result);
+
+            }
+
+        }
+
+    }
+
+
+
+    // -----------------------------------------------------------------------
+
+    // 7.4  Integer-coordinate bowtie: exact arithmetic self-intersection.
+
+    // -----------------------------------------------------------------------
+
+    #[test]
+
+    fn invariant_integer_bowtie(
+
+        scale in 2i32..100i32,
+
+        offset in -100i32..100i32,
+
+    ) {
+
+        let s = scale as f64;
+
+        let o = offset as f64;
+
+        let poly = Polygon::new(
+
+            LineString::new(vec![
+
+                Coord { x: o, y: o },
+
+                Coord { x: o + s, y: o + s },
+
+                Coord { x: o + s, y: o },
+
+                Coord { x: o, y: o + s },
+
+                Coord { x: o, y: o },
+
+            ]),
+
+            Vec::new(),
+
+        );
+
+        for cfg in &cfg_all() {
+
+            let result = poly.make_valid_with_config(cfg);
+
+            assert_valid_ogc(&result);
+
+            assert_not_empty(&result);
+
+        }
+
+    }
+
+
+
+    // -----------------------------------------------------------------------
+
+    // 7.5  Self-crossing linear ring: closed LineString that self-intersects.
+
+    // -----------------------------------------------------------------------
+
+    #[test]
+
+    fn invariant_self_crossing_linear_ring(
+
+        scale in 1.0f64..100.0f64,
+
+    ) {
+
+        let ring = LineString::new(vec![
+
+            Coord { x: 0.0, y: 0.0 },
+
+            Coord { x: scale, y: scale },
+
+            Coord { x: scale, y: 0.0 },
+
+            Coord { x: 0.0, y: scale },
+
+            Coord { x: 0.0, y: 0.0 },
+
+        ]);
+
+        for cfg in &cfg_all() {
+
+            let result = ring.make_valid_with_config(cfg);
+
+            assert_valid(&result);
+
+        }
+
+    }
+
+
+
+    // -----------------------------------------------------------------------
+
+    // 7.6  Hole touching shell at 3 vertices: stress touch-point dedup.
+
+    // -----------------------------------------------------------------------
+
+    #[test]
+
+    fn invariant_hole_touches_shell_at_three_vertices(
+
+        scale in 3.0f64..100.0f64,
+
+    ) {
+
+        let s = scale;
+
+        let poly = Polygon::new(
+
+            LineString::new(vec![
+
+                Coord { x: 0.0, y: 0.0 }, Coord { x: s, y: 0.0 },
+
+                Coord { x: s, y: s }, Coord { x: 0.0, y: s }, Coord { x: 0.0, y: 0.0 },
+
+            ]),
+
+            vec![LineString::new(vec![
+
+                Coord { x: s * 0.333, y: 0.0 },
+
+                Coord { x: s * 0.5, y: s * 0.5 },
+
+                Coord { x: s * 0.667, y: 0.0 },
+
+                Coord { x: s * 0.5, y: s },
+
+                Coord { x: s * 0.333, y: 0.0 },
+
+            ])],
+
+        );
+
+        for cfg in &cfg_all() {
+
+            let result = poly.make_valid_with_config(cfg);
+
+            assert_valid(&result);
+
+        }
+
+    }
+
+}
+
+
+
+// =========================================================================
+// =========================================================================
 // Legacy diagnostic module (preserved for debugging specific failures)
 // =========================================================================
 
