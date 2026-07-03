@@ -47,9 +47,9 @@ use std::io::Read;
 
 use geo::{Coord, Geometry, GeometryCollection, Polygon};
 
-use crate::core::MakeValidConfig;
-use crate::validation::{validate, ValidationResult};
 use crate::MakeValid;
+use crate::core::MakeValidConfig;
+use crate::validation::{ValidationResult, validate};
 
 /// Custom binary format for bulk polygon storage (`.bin`).
 pub mod binary;
@@ -62,11 +62,12 @@ pub mod wkt;
 pub use binary::{load_bin, load_bin_stream, write_bin};
 /// Read/write OGC WKB geometry format.
 pub use wkb::{
-    estimate_wkb_size, read_ewkb, read_wkb, read_wkb_concat, read_wkb_from, write_ewkb, write_wkb,
-    write_wkb_to, write_wkb_with_opts, Endianness, EwkbDims, EwkbGeometry, WkbError, WriteOptions,
+    Endianness, EwkbDims, EwkbGeometry, WkbError, WriteOptions, estimate_wkb_size, read_ewkb,
+    read_wkb, read_wkb_concat, read_wkb_from, write_ewkb, write_wkb, write_wkb_to,
+    write_wkb_with_opts,
 };
 /// Read/write OGC WKT text format.
-pub use wkt::{infer_wkt_type, read_wkt, read_wkt_from, write_wkt, write_wkt_to, WktError};
+pub use wkt::{WktError, infer_wkt_type, read_wkt, read_wkt_from, write_wkt, write_wkt_to};
 
 // ---------------------------------------------------------------------------
 // File-format dispatch by extension

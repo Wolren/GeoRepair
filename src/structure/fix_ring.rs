@@ -9,11 +9,11 @@ use crate::core;
 use crate::noding;
 use crate::orient::{orient2d, orient2d_fast};
 use crate::structure::PROFILE_FSI_NS;
-use log::warn;
-use rstar::{RTree, RTreeObject, AABB};
 use crate::structure::fix_ring_graph::{
     build_graph, extract_all_faces, label_interior_faces, split_face_at_pinch_points,
 };
+use log::warn;
+use rstar::{AABB, RTree, RTreeObject};
 
 type SplitPoint = SmallVec<[(f64, Coord<f64>); 2]>;
 
@@ -267,7 +267,10 @@ pub(crate) fn edge_intersection(
     if (ti > eps && ti < 1.0 - eps) || (tj > eps && tj < 1.0 - eps) {
         let pi = lerp(e1, ti);
         let pj = lerp(e2, tj);
-        let pt = Coord { x: (pi.x + pj.x) * 0.5, y: (pi.y + pj.y) * 0.5 };
+        let pt = Coord {
+            x: (pi.x + pj.x) * 0.5,
+            y: (pi.y + pj.y) * 0.5,
+        };
         Some((i, j, pt))
     } else {
         None
@@ -560,19 +563,28 @@ fn split_edges_rtree(edges: &[Line<f64>], split_points: &mut [SplitPoint], eps: 
     let n = edges.len();
 
     #[derive(Clone, Copy)]
-    struct EdgeEnv { idx: usize, env: AABB<[f64; 2]> }
+    struct EdgeEnv {
+        idx: usize,
+        env: AABB<[f64; 2]>,
+    }
     impl RTreeObject for EdgeEnv {
         type Envelope = AABB<[f64; 2]>;
-        fn envelope(&self) -> Self::Envelope { self.env }
+        fn envelope(&self) -> Self::Envelope {
+            self.env
+        }
     }
 
-    let envs: Vec<EdgeEnv> = edges.iter().enumerate().map(|(i, e)| EdgeEnv {
-        idx: i,
-        env: AABB::from_corners(
-            [e.start.x.min(e.end.x), e.start.y.min(e.end.y)],
-            [e.start.x.max(e.end.x), e.start.y.max(e.end.y)],
-        ),
-    }).collect();
+    let envs: Vec<EdgeEnv> = edges
+        .iter()
+        .enumerate()
+        .map(|(i, e)| EdgeEnv {
+            idx: i,
+            env: AABB::from_corners(
+                [e.start.x.min(e.end.x), e.start.y.min(e.end.y)],
+                [e.start.x.max(e.end.x), e.start.y.max(e.end.y)],
+            ),
+        })
+        .collect();
     let tree = RTree::bulk_load(envs);
 
     for i in 0..n {
@@ -583,7 +595,9 @@ fn split_edges_rtree(edges: &[Line<f64>], split_points: &mut [SplitPoint], eps: 
         );
         let _ = tree.locate_in_envelope_intersecting_int(&query, |c| {
             let j = c.idx;
-            if j <= i { return std::ops::ControlFlow::<(), ()>::Continue(()); }
+            if j <= i {
+                return std::ops::ControlFlow::<(), ()>::Continue(());
+            }
 
             if i.abs_diff(j) <= 1 || (i == 0 && j == n - 1) {
                 return std::ops::ControlFlow::<(), ()>::Continue(());
@@ -591,25 +605,40 @@ fn split_edges_rtree(edges: &[Line<f64>], split_points: &mut [SplitPoint], eps: 
 
             if edges[i].start == edges[j].start
                 && orient2d_fast(edges[i].start, edges[i].end, edges[j].end) != 0.0
-            { return std::ops::ControlFlow::<(), ()>::Continue(()); }
+            {
+                return std::ops::ControlFlow::<(), ()>::Continue(());
+            }
             if edges[i].start == edges[j].end
                 && orient2d_fast(edges[i].start, edges[i].end, edges[j].start) != 0.0
-            { return std::ops::ControlFlow::<(), ()>::Continue(()); }
+            {
+                return std::ops::ControlFlow::<(), ()>::Continue(());
+            }
             if edges[i].end == edges[j].start
                 && orient2d_fast(edges[i].end, edges[i].start, edges[j].end) != 0.0
-            { return std::ops::ControlFlow::<(), ()>::Continue(()); }
+            {
+                return std::ops::ControlFlow::<(), ()>::Continue(());
+            }
             if edges[i].end == edges[j].end
                 && orient2d_fast(edges[i].end, edges[i].start, edges[j].start) != 0.0
-            { return std::ops::ControlFlow::<(), ()>::Continue(()); }
+            {
+                return std::ops::ControlFlow::<(), ()>::Continue(());
+            }
 
             if let Some((ti, tj)) = intersect_param(&edges[i], &edges[j], eps)
                 && ((ti > eps && ti < 1.0 - eps) || (tj > eps && tj < 1.0 - eps))
             {
                 let pi = lerp(edges[i], ti);
                 let pj = lerp(edges[j], tj);
-                let pt = Coord { x: (pi.x + pj.x) * 0.5, y: (pi.y + pj.y) * 0.5 };
-                if ti > eps && ti < 1.0 - eps { split_points[i].push((ti, pt)); }
-                if tj > eps && tj < 1.0 - eps { split_points[j].push((tj, pt)); }
+                let pt = Coord {
+                    x: (pi.x + pj.x) * 0.5,
+                    y: (pi.y + pj.y) * 0.5,
+                };
+                if ti > eps && ti < 1.0 - eps {
+                    split_points[i].push((ti, pt));
+                }
+                if tj > eps && tj < 1.0 - eps {
+                    split_points[j].push((tj, pt));
+                }
             }
             std::ops::ControlFlow::<(), ()>::Continue(())
         });
@@ -737,9 +766,9 @@ fn intersect_param(e1: &Line<f64>, e2: &Line<f64>, eps: f64) -> Option<(f64, f64
     // Phase 2: Computation via double-double arithmetic (106-bit mantissa).
     // Handles proper crossings AND endpoint-on-segment intersections (both
     // are valid noding events).
-    if let Some((_pt, t_dd, u_dd)) = crate::dd::segment_intersection_dd(
-        e1.start, e1.end, e2.start, e2.end,
-    ) {
+    if let Some((_pt, t_dd, u_dd)) =
+        crate::dd::segment_intersection_dd(e1.start, e1.end, e2.start, e2.end)
+    {
         let t = t_dd.to_f64();
         let u = u_dd.to_f64();
         if t >= -eps && t <= 1.0 + eps && u >= -eps && u <= 1.0 + eps {

@@ -43,7 +43,7 @@ fn main() {
     let their_wkb: Vec<Vec<u8>> = polys
         .iter()
         .map(|g| {
-            use wkb::writer::{geometry_wkb_size, write_geometry, WriteOptions};
+            use wkb::writer::{WriteOptions, geometry_wkb_size, write_geometry};
             let opts = WriteOptions::default();
             let size = geometry_wkb_size(g);
             let mut buf = Vec::with_capacity(size);
@@ -145,7 +145,7 @@ fn main() {
         let _ = geo_repair::write_wkb(g);
     });
     let their_w = bench_ns(&polys, |g| {
-        use wkb::writer::{geometry_wkb_size, write_geometry, WriteOptions};
+        use wkb::writer::{WriteOptions, geometry_wkb_size, write_geometry};
         let opts = WriteOptions::default();
         let size = geometry_wkb_size(g);
         let mut buf = Vec::with_capacity(size);
@@ -173,7 +173,7 @@ fn main() {
         let _ = geo_repair::read_wkb(&bytes).unwrap();
     });
     let their_rt = bench_ns(&polys, |g| {
-        use wkb::writer::{geometry_wkb_size, write_geometry, WriteOptions};
+        use wkb::writer::{WriteOptions, geometry_wkb_size, write_geometry};
         let opts = WriteOptions::default();
         let size = geometry_wkb_size(g);
         let mut buf = Vec::with_capacity(size);

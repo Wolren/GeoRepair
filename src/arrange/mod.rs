@@ -42,8 +42,9 @@ pub mod prep;
 pub mod prep_intersect;
 
 use crate::core::MakeValidConfig;
+use crate::validation::GeoValidation;
 use geo::{Coord, Geometry, GeometryCollection, LinesIter, MultiPolygon, Polygon};
-use rstar::{RTree, RTreeObject, AABB};
+use rstar::{AABB, RTree, RTreeObject};
 use rustc_hash::FxHashSet;
 use spade::{ConstrainedDelaunayTriangulation, Triangulation};
 
@@ -76,6 +77,14 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, _config: &MakeValidConfig) -> Geo
     }
     if prep::has_no_intersections(&lines) && holes_are_valid(poly) {
         return Geometry::Polygon(poly.clone());
+    }
+    // Fallback: if intersection check false-positives (known fp precision issue
+    // with near-collinear vertices from CDT output), verify with our own validator.
+    if holes_are_valid(poly) && poly_has_basic_form(poly) {
+        let v = poly.validate();
+        if v.valid {
+            return Geometry::Polygon(poly.clone());
+        }
     }
     match fix_from_lines(lines) {
         Some(mp) => Geometry::MultiPolygon(mp),

@@ -41,7 +41,7 @@ use geo::{
     Coord, Geometry, GeometryCollection, LineString, LinesIter, MultiPolygon, Point, Polygon,
     Winding,
 };
-use rstar::{RTree, RTreeObject, AABB};
+use rstar::{AABB, RTree, RTreeObject};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
@@ -85,16 +85,30 @@ pub fn print_profile(n_polys: usize) {
     let sub = PROFILE_SUB_NS.load(Ordering::Relaxed);
     let total_ns = fp + sr + hr + hn + mg;
     let total_ms = total_ns as f64 / 1e6;
-    let pct = |v: f64| if total_ms > 0.0 { v / total_ms * 100.0 } else { 0.0 };
+    let pct = |v: f64| {
+        if total_ms > 0.0 {
+            v / total_ms * 100.0
+        } else {
+            0.0
+        }
+    };
     let ms = |v: u64| v as f64 / 1e6;
     eprintln!("\n=== Structure profile: {n_polys} polys ===");
     eprintln!("  fast_path     {:>9.3}ms  {:>5.1}%", ms(fp), pct(ms(fp)));
     eprintln!("  shell_repair  {:>9.3}ms  {:>5.1}%", ms(sr), pct(ms(sr)));
     eprintln!("    (self_intx) {:>9.3}ms", ms(fsi));
     eprintln!("  hole_repair   {:>9.3}ms  {:>5.1}%", ms(hr), pct(ms(hr)));
-    eprintln!("  hole_nest_sub {:>9.3}ms  {:>5.1}%  break:", ms(hn), pct(ms(hn)));
+    eprintln!(
+        "  hole_nest_sub {:>9.3}ms  {:>5.1}%  break:",
+        ms(hn),
+        pct(ms(hn))
+    );
     eprintln!("    classify    {:>9.3}ms  {:>5.1}%", ms(cl), pct(ms(cl)));
-    eprintln!("    nesting     {:>9.3}ms  {:>5.1}%", ms(nest), pct(ms(nest)));
+    eprintln!(
+        "    nesting     {:>9.3}ms  {:>5.1}%",
+        ms(nest),
+        pct(ms(nest))
+    );
     eprintln!("    subtract    {:>9.3}ms  {:>5.1}%", ms(sub), pct(ms(sub)));
     eprintln!("  merge         {:>9.3}ms  {:>5.1}%", ms(mg), pct(ms(mg)));
     eprintln!("  ─────────────────────────────────");
@@ -143,10 +157,8 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
                 if shell_rings.is_empty() {
                     return None;
                 }
-                let valid: Vec<LineString<f64>> = shell_rings
-                    .into_iter()
-                    .filter(|s| s.0.len() >= 4)
-                    .collect();
+                let valid: Vec<LineString<f64>> =
+                    shell_rings.into_iter().filter(|s| s.0.len() >= 4).collect();
                 PROFILE_SR_NS.fetch_add(_t.elapsed().as_nanos() as u64, Ordering::Relaxed);
                 if valid.is_empty() { None } else { Some(valid) }
             },
@@ -184,7 +196,9 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
                     return Some(
                         crate::arrange::fix_from_lines(lines)
                             .map(Geometry::MultiPolygon)
-                            .unwrap_or(Geometry::GeometryCollection(GeometryCollection(Vec::new()))),
+                            .unwrap_or(Geometry::GeometryCollection(
+                                GeometryCollection(Vec::new()),
+                            )),
                     );
                 }
                 return handle_collapse_result(poly.exterior(), config);
@@ -207,7 +221,9 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
                     return Some(
                         crate::arrange::fix_from_lines(lines)
                             .map(Geometry::MultiPolygon)
-                            .unwrap_or(Geometry::GeometryCollection(GeometryCollection(Vec::new()))),
+                            .unwrap_or(Geometry::GeometryCollection(
+                                GeometryCollection(Vec::new()),
+                            )),
                     );
                 }
                 return handle_collapse_result(poly.exterior(), config);
@@ -294,10 +310,7 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
             }
             #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
             {
-                valid_shells
-                    .into_iter()
-                    .flat_map(process_shell)
-                    .collect()
+                valid_shells.into_iter().flat_map(process_shell).collect()
             }
         };
         PROFILE_HN_NS.fetch_add(_t_hn.elapsed().as_nanos() as u64, Ordering::Relaxed);
@@ -526,5 +539,3 @@ fn handle_collapse_result(
         }
     }
 }
-
-

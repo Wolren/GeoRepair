@@ -259,7 +259,7 @@ fn read_geometry_inner(
                         return Err(WkbError::UnexpectedGeometryType {
                             expected: "Point",
                             code: 0,
-                        })
+                        });
                     }
                 }
             }
@@ -276,7 +276,7 @@ fn read_geometry_inner(
                         return Err(WkbError::UnexpectedGeometryType {
                             expected: "LineString",
                             code: 0,
-                        })
+                        });
                     }
                 }
             }
@@ -293,7 +293,7 @@ fn read_geometry_inner(
                         return Err(WkbError::UnexpectedGeometryType {
                             expected: "Polygon",
                             code: 0,
-                        })
+                        });
                     }
                 }
             }
@@ -1121,7 +1121,7 @@ mod tests {
         // EWKB point with SRID flag and SRID value
         let mut wkb = Vec::new();
         wkb.push(1); // LE
-                     // type = Point (1) | SRID flag (0x20000000)
+        // type = Point (1) | SRID flag (0x20000000)
         let type_with_srid = 1u32 | WKB_SRID_FLAG;
         wkb.extend_from_slice(&type_with_srid.to_le_bytes());
         wkb.extend_from_slice(&4326u32.to_le_bytes()); // SRID

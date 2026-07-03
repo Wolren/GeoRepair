@@ -1,26 +1,14 @@
 use crate::orient::orient2d;
 use geo::Line;
-use rstar::{RTree, RTreeObject, AABB};
+use rstar::{AABB, RTree, RTreeObject};
 
 fn quadrant(x: f64, y: f64) -> u8 {
     if x > 0.0 {
-        if y >= 0.0 {
-            0
-        } else {
-            1
-        }
+        if y >= 0.0 { 0 } else { 1 }
     } else if x < 0.0 {
-        if y > 0.0 {
-            3
-        } else {
-            2
-        }
+        if y > 0.0 { 3 } else { 2 }
     } else {
-        if y > 0.0 {
-            0
-        } else {
-            2
-        }
+        if y > 0.0 { 0 } else { 2 }
     }
 }
 

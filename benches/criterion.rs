@@ -5,7 +5,7 @@
 //!
 //! Future: Add CGAL comparison when CGAL C++ executables are compiled.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use geo::{
     Coord, Geometry, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon, Rect,
     Triangle,
@@ -447,16 +447,37 @@ fn bench_missing_shapes(c: &mut Criterion) {
     let many_holes_wkt_clone = many_holes_wkt.clone();
     let wkt_lookup: Vec<(&str, &str)> = vec![
         ("collinear_overlap", "POLYGON ((0 0, 1 0, 1 2, 1 1, 0 1))"),
-        ("star", "POLYGON ((0 3, 1 3, 1 4, 3 4, 3 2, 2 3.5, 2 3, 1.5 3.5, 1 2, 4 1, 7 3, 6 5, 4 2, 4.5 2, 4 1.5, 3.5 3, 3.5 4.5, 4 5, 0 5))"),
+        (
+            "star",
+            "POLYGON ((0 3, 1 3, 1 4, 3 4, 3 2, 2 3.5, 2 3, 1.5 3.5, 1 2, 4 1, 7 3, 6 5, 4 2, 4.5 2, 4 1.5, 3.5 3, 3.5 4.5, 4 5, 0 5))",
+        ),
         ("backtracking", "POLYGON ((1 0, 2 6, 3 3, 4 5, 5 4, 0 1))"),
-        ("micro", "POLYGON ((0 0, 1e-15 0, 1e-15 1e-15, 0 1e-15, 0 0))"),
-        ("extreme", "POLYGON ((-1e12 -1e12, 1e12 -1e12, 1e12 1e12, -1e12 1e12, -1e12 -1e12))"),
+        (
+            "micro",
+            "POLYGON ((0 0, 1e-15 0, 1e-15 1e-15, 0 1e-15, 0 0))",
+        ),
+        (
+            "extreme",
+            "POLYGON ((-1e12 -1e12, 1e12 -1e12, 1e12 1e12, -1e12 1e12, -1e12 -1e12))",
+        ),
         ("cw", "POLYGON ((0 0, 0 10, 10 10, 10 0, 0 0))"),
-        ("nested_holes", "POLYGON ((0 0, 20 0, 20 20, 0 20, 0 0), (2 2, 18 2, 18 18, 2 18, 2 2), (6 6, 14 6, 14 14, 6 14, 6 6))"),
+        (
+            "nested_holes",
+            "POLYGON ((0 0, 20 0, 20 20, 0 20, 0 0), (2 2, 18 2, 18 18, 2 18, 2 2), (6 6, 14 6, 14 14, 6 14, 6 6))",
+        ),
         ("many_holes", &many_holes_wkt_clone),
-        ("shared_edge", "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (0 0, 5 0, 5 5, 0 5, 0 0))"),
-        ("touching_holes", "POLYGON ((0 0, 8 0, 8 8, 0 8, 0 0), (4 0, 2 2, 4 4, 4 2), (4 4, 2 6, 6 6))"),
-        ("meeting_holes", "POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), (40 80, 60 80, 50 50, 40 80), (20 60, 20 40, 50 50, 20 60), (40 20, 60 20, 50 50, 40 20))"),
+        (
+            "shared_edge",
+            "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (0 0, 5 0, 5 5, 0 5, 0 0))",
+        ),
+        (
+            "touching_holes",
+            "POLYGON ((0 0, 8 0, 8 8, 0 8, 0 0), (4 0, 2 2, 4 4, 4 2), (4 4, 2 6, 6 6))",
+        ),
+        (
+            "meeting_holes",
+            "POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), (40 80, 60 80, 50 50, 40 80), (20 60, 20 40, 50 50, 20 60), (40 20, 60 20, 50 50, 40 20))",
+        ),
     ];
 
     let polygons: Vec<(&str, Polygon<f64>, &str)> = wkt_lookup

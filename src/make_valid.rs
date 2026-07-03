@@ -365,16 +365,15 @@ impl MakeValid for Polygon<f64> {
             }
             // has_nan: fall through to NaN path
         } else {
-            // Small polygon or keep-collapsed — separate quick scan
-            let has_nan = self.exterior().0.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
-                || self.interiors().iter().flat_map(|r| r.0.iter()).any(|c| !c.x.is_finite() || !c.y.is_finite());
-            if !has_nan {
-                if config.keep_collapsed && !self.exterior().0.is_empty() {
-                    return Geometry::Point(Point(self.exterior().0[0]));
-                }
-                return empty_geom();
-            }
         }
+        if !config.keep_collapsed && self.exterior().0.len() < 4 {
+            // Degenerate ring (< 4 vertices). If keep_collapsed, save as Point.
+            if config.keep_collapsed && !self.exterior().0.is_empty() {
+                return Geometry::Point(Point(self.exterior().0[0]));
+            }
+            return empty_geom();
+        }
+        // keep_collapsed: true with >= 4 verts: fall through to make_valid_impl
 
         // NaN path: filter, dedup, rebuild.
         let ext_clean: Vec<Coord<f64>> = self

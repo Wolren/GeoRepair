@@ -99,20 +99,20 @@ pub(crate) fn extract_all_faces(graph: &Graph) -> Option<Vec<Vec<(usize, usize)>
 
     for start_ei in 0..n_edges {
         let (fi, ti) = graph.edges[start_ei];
-        if !used_fwd[start_ei] && let Some(face) = walk_face(graph, start_ei, fi, ti, &mut used_fwd, &mut used_rev)
-            && face.len() >= 3 {
-                faces.push(face);
-            }
-        if !used_rev[start_ei] && let Some(face) = walk_face(graph, start_ei, ti, fi, &mut used_fwd, &mut used_rev)
-            && face.len() >= 3 {
-                faces.push(face);
-            }
+        if !used_fwd[start_ei]
+            && let Some(face) = walk_face(graph, start_ei, fi, ti, &mut used_fwd, &mut used_rev)
+            && face.len() >= 3
+        {
+            faces.push(face);
+        }
+        if !used_rev[start_ei]
+            && let Some(face) = walk_face(graph, start_ei, ti, fi, &mut used_fwd, &mut used_rev)
+            && face.len() >= 3
+        {
+            faces.push(face);
+        }
     }
-    if faces.is_empty() {
-        None
-    } else {
-        Some(faces)
-    }
+    if faces.is_empty() { None } else { Some(faces) }
 }
 
 fn walk_face(

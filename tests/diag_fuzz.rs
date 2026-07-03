@@ -93,8 +93,10 @@ fn diag_structure_pipeline() {
 
                 let on_i = ti > eps && ti < 1.0 - eps;
                 let on_j = tj > eps && tj < 1.0 - eps;
-                println!("  E{} x E{}: ti={:.10} tj={:.10} pi=({:.10},{:.10}) pj=({:.10},{:.10}) on_i={} on_j={}", 
-                    i, j, ti, tj, pi.x, pi.y, pj.x, pj.y, on_i, on_j);
+                println!(
+                    "  E{} x E{}: ti={:.10} tj={:.10} pi=({:.10},{:.10}) pj=({:.10},{:.10}) on_i={} on_j={}",
+                    i, j, ti, tj, pi.x, pi.y, pj.x, pj.y, on_i, on_j
+                );
             }
         }
     }

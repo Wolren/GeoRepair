@@ -4,7 +4,7 @@ use crate::core::MakeValidError;
 use crate::orient::orient2d;
 use crate::snap;
 use geo::{Coord, Line};
-use rstar::{RTree, RTreeObject, AABB};
+use rstar::{AABB, RTree, RTreeObject};
 
 /// Prepared edge set: snapped, deduplicated, and intersection-split segments
 /// ready for CDT construction.
