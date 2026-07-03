@@ -192,14 +192,7 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
                 warn!("Structure: shell ring repair failed, falling back to CDT arrange");
                 #[cfg(feature = "arrange")]
                 if !poly.exterior().0.is_empty() {
-                    let lines: Vec<_> = poly.lines_iter().collect();
-                    return Some(
-                        crate::arrange::fix_from_lines(lines)
-                            .map(Geometry::MultiPolygon)
-                            .unwrap_or(Geometry::GeometryCollection(
-                                GeometryCollection(Vec::new()),
-                            )),
-                    );
+                    return Some(crate::arrange::fallback_polygon_fix(poly));
                 }
                 return handle_collapse_result(poly.exterior(), config);
             }
@@ -217,14 +210,8 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
                 warn!("Structure: shell ring repair failed, falling back to CDT arrange");
                 #[cfg(feature = "arrange")]
                 if !poly.exterior().0.is_empty() {
-                    let lines: Vec<_> = poly.lines_iter().collect();
-                    return Some(
-                        crate::arrange::fix_from_lines(lines)
-                            .map(Geometry::MultiPolygon)
-                            .unwrap_or(Geometry::GeometryCollection(
-                                GeometryCollection(Vec::new()),
-                            )),
-                    );
+                    return Some(crate::arrange::fallback_polygon_fix(poly));
+
                 }
                 return handle_collapse_result(poly.exterior(), config);
             }
@@ -284,9 +271,8 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
 
         let mut local = Vec::new();
         let _t_sub = Instant::now();
-        if let Some(current) = subtract::subtract_holes(&shell_poly, &inner_polys) {
-            local.push(current);
-        }
+        let subtracted = subtract::subtract_holes(&shell_poly, &inner_polys);
+        local.extend(subtracted.0);
         PROFILE_SUB_NS.fetch_add(_t_sub.elapsed().as_nanos() as u64, Ordering::Relaxed);
 
         local.extend(islands);
@@ -324,7 +310,8 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
 
     let result = if result_polys.len() == 1 {
         // Safe: len==1 verified above on local Vec
-        Geometry::Polygon(result_polys.pop().expect("len==1 verified"))
+        let p = result_polys.pop().expect("len==1 verified");
+        Geometry::Polygon(p)
     } else {
         let _t_mg = Instant::now();
         let mp = Geometry::MultiPolygon(MultiPolygon::new(merge::merge_shells(result_polys).0));

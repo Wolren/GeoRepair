@@ -43,7 +43,7 @@ pub mod prep_intersect;
 
 use crate::core::MakeValidConfig;
 use crate::validation::GeoValidation;
-use geo::{Coord, Geometry, GeometryCollection, LinesIter, MultiPolygon, Polygon};
+use geo::{BooleanOps, Coord, Geometry, GeometryCollection, LinesIter, MultiPolygon, Polygon};
 use rstar::{AABB, RTree, RTreeObject};
 use rustc_hash::FxHashSet;
 use spade::{ConstrainedDelaunayTriangulation, Triangulation};
@@ -86,10 +86,42 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, _config: &MakeValidConfig) -> Geo
             return Geometry::Polygon(poly.clone());
         }
     }
-    match fix_from_lines(lines) {
-        Some(mp) => Geometry::MultiPolygon(mp),
-        None => empty(),
+    fallback_polygon_fix(poly)
+}
+
+/// Run CDT on polygon edges, falling back to boolean difference when CDT
+/// produces empty output (e.g. hole touching shell at 2 points).
+/// Does NOT run the expensive Shewchuk validation — use this from Structure
+/// fallback where the polygon is already known to need repair.
+pub(crate) fn fallback_polygon_fix(poly: &Polygon<f64>) -> Geometry<f64> {
+    let lines: Vec<_> = poly.lines_iter().collect();
+    if let Some(mp) = fix_from_lines(lines) {
+        if !mp.0.is_empty() {
+            return Geometry::MultiPolygon(mp);
+        }
     }
+    if poly.interiors().is_empty() {
+        return empty();
+    }
+    let shell = Polygon::new(poly.exterior().clone(), Vec::new());
+    let holes: Vec<Polygon<f64>> = poly.interiors().iter()
+        .map(|h| Polygon::new(h.clone(), Vec::new()))
+        .collect();
+    if holes.len() == 1 {
+        let diff = shell.boolean_op(&holes[0], geo::OpType::Difference);
+        if !diff.0.is_empty() {
+            return Geometry::MultiPolygon(diff);
+        }
+    } else {
+        let shell_mp = MultiPolygon::new(vec![shell]);
+        let holes_mp = MultiPolygon::new(holes);
+        let diff = shell_mp.boolean_op(&holes_mp, geo::OpType::Difference);
+        if !diff.0.is_empty() {
+            return Geometry::MultiPolygon(diff);
+        }
+    }
+    // polygon split failed for hole-touching-2-places — returned empty
+    empty()
 }
 
 /// Validate a polygon against GEOS-compatible validity rules.
