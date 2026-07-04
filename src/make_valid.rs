@@ -353,8 +353,8 @@ impl MakeValid for Polygon<f64> {
                 return make_valid_impl(self, self, config, coords[0]);
             }
             // has_nan: fall through to NaN path
-        } else {
         }
+        // For valid NaN-free polygons, use make_valid_clean fast-path
         if !config.keep_collapsed && self.exterior().0.len() < 4 {
             // Degenerate ring (< 4 vertices). If keep_collapsed, save as Point.
             if config.keep_collapsed && !self.exterior().0.is_empty() {
@@ -782,8 +782,8 @@ fn shells_have_vertex_inside(mp: &MultiPolygon<f64>) -> bool {
             let ext_j = &mp.0[j].exterior().0;
             if ext_j.len() < 4 { continue; }
             let max_check = ext_i.len().min(32);
-            for k in 0..max_check {
-                if point_in_ring_exclusive(ext_i[k], ext_j) {
+            for pt in ext_i.iter().take(max_check) {
+                if point_in_ring_exclusive(*pt, ext_j) {
                     return true;
                 }
             }
