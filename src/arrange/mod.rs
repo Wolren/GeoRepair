@@ -343,6 +343,13 @@ pub(crate) fn fix_from_lines(lines: Vec<geo::Line<f64>>) -> Option<MultiPolygon<
     let rings: Vec<_> = raw_rings
         .into_iter()
         .flat_map(extract::split_ring_at_pinch_points)
+        .filter(|coords| {
+            // O(n log n): discard rings with self-intersections from CDT precision
+            let lines: Vec<geo::Line<f64>> = coords.windows(2)
+                .map(|w| geo::Line::new(w[0], w[1]))
+                .collect();
+            lines.len() < 4 || prep_intersect::has_no_intersections(&lines)
+        })
         .map(geo::LineString::new)
         .collect();
     Some(assemble::assemble_polygons(rings))
