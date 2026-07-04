@@ -14,7 +14,6 @@ use geo::{
 };
 use geo_repair::validation::GeoValidation;
 use geo::BooleanOps;
-use geo::Area;
 use geo_repair::{MakeValid, MakeValidConfig};
 
 #[path = "common/mod.rs"]

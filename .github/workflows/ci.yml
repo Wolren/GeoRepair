@@ -30,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --no-default-features --features "arrange,structure"
+      - run: cargo test --no-default-features --features "arrange,structure,parallel,simd,validate"
 
   test-serde:
     runs-on: ubuntu-latest

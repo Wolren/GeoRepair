@@ -6,7 +6,7 @@
 //! panic occurs. This tests the building blocks indirectly via the
 //! pipeline, which is the strongest guarantee of correctness.
 
-use geo::{Coord, Geometry, LineString, MultiPolygon, Point, Polygon};
+use geo::{Coord, LineString, MultiPolygon, Polygon};
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 use std::panic::{self, AssertUnwindSafe};
 
