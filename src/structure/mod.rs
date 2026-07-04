@@ -32,6 +32,8 @@ pub mod fix_ring;
 pub mod fix_ring_graph;
 /// Face merging after planar graph extraction.
 pub mod merge;
+/// Topological face extraction from noded edge sets (BuildArea).
+pub mod polygonizer;
 /// Hole subtraction during polygon face assembly.
 pub mod subtract;
 /// Plane-sweep intersection detection for edge segments.
@@ -314,9 +316,13 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
         Geometry::Polygon(p)
     } else {
         let _t_mg = Instant::now();
-        let mp = Geometry::MultiPolygon(MultiPolygon::new(merge::merge_shells(result_polys).0));
+        // Even-parent filter: when shells are nested (one fully contains another),
+        // unary_union produces NestedHoles. The BuildArea even-parent approach
+        // keeps only shells with an even number of containing shells.
+        let merged = merge::merge_shells(result_polys);
         PROFILE_MG_NS.fetch_add(_t_mg.elapsed().as_nanos() as u64, Ordering::Relaxed);
-        mp
+        // Clean NestedHoles from merge output
+        crate::make_valid::drop_nested_components(merged)
     };
 
     Some(result)
@@ -525,4 +531,53 @@ fn handle_collapse_result(
             }
         }
     }
+}
+
+/// O(n)/O(n log n) structural soundness check for Structure strategy output.
+fn structurally_sound(g: &Geometry<f64>) -> bool {
+    match g {
+        Geometry::Polygon(p) => polygon_sound(p),
+        Geometry::MultiPolygon(mp) => {
+            for p in &mp.0 { if !polygon_sound(p) { return false; } }
+            for i in 0..mp.0.len() {
+                let ei = &mp.0[i].exterior().0;
+                if ei.len() < 4 { continue; }
+                for j in 0..mp.0.len() {
+                    if i == j { continue; }
+                    let ej = &mp.0[j].exterior().0;
+                    if ej.len() < 4 { continue; }
+                    if ei.iter().all(|&pt| point_in_ring_exclusive(pt, ej)) {
+                        return false;
+                    }
+                }
+            }
+            true
+        }
+        _ => true,
+    }
+}
+
+fn polygon_sound(p: &Polygon<f64>) -> bool {
+    if !ring_sound(&p.exterior().0) { return false; }
+    for h in p.interiors() { if !ring_sound(&h.0) { return false; } }
+    let lines: Vec<_> = p.lines_iter().collect();
+    crate::arrange::prep::has_no_intersections(&lines)
+}
+
+fn ring_sound(coords: &[Coord<f64>]) -> bool {
+    if coords.len() < 4 { return false; }
+    if coords.iter().any(|c| !c.x.is_finite() || !c.y.is_finite()) { return false; }
+    shoelace_abs_sum(coords) >= 1e-12
+}
+
+fn shoelace_abs_sum(coords: &[Coord<f64>]) -> f64 {
+    let n = coords.len();
+    if n < 3 { return 0.0; }
+    let end = if coords.first() == coords.last() { n - 1 } else { n };
+    let mut sum = 0.0_f64;
+    for i in 0..end - 1 {
+        sum += coords[i].x * coords[i + 1].y - coords[i + 1].x * coords[i].y;
+    }
+    sum += coords[end - 1].x * coords[0].y - coords[0].x * coords[end - 1].y;
+    sum.abs()
 }
