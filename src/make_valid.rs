@@ -13,8 +13,8 @@
 //! - [`MakeValid::make_valid_with_config`] — repair with custom config
 //! - [`ValidateAndFix::validate_and_fix`] — combined validation + repair
 use geo::{
-    Coord, CoordNum, GeoFloat, Geometry, GeometryCollection, Line, LineString, MultiLineString,
-    MultiPoint, MultiPolygon, Point, Polygon, Rect, Triangle, Winding,
+    Coord, CoordNum, GeoFloat, Geometry, GeometryCollection, Line, LineString, LinesIter,
+    MultiLineString, MultiPoint, MultiPolygon, Point, Polygon, Rect, Triangle, Winding,
 };
 
 use crate::core::MakeValidConfig;
@@ -438,6 +438,14 @@ fn make_valid_clean(poly: &Polygon<f64>, config: &MakeValidConfig) -> Geometry<f
     make_valid_impl(poly, poly, config, first_valid)
 }
 
+/// Check if any coordinate in a polygon is NaN or Infinity.
+fn has_nan_or_infinite(p: &Polygon<f64>) -> bool {
+    p.exterior().0.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
+        || p.interiors().iter().any(|ring| {
+            ring.0.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
+        })
+}
+
 /// Common strategy dispatch after degeneracy checks.
 #[cfg(any(feature = "arrange", feature = "structure"))]
 fn make_valid_impl(
@@ -446,6 +454,10 @@ fn make_valid_impl(
     config: &MakeValidConfig,
     _first_valid: Coord<f64>,
 ) -> Geometry<f64> {
+    // Bail early on NaN/Inf coordinates
+    if has_nan_or_infinite(poly) {
+        return empty_geom::<f64>();
+    }
     let result = match config.poly_method {
             PolyMethod::Arrange => arrange_or_empty(poly, config),
             PolyMethod::Structure => structure_fix(poly, config).unwrap_or_else(|| {
@@ -475,8 +487,9 @@ fn make_valid_impl(
                 }
             }
         };
-        enforce_ogc_winding(result)
-    }
+        let result = enforce_ogc_winding(result);
+        result
+        }
 
 /// Enforce OGC winding: CCW exterior, CW interior rings.
 fn enforce_ogc_winding(g: Geometry<f64>) -> Geometry<f64> {
@@ -504,13 +517,60 @@ fn enforce_ogc_winding(g: Geometry<f64>) -> Geometry<f64> {
                 .collect(),
         )),
         other => other,
+        }
+        }
+
+/// Remove degenerate Polygon/MultiPolygon components: exterior rings with
+/// <4 coordinates, shoelace area below epsilon, or NaN/Inf coordinates.
+fn strip_degenerate(g: Geometry<f64>) -> Geometry<f64> {
+    match g {
+        Geometry::Polygon(p) => {
+            let ext = &p.exterior().0;
+            if ext.len() < 4
+                || shoelace_abs_sum(ext) < 1e-12
+                || ext.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
+            {
+                empty_geom::<f64>()
+            } else {
+                // Strip degenerate holes (RingTooFewPoints, NaN/Inf)
+                let holes: Vec<LineString<f64>> = p.interiors().iter()
+                    .filter(|ring| {
+                        ring.0.len() >= 4
+                            && !ring.0.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
+                    })
+                    .cloned()
+                    .collect();
+                if holes.len() == p.interiors().len() {
+                    Geometry::Polygon(p)
+                } else {
+                    Geometry::Polygon(Polygon::new(p.exterior().clone(), holes))
+                }
+            }
+        }
+        Geometry::MultiPolygon(mp) => {
+            let filtered: Vec<Polygon<f64>> =
+                mp.0.into_iter()
+                    .filter(|p| {
+                        let ext = &p.exterior().0;
+                        ext.len() >= 4
+                            && shoelace_abs_sum(ext) >= 1e-12
+                            && !ext.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
+                    })
+                    .collect();
+            match filtered.len() {
+                0 => empty_geom::<f64>(),
+                1 => Geometry::Polygon(filtered.into_iter().next().unwrap()),
+                _ => Geometry::MultiPolygon(MultiPolygon::new(filtered)),
+            }
+        }
+        other => other,
     }
 }
 
 fn enforce_ccw(mut ring: LineString<f64>) -> LineString<f64> {
-    #[cfg(feature = "simd")]
-    let ccw = crate::simd::is_ring_ccw_simd(&ring.0);
-    #[cfg(not(feature = "simd"))]
+    // Use scalar winding_order() to stay consistent with the validator.
+    // SIMD batch-accumulation disagrees with scalar on tiny-area rings
+    // causing WrongOrientation false positives.
     let ccw = ring.winding_order() == Some(WindingOrder::CounterClockwise);
     if !ccw {
         ring.make_ccw_winding();
@@ -535,8 +595,11 @@ impl MakeValid for MultiPolygon<f64> {
         if self.0.is_empty() {
             return empty_geom::<f64>();
         }
+        // Bail early on NaN/Inf coordinates
+        if self.0.iter().any(|p| has_nan_or_infinite(p)) {
+            return empty_geom::<f64>();
+        }
         let polys: Vec<Geometry<f64>> = self
-            .0
             .iter()
             .map(|p| p.make_valid_with_config(config))
             .collect();
@@ -560,6 +623,14 @@ impl MakeValid for MultiPolygon<f64> {
         if is_valid_with_geo(&Geometry::MultiPolygon(mp.clone())) {
             return enforce_ogc_winding(Geometry::MultiPolygon(mp));
         }
+        // Even-parent filter: prevent NestedHoles from unary_union by removing
+        // shells that are fully contained inside larger shells.
+        let filtered = crate::structure::merge::merge_shells(mp.0);
+        if filtered.0.len() <= 1 {
+            return if filtered.0.is_empty() { empty_geom::<f64>() }
+                   else { enforce_ogc_winding(Geometry::Polygon(filtered.0.into_iter().next().unwrap())) };
+        }
+        let mp = filtered;
         // Check if shells have overlapping bboxes — if not, unary_union is overkill
         let shells_overlap = shells_have_overlapping_bboxes(&mp);
         if !shells_overlap {
@@ -584,16 +655,16 @@ impl MakeValid for MultiPolygon<f64> {
                         best = Some(enforce_ogc_winding(Geometry::MultiPolygon(re_union)));
                         break;
                     }
-                    if best.is_none()
-                        || re_union.0.len() < best.as_ref().map_or(usize::MAX, |_| usize::MAX)
-                    {
+                    if best.is_none() {
                         best = Some(enforce_ogc_winding(Geometry::MultiPolygon(re_union)));
                     }
                 }
-                best.unwrap_or_else(|| {
-                    warn!("MultiPolygon: all precision reduction attempts failed, using pre-union shells");
-                    enforce_ogc_winding(Geometry::MultiPolygon(mp))
-                })
+                // If all retries failed, clean union output with drop_nested_components
+                // Use the best (last) retry result to avoid another union call.
+                let unioned = best.take()
+                    .map(|g| match g { Geometry::MultiPolygon(mp) => mp, _ => return MultiPolygon::new(Vec::new()) })
+                    .unwrap_or_else(|| geo::algorithm::bool_ops::unary_union(&mp));
+                drop_nested_components(unioned)
             }
         }
     }
@@ -625,6 +696,7 @@ impl MakeValid for Geometry<f64> {
             Geometry::Rect(g) => g.make_valid_with_config(config),
             Geometry::Triangle(g) => g.make_valid_with_config(config),
         };
+        let geom = strip_degenerate(geom);
         apply_target_crs(geom, config)
     }
 
@@ -642,6 +714,7 @@ impl MakeValid for Geometry<f64> {
             Geometry::Rect(g) => g.par_make_valid_with_config(config),
             Geometry::Triangle(g) => g.par_make_valid_with_config(config),
         };
+        let geom = strip_degenerate(geom);
         apply_target_crs(geom, config)
     }
 }
@@ -686,7 +759,14 @@ impl<T: NodingFloat> MakeValid for Geometry<T> {
 
 #[cfg(feature = "arrange")]
 fn arrange_or_empty(poly: &Polygon<f64>, config: &MakeValidConfig) -> Geometry<f64> {
-    crate::arrange::fix_polygon(poly, config)
+    let result = crate::arrange::fix_polygon(poly, config);
+    // Clean NestedHoles from Arrange output (edge-sharing components)
+    if let Geometry::MultiPolygon(mp) = &result {
+        if mp.0.len() > 1 {
+            return drop_nested_components(mp.clone());
+        }
+    }
+    result
 }
 
 #[cfg(not(feature = "arrange"))]
@@ -805,6 +885,87 @@ fn point_in_ring_exclusive(pt: Coord<f64>, ring: &[Coord<f64>]) -> bool {
         if intersect { inside = !inside; }
     }
     inside
+}
+
+/// Remove components from a MultiPolygon that are inside another component
+/// (fixes NestedHoles from unary_union). Sorts by area, keeps only even-parent.
+fn shoelace_abs_sum(coords: &[Coord<f64>]) -> f64 {
+    let n = coords.len();
+    if n < 3 { return 0.0; }
+    let end = if coords.first() == coords.last() { n - 1 } else { n };
+    let mut sum = 0.0_f64;
+    for i in 0..end - 1 {
+        sum += coords[i].x * coords[i + 1].y - coords[i + 1].x * coords[i].y;
+    }
+    sum += coords[end - 1].x * coords[0].y - coords[0].x * coords[end - 1].y;
+    sum.abs()
+}
+
+pub(crate) fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
+    if mp.0.len() <= 1 {
+        return if mp.0.is_empty() { empty_geom::<f64>() }
+               else { enforce_ogc_winding(Geometry::Polygon(mp.0.into_iter().next().unwrap())) };
+    }
+    let mut with_area: Vec<(Polygon<f64>, f64)> = mp.0.into_iter()
+        .map(|p| { let a = shoelace_abs_sum(&p.exterior().0); (p, a) })
+        .collect();
+    with_area.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let n = with_area.len();
+    let mut keep: Vec<bool> = vec![true; n];
+    for i in 0..n {
+        let ext_i = &with_area[i].0.exterior().0;
+        if ext_i.len() < 4 { keep[i] = false; continue; }
+        let centroid = ext_i[..ext_i.len()-1].iter().fold(Coord { x: 0.0, y: 0.0 },
+            |acc, c| Coord { x: acc.x + c.x, y: acc.y + c.y });
+        let n_verts = (ext_i.len() - 1).max(1) as f64;
+        let centroid = Coord { x: centroid.x / n_verts, y: centroid.y / n_verts };
+        let pt_candidates = [ext_i[0], Coord {
+            x: (ext_i[0].x + ext_i[1].x) * 0.5,
+            y: (ext_i[0].y + ext_i[1].y) * 0.5,
+        }, centroid];
+        let is_nested = with_area.iter().enumerate().any(|(j, (p_j, _))| {
+            if i == j || !keep[j] { return false; }
+            let ext_j = &p_j.exterior().0;
+            if ext_j.len() < 4 { return false; }
+            pt_candidates.iter().any(|&pt| point_in_ring_exclusive(pt, ext_j))
+        });
+        if is_nested { keep[i] = false; }
+    }
+    let kept: Vec<Polygon<f64>> = with_area.into_iter()
+        .enumerate()
+        .filter_map(|(i, (p, _))| if keep[i] { Some(p) } else { None })
+        .collect();
+    if kept.is_empty() { return empty_geom::<f64>(); }
+    let kept_len = kept.len();
+    if kept_len == 1 {
+        return enforce_ogc_winding(Geometry::Polygon(kept.into_iter().next().unwrap()));
+    }
+    // Edge-sharing case: containment didn't reduce components. Return as-is.
+    let mp = MultiPolygon::new(kept);
+    enforce_ogc_winding(Geometry::MultiPolygon(mp))
+}
+
+/// Polygonizer fallback for edge-sharing MultiPolygon components
+/// that containment-based drop_nested_components can't handle.
+fn polygonizer_fallback(mp: &MultiPolygon<f64>) -> Option<Geometry<f64>> {
+    let lines: Vec<geo::Line<f64>> = mp.0.iter()
+        .flat_map(|p| p.lines_iter())
+        .collect();
+    if lines.is_empty() { return None; }
+    let noded = crate::arrange::prep::prepare_lines(lines).ok()?;
+    if noded.lines.is_empty() { return None; }
+    let faces = crate::structure::polygonizer::polygonize(&noded.lines);
+    if faces.is_empty() { return None; }
+    let valid: Vec<Polygon<f64>> = faces.into_iter()
+        .filter(|p| {
+            let ext = &p.exterior().0;
+            ext.len() >= 4 && !ext.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
+                && shoelace_abs_sum(ext) >= 1e-12
+        })
+        .collect();
+    if valid.is_empty() { return None; }
+    if valid.len() == 1 { return Some(Geometry::Polygon(valid.into_iter().next().unwrap())); }
+    Some(Geometry::MultiPolygon(MultiPolygon::new(valid)))
 }
 
 /// Snap all coordinates in a MultiPolygon to the default precision grid (1e-8).
