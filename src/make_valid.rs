@@ -404,7 +404,7 @@ impl MakeValid for Polygon<f64> {
             LineString::new(c)
         };
         let cleaned = Polygon::new(ext_ring, int_clean);
-        make_valid_impl(self, &cleaned, config, first_valid)
+        strip_degenerate(make_valid_impl(self, &cleaned, config, first_valid))
     }
 }
 
@@ -522,15 +522,40 @@ fn enforce_ogc_winding(g: Geometry<f64>) -> Geometry<f64> {
 
 /// Remove degenerate Polygon/MultiPolygon components: exterior rings with
 /// <4 coordinates, shoelace area below epsilon, or NaN/Inf coordinates.
+/// Returns boundary LineString for degenerate polygons (GEOS-style type degradation).
 fn strip_degenerate(g: Geometry<f64>) -> Geometry<f64> {
     match g {
         Geometry::Polygon(p) => {
             let ext = &p.exterior().0;
+            let (mut min_x, mut max_x, mut min_y, mut max_y) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+            for c in ext.iter() {
+                if c.x.is_finite() { min_x = min_x.min(c.x); max_x = max_x.max(c.x); }
+                if c.y.is_finite() { min_y = min_y.min(c.y); max_y = max_y.max(c.y); }
+            }
+            let bbox_degenerate = (max_x - min_x).abs() < f64::EPSILON * 1e6
+                || (max_y - min_y).abs() < f64::EPSILON * 1e6;
             if ext.len() < 4
                 || shoelace_abs_sum(ext) < 1e-12
+                || bbox_degenerate
                 || ext.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
             {
-                empty_geom::<f64>()
+                // GEOS-style: return degenerate polygon boundary as LineString
+                let mut lines: Vec<LineString<f64>> = Vec::new();
+                if ext.len() >= 2 {
+                    lines.push(p.exterior().clone());
+                }
+                for ring in p.interiors() {
+                    if ring.0.len() >= 2 {
+                        lines.push(ring.clone());
+                    }
+                }
+                if lines.is_empty() {
+                    empty_geom::<f64>()
+                } else if lines.len() == 1 {
+                    Geometry::LineString(lines.into_iter().next().unwrap())
+                } else {
+                    Geometry::MultiLineString(MultiLineString::new(lines))
+                }
             } else {
                 // Strip degenerate holes (RingTooFewPoints, NaN/Inf)
                 let holes: Vec<LineString<f64>> = p.interiors().iter()
@@ -548,19 +573,60 @@ fn strip_degenerate(g: Geometry<f64>) -> Geometry<f64> {
             }
         }
         Geometry::MultiPolygon(mp) => {
-            let filtered: Vec<Polygon<f64>> =
-                mp.0.into_iter()
-                    .filter(|p| {
-                        let ext = &p.exterior().0;
-                        ext.len() >= 4
-                            && shoelace_abs_sum(ext) >= 1e-12
-                            && !ext.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
-                    })
-                    .collect();
-            match filtered.len() {
-                0 => empty_geom::<f64>(),
-                1 => Geometry::Polygon(filtered.into_iter().next().unwrap()),
-                _ => Geometry::MultiPolygon(MultiPolygon::new(filtered)),
+            let mut valid_polys: Vec<Polygon<f64>> = Vec::new();
+            let mut boundary_lines: Vec<LineString<f64>> = Vec::new();
+            for p in mp.0.into_iter() {
+                let ext = &p.exterior().0;
+                if ext.len() >= 4
+                    && shoelace_abs_sum(ext) >= 1e-12
+                    && !ext.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
+                {
+                    valid_polys.push(p);
+                } else {
+                    // Collect degenerate component's boundary as lines
+                    if ext.len() >= 2 {
+                        boundary_lines.push(p.exterior().clone());
+                    }
+                    for ring in p.interiors() {
+                        if ring.0.len() >= 2 {
+                            boundary_lines.push(ring.clone());
+                        }
+                    }
+                }
+            }
+            match (valid_polys.len(), boundary_lines.is_empty()) {
+                (0, true) => empty_geom::<f64>(),
+                (0, false) => {
+                    if boundary_lines.len() == 1 {
+                        Geometry::LineString(boundary_lines.into_iter().next().unwrap())
+                    } else {
+                        Geometry::MultiLineString(MultiLineString::new(boundary_lines))
+                    }
+                }
+                (1, true) => Geometry::Polygon(valid_polys.into_iter().next().unwrap()),
+                (1, false) => {
+                    let mut geoms: Vec<Geometry<f64>> = Vec::new();
+                    geoms.push(Geometry::Polygon(valid_polys.into_iter().next().unwrap()));
+                    let mls = if boundary_lines.len() == 1 {
+                        Geometry::LineString(boundary_lines.into_iter().next().unwrap())
+                    } else {
+                        Geometry::MultiLineString(MultiLineString::new(boundary_lines))
+                    };
+                    geoms.push(mls);
+                    Geometry::GeometryCollection(GeometryCollection(geoms))
+                }
+                (_, true) => Geometry::MultiPolygon(MultiPolygon::new(valid_polys)),
+                (_, false) => {
+                    let mut geoms: Vec<Geometry<f64>> = valid_polys.into_iter()
+                        .map(Geometry::Polygon).collect();
+                    let mls = if boundary_lines.len() == 1 {
+                        Geometry::LineString(boundary_lines.into_iter().next().unwrap())
+                    } else {
+                        Geometry::MultiLineString(MultiLineString::new(boundary_lines))
+                    };
+                    geoms.push(mls);
+                    Geometry::GeometryCollection(GeometryCollection(geoms))
+                }
             }
         }
         other => other,
