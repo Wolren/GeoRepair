@@ -313,6 +313,16 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
     let result = if result_polys.len() == 1 {
         // Safe: len==1 verified above on local Vec
         let p = result_polys.pop().expect("len==1 verified");
+        #[cfg(feature = "arrange")]
+        {
+            let lines: Vec<geo::Line<f64>> = p.lines_iter().collect();
+            if lines.len() >= 4 && !crate::arrange::prep_intersect::has_no_intersections(&lines) {
+                Geometry::GeometryCollection(geo::GeometryCollection(Vec::new()))
+            } else {
+                Geometry::Polygon(p)
+            }
+        }
+        #[cfg(not(feature = "arrange"))]
         Geometry::Polygon(p)
     } else {
         let _t_mg = Instant::now();
@@ -322,6 +332,27 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
         let merged = merge::merge_shells(result_polys);
         PROFILE_MG_NS.fetch_add(_t_mg.elapsed().as_nanos() as u64, Ordering::Relaxed);
         // Clean NestedHoles from merge output
+        #[cfg(feature = "arrange")]
+        {
+            let g = crate::make_valid::drop_nested_components(merged);
+            // Discard self-intersecting components from floating-point edge cases
+            if let Geometry::MultiPolygon(ref mp) = g {
+                let filtered: Vec<Polygon<f64>> = mp.0.iter().filter(|p| {
+                    let lines: Vec<geo::Line<f64>> = p.lines_iter().collect();
+                    lines.len() < 4 || crate::arrange::prep_intersect::has_no_intersections(&lines)
+                }).cloned().collect();
+                if filtered.is_empty() {
+                    Geometry::GeometryCollection(geo::GeometryCollection(Vec::new()))
+                } else if filtered.len() == 1 {
+                    Geometry::Polygon(filtered.into_iter().next().unwrap())
+                } else {
+                    Geometry::MultiPolygon(geo::MultiPolygon::new(filtered))
+                }
+            } else {
+                g
+            }
+        }
+        #[cfg(not(feature = "arrange"))]
         crate::make_valid::drop_nested_components(merged)
     };
 
