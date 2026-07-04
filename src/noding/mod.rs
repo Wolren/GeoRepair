@@ -302,7 +302,7 @@ fn split_edges_rtree(edges: &[Line<f64>], split_points: &mut [Vec<f64>], eps: f6
             [e.start.x.min(e.end.x), e.start.y.min(e.end.y)],
             [e.start.x.max(e.end.x), e.start.y.max(e.end.y)],
         );
-        let _ = tree.locate_in_envelope_intersecting_int(&query, |c| {
+        let _ = tree.locate_in_envelope_intersecting_int(query, |c| {
             let j = c.idx;
             if j <= i {
                 return std::ops::ControlFlow::<(), ()>::Continue(());

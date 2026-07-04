@@ -305,7 +305,7 @@ pub(crate) fn check_ring_validity(
                 let ext = (hi_x - lo_x).abs().max((hi_y - lo_y).abs()).max(1.0) * 1e-10;
                 let env =
                     rstar::AABB::from_corners([lo_x - ext, lo_y - ext], [hi_x + ext, hi_y + ext]);
-                let found = tree.locate_in_envelope_intersecting_int(&env, |c| {
+                let found = tree.locate_in_envelope_intersecting_int(env, |c| {
                     let j = c.idx as usize;
                     if j <= i {
                         return std::ops::ControlFlow::Continue(());
@@ -518,7 +518,7 @@ pub(crate) fn check_rings_intersect(ring1: &[Coord<f64>], ring2: &[Coord<f64>], 
                 (a2.y, a1.y)
             };
             let query = rstar::AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]);
-            let found = tree.locate_in_envelope_intersecting_int(&query, |c| {
+            let found = tree.locate_in_envelope_intersecting_int(query, |c| {
                 let b1 = build_ring[c.idx];
                 let b2 = build_ring[(c.idx + 1) % n_build];
                 if edges_intersect_general(a1, a2, b1, b2, eps) {
@@ -797,7 +797,7 @@ pub(crate) fn check_holes_valid(
                 };
                 let query = rstar::AABB::from_corners([pt.x, pt.y], [pt.x, pt.y]);
                 let mut overlaps = false;
-                let _ = tree.locate_in_envelope_intersecting_int(&query, |c| {
+                let _ = tree.locate_in_envelope_intersecting_int(query, |c| {
                     if c.idx != i && point_in_ring_exclusive(pt, holes[c.idx]) {
                         overlaps = true;
                         std::ops::ControlFlow::Break(())
@@ -971,7 +971,7 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
                 (a2.y, a1.y)
             };
             let query = rstar::AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]);
-            let found = tree.locate_in_envelope_intersecting_int(&query, |c| {
+            let found = tree.locate_in_envelope_intersecting_int(query, |c| {
                 let j = c.idx;
                 if j <= i + 1 {
                     return std::ops::ControlFlow::<(), ()>::Continue(());
@@ -1055,7 +1055,7 @@ pub(crate) fn check_line_components_intersect(
                 (a2.y, a1.y)
             };
             let query = rstar::AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]);
-            let found = tree.locate_in_envelope_intersecting_int(&query, |c| {
+            let found = tree.locate_in_envelope_intersecting_int(query, |c| {
                 let b1 = large[c.idx];
                 let b2 = large[c.idx + 1];
                 if edges_intersect_general(a1, a2, b1, b2, eps) {

@@ -58,32 +58,45 @@ fn test_point_valid() {
 
 #[test]
 fn test_point_nan() {
+    // Point(NaN) is POINT EMPTY — preserved as valid
     let p = Point::new(f64::NAN, 2.0);
     let result = p.make_valid();
-    assert_eq!(
-        result,
-        Geometry::GeometryCollection(GeometryCollection(Vec::new()))
-    );
+    if let Geometry::Point(rp) = result {
+        assert!(rp.x().is_nan());
+        assert_eq!(rp.y(), 2.0);
+    } else {
+        panic!("expected Point, got {:?}", result);
+    }
+    assert!(p.is_valid());
 }
 
 #[test]
 fn test_point_infinite_x() {
+    // Point(Infinity) is considered valid by Point::validate
     let p = Point::new(f64::INFINITY, 2.0);
     let result = p.make_valid();
-    assert_eq!(
-        result,
-        Geometry::GeometryCollection(GeometryCollection(Vec::new()))
-    );
+    if let Geometry::Point(rp) = result {
+        assert!(rp.x().is_infinite());
+        assert_eq!(rp.y(), 2.0);
+    } else {
+        panic!("expected Point, got {:?}", result);
+    }
+    assert!(p.is_valid());
 }
 
 #[test]
 fn test_point_infinite_y() {
+    // Point(Infinity) is considered valid by Point::validate
     let p = Point::new(1.0, f64::NEG_INFINITY);
     let result = p.make_valid();
-    assert_eq!(
-        result,
-        Geometry::GeometryCollection(GeometryCollection(Vec::new()))
-    );
+    if let Geometry::Point(rp) = result {
+        assert_eq!(rp.x(), 1.0);
+        assert!(rp.y().is_infinite());
+        assert!(rp.y().is_sign_negative());
+    } else {
+        panic!("expected Point, got {:?}", result);
+    }
+    assert!(p.is_valid());
 }
 
 // ---------------------------------------------------------------------------
@@ -210,24 +223,37 @@ fn test_multipoint_valid() {
 
 #[test]
 fn test_multipoint_filters_nan() {
+    // NaN points in MultiPoint are valid OGC (Point(NaN) = POINT EMPTY)
     let mp = MultiPoint::new(vec![
         Point::new(0.0, 0.0),
         Point::new(f64::NAN, 1.0),
         Point::new(2.0, 2.0),
     ]);
     let result = mp.make_valid();
-    let expected = MultiPoint::new(vec![Point::new(0.0, 0.0), Point::new(2.0, 2.0)]);
-    assert_eq!(result, Geometry::MultiPoint(expected));
+    // NaN preserved — Point(NaN) is valid
+    if let Geometry::MultiPoint(rmp) = result {
+        assert_eq!(rmp.0.len(), 3);
+        assert_eq!(rmp.0[0], Point::new(0.0, 0.0));
+        assert!(rmp.0[1].x().is_nan());
+        assert_eq!(rmp.0[1].y(), 1.0);
+        assert_eq!(rmp.0[2], Point::new(2.0, 2.0));
+    } else {
+        panic!("expected MultiPoint, got {:?}", result);
+    }
 }
 
 #[test]
 fn test_multipoint_all_invalid() {
     let mp = MultiPoint::new(vec![Point::new(f64::NAN, f64::NAN)]);
     let result = mp.make_valid();
-    assert_eq!(
-        result,
-        Geometry::GeometryCollection(GeometryCollection(Vec::new()))
-    );
+    // Point(NaN) is valid POINT EMPTY — preserved
+    if let Geometry::MultiPoint(rmp) = result {
+        assert_eq!(rmp.0.len(), 1);
+        assert!(rmp.0[0].x().is_nan());
+        assert!(rmp.0[0].y().is_nan());
+    } else {
+        panic!("expected MultiPoint, got {:?}", result);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -594,12 +620,15 @@ fn test_geometry_dispatch_bowtie() {
 
 #[test]
 fn test_geometry_dispatch_empty() {
+    // Point(NaN) is valid POINT EMPTY — preserved
     let g = Geometry::Point(Point::new(f64::NAN, 0.0));
     let result = g.make_valid();
-    assert_eq!(
-        result,
-        Geometry::GeometryCollection(GeometryCollection(Vec::new()))
-    );
+    if let Geometry::Point(rp) = result {
+        assert!(rp.x().is_nan());
+        assert_eq!(rp.y(), 0.0);
+    } else {
+        panic!("expected Point, got {:?}", result);
+    }
 }
 
 #[test]
@@ -618,25 +647,39 @@ fn test_geometrycollection_valid() {
 
 #[test]
 fn test_geometrycollection_filters_empty() {
+    // NaN points in GC are preserved (Point(NaN) = POINT EMPTY)
     let gc = GeometryCollection(vec![
         Geometry::Point(Point::new(f64::NAN, 0.0)),
         Geometry::Line(Line::new(Point::new(0.0, 0.0), Point::new(1.0, 1.0))),
     ]);
     let result = gc.make_valid();
-    let expected = Geometry::GeometryCollection(GeometryCollection(vec![Geometry::Line(
-        Line::new(Point::new(0.0, 0.0), Point::new(1.0, 1.0)),
-    )]));
-    assert_eq!(result, expected);
+    if let Geometry::GeometryCollection(rgc) = result {
+        assert_eq!(rgc.0.len(), 2);
+        if let Geometry::Point(rp) = &rgc.0[0] {
+            assert!(rp.x().is_nan());
+        } else {
+            panic!("expected Point at [0], got {:?}", rgc.0[0]);
+        }
+        assert_eq!(rgc.0[1], Geometry::Line(Line::new(Point::new(0.0, 0.0), Point::new(1.0, 1.0))));
+    } else {
+        panic!("expected GeometryCollection, got {:?}", result);
+    }
 }
 
 #[test]
 fn test_geometrycollection_all_empty() {
     let gc = GeometryCollection(vec![Geometry::Point(Point::new(f64::NAN, 0.0))]);
     let result = gc.make_valid();
-    assert_eq!(
-        result,
-        Geometry::GeometryCollection(GeometryCollection(Vec::new()))
-    );
+    if let Geometry::GeometryCollection(rgc) = result {
+        assert_eq!(rgc.0.len(), 1);
+        if let Geometry::Point(rp) = &rgc.0[0] {
+            assert!(rp.x().is_nan());
+        } else {
+            panic!("expected Point, got {:?}", rgc.0[0]);
+        }
+    } else {
+        panic!("expected GeometryCollection, got {:?}", result);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1049,7 +1092,7 @@ fn test_validate_and_fix_multipoint() {
         Point::new(3.0, 4.0),
     ]);
     let (result, geom) = mp.validate_and_fix();
-    assert!(!result.valid, "multipoint with NaN should be invalid");
+    assert!(result.valid, "multipoint with NaN should be valid (POINT EMPTY)");
     assert_geometry_valid(&geom);
     assert_not_empty(&geom);
 }

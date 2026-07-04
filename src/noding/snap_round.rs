@@ -209,7 +209,7 @@ fn collect_intersections_mcindex(
     for i in 0..nc {
         let mc1 = &chains[i];
         let q = rstar::AABB::from_corners([mc1.min_x, mc1.min_y], [mc1.max_x, mc1.max_y]);
-        let _ = chain_tree.locate_in_envelope_intersecting_int(&q, |c| {
+        let _ = chain_tree.locate_in_envelope_intersecting_int(q, |c| {
             let j = c.idx;
             if j <= i {
                 return std::ops::ControlFlow::<(), ()>::Continue(());
@@ -448,7 +448,7 @@ impl SnapRoundingNoder {
                 let lo_y = seg.start.y.min(seg.end.y) - hp_r;
                 let hi_y = seg.start.y.max(seg.end.y) + hp_r;
                 let query = rstar::AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]);
-                let _ = hp_tree.locate_in_envelope_intersecting_int(&query, |entry| {
+                let _ = hp_tree.locate_in_envelope_intersecting_int(query, |entry| {
                     let hp = HotPixel {
                         center: entry.center,
                     };

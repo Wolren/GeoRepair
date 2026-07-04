@@ -148,7 +148,7 @@ fn check_self_intersections_f64(edges: &[Line<f64>], eps: f64) -> bool {
             [e.start.x.min(e.end.x), e.start.y.min(e.end.y)],
             [e.start.x.max(e.end.x), e.start.y.max(e.end.y)],
         );
-        let result = tree.locate_in_envelope_intersecting_int(&query, |c| {
+        let result = tree.locate_in_envelope_intersecting_int(query, |c| {
             let j = c.idx;
             if j <= i {
                 return std::ops::ControlFlow::Continue(());

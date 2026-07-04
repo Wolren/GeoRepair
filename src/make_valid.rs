@@ -410,6 +410,7 @@ impl MakeValid for Polygon<f64> {
 
 /// Fast path: polygon has no NaN coords, use self directly.
 #[cfg(any(feature = "arrange", feature = "structure"))]
+#[allow(dead_code)]
 fn make_valid_clean(poly: &Polygon<f64>, config: &MakeValidConfig) -> Geometry<f64> {
     if !config.keep_collapsed && poly.exterior().0.len() >= 4 {
         let coords = &poly.exterior().0;
@@ -808,6 +809,7 @@ fn point_in_ring_exclusive(pt: Coord<f64>, ring: &[Coord<f64>]) -> bool {
 
 /// Snap all coordinates in a MultiPolygon to the default precision grid (1e-8).
 #[cfg(any(feature = "arrange", feature = "structure"))]
+#[allow(dead_code)]
 fn reduce_mp(mp: &MultiPolygon<f64>, config: &MakeValidConfig) -> MultiPolygon<f64> {
     reduce_mp_at_scale(mp, config, 1e-8)
 }
