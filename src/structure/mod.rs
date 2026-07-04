@@ -38,7 +38,7 @@ pub mod subtract;
 pub mod sweep;
 
 use geo::{
-    Coord, Geometry, GeometryCollection, LineString, LinesIter, MultiPolygon, Point, Polygon,
+    Coord, Geometry, LineString, LinesIter, MultiPolygon, Point, Polygon,
     Winding,
 };
 use rstar::{AABB, RTree, RTreeObject};
@@ -395,7 +395,7 @@ fn resolve_nesting(holes: &[LineString<f64>]) -> (Vec<LineString<f64>>, Vec<Poly
             let query = AABB::from_corners([pt.x, pt.y], [pt.x, pt.y]);
             let mut best: Option<usize> = None;
             let mut best_area = f64::MAX;
-            let _ = tree.locate_in_envelope_intersecting_int(&query, |c| {
+            let _ = tree.locate_in_envelope_intersecting_int(query, |c| {
                 if c.idx == j {
                     return std::ops::ControlFlow::<(), ()>::Continue(());
                 }

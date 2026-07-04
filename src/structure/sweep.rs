@@ -51,7 +51,7 @@ pub(crate) fn has_self_intersections(coords: &[Coord<f64>], eps: f64) -> bool {
 
     for i in 0..n_edges {
         let query_env = edge_envelope(coords, i);
-        let result = tree.locate_in_envelope_intersecting_int(&query_env, |candidate| {
+        let result = tree.locate_in_envelope_intersecting_int(query_env, |candidate| {
             let j = candidate.index as usize;
             if j <= i {
                 return std::ops::ControlFlow::Continue(());
@@ -120,7 +120,7 @@ pub(crate) fn find_first_intersection(
     for i in 0..n_edges {
         let query_env = edge_envelope(coords, i);
         let result: std::ops::ControlFlow<Option<(usize, usize, Coord<f64>)>> = tree
-            .locate_in_envelope_intersecting_int(&query_env, |candidate| {
+            .locate_in_envelope_intersecting_int(query_env, |candidate| {
                 let j = candidate.index as usize;
                 if j <= i {
                     return std::ops::ControlFlow::Continue(());

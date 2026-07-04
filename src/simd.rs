@@ -10,7 +10,10 @@
 //! error bound check, falling back to the `robust` crate's exact adaptive-precision
 //! arithmetic only when the fast result is within the error bound.
 
+#[cfg(not(feature = "simd-portable"))]
 use geo::{Coord, GeoFloat};
+#[cfg(feature = "simd-portable")]
+use geo::Coord;
 
 use crate::orient::orient2d as orient2d_robust;
 

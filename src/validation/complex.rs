@@ -183,7 +183,7 @@ impl GeoValidation for MultiPolygon<f64> {
                     };
                     let query = rstar::AABB::from_corners([pt.x, pt.y], [pt.x, pt.y]);
                     let mut overlaps = false;
-                    let _ = tree.locate_in_envelope_intersecting_int(&query, |c| {
+                    let _ = tree.locate_in_envelope_intersecting_int(query, |c| {
                         if c.idx != i && point_in_ring_exclusive(pt, shells[c.idx]) {
                             overlaps = true;
                             std::ops::ControlFlow::Break(())

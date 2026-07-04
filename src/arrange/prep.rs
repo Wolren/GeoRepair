@@ -241,7 +241,7 @@ fn split_segments(lines: Vec<Line<f64>>) -> Result<Vec<Line<f64>>, MakeValidErro
         let lo_y = li.start.y.min(li.end.y);
         let hi_y = li.start.y.max(li.end.y);
         let query = AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]);
-        let _ = tree.locate_in_envelope_intersecting_int(&query, |c| {
+        let _ = tree.locate_in_envelope_intersecting_int(query, |c| {
             let j = c.idx;
             if j <= i {
                 return ControlFlow::<(), ()>::Continue(());

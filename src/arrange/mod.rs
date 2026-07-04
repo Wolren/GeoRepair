@@ -213,7 +213,7 @@ pub(crate) fn holes_are_valid(poly: &Polygon<f64>) -> bool {
             };
             let query = AABB::from_corners([pt.x, pt.y], [pt.x, pt.y]);
             let mut overlaps = false;
-            let _ = tree.locate_in_envelope_intersecting_int(&query, |c| {
+            let _ = tree.locate_in_envelope_intersecting_int(query, |c| {
                 if c.idx != i && point_in_ring_exclusive(pt, holes[c.idx]) {
                     overlaps = true;
                     std::ops::ControlFlow::Break(())

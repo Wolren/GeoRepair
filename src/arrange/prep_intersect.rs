@@ -261,7 +261,7 @@ pub(crate) fn has_no_intersections(lines: &[Line<f64>]) -> bool {
                 }
                 let mc1 = &chains[i];
                 let q = AABB::from_corners([mc1.min_x, mc1.min_y], [mc1.max_x, mc1.max_y]);
-                let res = tree.locate_in_envelope_intersecting_int(&q, |c| {
+                let res = tree.locate_in_envelope_intersecting_int(q, |c| {
                     if found.load(Ordering::Acquire) {
                         return ControlFlow::Break(());
                     }
@@ -288,7 +288,7 @@ pub(crate) fn has_no_intersections(lines: &[Line<f64>]) -> bool {
     for i in 0..nc {
         let mc1 = &chains[i];
         let q = AABB::from_corners([mc1.min_x, mc1.min_y], [mc1.max_x, mc1.max_y]);
-        let result = tree.locate_in_envelope_intersecting_int(&q, |c| {
+        let result = tree.locate_in_envelope_intersecting_int(q, |c| {
             let j = c.idx;
             if j <= i {
                 return ControlFlow::Continue(());

@@ -70,7 +70,7 @@ pub(crate) fn assemble_polygons(rings: Vec<geo::LineString<f64>>) -> geo::MultiP
         for pt in &hole.0 {
             let query = AABB::from_corners([pt.x, pt.y], [pt.x, pt.y]);
             let mut found = None;
-            let _ = ext_tree.locate_in_envelope_intersecting_int(&query, |c| {
+            let _ = ext_tree.locate_in_envelope_intersecting_int(query, |c| {
                 if coord_pos_relative_to_ring(*pt, &polygons[c.idx].0) == CoordPos::Inside {
                     found = Some(c.idx);
                     std::ops::ControlFlow::Break(())

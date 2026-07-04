@@ -355,7 +355,7 @@ impl NodingValidator {
             for i in 0..chains.len() {
                 let mc1 = &chains[i];
                 let q = rstar::AABB::from_corners([mc1.min_x, mc1.min_y], [mc1.max_x, mc1.max_y]);
-                let _ = tree.locate_in_envelope_intersecting_int(&q, |c| {
+                let _ = tree.locate_in_envelope_intersecting_int(q, |c| {
                     let j = c.idx;
                     if j <= i {
                         return std::ops::ControlFlow::<(), ()>::Continue(());
