@@ -940,9 +940,24 @@ pub(crate) fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
     if kept_len == 1 {
         return enforce_ogc_winding(Geometry::Polygon(kept.into_iter().next().unwrap()));
     }
-    // Edge-sharing case: containment didn't reduce components. Return as-is.
-    let mp = MultiPolygon::new(kept);
-    enforce_ogc_winding(Geometry::MultiPolygon(mp))
+    // Edge-sharing case: containment didn't reduce components.
+    // Filter out components with PinchPoint or self-intersection errors.
+    let mp_kept = MultiPolygon::new(kept);
+    let valid: Vec<Polygon<f64>> = mp_kept.0.into_iter().filter(|p| {
+        let v = crate::validation::GeoValidation::validate(p);
+        !v.errors.iter().any(|e| matches!(e, crate::validation::GeometryValidationError::PinchPoint))
+            && v.errors.iter().filter(|e| !matches!(e,
+                crate::validation::GeometryValidationError::PinchPoint
+                | crate::validation::GeometryValidationError::NestedHoles
+            )).count() == 0
+    }).collect();
+    if valid.is_empty() {
+        return empty_geom::<f64>();
+    }
+    if valid.len() == 1 {
+        return enforce_ogc_winding(Geometry::Polygon(valid.into_iter().next().unwrap()));
+    }
+    enforce_ogc_winding(Geometry::MultiPolygon(MultiPolygon::new(valid)))
 }
 
 /// Polygonizer fallback for edge-sharing MultiPolygon components
