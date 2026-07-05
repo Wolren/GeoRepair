@@ -553,7 +553,9 @@ pub(crate) fn check_orientation(ring: &[Coord<f64>]) -> bool {
     if ring.len() < 4 {
         return true;
     }
-    crate::util::shoelace_sum(ring) > 0.0
+    // Use Shewchuk's orient2d (adaptive precision) on the extremal vertex.
+    // The shoelace sum can flip sign at extreme fp ratios (e.g. 1e12 and 1e-12).
+    crate::util::robust_is_ccw(ring)
 }
 
 pub(crate) fn point_in_ring_exclusive(pt: Coord<f64>, ring: &[Coord<f64>]) -> bool {

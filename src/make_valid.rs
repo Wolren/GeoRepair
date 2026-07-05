@@ -654,18 +654,19 @@ fn strip_degenerate(g: Geometry<f64>) -> Geometry<f64> {
 }
 
 fn enforce_ccw(mut ring: LineString<f64>) -> LineString<f64> {
-    // Use scalar winding_order() to stay consistent with the validator.
-    // SIMD batch-accumulation disagrees with scalar on tiny-area rings
-    // causing WrongOrientation false positives.
-    let ccw = ring.winding_order() == Some(WindingOrder::CounterClockwise);
-    if !ccw {
+    // Use Shewchuk's orient2d (adaptive precision) on the extremal vertex
+    // to determine winding order. The shoelace sum in geo's winding_order()
+    // can flip sign at extreme fp ratios (e.g. 1e12 and 1e-12 in same ring).
+    let is_ccw = crate::util::robust_is_ccw(&ring.0);
+    if !is_ccw {
         ring.make_ccw_winding();
     }
     ring
 }
 
 fn enforce_cw(mut ring: LineString<f64>) -> LineString<f64> {
-    if ring.winding_order() != Some(WindingOrder::Clockwise) {
+    let is_ccw = crate::util::robust_is_ccw(&ring.0);
+    if is_ccw {
         ring.make_cw_winding();
     }
     ring
