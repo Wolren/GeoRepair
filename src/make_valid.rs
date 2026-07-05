@@ -391,10 +391,11 @@ impl MakeValid for Polygon<f64> {
             .collect();
         let deduped = crate::noding::remove_consecutive_duplicates(&ext_clean);
         if deduped.len() < 3 {
-            if config.keep_collapsed && deduped.len() == 1 {
-                return Geometry::Point(Point(deduped[0]));
-            }
-            return empty_geom();
+            return match deduped.len() {
+                0 => empty_geom(),
+                1 => Geometry::Point(Point(deduped[0])),
+                _ => Geometry::LineString(LineString::new(deduped)),
+            };
         }
         let ext_ring = if deduped.first() == deduped.last() {
             LineString::new(deduped)
@@ -527,49 +528,66 @@ fn strip_degenerate(g: Geometry<f64>) -> Geometry<f64> {
     match g {
         Geometry::Polygon(p) => {
             let ext = &p.exterior().0;
-            let (mut min_x, mut max_x, mut min_y, mut max_y) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
-            for c in ext.iter() {
-                if c.x.is_finite() { min_x = min_x.min(c.x); max_x = max_x.max(c.x); }
-                if c.y.is_finite() { min_y = min_y.min(c.y); max_y = max_y.max(c.y); }
-            }
-            let bbox_degenerate = (max_x - min_x).abs() < f64::EPSILON * 1e6
-                || (max_y - min_y).abs() < f64::EPSILON * 1e6;
-            if ext.len() < 4
-                || shoelace_abs_sum(ext) < 1e-12
-                || bbox_degenerate
-                || ext.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
-            {
-                // GEOS-style: return degenerate polygon boundary as LineString
-                let mut lines: Vec<LineString<f64>> = Vec::new();
-                if ext.len() >= 2 {
-                    lines.push(p.exterior().clone());
-                }
-                for ring in p.interiors() {
-                    if ring.0.len() >= 2 {
-                        lines.push(ring.clone());
+            // Fast path: valid polygons with ≥4 coords and no NaN pass through
+            if ext.len() >= 4 {
+                // Single-pass: compute bbox, shoelace, and NaN simultaneously
+                let n = ext.len();
+                let interior_n = if ext.first() == ext.last() { n - 1 } else { n };
+                let (mut min_x, mut max_x, mut min_y, mut max_y) = (ext[0].x, ext[0].x, ext[0].y, ext[0].y);
+                let mut sum = 0.0_f64;
+                let mut has_nan = !ext[0].x.is_finite() || !ext[0].y.is_finite();
+                for i in 0..interior_n - 1 {
+                    let c = ext[i + 1];
+                    min_x = min_x.min(c.x);
+                    max_x = max_x.max(c.x);
+                    min_y = min_y.min(c.y);
+                    max_y = max_y.max(c.y);
+                    sum += ext[i].x * ext[i + 1].y - ext[i + 1].x * ext[i].y;
+                    if !has_nan && (!c.x.is_finite() || !c.y.is_finite()) {
+                        has_nan = true;
                     }
                 }
-                if lines.is_empty() {
-                    empty_geom::<f64>()
-                } else if lines.len() == 1 {
-                    Geometry::LineString(lines.into_iter().next().unwrap())
-                } else {
-                    Geometry::MultiLineString(MultiLineString::new(lines))
+                sum += ext[interior_n - 1].x * ext[0].y - ext[0].x * ext[interior_n - 1].y;
+                let area_ok = sum.abs() >= 1e-12;
+                // Match validator threshold: f64::EPSILON * scale where scale = max(w, h, 1.0)
+                let v_scale = (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
+                let bbox_ok = (max_x - min_x).abs() >= f64::EPSILON * v_scale
+                    && (max_y - min_y).abs() >= f64::EPSILON * v_scale;
+                if area_ok && bbox_ok && !has_nan {
+                    // Non-degenerate polygon — return as-is after hole cleanup
+                    let holes: Vec<LineString<f64>> = p.interiors().iter()
+                        .filter(|ring| {
+                            ring.0.len() >= 4
+                                && !ring.0.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
+                        })
+                        .cloned()
+                        .collect();
+                    return if holes.len() == p.interiors().len() {
+                        Geometry::Polygon(p)
+                    } else {
+                        Geometry::Polygon(Polygon::new(p.exterior().clone(), holes))
+                    };
                 }
+            }
+            // Degenerate: return boundary as LineString
+            // Filter out rings with NaN coords (they'd fail LineString validation)
+            let mut lines: Vec<LineString<f64>> = Vec::new();
+            if ext.len() >= 2 && !ext.iter().any(|c| !c.x.is_finite() || !c.y.is_finite()) {
+                lines.push(p.exterior().clone());
+            }
+            for ring in p.interiors() {
+                if ring.0.len() >= 2
+                    && !ring.0.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
+                {
+                    lines.push(ring.clone());
+                }
+            }
+            if lines.is_empty() {
+                empty_geom::<f64>()
+            } else if lines.len() == 1 {
+                Geometry::LineString(lines.into_iter().next().unwrap())
             } else {
-                // Strip degenerate holes (RingTooFewPoints, NaN/Inf)
-                let holes: Vec<LineString<f64>> = p.interiors().iter()
-                    .filter(|ring| {
-                        ring.0.len() >= 4
-                            && !ring.0.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
-                    })
-                    .cloned()
-                    .collect();
-                if holes.len() == p.interiors().len() {
-                    Geometry::Polygon(p)
-                } else {
-                    Geometry::Polygon(Polygon::new(p.exterior().clone(), holes))
-                }
+                Geometry::MultiLineString(MultiLineString::new(lines))
             }
         }
         Geometry::MultiPolygon(mp) => {
@@ -584,11 +602,13 @@ fn strip_degenerate(g: Geometry<f64>) -> Geometry<f64> {
                     valid_polys.push(p);
                 } else {
                     // Collect degenerate component's boundary as lines
-                    if ext.len() >= 2 {
+                    if ext.len() >= 2 && !ext.iter().any(|c| !c.x.is_finite() || !c.y.is_finite()) {
                         boundary_lines.push(p.exterior().clone());
                     }
                     for ring in p.interiors() {
-                        if ring.0.len() >= 2 {
+                        if ring.0.len() >= 2
+                            && !ring.0.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
+                        {
                             boundary_lines.push(ring.clone());
                         }
                     }
@@ -1007,15 +1027,19 @@ pub(crate) fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
         return enforce_ogc_winding(Geometry::Polygon(kept.into_iter().next().unwrap()));
     }
     // Edge-sharing case: containment didn't reduce components.
-    // Filter out components with PinchPoint or self-intersection errors.
+    // Filter out components with PinchPoint, RepeatedPoint, or
+    // other remaining errors.
     let mp_kept = MultiPolygon::new(kept);
     let valid: Vec<Polygon<f64>> = mp_kept.0.into_iter().filter(|p| {
         let v = crate::validation::GeoValidation::validate(p);
-        !v.errors.iter().any(|e| matches!(e, crate::validation::GeometryValidationError::PinchPoint))
-            && v.errors.iter().filter(|e| !matches!(e,
-                crate::validation::GeometryValidationError::PinchPoint
-                | crate::validation::GeometryValidationError::NestedHoles
-            )).count() == 0
+        !v.errors.iter().any(|e| matches!(e,
+            crate::validation::GeometryValidationError::PinchPoint
+            | crate::validation::GeometryValidationError::RepeatedPoint
+        )) && v.errors.iter().filter(|e| !matches!(e,
+            crate::validation::GeometryValidationError::PinchPoint
+            | crate::validation::GeometryValidationError::RepeatedPoint
+            | crate::validation::GeometryValidationError::NestedHoles
+        )).count() == 0
     }).collect();
     if valid.is_empty() {
         return empty_geom::<f64>();

@@ -244,7 +244,13 @@ impl ValidateDepth for GeometryCollection<f64> {
         for g in &self.0 {
             let r = g.validate_at_depth(depth + 1, max_depth);
             if !r.valid {
-                errors.extend(r.errors);
+                // OGC: GeometryCollection doesn't enforce simplicity.
+                // Filter out NotSimple from sub-geometry validation.
+                for e in r.errors {
+                    if !matches!(e, GeometryValidationError::NotSimple) {
+                        errors.push(e);
+                    }
+                }
             }
         }
         for i in 0..self.0.len() {
