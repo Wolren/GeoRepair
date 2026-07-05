@@ -1028,9 +1028,16 @@ pub(crate) fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
         return enforce_ogc_winding(Geometry::Polygon(kept.into_iter().next().unwrap()));
     }
     // Edge-sharing case: containment didn't reduce components.
-    // Filter out components with PinchPoint, RepeatedPoint, or
-    // other remaining errors.
+    // Try polygonizer fallback to split edge-sharing components.
     let mp_kept = MultiPolygon::new(kept);
+    #[cfg(feature = "arrange")]
+    {
+        if let Some(g) = polygonizer_fallback(&mp_kept) {
+            return strip_degenerate(g);
+        }
+    }
+    // Polygonizer failed — filter out components with PinchPoint,
+    // RepeatedPoint, or other remaining errors.
     let valid: Vec<Polygon<f64>> = mp_kept.0.into_iter().filter(|p| {
         let v = crate::validation::GeoValidation::validate(p);
         !v.errors.iter().any(|e| matches!(e,
@@ -1067,6 +1074,11 @@ fn polygonizer_fallback(mp: &MultiPolygon<f64>) -> Option<Geometry<f64>> {
             let ext = &p.exterior().0;
             ext.len() >= 4 && !ext.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
                 && shoelace_abs_sum(ext) >= 1e-12
+                // Also check for self-intersection using edge intersection test
+                && {
+                    let edges: Vec<geo::Line<f64>> = p.lines_iter().collect();
+                    edges.len() < 4 || crate::arrange::prep_intersect::has_no_intersections(&edges)
+                }
         })
         .collect();
     if valid.is_empty() { return None; }
