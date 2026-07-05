@@ -28,7 +28,9 @@ pub(crate) fn polygonize(lines: &[Line<f64>]) -> Vec<Polygon<f64>> {
     for face in &face_edges {
         let ring = face_to_ring(&graph, face);
         if ring.len() >= 4 && signed_area_x2(&ring).abs() > 0.0 {
-            rings.push(ring);
+            // Split rings that touch at a single vertex (pinch points)
+            let split = split_at_pinch_point(&ring);
+            rings.extend(split);
         }
     }
     if rings.is_empty() { return Vec::new(); }
@@ -230,6 +232,51 @@ fn signed_area_x2(coords: &[Coord<f64>]) -> f64 {
     }
     sum += coords[end - 1].x * coords[0].y - coords[0].x * coords[end - 1].y;
     sum
+}
+
+/// Split a ring at pinch points (vertices that appear more than once),
+/// producing separate rings. A pinch point is a vertex where the ring
+/// touches itself — the same coordinate appears at two different indices.
+fn split_at_pinch_point(ring: &[Coord<f64>]) -> Vec<Vec<Coord<f64>>> {
+    if ring.len() < 4 {
+        return vec![ring.to_vec()];
+    }
+    let interior_end = if ring.first() == ring.last() { ring.len() - 1 } else { ring.len() };
+    let mut dup: Option<usize> = None;
+    for i in 1..interior_end {
+        for j in 0..i {
+            if (ring[i].x - ring[j].x).abs() < 1e-12 && (ring[i].y - ring[j].y).abs() < 1e-12 {
+                dup = Some(j);
+                break;
+            }
+        }
+        if dup.is_some() { break; }
+    }
+    if let Some(dup_idx) = dup {
+        let mut positions: Vec<usize> = Vec::new();
+        for i in 0..interior_end {
+            if (ring[i].x - ring[dup_idx].x).abs() < 1e-12 && (ring[i].y - ring[dup_idx].y).abs() < 1e-12 {
+                positions.push(i);
+            }
+        }
+        if positions.len() >= 2 {
+            let mut result: Vec<Vec<Coord<f64>>> = Vec::new();
+            for w in positions.windows(2) {
+                let mut new_ring: Vec<Coord<f64>> = ring[w[0]..=w[1]].to_vec();
+                if new_ring.first() != new_ring.last() { new_ring.push(new_ring[0]); }
+                if new_ring.len() >= 4 && signed_area_x2(&new_ring).abs() > 0.0 { result.push(new_ring); }
+            }
+            let last_pos = positions[positions.len() - 1];
+            if last_pos + 1 < interior_end {
+                let mut close_ring: Vec<Coord<f64>> = ring[last_pos..].to_vec();
+                close_ring.extend_from_slice(&ring[0..=positions[0]]);
+                if close_ring.first() != close_ring.last() { close_ring.push(close_ring[0]); }
+                if close_ring.len() >= 4 && signed_area_x2(&close_ring).abs() > 0.0 { result.push(close_ring); }
+            }
+            if !result.is_empty() { return result; }
+        }
+    }
+    vec![ring.to_vec()]
 }
 
 #[cfg(test)]
