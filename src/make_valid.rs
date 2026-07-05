@@ -16,6 +16,7 @@ use geo::{
     Coord, CoordNum, GeoFloat, Geometry, GeometryCollection, Line, LineString, LinesIter,
     MultiLineString, MultiPoint, MultiPolygon, Point, Polygon, Rect, Triangle, Winding,
 };
+use geo::CoordsIter;
 
 use crate::core::MakeValidConfig;
 #[cfg(any(feature = "arrange", feature = "structure"))]
@@ -489,7 +490,7 @@ fn make_valid_impl(
             }
         };
         let result = enforce_ogc_winding(result);
-        result
+        if has_nan(&result) { empty_geom::<f64>() } else { result }
         }
 
 /// Enforce OGC winding: CCW exterior, CW interior rings.
@@ -520,6 +521,12 @@ fn enforce_ogc_winding(g: Geometry<f64>) -> Geometry<f64> {
         other => other,
         }
         }
+
+/// Check if a geometry contains NaN coordinates using CoordsIter.
+fn has_nan(g: &Geometry<f64>) -> bool {
+    use geo::CoordsIter;
+    g.coords_iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
+}
 
 /// Remove degenerate Polygon/MultiPolygon components: exterior rings with
 /// <4 coordinates, shoelace area below epsilon, or NaN/Inf coordinates.
