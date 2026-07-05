@@ -89,8 +89,183 @@ pub(crate) fn build_graph(lines: &[Line<f64>]) -> Graph {
 }
 
 /// ---------------------------------------------------------------------------
-/// Face extraction — walk each unused directed edge using smallest CCW turn
+/// Face extraction — full GEOS two-pass approach:
+/// 1. CW pass: connect all edges at each node in a single CW ring
+/// 2. Walk CW faces to assign labels (each face = one label)
+/// 3. CCW pass per label: connect edges with same label in CCW ring
+/// 4. Walk CCW faces with labels to produce per-face rings
+///
+/// This correctly handles pinch points (shared vertices) because edges
+/// from different faces get different labels and are disconnected in CCW.
 /// ---------------------------------------------------------------------------
+pub(crate) fn extract_all_faces_geos(graph: &Graph) -> Option<Vec<Vec<(usize, usize)>>> {
+    let n_edges = graph.edges.len();
+    // Two arrays for next pointers. Index 0..n_edges = edge forward (from -> to).
+    // Index n_edges..2*n_edges = edge reverse (to -> from).
+    let mut cw_next: Vec<Option<usize>> = vec![None; n_edges * 2];
+    let mut ccw_next: Vec<Option<usize>> = vec![None; n_edges * 2];
+
+    // Helper: for edge E at vertex V, get fwd (V->N) and rev (N->V) indices.
+    let dir_at_v = |e: usize, v: usize| -> (usize, usize) {
+        let (from, to) = graph.edges[e];
+        if from == v { (e, n_edges + e) }      // fwd = e, rev = n_edges+e
+        else { (n_edges + e, e) }              // fwd = n_edges+e, rev = e
+    };
+
+    // Step 1: CW next pointers.
+    // GEOS computeNextCWEdges: for edges in CCW order,
+    // sym(prev_fwd).next = curr_fwd.
+    // sym(prev_fwd) is the REVERSE of prev_fwd = rev_at_v of prev edge.
+    for (v, neighbors) in graph.sorted_adj.iter().enumerate() {
+        let deg = neighbors.len();
+        if deg < 2 {
+            // Degree-1 vertex: rev.next = fwd (turn around)
+            if deg == 1 {
+                let (_, e) = neighbors[0];
+                let (fwd, rev) = dir_at_v(e, v);
+                cw_next[rev] = Some(fwd);
+            }
+            continue;
+        }
+        for i in 0..deg {
+            let (_, e_curr) = neighbors[i];
+            let (_, e_prev) = neighbors[(i + deg - 1) % deg];
+            let (_, prev_rev) = dir_at_v(e_prev, v);
+            let (curr_fwd, _) = dir_at_v(e_curr, v);
+            cw_next[prev_rev] = Some(curr_fwd);
+        }
+    }
+
+    // Step 2: Add identity defaults to cw_next (fwd→rev for all edges)
+    // so the CW walker can traverse from any starting index.
+    for e in 0..n_edges {
+        if cw_next[e].is_none() {
+            cw_next[e] = Some(n_edges + e);
+        }
+        if cw_next[n_edges + e].is_none() {
+            cw_next[n_edges + e] = Some(e);
+        }
+    }
+
+    // Step 2: Walk CW faces.
+    let mut used = vec![false; n_edges * 2];
+    let mut label = vec![0usize; n_edges];
+    let mut next_label = 1usize;
+
+    for start in 0..n_edges * 2 {
+        if used[start] { continue; }
+        let mut cur = start;
+        let mut face_edges: Vec<usize> = Vec::new();
+        loop {
+            if used[cur] { break; }
+            used[cur] = true;
+            face_edges.push(cur % n_edges);
+            match cw_next[cur] {
+                Some(nxt) if nxt != start && nxt != cur => cur = nxt,
+                _ => break,
+            }
+            if face_edges.len() > n_edges * 2 { break; }
+        }
+        if face_edges.len() >= 3 {
+            let lbl = next_label;
+            next_label += 1;
+            for &ei in &face_edges { if label[ei] == 0 { label[ei] = lbl; } }
+        }
+    }
+
+    // Reset used for CCW walk
+    used.fill(false);
+
+    // Step 3a: Set identity defaults — every forward edge connects to its
+    // reverse (arriving at the destination vertex), and every reverse edges
+    // connects to its forward (leaving). The CCW pass below will overwrite
+    // the rev→fwd connections for labeled edges.
+    for e in 0..n_edges {
+        let (from, to) = graph.edges[e];
+        ccw_next[e] = Some(n_edges + e);          // fwd → rev (arriving at dest)
+        ccw_next[n_edges + e] = Some(e);          // rev → fwd (leaving from dest)
+    }
+
+    // Step 3b: For each label at each node, overwrite CCW next pointers.
+    // GEOS computeNextCCWEdges: iterate edges in CW order (reverse of CCW).
+    //   if sym has label → remember as prev_in
+    //   if de has label → prev_in.next = de, clear prev_in
+    //   after: prev_in.next = first_out (close the loop)
+    for (v, neighbors) in graph.sorted_adj.iter().enumerate() {
+        let deg = neighbors.len();
+        if deg < 2 { continue; }
+        for lbl in 1..next_label {
+            // Collect edges at this node with this label
+            let mut has_label: Vec<(usize, bool)> = Vec::new();
+            for &(_, e) in neighbors {
+                if label[e] == lbl {
+                    has_label.push((e, graph.edges[e].0 == v)); // (edge, is_fwd_at_v)
+                }
+            }
+            if has_label.len() < 2 { continue; }
+            // Sort by position in neighbors to preserve CCW order
+            has_label.sort_by(|(e1, _), (e2, _)| {
+                let p1 = neighbors.iter().position(|(_, e)| *e == *e1).unwrap_or(0);
+                let p2 = neighbors.iter().position(|(_, e)| *e == *e2).unwrap_or(0);
+                p1.cmp(&p2)
+            });
+            // Iterate in CW order (reverse of sorted CCW)
+            let n = has_label.len();
+            let mut first_out: Option<usize> = None;
+            let mut prev_in: Option<usize> = None;
+            for i in (0..n).rev() {
+                let (e, is_fwd) = has_label[i];
+                let (fwd, rev) = dir_at_v(e, v);
+                if is_fwd {
+                    // de has label → outgoing (forward at V)
+                    if let Some(pi) = prev_in.take() {
+                        ccw_next[pi] = Some(fwd);
+                    }
+                    if first_out.is_none() {
+                        first_out = Some(fwd);
+                    }
+                } else {
+                    // sym has label → incoming (reverse at V)
+                    prev_in = Some(rev);  // rev is the incoming direction index
+                }
+            }
+            // Close the loop: last incoming → first outgoing
+            if let Some(pi) = prev_in {
+                if let Some(fo) = first_out {
+                    ccw_next[pi] = Some(fo);
+                }
+            }
+        }
+    }
+
+    // Step 4: Walk CCW faces
+    let mut faces: Vec<Vec<(usize, usize)>> = Vec::new();
+    let mut ccw_face_count = 0usize;
+    for start in 0..n_edges * 2 {
+        if used[start] { continue; }
+        ccw_face_count += 1;
+        let mut cur = start;
+        let mut face: Vec<(usize, usize)> = Vec::new();
+        loop {
+            if used[cur] { break; }
+            used[cur] = true;
+            let ei = cur % n_edges;
+            let (from, to) = graph.edges[ei];
+            let to_vert = if cur < n_edges { to } else { from };
+            face.push((ei, to_vert));
+            match ccw_next[cur] {
+                Some(nxt) if nxt != start => cur = nxt,
+                _ => break,
+            }
+            if face.len() > n_edges * 2 { break; }
+        }
+        if face.len() >= 3 { faces.push(face); }
+    }
+
+    // Fallback to extract_all_faces if CCW produced nothing
+    if faces.is_empty() { return extract_all_faces(graph); }
+    Some(faces)
+}
 pub(crate) fn extract_all_faces(graph: &Graph) -> Option<Vec<Vec<(usize, usize)>>> {
     let n_edges = graph.edges.len();
     let mut used_fwd = vec![false; n_edges];

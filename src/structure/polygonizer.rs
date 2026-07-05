@@ -19,10 +19,17 @@ pub(crate) fn polygonize(lines: &[Line<f64>]) -> Vec<Polygon<f64>> {
     let graph = fix_ring_graph::build_graph(lines);
     if graph.edges.is_empty() { return Vec::new(); }
 
-    let face_edges = match fix_ring_graph::extract_all_faces(&graph) {
+    let face_edges = match fix_ring_graph::extract_all_faces_geos(&graph) {
         Some(faces) => faces,
         None => return Vec::new(),
     };
+
+    // Split faces at repeated vertices (figure-8 pinch points)
+    let face_edges: Vec<Vec<(usize, usize)>> = face_edges
+        .into_iter()
+        .flat_map(|face| fix_ring_graph::split_face_at_pinch_points(&face, &graph.edges))
+        .filter(|face| face.len() >= 3)
+        .collect();
 
     let mut rings: Vec<Vec<Coord<f64>>> = Vec::new();
     for face in &face_edges {
