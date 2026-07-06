@@ -19,7 +19,7 @@ pub(crate) fn polygonize(lines: &[Line<f64>]) -> Vec<Polygon<f64>> {
     let graph = fix_ring_graph::build_graph(lines);
     if graph.edges.is_empty() { return Vec::new(); }
 
-    let face_edges = match fix_ring_graph::extract_all_faces_geos(&graph) {
+    let face_edges = match fix_ring_graph::extract_all_faces(&graph) {
         Some(faces) => faces,
         None => return Vec::new(),
     };
