@@ -2,4 +2,5 @@
 target/
 benches/real_world/
 *.py
+*.py[cod]
 patches/

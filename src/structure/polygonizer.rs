@@ -8,8 +8,7 @@
 //! 5. Even-parent filter (BuildArea findFaceHoles + collectWithEvenAncestors)
 //! 6. Union kept faces to dissolve shared edges
 
-use geo::{Coord, Line, LineString, MultiPolygon, Polygon, Winding};
-use log::warn;
+use geo::{Coord, Line, LineString, Polygon, Winding};
 
 use super::fix_ring_graph;
 
