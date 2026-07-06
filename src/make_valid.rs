@@ -11,12 +11,10 @@
 //! The main entry points are:
 //! - [`MakeValid::make_valid`] — repair with default config
 //! - [`MakeValid::make_valid_with_config`] — repair with custom config
-//! - [`ValidateAndFix::validate_and_fix`] — combined validation + repair
 use geo::{
     Coord, CoordNum, GeoFloat, Geometry, GeometryCollection, Line, LineString, LinesIter,
     MultiLineString, MultiPoint, MultiPolygon, Point, Polygon, Rect, Triangle, Winding,
 };
-use geo::CoordsIter;
 
 use crate::core::MakeValidConfig;
 #[cfg(any(feature = "arrange", feature = "structure"))]
@@ -679,7 +677,6 @@ fn enforce_cw(mut ring: LineString<f64>) -> LineString<f64> {
     ring
 }
 
-use geo::winding_order::WindingOrder;
 
 #[cfg(any(feature = "arrange", feature = "structure"))]
 impl MakeValid for MultiPolygon<f64> {
@@ -690,7 +687,7 @@ impl MakeValid for MultiPolygon<f64> {
             return empty_geom::<f64>();
         }
         // Bail early on NaN/Inf coordinates
-        if self.0.iter().any(|p| has_nan_or_infinite(p)) {
+        if self.0.iter().any(has_nan_or_infinite) {
             return empty_geom::<f64>();
         }
         let polys: Vec<Geometry<f64>> = self
@@ -756,7 +753,7 @@ impl MakeValid for MultiPolygon<f64> {
                 // If all retries failed, clean union output with drop_nested_components
                 // Use the best (last) retry result to avoid another union call.
                 let unioned = best.take()
-                    .map(|g| match g { Geometry::MultiPolygon(mp) => mp, _ => return MultiPolygon::new(Vec::new()) })
+                    .map(|g| match g { Geometry::MultiPolygon(mp) => mp, _ => MultiPolygon::new(Vec::new()) })
                     .unwrap_or_else(|| geo::algorithm::bool_ops::unary_union(&mp));
                 drop_nested_components(unioned)
             }

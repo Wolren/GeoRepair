@@ -40,7 +40,7 @@ pub mod subtract;
 pub mod sweep;
 
 use geo::{
-    Coord, Geometry, LineString, LinesIter, MultiPolygon, Point, Polygon,
+    Coord, Geometry, LineString, LinesIter, Point, Polygon,
     Winding,
 };
 use rstar::{AABB, RTree, RTreeObject};

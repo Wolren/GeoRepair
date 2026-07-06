@@ -107,7 +107,7 @@ pub(crate) fn extract_all_faces_geos(graph: &Graph) -> Option<Vec<Vec<(usize, us
 
     // Helper: for edge E at vertex V, get fwd (V->N) and rev (N->V) indices.
     let dir_at_v = |e: usize, v: usize| -> (usize, usize) {
-        let (from, to) = graph.edges[e];
+        let (from, _to) = graph.edges[e];
         if from == v { (e, n_edges + e) }      // fwd = e, rev = n_edges+e
         else { (n_edges + e, e) }              // fwd = n_edges+e, rev = e
     };
@@ -181,7 +181,7 @@ pub(crate) fn extract_all_faces_geos(graph: &Graph) -> Option<Vec<Vec<(usize, us
     // connects to its forward (leaving). The CCW pass below will overwrite
     // the rev→fwd connections for labeled edges.
     for e in 0..n_edges {
-        let (from, to) = graph.edges[e];
+        let (_from, _to) = graph.edges[e];
         ccw_next[e] = Some(n_edges + e);          // fwd → rev (arriving at dest)
         ccw_next[n_edges + e] = Some(e);          // rev → fwd (leaving from dest)
     }

@@ -32,8 +32,23 @@ cargo bench --features bench-geos,arrange,structure,parallel,simd,io-shp --bench
 ## Run tests (without GEOS)
 
 ```powershell
-cargo test --features arrange,structure,parallel,simd,io-shp,io-gpkg,io-gml
-```
+# Core library tests
+cargo test --features arrange,structure,parallel,simd,validate
+
+# Fuzz tests (256 cases, fast)
+PROPTEST_CASES=256 cargo test --features arrange,structure,parallel,simd,validate --test fuzz
+
+# Fuzz tests (5000 cases, thorough)
+PROPTEST_CASES=5000 cargo test --features arrange,structure,parallel,simd,validate --test fuzz
+
+# All features (slow — includes IO, benchmarks, Python bindings)
+cargo test --all-features
+
+# Clippy (CI gate)
+cargo clippy --features arrange,structure,parallel,simd,validate -- -D warnings
+
+# Full CI check
+cargo check --all-features
 
 ## Build and install Python wheel for QGIS
 
