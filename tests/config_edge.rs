@@ -531,7 +531,8 @@ fn test_rect_infinite() {
 #[test]
 fn test_rect_zero_area() {
     let r = Rect::new(Point::new(5.0, 5.0), Point::new(5.0, 5.0));
-    assert_not_empty(&r.make_valid());
+    // Zero-area rect is degenerate → empty (GEOS-aligned type degradation)
+    assert_empty(&r.make_valid());
 }
 
 #[test]

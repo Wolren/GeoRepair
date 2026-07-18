@@ -533,6 +533,41 @@ fn has_nan(g: &Geometry<f64>) -> bool {
     g.coords_iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
 }
 
+/// Cheap simplicity check for 2-pt and short linestrings demoted from collapsed polys.
+fn linestring_is_simple(ls: &LineString<f64>) -> bool {
+    let coords = &ls.0;
+    if coords.len() < 2 {
+        return false;
+    }
+    // Open path for intersection check (drop closing duplicate if present)
+    let end = if coords.len() >= 2 && coords.first() == coords.last() {
+        coords.len() - 1
+    } else {
+        coords.len()
+    };
+    if end < 2 {
+        return false;
+    }
+    if end == 2 {
+        return coords[0] != coords[1];
+    }
+    let lines: Vec<Line<f64>> = (0..end - 1)
+        .map(|i| Line::new(coords[i], coords[i + 1]))
+        .filter(|l| l.start != l.end)
+        .collect();
+    if lines.len() < 2 {
+        return !lines.is_empty();
+    }
+    #[cfg(feature = "arrange")]
+    {
+        crate::arrange::prep::has_no_intersections(&lines)
+    }
+    #[cfg(not(feature = "arrange"))]
+    {
+        true
+    }
+}
+
 /// Remove degenerate Polygon/MultiPolygon components: exterior rings with
 /// <4 coordinates, shoelace area below epsilon, or NaN/Inf coordinates.
 /// Returns boundary LineString for degenerate polygons (GEOS-style type degradation).
@@ -587,27 +622,44 @@ fn strip_degenerate(g: Geometry<f64>) -> Geometry<f64> {
                                     }
                                     } // end interior_n >= 3
                                 }
-                                // Degenerate: return boundary as LineString
-            // Filter out rings with NaN coords (they'd fail LineString validation)
-            let mut lines: Vec<LineString<f64>> = Vec::new();
-            if ext.len() >= 2 && !ext.iter().any(|c| !c.x.is_finite() || !c.y.is_finite()) {
-                lines.push(p.exterior().clone());
-            }
-            for ring in p.interiors() {
-                if ring.0.len() >= 2
-                    && !ring.0.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
-                {
-                    lines.push(ring.clone());
-                }
-            }
-            if lines.is_empty() {
-                empty_geom::<f64>()
-            } else if lines.len() == 1 {
-                Geometry::LineString(lines.into_iter().next().unwrap())
-            } else {
-                Geometry::MultiLineString(MultiLineString::new(lines))
-            }
-        }
+                                // Degenerate: demote to open LineString (drop closing vertex). Closed
+                                            // collapsed rings are often NotSimple under OGC; open path is cleaner.
+                                            // If still not simple → empty (keep_collapsed=false default).
+                                            let mut lines: Vec<LineString<f64>> = Vec::new();
+                                            if ext.len() >= 2 && !ext.iter().any(|c| !c.x.is_finite() || !c.y.is_finite()) {
+                                                let mut coords = ext.clone();
+                                                if coords.len() >= 2 && coords.first() == coords.last() {
+                                                    coords.pop();
+                                                }
+                                                if coords.len() >= 2 {
+                                                    lines.push(LineString::new(coords));
+                                                }
+                                            }
+                                            for ring in p.interiors() {
+                                                if ring.0.len() >= 2
+                                                    && !ring.0.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
+                                                {
+                                                    let mut coords = ring.0.clone();
+                                                    if coords.len() >= 2 && coords.first() == coords.last() {
+                                                        coords.pop();
+                                                    }
+                                                    if coords.len() >= 2 {
+                                                        lines.push(LineString::new(coords));
+                                                    }
+                                                }
+                                            }
+                                            let simple: Vec<LineString<f64>> = lines
+                                                .into_iter()
+                                                .filter(|ls| linestring_is_simple(ls))
+                                                .collect();
+                                            if simple.is_empty() {
+                                                empty_geom::<f64>()
+                                            } else if simple.len() == 1 {
+                                                Geometry::LineString(simple.into_iter().next().unwrap())
+                                            } else {
+                                                Geometry::MultiLineString(MultiLineString::new(simple))
+                                            }
+                                        }
         Geometry::MultiPolygon(mp) => {
             let mut valid_polys: Vec<Polygon<f64>> = Vec::new();
             let mut boundary_lines: Vec<LineString<f64>> = Vec::new();
