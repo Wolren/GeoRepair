@@ -232,19 +232,26 @@ impl<T: GeoFloat> MakeValid for Rect<T> {
     type Scalar = T;
 
     fn make_valid_with_config(&self, _config: &MakeValidConfig) -> Geometry<T> {
-        let min_ok = self.min().x.is_finite() && self.min().y.is_finite();
-        let max_ok = self.max().x.is_finite() && self.max().y.is_finite();
-        if min_ok && max_ok {
-            Geometry::Rect(*self)
-        } else {
-            warn!(
-                "Rect::make_valid: NaN coordinate ({:?}, {:?})",
-                self.min(),
-                self.max()
-            );
-            empty_geom()
+            let min_ok = self.min().x.is_finite() && self.min().y.is_finite();
+            let max_ok = self.max().x.is_finite() && self.max().y.is_finite();
+            if min_ok && max_ok {
+                // Degenerate (zero-area) rect → empty
+                if (self.max().x - self.min().x).abs() < T::epsilon()
+                    || (self.max().y - self.min().y).abs() < T::epsilon()
+                {
+                    empty_geom()
+                } else {
+                    Geometry::Rect(*self)
+                }
+            } else {
+                warn!(
+                    "Rect::make_valid: NaN coordinate ({:?}, {:?})",
+                    self.min(),
+                    self.max()
+                );
+                empty_geom()
+            }
         }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -349,8 +356,8 @@ impl MakeValid for Polygon<f64> {
                 }
             }
             if !has_nan {
-                return make_valid_impl(self, self, config, coords[0]);
-            }
+                            return strip_degenerate(make_valid_impl(self, self, config, coords[0]));
+                        }
             // has_nan: fall through to NaN path
         }
         // For valid NaN-free polygons, use make_valid_clean fast-path
@@ -535,10 +542,15 @@ fn strip_degenerate(g: Geometry<f64>) -> Geometry<f64> {
             let ext = &p.exterior().0;
             // Fast path: valid polygons with ≥4 coords and no NaN pass through
             if ext.len() >= 4 {
-                // Single-pass: compute bbox, shoelace, and NaN simultaneously
-                let n = ext.len();
-                let interior_n = if ext.first() == ext.last() { n - 1 } else { n };
-                let (mut min_x, mut max_x, mut min_y, mut max_y) = (ext[0].x, ext[0].x, ext[0].y, ext[0].y);
+                            // Single-pass: compute bbox, shoelace, and NaN simultaneously
+                            let n = ext.len();
+                            let interior_n = if ext.first() == ext.last() { n - 1 } else { n };
+                            // Guard: fewer than 3 unique vertices can never form a valid polygon.
+                            // (interior_n == 3 with positive area is a valid triangle.)
+                            if interior_n < 3 {
+                                // Fall through to boundary output below.
+                            } else {
+                            let (mut min_x, mut max_x, mut min_y, mut max_y) = (ext[0].x, ext[0].x, ext[0].y, ext[0].y);
                 let mut sum = 0.0_f64;
                 let mut has_nan = !ext[0].x.is_finite() || !ext[0].y.is_finite();
                 for i in 0..interior_n - 1 {
@@ -568,13 +580,14 @@ fn strip_degenerate(g: Geometry<f64>) -> Geometry<f64> {
                         .cloned()
                         .collect();
                     return if holes.len() == p.interiors().len() {
-                        Geometry::Polygon(p)
-                    } else {
-                        Geometry::Polygon(Polygon::new(p.exterior().clone(), holes))
-                    };
-                }
-            }
-            // Degenerate: return boundary as LineString
+                                            Geometry::Polygon(p)
+                                        } else {
+                                            Geometry::Polygon(Polygon::new(p.exterior().clone(), holes))
+                                        };
+                                    }
+                                    } // end interior_n >= 3
+                                }
+                                // Degenerate: return boundary as LineString
             // Filter out rings with NaN coords (they'd fail LineString validation)
             let mut lines: Vec<LineString<f64>> = Vec::new();
             if ext.len() >= 2 && !ext.iter().any(|c| !c.x.is_finite() || !c.y.is_finite()) {
@@ -967,6 +980,24 @@ fn shells_have_vertex_inside(mp: &MultiPolygon<f64>) -> bool {
 fn point_in_ring_exclusive(pt: Coord<f64>, ring: &[Coord<f64>]) -> bool {
     if ring.len() < 4 { return false; }
     let n = ring.len() - 1;
+    // Boundary check first (exclusive: on-edge → outside). Fixes NestedHoles
+    // false-positives from ray-cast hitting a vertex/edge.
+    for i in 0..n {
+        let (xi, yi) = (ring[i].x, ring[i].y);
+        let (xj, yj) = (ring[(i + 1) % n].x, ring[(i + 1) % n].y);
+        let orient = (xi - pt.x) * (yj - pt.y) - (xj - pt.x) * (yi - pt.y);
+        if orient.abs() < 1e-15 {
+            let min_x = xi.min(xj);
+            let max_x = xi.max(xj);
+            let min_y = yi.min(yj);
+            let max_y = yi.max(yj);
+            if pt.x >= min_x - 1e-12 && pt.x <= max_x + 1e-12
+                && pt.y >= min_y - 1e-12 && pt.y <= max_y + 1e-12
+            {
+                return false;
+            }
+        }
+    }
     let mut inside = false;
     for i in 0..n {
         let (xi, yi) = (ring[i].x, ring[i].y);

@@ -563,6 +563,23 @@ pub(crate) fn point_in_ring_exclusive(pt: Coord<f64>, ring: &[Coord<f64>]) -> bo
     if n < 2 {
         return false;
     }
+    // Boundary check (exclusive: on-edge → outside)
+    for i in 0..n - 1 {
+        let p1 = ring[i];
+        let p2 = ring[i + 1];
+        let o = (p2.x - p1.x) * (pt.y - p1.y) - (p2.y - p1.y) * (pt.x - p1.x);
+        if o.abs() < 1e-15 {
+            let min_x = p1.x.min(p2.x);
+            let max_x = p1.x.max(p2.x);
+            let min_y = p1.y.min(p2.y);
+            let max_y = p1.y.max(p2.y);
+            if pt.x >= min_x - 1e-12 && pt.x <= max_x + 1e-12
+                && pt.y >= min_y - 1e-12 && pt.y <= max_y + 1e-12
+            {
+                return false;
+            }
+        }
+    }
     let mut wn = 0i32;
     for i in 0..n - 1 {
         let p1 = ring[i];

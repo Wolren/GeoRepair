@@ -103,6 +103,23 @@ fn shoelace_abs_sum(coords: &[Coord<f64>]) -> f64 {
 fn point_in_ring_exclusive(pt: Coord<f64>, ring: &[Coord<f64>]) -> bool {
     if ring.len() < 4 { return false; }
     let n = ring.len() - 1;
+    // Boundary check (exclusive: on-edge → outside)
+    for i in 0..n {
+        let (xi, yi) = (ring[i].x, ring[i].y);
+        let (xj, yj) = (ring[(i + 1) % n].x, ring[(i + 1) % n].y);
+        let orient = (xi - pt.x) * (yj - pt.y) - (xj - pt.x) * (yi - pt.y);
+        if orient.abs() < 1e-15 {
+            let min_x = xi.min(xj);
+            let max_x = xi.max(xj);
+            let min_y = yi.min(yj);
+            let max_y = yi.max(yj);
+            if pt.x >= min_x - 1e-12 && pt.x <= max_x + 1e-12
+                && pt.y >= min_y - 1e-12 && pt.y <= max_y + 1e-12
+            {
+                return false;
+            }
+        }
+    }
     let mut inside = false;
     for i in 0..n {
         let (xi, yi) = (ring[i].x, ring[i].y);

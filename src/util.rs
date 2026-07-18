@@ -38,12 +38,18 @@ pub(crate) fn robust_is_ccw(ring: &[Coord<f64>]) -> bool {
     let curr = &ring[min_idx];
     let next = &ring[(min_idx + 1) % interior_n];
     // orient2d > 0 means CCW for extremal vertex with min x
-    robust::orient2d(
-        robust::Coord { x: prev.x, y: prev.y },
-        robust::Coord { x: curr.x, y: curr.y },
-        robust::Coord { x: next.x, y: next.y },
-    ) > 0.0
-}
+        let orient = robust::orient2d(
+            robust::Coord { x: prev.x, y: prev.y },
+            robust::Coord { x: curr.x, y: curr.y },
+            robust::Coord { x: next.x, y: next.y },
+        );
+        // Collinear extremal vertex → shoelace fallback (Shewchuk gives 0)
+        if orient.abs() <= 1e-15 {
+            shoelace_sum(ring) > 0.0
+        } else {
+            orient > 0.0
+        }
+    }
 
 #[cfg(test)]
 mod tests {
