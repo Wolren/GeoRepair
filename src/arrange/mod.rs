@@ -75,6 +75,13 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, _config: &MakeValidConfig) -> Geo
     if lines.is_empty() {
         return empty();
     }
+    // Degenerate gate shared with Structure fast path: mixed-magnitude rings
+    // (sub-ULP edges) must NOT pass through — proper-crossing detection is
+    // blind to their collinear overlap. Collinear rings are handled by
+    // strip_degenerate's noise-bound demotion downstream.
+    if has_sub_ulp_edge(poly) {
+        return fallback_polygon_fix(poly);
+    }
     if prep::has_no_intersections(&lines) && holes_are_valid(poly) {
         return Geometry::Polygon(poly.clone());
     }
@@ -225,8 +232,119 @@ pub(crate) fn holes_are_valid(poly: &Polygon<f64>) -> bool {
                 return false;
             }
         }
+        // Hole-hole collinear edge sharing (positive-length overlap) → the holes
+        // touch each other → DisconnectedInteriorRing. The R-tree above only
+        // catches one hole's vertex strictly inside another; touching holes
+        // share an edge with no vertex containment. Bbox-prefilter + small-ring
+        // cap keeps this cheap: valid multi-hole polys have no edge sharing.
+        for i in 0..holes.len() {
+            for j in (i + 1)..holes.len() {
+                if rings_share_collinear_edge(holes[i], holes[j]) {
+                    return false;
+                }
+            }
+        }
     }
     true
+}
+
+/// True if two rings share a collinear edge segment with positive-length overlap.
+fn rings_share_collinear_edge(a: &[geo::Coord<f64>], b: &[geo::Coord<f64>]) -> bool {
+    let na = if a.first() == a.last() { a.len() - 1 } else { a.len() };
+    let nb = if b.first() == b.last() { b.len() - 1 } else { b.len() };
+    if na < 2 || nb < 2 {
+        return false;
+    }
+    // Work cap: only small rings get the precise scan (fuzz DIR seeds are tiny).
+    if na * nb > 2048 {
+        return false;
+    }
+    for i in 0..na {
+        let (ax1, ay1) = (a[i].x, a[i].y);
+        let (ax2, ay2) = (a[(i + 1) % na].x, a[(i + 1) % na].y);
+        for j in 0..nb {
+            let (bx1, by1) = (b[j].x, b[j].y);
+            let (bx2, by2) = (b[(j + 1) % nb].x, b[(j + 1) % nb].y);
+            let dax = ax2 - ax1;
+            let day = ay2 - ay1;
+            let dbx = bx2 - bx1;
+            let dby = by2 - by1;
+            let scale = dax.abs().max(day.abs()).max(dbx.abs()).max(dby.abs()).max(1.0);
+            let cross = dax * dby - day * dbx;
+            if cross.abs() > 1e-12 * scale * scale {
+                continue;
+            }
+            let cross2 = (bx2 - bx1) * (ay1 - by1) - (by2 - by1) * (ax1 - bx1);
+            if cross2.abs() > 1e-12 * scale * scale {
+                continue;
+            }
+            let aminx = ax1.min(ax2);
+            let amaxx = ax1.max(ax2);
+            let aminy = ay1.min(ay2);
+            let amaxy = ay1.max(ay2);
+            let overlap = if dax.abs() >= day.abs() {
+                interval_overlap(aminx, amaxx, bx1.min(bx2), bx1.max(bx2))
+            } else {
+                interval_overlap(aminy, amaxy, by1.min(by2), by1.max(by2))
+            };
+            if overlap > 1e-12 * scale {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn interval_overlap(a0: f64, a1: f64, b0: f64, b1: f64) -> f64 {
+    let lo = a0.max(b0);
+    let hi = a1.min(b1);
+    if hi > lo { hi - lo } else { 0.0 }
+}
+
+/// True if any ring edge is shorter than EPSILON * bbox_scale.
+/// Mixed-magnitude rings (1e8 + 1e-8 coords) create edges below the
+/// representable precision of the bbox scale — collinear overlaps between
+/// such edges and big edges are invisible to proper-crossing detection.
+/// Cheap O(n): single pass over edges, only used in fast-path gates.
+pub(crate) fn has_sub_ulp_edge(poly: &Polygon<f64>) -> bool {
+    fn ring_has_sub_ulp(ring: &[geo::Coord<f64>]) -> bool {
+        let n = ring.len();
+        if n < 2 {
+            return false;
+        }
+        let (mut min_x, mut max_x, mut min_y, mut max_y) =
+            (ring[0].x, ring[0].x, ring[0].y, ring[0].y);
+        for c in &ring[1..] {
+            min_x = min_x.min(c.x);
+            max_x = max_x.max(c.x);
+            min_y = min_y.min(c.y);
+            max_y = max_y.max(c.y);
+        }
+        let scale = (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
+        let eps = f64::EPSILON * scale;
+        if eps <= 0.0 {
+            return false;
+        }
+        let end = if ring.first() == ring.last() { n - 1 } else { n };
+        for i in 0..end {
+            let a = ring[i];
+            let b = ring[(i + 1) % n];
+            let dx = (b.x - a.x).abs();
+            let dy = (b.y - a.y).abs();
+            // Edge LENGTH below eps: use max component, not either — real GIS
+            // data is full of axis-aligned edges (vertical: dx=0, horizontal:
+            // dy=0) which are perfectly valid. Only a truly point-like edge
+            // (both components sub-ULP) is degenerate.
+            if dx.max(dy) < eps {
+                return true;
+            }
+        }
+        false
+    }
+    if ring_has_sub_ulp(&poly.exterior().0) {
+        return true;
+    }
+    poly.interiors().iter().any(|h| ring_has_sub_ulp(&h.0))
 }
 
 /// Winding-number point-in-ring test (strict interior, boundary counts as outside).

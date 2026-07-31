@@ -8,7 +8,7 @@
 //! 5. Even-parent filter (BuildArea findFaceHoles + collectWithEvenAncestors)
 //! 6. Union kept faces to dissolve shared edges
 
-use geo::{Coord, Line, LineString, Polygon, Winding};
+use geo::{Coord, Line, LineString, MultiPolygon, Polygon, Winding};
 
 use super::fix_ring_graph;
 
@@ -176,7 +176,14 @@ fn build_area_filter(polys: Vec<Polygon<f64>>) -> Vec<Polygon<f64>> {
         }
     }
 
-    crate::structure::merge::merge_shells(result).0
+    if result.len() <= 1 {
+        return result;
+    }
+    // Dissolve shared edges via unary_union. Do NOT run merge_shells even-parent
+    // again: that counts containment by exterior only and drops islands that sit
+    // inside a hole of a kept shell (deep nesting L0+hole + L2 island).
+    let mp = MultiPolygon::new(result);
+    geo::algorithm::bool_ops::unary_union(&mp).0
 }
 
 /// Check if two rings are equal in either direction.

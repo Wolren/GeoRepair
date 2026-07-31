@@ -32,24 +32,27 @@ pub(crate) fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
     with_area.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
     let n = with_area.len();
-    let mut parent_count: Vec<usize> = vec![0; n];
-    for i in 0..n {
-        let ext_i = &with_area[i].0.exterior().0;
-        if ext_i.len() < 4 { continue; }
-        // Try first vertex. If on boundary, try midpoint of first edge.
-        let pt_candidates = [ext_i[0], Coord {
-            x: (ext_i[0].x + ext_i[1].x) * 0.5,
-            y: (ext_i[0].y + ext_i[1].y) * 0.5,
-        }];
-        for j in 0..i {
-            let ext_j = &with_area[j].0.exterior().0;
-            if ext_j.len() < 4 { continue; }
-            let contained = pt_candidates.iter().any(|&pt| point_in_ring_exclusive(pt, ext_j));
-            if contained {
-                parent_count[i] += 1;
+        let mut parent_count: Vec<usize> = vec![0; n];
+        for i in 0..n {
+            let ext_i = &with_area[i].0.exterior().0;
+            if ext_i.len() < 4 { continue; }
+            // Multi-candidate probe: first vertex + first edge midpoint.
+            // A single point (e.g. centroid of first triangle) can fall OUTSIDE
+            // the shell when the shell overlaps another component — that misses
+            // containment and keeps overlapping pieces that union into an SI ring.
+            // First vertex alone also fails when it sits exactly on a boundary.
+            let pt_candidates = [ext_i[0], Coord {
+                x: (ext_i[0].x + ext_i[1].x) * 0.5,
+                y: (ext_i[0].y + ext_i[1].y) * 0.5,
+            }];
+            for j in 0..i {
+                // Full polygon containment (exterior AND not in any hole of j).
+                // Exterior-only checks drop islands sitting inside a hole of j.
+                if pt_candidates.iter().any(|&pt| point_in_polygon_exclusive(pt, &with_area[j].0)) {
+                    parent_count[i] += 1;
+                }
             }
         }
-    }
 
     let kept: Vec<Polygon<f64>> = with_area
         .into_iter()
@@ -129,6 +132,22 @@ fn point_in_ring_exclusive(pt: Coord<f64>, ring: &[Coord<f64>]) -> bool {
         if intersect { inside = !inside; }
     }
     inside
+}
+
+/// Point in polygon exclusive of boundary and holes.
+fn point_in_polygon_exclusive(pt: Coord<f64>, poly: &Polygon<f64>) -> bool {
+    if !point_in_ring_exclusive(pt, &poly.exterior().0) {
+        return false;
+    }
+    for h in poly.interiors() {
+        // Interior of a hole → not inside the polygon fill
+        if point_in_ring_exclusive(pt, &h.0) {
+            return false;
+        }
+        // On hole boundary → exclusive outside fill
+        // (point_in_ring_exclusive already returns false for boundary)
+    }
+    true
 }
 
 #[cfg(test)]
