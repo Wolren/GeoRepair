@@ -36,13 +36,13 @@ fn key_to_coord(key: (i64, i64)) -> Coord<f64> {
     }
 }
 
-pub(crate) struct Graph {
-    pub(crate) verts: Vec<Coord<f64>>,
-    pub(crate) edges: Vec<(usize, usize)>,
-    pub(crate) sorted_adj: Vec<SmallVec<[(usize, usize); 4]>>,
+pub struct Graph {
+    pub verts: Vec<Coord<f64>>,
+    pub edges: Vec<(usize, usize)>,
+    pub sorted_adj: Vec<SmallVec<[(usize, usize); 4]>>,
 }
 
-pub(crate) fn build_graph(lines: &[Line<f64>]) -> Graph {
+pub fn build_graph(lines: &[Line<f64>]) -> Graph {
     let mut key_to_idx: FxHashMap<(i64, i64), usize> = FxHashMap::default();
     let mut verts: Vec<Coord<f64>> = Vec::new();
     let mut get_vert = |c: Coord<f64>| -> usize {
@@ -89,184 +89,191 @@ pub(crate) fn build_graph(lines: &[Line<f64>]) -> Graph {
 }
 
 /// ---------------------------------------------------------------------------
-/// Face extraction — full GEOS two-pass approach:
-/// 1. CW pass: connect all edges at each node in a single CW ring
-/// 2. Walk CW faces to assign labels (each face = one label)
-/// 3. CCW pass per label: connect edges with same label in CCW ring
-/// 4. Walk CCW faces with labels to produce per-face rings
-///
-/// This correctly handles pinch points (shared vertices) because edges
-/// from different faces get different labels and are disconnected in CCW.
+/// Face extraction — faithful port of GEOS PolygonizeGraph::getEdgeRings
+/// (computeNextCWEdges + findLabeledEdgeRings + convertMaximalToMinimalEdgeRings
+/// + findEdgeRing). Labels are per-DIRECTED edge (2*n_edges entries): the two
+/// faces on either side of an undirected edge carry different labels, and the
+/// CCW conversion distinguishes de->getLabel() from sym->getLabel().
+/// Without this, faces merge across shared edges (measured: 7 faces instead
+/// of the correct 10 on a 9-vertex multi-crossing ring).
 /// ---------------------------------------------------------------------------
-pub(crate) fn extract_all_faces_geos(graph: &Graph) -> Option<Vec<Vec<(usize, usize)>>> {
+pub fn extract_all_faces_geos(graph: &Graph) -> Option<Vec<Vec<(usize, usize)>>> {
     let n_edges = graph.edges.len();
-    // Two arrays for next pointers. Index 0..n_edges = edge forward (from -> to).
-    // Index n_edges..2*n_edges = edge reverse (to -> from).
-    let mut cw_next: Vec<Option<usize>> = vec![None; n_edges * 2];
-    let mut ccw_next: Vec<Option<usize>> = vec![None; n_edges * 2];
+    // Directed edge indexing: idx e = forward (from->to), idx n_edges+e = reverse.
+    // next[i] follows GEOS's PolygonizeDirectedEdge::next.
+    let mut next: Vec<usize> = vec![0; n_edges * 2];
 
-    // Helper: for edge E at vertex V, get fwd (V->N) and rev (N->V) indices.
-    let dir_at_v = |e: usize, v: usize| -> (usize, usize) {
-        let (from, _to) = graph.edges[e];
-        if from == v { (e, n_edges + e) }      // fwd = e, rev = n_edges+e
-        else { (n_edges + e, e) }              // fwd = n_edges+e, rev = e
-    };
-
-    // Step 1: CW next pointers.
-    // GEOS computeNextCWEdges: for edges in CCW order,
-    // sym(prev_fwd).next = curr_fwd.
-    // sym(prev_fwd) is the REVERSE of prev_fwd = rev_at_v of prev edge.
+    // ---- Step 1: computeNextCWEdges (maximal rings) -----------------------
+    // Edges around each node are stored in CCW order in sorted_adj (atan2 sort).
+    // For consecutive edges prev, curr in CCW order: sym(prev).next = curr.
+    // This yields the CW-facing rings (the "maximal" rings of the graph).
     for (v, neighbors) in graph.sorted_adj.iter().enumerate() {
         let deg = neighbors.len();
-        if deg < 2 {
-            // Degree-1 vertex: rev.next = fwd (turn around)
-            if deg == 1 {
-                let (_, e) = neighbors[0];
-                let (fwd, rev) = dir_at_v(e, v);
-                cw_next[rev] = Some(fwd);
-            }
+        if deg == 0 {
             continue;
         }
+        if deg == 1 {
+            // Dangle: reverse of the single edge points back to its forward.
+            let (_, e) = neighbors[0];
+            let (fwd, rev) = dir_at_v(graph, e, v);
+            next[rev] = fwd;
+            continue;
+        }
+        // neighbors sorted CCW by atan2. For i, prev = (i+deg-1)%deg.
         for i in 0..deg {
             let (_, e_curr) = neighbors[i];
             let (_, e_prev) = neighbors[(i + deg - 1) % deg];
-            let (_, prev_rev) = dir_at_v(e_prev, v);
-            let (curr_fwd, _) = dir_at_v(e_curr, v);
-            cw_next[prev_rev] = Some(curr_fwd);
+            let (_, prev_rev) = dir_at_v(graph, e_prev, v);
+            let (curr_fwd, _) = dir_at_v(graph, e_curr, v);
+            next[prev_rev] = curr_fwd;
         }
     }
 
-    // Step 2: Add identity defaults to cw_next (fwd→rev for all edges)
-    // so the CW walker can traverse from any starting index.
-    for e in 0..n_edges {
-        if cw_next[e].is_none() {
-            cw_next[e] = Some(n_edges + e);
-        }
-        if cw_next[n_edges + e].is_none() {
-            cw_next[n_edges + e] = Some(e);
-        }
-    }
-
-    // Step 2: Walk CW faces.
-    let mut used = vec![false; n_edges * 2];
-    let mut label = vec![0usize; n_edges];
-    let mut next_label = 1usize;
-
+    // ---- Step 2: findLabeledEdgeRings --------------------------------------
+    // Walk CW rings via `next`; assign one label per ring. Labels are stored
+    // PER DIRECTED EDGE (the sym of an edge belongs to the adjacent ring).
+    let mut label: Vec<i64> = vec![-1; n_edges * 2];
+    let mut next_label: i64 = 1;
     for start in 0..n_edges * 2 {
-        if used[start] { continue; }
+        if label[start] >= 0 {
+            continue;
+        }
+        // Walk the maximal ring containing `start`.
         let mut cur = start;
-        let mut face_edges: Vec<usize> = Vec::new();
+        let mut ring: Vec<usize> = Vec::new();
         loop {
-            if used[cur] { break; }
-            used[cur] = true;
-            face_edges.push(cur % n_edges);
-            match cw_next[cur] {
-                Some(nxt) if nxt != start && nxt != cur => cur = nxt,
-                _ => break,
+            if label[cur] >= 0 {
+                break;
             }
-            if face_edges.len() > n_edges * 2 { break; }
+            label[cur] = next_label;
+            ring.push(cur);
+            let nxt = next[cur];
+            if nxt == cur || nxt == start {
+                break;
+            }
+            cur = nxt;
+            if ring.len() > n_edges * 2 {
+                break;
+            }
         }
-        if face_edges.len() >= 3 {
-            let lbl = next_label;
-            next_label += 1;
-            for &ei in &face_edges { if label[ei] == 0 { label[ei] = lbl; } }
-        }
+        next_label += 1;
     }
 
-    // Reset used for CCW walk
-    used.fill(false);
-
-    // Step 3a: Set identity defaults — every forward edge connects to its
-    // reverse (arriving at the destination vertex), and every reverse edges
-    // connects to its forward (leaving). The CCW pass below will overwrite
-    // the rev→fwd connections for labeled edges.
-    for e in 0..n_edges {
-        let (_from, _to) = graph.edges[e];
-        ccw_next[e] = Some(n_edges + e);          // fwd → rev (arriving at dest)
-        ccw_next[n_edges + e] = Some(e);          // rev → fwd (leaving from dest)
-    }
-
-    // Step 3b: For each label at each node, overwrite CCW next pointers.
-    // GEOS computeNextCCWEdges: iterate edges in CW order (reverse of CCW).
-    //   if sym has label → remember as prev_in
-    //   if de has label → prev_in.next = de, clear prev_in
-    //   after: prev_in.next = first_out (close the loop)
-    for (v, neighbors) in graph.sorted_adj.iter().enumerate() {
+    // ---- Step 3: convertMaximalToMinimalEdgeRings --------------------------
+    // For each labeled ring, rewire `next` at its intersection nodes
+    // (nodes with degree > 1 within that label) via computeNextCCWEdges.
+    // This splits maximal rings into minimal rings (true faces).
+    let mut ccw_next: Vec<usize> = next.clone();
+    for v in 0..graph.verts.len() {
+        let neighbors = &graph.sorted_adj[v];
         let deg = neighbors.len();
-        if deg < 2 { continue; }
-        for lbl in 1..next_label {
-            // Collect edges at this node with this label
-            let mut has_label: Vec<(usize, bool)> = Vec::new();
-            for &(_, e) in neighbors {
-                if label[e] == lbl {
-                    has_label.push((e, graph.edges[e].0 == v)); // (edge, is_fwd_at_v)
+        if deg < 2 {
+            continue;
+        }
+        // Collect distinct labels present at this node.
+        let mut labels_at_node: Vec<i64> = Vec::new();
+        for &(_, e) in neighbors {
+            let (de, sym) = dir_at_v(graph, e, v);
+            for &d in &[de, sym] {
+                let lbl = label[d];
+                if lbl >= 0 && !labels_at_node.contains(&lbl) {
+                    labels_at_node.push(lbl);
                 }
             }
-            if has_label.len() < 2 { continue; }
-            // Sort by position in neighbors to preserve CCW order
-            has_label.sort_by(|(e1, _), (e2, _)| {
-                let p1 = neighbors.iter().position(|(_, e)| *e == *e1).unwrap_or(0);
-                let p2 = neighbors.iter().position(|(_, e)| *e == *e2).unwrap_or(0);
-                p1.cmp(&p2)
-            });
-            // Iterate in CW order (reverse of sorted CCW)
-            let n = has_label.len();
+        }
+        for lbl in labels_at_node {
+            // computeNextCCWEdges(node, label): iterate edges in CW order
+            // (reverse of CCW sorted_adj). For each edge: if de has the label
+            // it's an outgoing edge; if sym has the label it's incoming.
             let mut first_out: Option<usize> = None;
             let mut prev_in: Option<usize> = None;
-            for i in (0..n).rev() {
-                let (e, is_fwd) = has_label[i];
-                let (fwd, rev) = dir_at_v(e, v);
-                if is_fwd {
-                    // de has label → outgoing (forward at V)
+            for i in (0..deg).rev() {
+                let (_, e) = neighbors[i];
+                // CRITICAL: the edge may be stored (v->to) or (to->v). Use
+                // dir_at_v to resolve which index is the forward (outgoing)
+                // direction at v and which is the sym (incoming).
+                let (de, sym) = dir_at_v(graph, e, v);
+                let mut out_de: Option<usize> = None;
+                if label[de] == lbl {
+                    out_de = Some(de);
+                }
+                let mut in_de: Option<usize> = None;
+                if label[sym] == lbl {
+                    in_de = Some(sym);
+                }
+                if out_de.is_none() && in_de.is_none() {
+                    continue;
+                }
+                if let Some(ind) = in_de {
+                    prev_in = Some(ind);
+                }
+                if let Some(outd) = out_de {
                     if let Some(pi) = prev_in.take() {
-                        ccw_next[pi] = Some(fwd);
+                        ccw_next[pi] = outd;
                     }
                     if first_out.is_none() {
-                        first_out = Some(fwd);
+                        first_out = Some(outd);
                     }
-                } else {
-                    // sym has label → incoming (reverse at V)
-                    prev_in = Some(rev);  // rev is the incoming direction index
                 }
             }
-            // Close the loop: last incoming → first outgoing
             if let Some(pi) = prev_in {
                 if let Some(fo) = first_out {
-                    ccw_next[pi] = Some(fo);
+                    ccw_next[pi] = fo;
                 }
             }
         }
     }
 
-    // Step 4: Walk CCW faces
+    // ---- Step 4: findEdgeRing — walk minimal CCW rings ---------------------
+    let mut used = vec![false; n_edges * 2];
     let mut faces: Vec<Vec<(usize, usize)>> = Vec::new();
-    let mut ccw_face_count = 0usize;
     for start in 0..n_edges * 2 {
-        if used[start] { continue; }
-        ccw_face_count += 1;
+        if used[start] {
+            continue;
+        }
         let mut cur = start;
         let mut face: Vec<(usize, usize)> = Vec::new();
         loop {
-            if used[cur] { break; }
+            if used[cur] {
+                break;
+            }
             used[cur] = true;
             let ei = cur % n_edges;
             let (from, to) = graph.edges[ei];
             let to_vert = if cur < n_edges { to } else { from };
             face.push((ei, to_vert));
-            match ccw_next[cur] {
-                Some(nxt) if nxt != start => cur = nxt,
-                _ => break,
+            let nxt = ccw_next[cur];
+            if nxt == cur || nxt == start {
+                break;
             }
-            if face.len() > n_edges * 2 { break; }
+            cur = nxt;
+            if face.len() > n_edges * 2 {
+                break;
+            }
         }
-        if face.len() >= 3 { faces.push(face); }
+        if face.len() >= 3 {
+            faces.push(face);
+        }
     }
 
-    // Fallback to extract_all_faces if CCW produced nothing
-    if faces.is_empty() { return extract_all_faces(graph); }
+    if faces.is_empty() {
+        return None;
+    }
     Some(faces)
 }
-pub(crate) fn extract_all_faces(graph: &Graph) -> Option<Vec<Vec<(usize, usize)>>> {
+
+#[inline(always)]
+fn dir_at_v(graph: &Graph, e: usize, v: usize) -> (usize, usize) {
+    let n_edges = graph.edges.len();
+    let (from, _to) = graph.edges[e];
+    if from == v {
+        (e, n_edges + e) // fwd = e, rev = n_edges+e
+    } else {
+        (n_edges + e, e)
+    }
+}
+
+pub fn extract_all_faces(graph: &Graph) -> Option<Vec<Vec<(usize, usize)>>> {
     let n_edges = graph.edges.len();
     let mut used_fwd = vec![false; n_edges];
     let mut used_rev = vec![false; n_edges];
@@ -552,107 +559,103 @@ fn face_winding(
 }
 
 /// ---------------------------------------------------------------------------
-/// Face labeling: BFS from exterior face toggling interior/exterior
+/// Face labeling: even-odd winding parity (GEOS MakeValidPoly equivalent)
 /// ---------------------------------------------------------------------------
-pub(crate) fn label_interior_faces(
+/// GEOS's BuildArea + symdiff loop selects the faces whose winding number
+/// w.r.t. the input ring is ODD. The BFS-from-exterior toggle is WRONG for
+/// multi-crossing rings: with 2+ crossings, faces on the far side of a
+/// second crossing are reachable through an odd number of edges but have
+/// EVEN winding (measured: 5 of 9 faces kept, GEOS area 9931.89 vs BFS
+/// interior 11956). Winding parity is exact:
+///   face winding = winding number of any interior probe point vs the ring.
+pub fn label_interior_faces(
     edges: &[Line<f64>],
     verts: &[Coord<f64>],
     input_ring: &[Coord<f64>],
     faces: &[Vec<(usize, usize)>],
     graph_edges: &[(usize, usize)],
 ) -> Option<FxHashSet<usize>> {
-    let n_faces = faces.len();
-    if n_faces == 0 {
+    let mut interior: FxHashSet<usize> = FxHashSet::default();
+    for (fi, face) in faces.iter().enumerate() {
+        let probe = face_probe_point(face, verts, graph_edges)?;
+        let wn = winding_number(input_ring, probe);
+        if wn % 2 != 0 {
+            interior.insert(fi);
+        }
+    }
+    Some(interior)
+}
+
+/// Interior probe point for a face: midpoint of the first edge, nudged
+/// perpendicular toward the face interior. For a face of positive area this
+/// point is strictly inside (a centroid can land outside concave faces).
+fn face_probe_point(
+    face: &[(usize, usize)],
+    verts: &[Coord<f64>],
+    graph_edges: &[(usize, usize)],
+) -> Option<Coord<f64>> {
+    if face.len() < 3 {
         return None;
     }
-
-    let mut edge_to_faces: FxHashMap<usize, Vec<usize>> = FxHashMap::default();
-    for (fi, face) in faces.iter().enumerate() {
-        for &(ei, _) in face {
-            edge_to_faces.entry(ei).or_default().push(fi);
-        }
-    }
-    let mut adj: FxHashMap<usize, Vec<usize>> = FxHashMap::default();
-    for faces_on_edge in edge_to_faces.values() {
-        if faces_on_edge.len() == 2 {
-            adj.entry(faces_on_edge[0])
-                .or_default()
-                .push(faces_on_edge[1]);
-            adj.entry(faces_on_edge[1])
-                .or_default()
-                .push(faces_on_edge[0]);
-        }
-    }
-
-    let exterior = {
-        let mut best: Option<(usize, f64)> = None;
-        for (fi, face) in faces.iter().enumerate() {
-            let (mut min_x, mut max_x, mut min_y, mut max_y) =
-                (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
-            for &(ei, _) in face {
-                let e = &edges[ei];
-                min_x = min_x.min(e.start.x).min(e.end.x);
-                max_x = max_x.max(e.start.x).max(e.end.x);
-                min_y = min_y.min(e.start.y).min(e.end.y);
-                max_y = max_y.max(e.start.y).max(e.end.y);
-            }
-            let area = (max_x - min_x) * (max_y - min_y);
-            if best.is_none_or(|(_, a)| area > a) {
-                best = Some((fi, area));
-            }
-        }
-        best.map(|(i, _)| i)?
+    // First edge of the face: (v0 -> v1) where v1 = to0 is the traversal
+    // destination. The source vertex is the OTHER endpoint of the edge.
+    let (e0, to0) = face[0];
+    let (from0, to1) = graph_edges[e0];
+    let v0 = if to1 == to0 { verts[from0] } else { verts[to1] };
+    let v1 = verts[to0];
+    let mid = Coord {
+        x: (v0.x + v1.x) * 0.5,
+        y: (v0.y + v1.y) * 0.5,
     };
+    // Signed area of the face tells us which side is interior. Compute the
+    // face's shoelace; if negative (CW), interior is to the RIGHT of (v0->v1).
+    let mut shoelace = 0.0;
+    for i in 0..face.len() {
+        let (_, ta) = face[i];
+        let (_, tb) = face[(i + 1) % face.len()];
+        let a = verts[ta];
+        let b = verts[tb];
+        shoelace += a.x * b.y - b.x * a.y;
+    }
+    // WALKER CONVENTION: every face (bounded AND outer) is walked with the
+    // face interior on the RIGHT of the directed edge. Bounded faces come
+    // out CW (negative shoelace), the outer face comes out CCW (positive)
+    // — but both have their interior on the right. So the nudge is ALWAYS
+    // to the right; the shoelace sign alone would push the outer face probe
+    // INTO the ring (winding 1 → mislabeled interior, measured).
+    let scale = (mid.x.abs().max(mid.y.abs())).max(1.0);
+    let eps = 1e-9 * scale;
+    let dx = v1.x - v0.x;
+    let dy = v1.y - v0.y;
+    let len = (dx * dx + dy * dy).sqrt().max(1e-12);
+    let (nx, ny) = (-dy / len, dx / len); // left normal
+    let sign = -1.0; // interior is on the RIGHT of the directed edge
+    Some(Coord {
+        x: mid.x + sign * nx * eps,
+        y: mid.y + sign * ny * eps,
+    })
+}
 
-    let mut interior: FxHashSet<usize> = FxHashSet::default();
-    let mut visited: FxHashSet<usize> = FxHashSet::default();
-    let mut queue: VecDeque<(usize, bool)> = VecDeque::new();
-    visited.insert(exterior);
-    queue.push_back((exterior, false));
-
-    while let Some((face, is_interior)) = queue.pop_front() {
-        if is_interior {
-            interior.insert(face);
-        }
-        if let Some(neighbors) = adj.get(&face) {
-            for &nb in neighbors {
-                if visited.insert(nb) {
-                    queue.push_back((nb, !is_interior));
+/// Winding number of a point w.r.t. a closed ring (even-odd rule).
+fn winding_number(ring: &[Coord<f64>], pt: Coord<f64>) -> i32 {
+    let mut wn = 0i32;
+    for w in ring.windows(2) {
+        let (p1, p2) = (w[0], w[1]);
+        if p1.y <= pt.y {
+            if p2.y > pt.y {
+                let cross = (p2.x - p1.x) * (pt.y - p1.y) - (p2.y - p1.y) * (pt.x - p1.x);
+                if cross > 0.0 {
+                    wn += 1;
                 }
             }
-        }
-    }
-
-    let mut to_remove = Vec::new();
-    for &fi in &interior {
-        let face = &faces[fi];
-        let wn = face_winding(face, verts, graph_edges, input_ring);
-        if wn == 0 {
-            to_remove.push(fi);
-        }
-    }
-    for fi in to_remove {
-        interior.remove(&fi);
-    }
-
-    if visited.len() < n_faces || {
-        let ext_face = &faces[exterior];
-        let wn = face_winding(ext_face, verts, graph_edges, input_ring);
-        wn != 0
-    } {
-        for (fi, face) in faces.iter().enumerate() {
-            if interior.contains(&fi) {
-                continue;
-            }
-
-            let wn = face_winding(face, verts, graph_edges, input_ring);
-            if wn != 0 {
-                interior.insert(fi);
+        } else if p2.y <= pt.y {
+            let cross = (p2.x - p1.x) * (pt.y - p1.y) - (p2.y - p1.y) * (pt.x - p1.x);
+            if cross < 0.0 {
+                wn -= 1;
             }
         }
     }
-
-    Some(interior)
+    wn
 }
 
 // ---------------------------------------------------------------------------
@@ -662,20 +665,26 @@ pub(crate) fn label_interior_faces(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use geo::Polygon;
     use crate::structure::fix_ring::{
         basic_cleanup, edges_from_coords, has_self_intersections, repair_ring, split_edges,
     };
 
     fn ring_area(ring: &LineString<f64>) -> f64 {
-        let mut s = 0.0;
+        let mut a = 0.0;
         for w in ring.0.windows(2) {
-            s += w[0].x * w[1].y - w[1].x * w[0].y;
+            a += w[0].x * w[1].y - w[1].x * w[0].y;
         }
-        s.abs() / 2.0
+        a.abs() * 0.5
     }
 
     fn total_area(rings: &[LineString<f64>]) -> f64 {
         rings.iter().map(ring_area).sum()
+    }
+
+    fn poly_total_area(polys: &[Polygon<f64>]) -> f64 {
+        use geo::Area;
+        polys.iter().map(|p| p.unsigned_area()).sum()
     }
 
     #[test]
@@ -692,7 +701,7 @@ mod tests {
         assert!(r.is_some());
         let rings = r.unwrap();
         assert_eq!(rings.len(), 1);
-        let output_area = total_area(&rings);
+        let output_area = poly_total_area(&rings);
         if input_area > 0.0 {
             assert!(
                 (output_area / input_area - 1.0).abs() < 0.5,
@@ -717,10 +726,14 @@ mod tests {
         let rings = r.unwrap();
         assert!(!rings.is_empty(), "bowtie should produce at least one ring");
         for ring in &rings {
-            assert!(ring.0.len() >= 4, "ring too short");
-            assert_eq!(ring.0.first(), ring.0.last(), "ring not closed");
+            assert!(ring.exterior().0.len() >= 4, "ring too short");
+            assert_eq!(
+                ring.exterior().0.first(),
+                ring.exterior().0.last(),
+                "ring not closed"
+            );
         }
-        let output_area = total_area(&rings);
+        let output_area = poly_total_area(&rings);
         if input_area > 0.0 {
             assert!(
                 (output_area / input_area - 1.0).abs() < 0.5,
@@ -811,8 +824,8 @@ mod tests {
         let rings = r.unwrap();
         assert!(!rings.is_empty());
         for ring in &rings {
-            assert!(ring.0.len() >= 4);
-            assert_eq!(ring.0.first(), ring.0.last());
+            assert!(ring.exterior().0.len() >= 4);
+            assert_eq!(ring.exterior().0.first(), ring.exterior().0.last());
         }
     }
 

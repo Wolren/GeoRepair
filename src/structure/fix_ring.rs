@@ -1,4 +1,4 @@
-use geo::{Coord, Line, LineString};
+use geo::{Coord, Line, LineString, Polygon};
 use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
 use smallvec::SmallVec;
@@ -9,15 +9,13 @@ use crate::core;
 use crate::noding;
 use crate::orient::{orient2d, orient2d_fast};
 use crate::structure::PROFILE_FSI_NS;
-use crate::structure::fix_ring_graph::{
-    build_graph, extract_all_faces, label_interior_faces, split_face_at_pinch_points,
-};
+
 use log::warn;
 use rstar::{AABB, RTree, RTreeObject};
 
 type SplitPoint = SmallVec<[(f64, Coord<f64>); 2]>;
 
-pub(crate) fn repair_ring(ring: &LineString<f64>) -> Option<Vec<LineString<f64>>> {
+pub fn repair_ring(ring: &LineString<f64>) -> Option<Vec<Polygon<f64>>> {
     let coords = basic_cleanup(ring)?;
     if coords.len() < 4 {
         return None;
@@ -27,27 +25,34 @@ pub(crate) fn repair_ring(ring: &LineString<f64>) -> Option<Vec<LineString<f64>>
     }
 
     if !has_self_intersections(&coords) {
-        return Some(vec![LineString::new(coords)]);
+        return Some(vec![Polygon::new(LineString::new(coords), Vec::new())]);
     }
 
     // Fast path: try O(n) split for single self-intersection (70% of invalids).
+    // WARNING: a single split only fixes rings with EXACTLY one crossing. For
+    // multi-crossing rings (e.g. figure-eight chains), the split at the first
+    // crossing leaves a still-self-intersecting remainder — accepting it drops
+    // whole lobes of area (measured: 2334 → 112, 95% loss). Verify the split
+    // results are actually clean before returning them.
     if let Some(rings) = try_fast_fix(&coords) {
-        let cleaned: Vec<LineString<f64>> = rings
+        let cleaned: Vec<Polygon<f64>> = rings
             .into_iter()
-            .filter_map(|r| basic_cleanup(&r).map(LineString::new))
-            .filter(|r| r.0.len() >= 4)
+            .filter_map(|r| basic_cleanup(&r).map(|c| Polygon::new(LineString::new(c), Vec::new())))
+            .filter(|p| p.exterior().0.len() >= 4)
             .collect();
-        if !cleaned.is_empty() {
+        if !cleaned.is_empty()
+            && cleaned.iter().all(|p| !has_self_intersections(&p.exterior().0))
+        {
             return Some(cleaned);
         }
     }
 
-    // Full graph-based fix for multi-intersection, collinear overlap, etc.
-    if let Some(rings) = fix_self_intersecting(&coords) {
-        let cleaned: Vec<LineString<f64>> = rings
+    // Full graph-based fix (GEOS MakeValidPoly: node → BuildArea → even-parent).
+    // Returns polygons WITH structural holes — do not flatten to exterior rings.
+    if let Some(polys) = fix_self_intersecting(&coords) {
+        let cleaned: Vec<Polygon<f64>> = polys
             .into_iter()
-            .filter_map(|r| basic_cleanup(&r).map(LineString::new))
-            .filter(|r| r.0.len() >= 4)
+            .filter(|p| p.exterior().0.len() >= 4)
             .collect();
         if cleaned.is_empty() {
             return None;
@@ -95,7 +100,7 @@ pub(crate) fn is_collinear_ring(coords: &[Coord<f64>]) -> bool {
     true
 }
 
-pub(crate) fn has_self_intersections(coords: &[Coord<f64>]) -> bool {
+pub fn has_self_intersections(coords: &[Coord<f64>]) -> bool {
     has_self_intersections_impl(coords, None)
 }
 
@@ -310,7 +315,7 @@ pub(crate) fn split_ring_at_intersection(
 /// Returns `Some(rings)` if the ring had exactly one proper crossing that was
 /// split successfully.  Returns `None` if the fix is too complex for the fast
 /// path (caller should fall through to the full `fix_self_intersecting`).
-pub(crate) fn try_fast_fix(coords: &[Coord<f64>]) -> Option<Vec<LineString<f64>>> {
+pub fn try_fast_fix(coords: &[Coord<f64>]) -> Option<Vec<LineString<f64>>> {
     let n = coords.len();
     if n < 4 {
         return None;
@@ -331,9 +336,45 @@ pub(crate) fn try_fast_fix(coords: &[Coord<f64>]) -> Option<Vec<LineString<f64>>
         find_first_intersection_bruteforce(coords, eps)?
     };
 
+    // The fast path ONLY handles rings with exactly ONE proper crossing. With
+    // 2+ crossings, splitting at the first one can put the other crossing's
+    // two edges into DIFFERENT result rings — neither ring self-intersects,
+    // but the area is partitioned wrong (measured: 5609 → 116, 98% loss).
+    // Verify no second crossing exists before accepting.
+    let (i0, j0, _) = pair;
+    if find_second_intersection(coords, eps, i0, j0).is_some() {
+        return None;
+    }
+
     let (i, j, pt) = pair;
     let (ring1, ring2) = split_ring_at_intersection(coords, i, j, pt);
     Some(vec![LineString::new(ring1), LineString::new(ring2)])
+}
+
+/// Find any proper crossing OTHER than the edge pair (i0, j0). O(n²) brute
+/// force with early exit — only called once per fast-path attempt, and the
+/// ring is already known to be small (GRID_THRESHOLD_N bound in callers).
+fn find_second_intersection(
+    coords: &[Coord<f64>],
+    eps: f64,
+    i0: usize,
+    j0: usize,
+) -> Option<(usize, usize, Coord<f64>)> {
+    let n = coords.len();
+    for i in 0..n - 1 {
+        for j in (i + 2)..n - 1 {
+            if i == 0 && j == n - 2 {
+                continue;
+            }
+            if (i == i0 && j == j0) || (i == j0 && j == i0) {
+                continue;
+            }
+            if let Some(pair) = edge_intersection(coords, i, j, eps) {
+                return Some(pair);
+            }
+        }
+    }
+    None
 }
 
 fn find_first_intersection_bruteforce(
@@ -357,7 +398,7 @@ fn find_first_intersection_bruteforce(
 /// ---------------------------------------------------------------------------
 /// Self-intersecting ring fixer
 /// ---------------------------------------------------------------------------
-pub(crate) fn fix_self_intersecting(coords: &[Coord<f64>]) -> Option<Vec<LineString<f64>>> {
+pub fn fix_self_intersecting(coords: &[Coord<f64>]) -> Option<Vec<Polygon<f64>>> {
     let _t = Instant::now();
     let edges = edges_from_coords(coords);
     let mut noded = split_edges(&edges);
@@ -382,105 +423,12 @@ pub(crate) fn fix_self_intersecting(coords: &[Coord<f64>]) -> Option<Vec<LineStr
     if noded.is_empty() {
         return None;
     }
-    let graph = build_graph(&noded);
-    if graph.edges.is_empty() {
-        return None;
-    }
-    #[cfg(any(test, debug_assertions))]
-    if std::env::var("DIAG_FIX_RING").is_ok() {
-        eprintln!("\n=== fix_self_intersecting DIAG ===");
-        eprintln!("input coords ({}):", coords.len());
-        for (i, c) in coords.iter().enumerate() {
-            eprintln!("  c{}: ({:.10}, {:.10})", i, c.x, c.y);
-        }
-        eprintln!("noded edges ({}):", graph.edges.len());
-        for (i, &(fi, ti)) in graph.edges.iter().enumerate() {
-            eprintln!(
-                "  E{}: v{} ({:.6},{:.6}) -> v{} ({:.6},{:.6})",
-                i,
-                fi,
-                graph.verts[fi].x,
-                graph.verts[fi].y,
-                ti,
-                graph.verts[ti].x,
-                graph.verts[ti].y
-            );
-        }
-        eprintln!("verts ({}):", graph.verts.len());
-        for (i, v) in graph.verts.iter().enumerate() {
-            eprintln!("  v{}: ({:.10}, {:.10})", i, v.x, v.y);
-        }
-    }
-    let faces = extract_all_faces(&graph)?;
-    if faces.is_empty() {
-        return None;
-    }
-    #[cfg(any(test, debug_assertions))]
-    if std::env::var("DIAG_FIX_RING").is_ok() {
-        eprintln!("\nfragments from extract_all_faces ({}):", faces.len());
-        for (fi, face) in faces.iter().enumerate() {
-            eprintln!("  face {}: {} edges", fi, face.len());
-            for (ei, to) in face {
-                eprintln!(
-                    "    (E{}, to=v{}[{:.4},{:.4}])",
-                    ei, to, graph.verts[*to].x, graph.verts[*to].y
-                );
-            }
-        }
-    }
-    let simple_faces: Vec<Vec<(usize, usize)>> = faces
-        .iter()
-        .flat_map(|f| split_face_at_pinch_points(f, &graph.edges))
-        .filter(|f| f.len() >= 3)
-        .collect();
-    if simple_faces.is_empty() {
-        return None;
-    }
-    #[cfg(any(test, debug_assertions))]
-    if std::env::var("DIAG_FIX_RING").is_ok() {
-        eprintln!("\nsimple_faces after pinch split ({}):", simple_faces.len());
-        for (fi, face) in simple_faces.iter().enumerate() {
-            eprintln!("  face {}: {} edges", fi, face.len());
-            let visited_verts: Vec<usize> = face.iter().map(|&(_, to)| to).collect();
-            eprintln!("    verts: {:?}", visited_verts);
-            eprintln!("    coords:");
-            for (j, (ei, to)) in face.iter().enumerate() {
-                eprintln!(
-                    "      {}: E{} -> v{} ({:.10}, {:.10})",
-                    j, ei, to, graph.verts[*to].x, graph.verts[*to].y
-                );
-            }
-        }
-    }
-    let interior = label_interior_faces(&noded, &graph.verts, coords, &simple_faces, &graph.edges)?;
-    #[cfg(any(test, debug_assertions))]
-    if std::env::var("DIAG_FIX_RING").is_ok() {
-        eprintln!(
-            "\ninterior faces: {:?}",
-            interior.iter().collect::<Vec<_>>()
-        );
-    }
-    let mut result: Vec<LineString<f64>> = Vec::new();
-    for &fi in &interior {
-        let face = &simple_faces[fi];
-        let mut ring_coords: Vec<Coord<f64>> = face
-            .iter()
-            .map(|&(_, to_idx)| graph.verts[to_idx])
-            .collect();
-        if ring_coords.len() >= 3 {
-            ring_coords.push(ring_coords[0]);
-            #[cfg(any(test, debug_assertions))]
-            if std::env::var("DIAG_FIX_RING").is_ok() {
-                eprintln!("  interior ring coords ({}):", ring_coords.len());
-                let visited: Vec<usize> = face.iter().map(|&(_, to)| to).collect();
-                eprintln!("    verts: {:?}", visited);
-                for (j, c) in ring_coords.iter().enumerate() {
-                    eprintln!("      {}: ({:.10}, {:.10})", j, c.x, c.y);
-                }
-            }
-            result.push(LineString::new(ring_coords));
-        }
-    }
+    // GEOS MakeValidPoly core: BuildArea on the noded boundary + symdiff loop.
+    // Iteration 1 builds the outer faces; subtracting their boundary leaves
+    // the internal edges, whose BuildArea faces are XORed out. This is what
+    // removes inner lobes (even-winding faces) — verified: seed2 = 9931.89
+    // (10943.98 outer − 1012.09 inner), bit-identical to GEOS.
+    let result = make_valid_poly_symdiff(&noded);
     PROFILE_FSI_NS.fetch_add(_t.elapsed().as_nanos() as u64, Ordering::Relaxed);
     if result.is_empty() {
         None
@@ -489,7 +437,182 @@ pub(crate) fn fix_self_intersecting(coords: &[Coord<f64>]) -> Option<Vec<LineStr
     }
 }
 
-pub(crate) fn edges_from_coords(coords: &[Coord<f64>]) -> Vec<Line<f64>> {
+/// GEOS MakeValidPoly::buildArea loop: repeatedly BuildArea the remaining
+/// cut edges, XOR into the accumulated area, and remove the built boundary
+/// from the cut edges, until nothing remains. Returns the odd-winding faces
+/// (even-odd rule), exactly like GEOS.
+pub fn make_valid_poly_symdiff(cut_edges: &[Line<f64>]) -> Vec<Polygon<f64>> {
+    // build_area snaps vertices to the SNAP_SCALE grid; snap the input edges
+    // the same way so boundary removal matches exactly.
+    let snap = |c: Coord<f64>| Coord {
+        x: (c.x * crate::core::SNAP_SCALE).round() / crate::core::SNAP_SCALE,
+        y: (c.y * crate::core::SNAP_SCALE).round() / crate::core::SNAP_SCALE,
+    };
+    let mut remaining: Vec<Line<f64>> = cut_edges
+        .iter()
+        .map(|l| Line::new(snap(l.start), snap(l.end)))
+        .collect();
+    let mut area: Vec<Polygon<f64>> = Vec::new(); // accumulated (XOR) area
+    let mut guard = 0usize;
+    while !remaining.is_empty() {
+        guard += 1;
+        if guard > 64 {
+            warn!("make_valid_poly_symdiff: iteration guard exceeded");
+            break;
+        }
+        let Some(new_area) = crate::structure::build_area::build_area(&remaining) else {
+            break;
+        };
+        if new_area.0.is_empty() {
+            break;
+        }
+        // XOR the new faces into the accumulated area (symdiff).
+        area = symdiff_polygons(&area, &new_area.0);
+        // Remove the BOUNDARY of the built area from the cut edges. The
+        // boundary = segments appearing in exactly ONE face ring (internal
+        // edges appear in two adjacent faces, opposite directions — they
+        // stay in `remaining` for the next iteration). This mirrors GEOS's
+        // CascadedPolygonUnion dissolve before the boundary difference.
+        let mut seg_counts: rustc_hash::FxHashMap<(u64, u64, u64, u64), usize> =
+            rustc_hash::FxHashMap::default();
+        for p in &new_area.0 {
+            for ring in std::iter::once(p.exterior()).chain(p.interiors()) {
+                for w in ring.0.windows(2) {
+                    if w[0] != w[1] {
+                        let key = segment_key(w[0], w[1]);
+                        *seg_counts.entry(key).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+        #[cfg(any(test, debug_assertions))]
+        if std::env::var("DIAG_SYMDIFF").is_ok() {
+            use geo::Area;
+            eprintln!(
+                "symdiff iter {guard}: remaining edges = {}, new_area = {} polys",
+                remaining.len(),
+                new_area.0.len()
+            );
+            let mut total = 0.0;
+            for (i, p) in new_area.0.iter().enumerate() {
+                let a = p.unsigned_area();
+                total += a;
+                eprintln!("   new_area[{i}]: area={a:.4} holes={}", p.interiors().len());
+            }
+            eprintln!("   new_area total = {total:.4}");
+        }
+        #[cfg(any(test, debug_assertions))]
+        if std::env::var("DIAG_SYMDIFF").is_ok() {
+            use geo::Area;
+            let t: f64 = area.iter().map(|p| p.unsigned_area()).sum();
+            eprintln!("   area after XOR = {t:.4} ({} polys)", area.len());
+        }
+        remaining = remaining
+            .into_iter()
+            .filter(|l| {
+                let key = segment_key(snap(l.start), snap(l.end));
+                // Keep edges NOT on the built boundary: count==0 (unused) or
+                // count==2 (internal edge shared by two faces → next iter).
+                seg_counts.get(&key).copied().unwrap_or(0) != 1
+            })
+            .collect();
+    }
+    area
+}
+
+/// Orientation-insensitive key for a segment (bit-exact after snapping).
+fn segment_key(a: Coord<f64>, b: Coord<f64>) -> (u64, u64, u64, u64) {
+    let (ax, ay, bx, by) = (a.x.to_bits(), a.y.to_bits(), b.x.to_bits(), b.y.to_bits());
+    if (ax, ay) <= (bx, by) {
+        (ax, ay, bx, by)
+    } else {
+        (bx, by, ax, ay)
+    }
+}
+
+pub fn symdiff_test(a: &[Polygon<f64>], b: &[Polygon<f64>]) -> Vec<Polygon<f64>> {
+    symdiff_polygons(a, b)
+}
+
+/// Symmetric difference of two polygon sets (accumulated XOR) for the
+/// MakeValidPoly loop.
+///
+/// Our build_area returns ATOMIC subdivision cells (no CascadedPolygonUnion
+/// dissolve), so the faces of iteration N are exactly a SUBSET of iteration 1
+/// faces — the XOR is a set difference by ring fingerprint, no boolean ops.
+/// (geo's boolean ops are winding-sensitive and would fragment valid faces,
+/// losing area downstream in unary_union.)
+fn symdiff_polygons(a: &[Polygon<f64>], b: &[Polygon<f64>]) -> Vec<Polygon<f64>> {
+    if a.is_empty() {
+        return b.to_vec();
+    }
+    if b.is_empty() {
+        return a.to_vec();
+    }
+    let fp = |p: &Polygon<f64>| -> Vec<(u64, u64)> {
+        let mut pts: Vec<(u64, u64)> = p
+            .exterior()
+            .0
+            .iter()
+            .map(|c| (c.x.to_bits(), c.y.to_bits()))
+            .collect();
+        if pts.first() == pts.last() {
+            pts.pop();
+        }
+        pts.sort_unstable();
+        pts
+    };
+    #[cfg(any(test, debug_assertions))]
+    if std::env::var("DIAG_SYMDIFF").is_ok() {
+        use geo::Area;
+        eprintln!("   XOR: a={} polys, b={} polys", a.len(), b.len());
+        for (i, q) in a.iter().enumerate() {
+            eprintln!(
+                "     a[{i}]: area={:.4} fp={:?}",
+                q.unsigned_area(),
+                fp(q)
+            );
+        }
+        for (i, p) in b.iter().enumerate() {
+            eprintln!(
+                "     b[{i}]: area={:.4} fp={:?}",
+                p.unsigned_area(),
+                fp(p)
+            );
+        }
+    }
+    let b_set: Vec<Vec<(u64, u64)>> = b.iter().map(fp).collect();
+    let mut out: Vec<Polygon<f64>> = Vec::new();
+    for q in a {
+        let qf = fp(q);
+        let matched = b_set.iter().any(|bf| *bf == qf);
+        #[cfg(any(test, debug_assertions))]
+        if std::env::var("DIAG_SYMDIFF").is_ok() {
+            eprintln!("     match a fp {:?} -> {}", qf, matched);
+        }
+        if !matched {
+            out.push(q.clone());
+        }
+    }
+    // Faces of b not present in ORIGINAL a survive the XOR (defensive;
+    // normally none at iteration > 1 since b faces are a subset of a faces).
+    let a_set: Vec<Vec<(u64, u64)>> = a.iter().map(fp).collect();
+    for p in b {
+        let pf = fp(p);
+        if !a_set.iter().any(|af| *af == pf) {
+            out.push(p.clone());
+        }
+    }
+    out
+}
+
+/// Segment equality with orientation and reversed-direction tolerance
+/// (coordinates are exact after noding).
+fn same_segment(a: Line<f64>, b: Line<f64>) -> bool {
+    (a.start == b.start && a.end == b.end) || (a.start == b.end && a.end == b.start)
+}
+
+pub fn edges_from_coords(coords: &[Coord<f64>]) -> Vec<Line<f64>> {
     coords.windows(2).map(|w| Line::new(w[0], w[1])).collect()
 }
 
@@ -514,7 +637,7 @@ fn should_use_sweepline(edges: &[Line<f64>], n: usize) -> bool {
     freq.into_values().max().unwrap_or(0) > n / 4
 }
 
-pub(crate) fn split_edges(edges: &[Line<f64>]) -> Vec<Line<f64>> {
+pub fn split_edges(edges: &[Line<f64>]) -> Vec<Line<f64>> {
     let n = edges.len();
     let mut split_points: Vec<SplitPoint> = vec![SmallVec::new(); n];
 

@@ -26,6 +26,9 @@
 //! - `sweep`: Plane-sweep intersection detection
 /// Edge classification and planar graph building for polygon faces.
 pub mod classify;
+/// GEOS BuildArea port: polygonize linework → shell/hole classification →
+/// even-parent filter. The reference area-building algorithm.
+pub mod build_area;
 /// Ring repair: self-intersection resolution, winding correction.
 pub mod fix_ring;
 /// Graph-based ring intersection resolution.
@@ -117,7 +120,7 @@ pub fn print_profile(n_polys: usize) {
     eprintln!("  total         {:>9.3}ms", ms(total_ns));
 }
 
-pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geometry<f64>> {
+pub fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geometry<f64>> {
     // Fast path: valid polygons can return immediately. Use a total-verts limit
     // to avoid the monotone-chain has_no_intersections cost on very large rings.
     let _t_fp = Instant::now();
@@ -161,15 +164,17 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
         let (shell_res, holes) = rayon::join(
             || {
                 let _t = Instant::now();
-                let shell_rings = match fix_ring::repair_ring(poly.exterior()) {
-                    Some(rings) => rings,
+                let shell_polys = match fix_ring::repair_ring(poly.exterior()) {
+                    Some(polys) => polys,
                     None => return None,
                 };
-                if shell_rings.is_empty() {
+                if shell_polys.is_empty() {
                     return None;
                 }
-                let valid: Vec<LineString<f64>> =
-                    shell_rings.into_iter().filter(|s| s.0.len() >= 4).collect();
+                // Polygons carry structural holes from BuildArea (self-crossing
+                // lobes) — they must survive into the subtract step.
+                let valid: Vec<Polygon<f64>> =
+                    shell_polys.into_iter().filter(|p| p.exterior().0.len() >= 4).collect();
                 PROFILE_SR_NS.fetch_add(_t.elapsed().as_nanos() as u64, Ordering::Relaxed);
                 if valid.is_empty() { None } else { Some(valid) }
             },
@@ -186,7 +191,9 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
                         if !fix_ring::has_self_intersections_with_bbox(&h.0, hole_bbox) {
                             return vec![h.clone()];
                         }
-                        fix_ring::repair_ring(h).unwrap_or_else(|| vec![h.clone()])
+                        fix_ring::repair_ring(h).map(|polys| {
+                            polys.into_iter().map(|p| p.exterior().clone()).collect()
+                        }).unwrap_or_else(|| vec![h.clone()])
                     })
                     .collect();
                 PROFILE_HR_NS.fetch_add(_t.elapsed().as_nanos() as u64, Ordering::Relaxed);
@@ -215,8 +222,8 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
     #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
     let (valid_shells, hole_rings_cw) = {
         let _t_sr = Instant::now();
-        let shell_rings = match fix_ring::repair_ring(poly.exterior()) {
-            Some(rings) => rings,
+        let shell_polys = match fix_ring::repair_ring(poly.exterior()) {
+            Some(polys) => polys,
             None => {
                 warn!("Structure: shell ring repair failed, falling back to CDT arrange");
                 #[cfg(feature = "arrange")]
@@ -227,11 +234,11 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
                 return handle_collapse_result(poly.exterior(), config);
             }
         };
-        if shell_rings.is_empty() {
+        if shell_polys.is_empty() {
             return handle_collapse_result(poly.exterior(), config);
         }
-        let valid_shells: Vec<LineString<f64>> =
-            shell_rings.into_iter().filter(|s| s.0.len() >= 4).collect();
+        let valid_shells: Vec<Polygon<f64>> =
+            shell_polys.into_iter().filter(|p| p.exterior().0.len() >= 4).collect();
         if valid_shells.is_empty() {
             return handle_collapse_result(poly.exterior(), config);
         }
@@ -250,8 +257,8 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
                     hole_rings.push(ensure_cw(h.clone()));
                     continue;
                 }
-                if let Some(rings) = fix_ring::repair_ring(h) {
-                    hole_rings.extend(rings);
+                if let Some(polys) = fix_ring::repair_ring(h) {
+                    hole_rings.extend(polys.into_iter().map(|p| p.exterior().clone()));
                 } else {
                     hole_rings.push(ensure_cw(h.clone()));
                 }
@@ -262,9 +269,21 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
         (valid_shells, hole_rings_cw)
     };
 
-    // For each valid shell ring, classify and subtract holes
-    let process_shell = |shell: LineString<f64>| -> Vec<Polygon<f64>> {
-        let shell_poly = Polygon::new(ensure_ccw(shell), Vec::new());
+    // For each valid shell polygon, classify and subtract holes.
+    // The shell may already carry STRUCTURAL holes from BuildArea (lobes of a
+    // self-crossing shell that must remain void); input holes are subtracted
+    // on top of them.
+    let process_shell = |shell: Polygon<f64>| -> Vec<Polygon<f64>> {
+        let mut shell_poly = shell;
+        // Structural holes: ensure CW orientation (geo convention) and drop
+        // any that are invalid or collinear.
+        let struct_holes: Vec<LineString<f64>> = shell_poly
+            .interiors()
+            .iter()
+            .filter(|h| h.0.len() >= 4)
+            .map(|h| ensure_cw(h.clone()))
+            .collect();
+        shell_poly = Polygon::new(ensure_ccw(shell_poly.exterior().clone()), struct_holes);
 
         let _t_cl = Instant::now();
         let (inner_holes, outer_holes) =
@@ -319,13 +338,26 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
         return None;
     }
 
+    #[cfg(any(test, debug_assertions))]
+    if std::env::var("DIAG_PP").is_ok() {
+        use geo::Area;
+        for (i, p) in result_polys.iter().enumerate() {
+            eprintln!(
+                "DIAG_PP result_poly[{i}]: area={:.4} holes={}",
+                p.unsigned_area(),
+                p.interiors().len()
+            );
+        }
+    }
+
     let result = if result_polys.len() == 1 {
         // Safe: len==1 verified above on local Vec
         let p = result_polys.pop().expect("len==1 verified");
         #[cfg(feature = "arrange")]
         {
-            let lines: Vec<geo::Line<f64>> = p.lines_iter().collect();
-            if lines.len() >= 4 && !crate::arrange::prep_intersect::has_no_intersections(&lines) {
+            // Proper-crossing check only: legitimate hole/shell vertex touches
+            // (GEOS makeValid emits them) must survive.
+            if has_proper_self_crossing(&p) {
                 Geometry::GeometryCollection(geo::GeometryCollection(Vec::new()))
             } else {
                 Geometry::Polygon(p)
@@ -344,12 +376,29 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
         #[cfg(feature = "arrange")]
         {
             let g = crate::make_valid::drop_nested_components(merged);
-            // Discard self-intersecting components from floating-point edge cases
+            #[cfg(any(test, debug_assertions))]
+            if std::env::var("DIAG_STR").is_ok() {
+                use geo::Area;
+                let ga = match &g {
+                    Geometry::Polygon(p) => p.unsigned_area(),
+                    Geometry::MultiPolygon(mp) => mp.0.iter().map(|p| p.unsigned_area()).sum(),
+                    Geometry::GeometryCollection(gc) => gc.0.iter().map(|x| match x {
+                        Geometry::Polygon(p) => p.unsigned_area(),
+                        _ => 0.0,
+                    }).sum(),
+                    _ => 0.0,
+                };
+                eprintln!("DIAG_STR: drop_nested -> {ga:.4}");
+            }
+            // Discard components with proper self-crossings (floating-point edge
+            // cases). Legitimate hole/shell vertex touches survive.
             if let Geometry::MultiPolygon(ref mp) = g {
-                let filtered: Vec<Polygon<f64>> = mp.0.iter().filter(|p| {
-                    let lines: Vec<geo::Line<f64>> = p.lines_iter().collect();
-                    lines.len() < 4 || crate::arrange::prep_intersect::has_no_intersections(&lines)
-                }).cloned().collect();
+                let filtered: Vec<Polygon<f64>> = mp
+                    .0
+                    .iter()
+                    .filter(|p| !has_proper_self_crossing(p))
+                    .cloned()
+                    .collect();
                 if filtered.is_empty() {
                     Geometry::GeometryCollection(geo::GeometryCollection(Vec::new()))
                 } else if filtered.len() == 1 {
@@ -366,6 +415,46 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
     };
 
     Some(result)
+}
+
+/// True if the polygon's linework has a PROPER self-crossing (interior-interior
+/// intersection). Shared endpoints (hole touching shell at a vertex — GEOS
+/// makeValid emits them) are legal and do NOT count. Used as a post-fix
+/// filter: only genuine floating-point self-crossings are discarded.
+pub fn has_proper_self_crossing(p: &geo::Polygon<f64>) -> bool {
+    use geo::LinesIter;
+    let lines: Vec<geo::Line<f64>> = p.lines_iter().collect();
+    let n = lines.len();
+    if n < 4 {
+        return false;
+    }
+    for i in 0..n {
+        for j in (i + 1)..n {
+            // Skip adjacent segments of the SAME ring (they share an endpoint
+            // by construction). Rings are contiguous in lines_iter() order.
+            let same_ring_adjacent = j == i + 1 || (i == 0 && j == n - 1);
+            if same_ring_adjacent {
+                continue;
+            }
+            if segments_properly_cross(lines[i], lines[j]) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Proper crossing: the two segments intersect at a point strictly interior
+/// to BOTH segments (shared endpoints excluded).
+fn segments_properly_cross(a: geo::Line<f64>, b: geo::Line<f64>) -> bool {
+    use crate::orient::orient2d;
+    let o1 = orient2d(a.start, a.end, b.start);
+    let o2 = orient2d(a.start, a.end, b.end);
+    let o3 = orient2d(b.start, b.end, a.start);
+    let o4 = orient2d(b.start, b.end, a.end);
+    // Strict proper crossing: both orientations strictly opposite.
+    (o1 > 0.0 && o2 < 0.0 || o1 < 0.0 && o2 > 0.0)
+        && (o3 > 0.0 && o4 < 0.0 || o3 < 0.0 && o4 > 0.0)
 }
 
 /// Winding-number point-in-ring test (exclusive of boundary).

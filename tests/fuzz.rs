@@ -2447,3 +2447,160 @@ mod diag_all_methods_fail {
         assert!(result.validate().valid, "Auto must produce valid for diagnostic polygon");
     }
 }
+
+proptest! {
+    // =======================================================================
+    // 5.1  Area preservation: repair must not silently destroy polygon area
+    // -----------------------------------------------------------------------
+    // GEOS/JTS MakeValid contract: the fixed geometry covers the same area as
+    // the input (the unary union of its polygon parts). An implementation that
+    // returns GEOMETRYCOLLECTION EMPTY for everything passes assert_valid
+    // (empty is OGC-valid) but destroys data — this invariant closes that hole.
+    #[test]
+    fn invariant_area_preserved(
+        polys in proptest::collection::vec(polygon_points(-100.0..=100.0, 3, 8), 1..=3),
+    ) {
+        use geo::Area;
+        let mp = MultiPolygon::new(polys);
+        let geo_union = union_area_of(&mp);
+        let shoelace_sum: f64 = mp.0.iter().map(|p| p.signed_area().abs()).sum();
+        let is_valid_input = mp.is_valid();
+        if geo_union <= 1e-6 && shoelace_sum <= 1e-6 {
+            return Ok(()); // degenerate input — no area contract
+        }
+        for cfg in &cfg_all() {
+            let result = mp.make_valid_with_config(cfg);
+            let v = result.validate();
+            if !v.valid && !is_empty(&result) {
+                continue; // validity caught elsewhere
+            }
+            let out_area = total_polygon_area(&result);
+            if is_valid_input {
+                // Valid input: repair must be EXACT (area preserved to fp noise).
+                let scale = geo_union.abs().max(1.0);
+                assert!(
+                    out_area >= geo_union - 1e-6 * scale,
+                    "valid input area destroyed: {geo_union:.6} -> {out_area:.6} (cfg={:?}, in={mp:?})",
+                    cfg.poly_method
+                );
+                assert!(
+                    out_area <= geo_union + 1e-6 * scale,
+                    "valid input area invented: {geo_union:.6} -> {out_area:.6} (cfg={:?}, in={mp:?})",
+                    cfg.poly_method
+                );
+            } else {
+                // Invalid input: loose sanity bound — must not destroy >90% of
+                // the per-shell shoelace sum. (Legit union of 2 identical
+                // shells = 50% of the sum; 10% leaves huge margin. Catches
+                // the 95%-lobe-loss class and empty collapse.)
+                let floor = 0.10 * shoelace_sum;
+                let scale = floor.abs().max(1.0);
+                assert!(
+                    out_area >= floor - 1e-6 * scale,
+                    "area destroyed: shoelace sum {shoelace_sum:.6}, output {out_area:.6} (cfg={:?}, in={mp:?})",
+                    cfg.poly_method
+                );
+            }
+            assert!(
+                !is_empty(&result),
+                "area-bearing input collapsed to empty (cfg={:?})",
+                cfg.poly_method
+            );
+        }
+    }
+
+    fn invariant_area_preserved_holes(
+        exterior in polygon_points(-100.0..=100.0, 4, 10),
+        hole_polys in proptest::collection::vec(polygon_points(-100.0..=100.0, 3, 6), 0..=3),
+    ) {
+        use geo::Area;
+        let holes: Vec<LineString<f64>> = hole_polys
+            .into_iter()
+            .map(|p| p.exterior().clone())
+            .collect();
+        let poly = Polygon::new(exterior.exterior().clone(), holes);
+        let geo_union = union_area_of(&MultiPolygon::new(vec![poly.clone()]));
+        let shoelace: f64 = poly.signed_area().abs();
+        let is_valid_input = poly.is_valid();
+        if geo_union <= 1e-6 && shoelace <= 1e-6 {
+            return Ok(());
+        }
+        for cfg in &cfg_all() {
+            let result = poly.make_valid_with_config(cfg);
+            let out_area = total_polygon_area(&result);
+            if is_valid_input {
+                let scale = geo_union.abs().max(1.0);
+                assert!(
+                    out_area >= geo_union - 1e-6 * scale,
+                    "valid hole input area destroyed: {geo_union:.6} -> {out_area:.6} (cfg={:?})",
+                    cfg.poly_method
+                );
+                assert!(
+                    out_area <= geo_union + 1e-6 * scale,
+                    "valid hole input area invented: {geo_union:.6} -> {out_area:.6} (cfg={:?})",
+                    cfg.poly_method
+                );
+            } else {
+                let floor = 0.10 * shoelace;
+                let scale = floor.abs().max(1.0);
+                assert!(
+                    out_area >= floor - 1e-6 * scale,
+                    "area destroyed: shoelace {shoelace:.6}, output {out_area:.6} (cfg={:?})",
+                    cfg.poly_method
+                );
+            }
+            assert!(
+                !is_empty(&result),
+                "area-bearing polygon collapsed to empty (cfg={:?})",
+                cfg.poly_method
+            );
+        }
+    }
+}
+
+/// Sum of polygon area in a Geometry (Polygon/MultiPolygon/GC recursion).
+fn total_polygon_area(g: &Geometry<f64>) -> f64 {
+    use geo::Area;
+    match g {
+        Geometry::Polygon(p) => p.unsigned_area(),
+        Geometry::MultiPolygon(mp) => mp.0.iter().map(|p| p.unsigned_area()).sum(),
+        Geometry::GeometryCollection(gc) => gc.0.iter().map(total_polygon_area).sum(),
+        _ => 0.0,
+    }
+}
+
+/// Area of the unary union of a MultiPolygon's shells (winding-normalized).
+/// Uses geo's OverlayNG union as the INDEPENDENT ground truth (never our own
+/// repair — that would be circular). Winding normalization is required:
+/// geo's unary_union silently drops area on CW shells.
+fn union_area_of(mp: &MultiPolygon<f64>) -> f64 {
+    use geo::Area;
+    if mp.0.is_empty() {
+        return 0.0;
+    }
+    if mp.0.len() == 1 {
+        // Single shell: normalize winding, union still needed if it
+        // self-crosses (OverlayNG nodes it and returns the covered area).
+        let mut p = mp.0[0].clone();
+        use geo::Winding;
+        if p.exterior().0.len() >= 4 {
+            p.exterior_mut(|r| r.make_ccw_winding());
+        }
+        let u = geo::algorithm::bool_ops::unary_union(&MultiPolygon::new(vec![p]));
+        return u.0.iter().map(|p| p.unsigned_area()).sum();
+    }
+    let ccw: Vec<Polygon<f64>> = mp
+        .0
+        .iter()
+        .cloned()
+        .map(|mut p| {
+            use geo::Winding;
+            if p.exterior().0.len() >= 4 {
+                p.exterior_mut(|r| r.make_ccw_winding());
+            }
+            p
+        })
+        .collect();
+    let u = geo::algorithm::bool_ops::unary_union(&MultiPolygon::new(ccw));
+    u.0.iter().map(|p| p.unsigned_area()).sum()
+}

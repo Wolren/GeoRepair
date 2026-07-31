@@ -14,7 +14,7 @@ use geo::{Area, BooleanOps, Coord, LinesIter, MultiPolygon, OpType, Polygon};
 /// Input-side heuristics like "hole vertex on shell boundary" fire on
 /// ordinary real-world data and forced full noding + polygonize on nearly
 /// every polygon — a ~50-100x regression (305s vs 5.5s on 2298 invalid polys).
-pub(crate) fn subtract_holes(shell: &Polygon<f64>, holes: &[Polygon<f64>]) -> MultiPolygon<f64> {
+pub fn subtract_holes(shell: &Polygon<f64>, holes: &[Polygon<f64>]) -> MultiPolygon<f64> {
     if holes.is_empty() {
         return MultiPolygon::new(vec![shell.clone()]);
     }
