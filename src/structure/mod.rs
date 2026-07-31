@@ -129,7 +129,16 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Opti
             && total_verts <= core::FAST_PATH_MAX_VERTS
             && poly.exterior().0.len() >= 4
             && crate::arrange::poly_has_basic_form(poly)
-        {
+            // Sub-ULP edge check: an edge shorter than EPSILON * bbox_scale
+            // (mixed-magnitude rings, e.g. 1e8 coords with 1e-8 spikes) makes
+            // proper-crossing detection blind — collinear overlap is invisible.
+            // Such inputs are invalid anyway; route them to the full repair.
+            && !crate::arrange::has_sub_ulp_edge(poly)
+            // Collinear ring check: a wide-bbox ring can still be exactly
+            // collinear (base=1e10, step=0.09, n=3 — all points on one line).
+            // Winding is then numerically ambiguous → WrongOrientation. The
+            // fast path must not pass it through; full repair degrades it.
+                    {
             let lines: Vec<_> = poly.lines_iter().collect();
             if !lines.is_empty()
                 && crate::arrange::prep::has_no_intersections(&lines)
