@@ -9,12 +9,12 @@ use rstar::{AABB, RTree, RTreeObject};
 /// Prepared edge set: snapped, deduplicated, and intersection-split segments
 /// ready for CDT construction.
 #[derive(Debug)]
-pub(crate) struct PreparedLines {
+pub struct PreparedLines {
     /// The processed line segments (snapped, deduped, split at intersections).
     pub lines: Vec<Line<f64>>,
 }
 
-pub(crate) fn prepare_lines(lines: Vec<Line<f64>>) -> Result<PreparedLines, MakeValidError> {
+pub fn prepare_lines(lines: Vec<Line<f64>>) -> Result<PreparedLines, MakeValidError> {
     for line in &lines {
         for c in [line.start, line.end] {
             if c.x.is_nan() || c.y.is_nan() {

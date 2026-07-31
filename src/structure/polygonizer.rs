@@ -12,13 +12,13 @@ use geo::{Coord, Line, LineString, MultiPolygon, Polygon, Winding};
 
 use super::fix_ring_graph;
 
-pub(crate) fn polygonize(lines: &[Line<f64>]) -> Vec<Polygon<f64>> {
+pub fn polygonize(lines: &[Line<f64>]) -> Vec<Polygon<f64>> {
     if lines.is_empty() { return Vec::new(); }
 
     let graph = fix_ring_graph::build_graph(lines);
     if graph.edges.is_empty() { return Vec::new(); }
 
-    let face_edges = match fix_ring_graph::extract_all_faces(&graph) {
+    let face_edges = match fix_ring_graph::extract_all_faces_geos(&graph) {
         Some(faces) => faces,
         None => return Vec::new(),
     };

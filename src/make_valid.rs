@@ -473,7 +473,25 @@ fn make_valid_impl(
             }),
             PolyMethod::Auto => {
                 if let Some(r) = structure_fix(poly, config) {
-                    if is_valid_with_geo(&r) { r }
+                    // The structure path emits GEOS walker winding (CW shells,
+                    // CCW holes — GEOS polygonizer convention). OGC validity
+                    // requires CCW shells; normalize before the gate.
+                    let r_norm = enforce_ogc_winding(r);
+                    #[cfg(any(test, debug_assertions))]
+                    if std::env::var("DIAG_MV").is_ok() {
+                        use geo::Area;
+                        let ra = match &r_norm {
+                            Geometry::Polygon(p) => p.unsigned_area(),
+                            Geometry::MultiPolygon(mp) => mp.0.iter().map(|p| p.unsigned_area()).sum(),
+                            Geometry::GeometryCollection(gc) => gc.0.iter().map(|x| match x {
+                                Geometry::Polygon(p) => p.unsigned_area(),
+                                _ => 0.0,
+                            }).sum(),
+                            _ => 0.0,
+                        };
+                        eprintln!("DIAG_MV auto: structure r={ra:.4} valid={}", is_valid_with_geo(&r_norm));
+                    }
+                    if is_valid_with_geo(&r_norm) { r_norm }
                     else {
                         warn!("Auto mode: structure_fix invalid, falling back to CDT arrange");
                         let arranged = arrange_or_empty(poly, config);
@@ -571,6 +589,12 @@ fn linestring_is_simple(ls: &LineString<f64>) -> bool {
 /// Remove degenerate Polygon/MultiPolygon components: exterior rings with
 /// <4 coordinates, shoelace area below epsilon, or NaN/Inf coordinates.
 /// Returns boundary LineString for degenerate polygons (GEOS-style type degradation).
+pub fn strip_degenerate_test(
+    g: Geometry<f64>, 
+) -> Geometry<f64> {
+    strip_degenerate(g)
+}
+
 fn strip_degenerate(g: Geometry<f64>) -> Geometry<f64> {
     match g {
         Geometry::Polygon(p) => {
@@ -795,7 +819,7 @@ impl MakeValid for MultiPolygon<f64> {
         // Even-parent filter: prevent NestedHoles from unary_union by removing
         // shells that are fully contained inside larger shells.
         let filtered = crate::structure::merge::merge_shells(mp.0);
-                if filtered.0.len() <= 1 {
+        if filtered.0.len() <= 1 {
                     return if filtered.0.is_empty() {
                         empty_geom::<f64>()
                     } else {
@@ -969,7 +993,7 @@ fn structure_fix(poly: &Polygon<f64>, _config: &MakeValidConfig) -> Option<Geome
 }
 
 /// Check OGC validity using our own GeoValidation (Shewchuk-based).
-fn is_valid_with_geo(g: &Geometry<f64>) -> bool {
+pub fn is_valid_with_geo(g: &Geometry<f64>) -> bool {
     use crate::validation::GeoValidation;
     g.is_valid()
 }
@@ -1131,7 +1155,7 @@ fn shoelace_abs_sum(coords: &[Coord<f64>]) -> f64 {
     sum.abs()
 }
 
-pub(crate) fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
+pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
     if mp.0.len() <= 1 {
         return if mp.0.is_empty() { empty_geom::<f64>() }
                else { enforce_ogc_winding(Geometry::Polygon(mp.0.into_iter().next().unwrap())) };
@@ -1145,14 +1169,33 @@ pub(crate) fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
     for i in 0..n {
         let ext_i = &with_area[i].0.exterior().0;
         if ext_i.len() < 4 { keep[i] = false; continue; }
-        let centroid = ext_i[..ext_i.len()-1].iter().fold(Coord { x: 0.0, y: 0.0 },
-            |acc, c| Coord { x: acc.x + c.x, y: acc.y + c.y });
-        let n_verts = (ext_i.len() - 1).max(1) as f64;
-        let centroid = Coord { x: centroid.x / n_verts, y: centroid.y / n_verts };
-        let pt_candidates = [ext_i[0], Coord {
-            x: (ext_i[0].x + ext_i[1].x) * 0.5,
-            y: (ext_i[0].y + ext_i[1].y) * 0.5,
-        }, centroid];
+        // Interior probes: first vertex, first-edge midpoint nudged toward
+        // the interior, and a mid-edge probe. The vertex MEAN is NOT a safe
+        // candidate for concave faces (can land outside, inside a neighbor —
+        // false "nested" flag). Edge-midpoint probes are always interior.
+        let (v0, v1) = (ext_i[0], ext_i[1]);
+        let edge_mid = Coord {
+            x: (v0.x + v1.x) * 0.5,
+            y: (v0.y + v1.y) * 0.5,
+        };
+        let scale = edge_mid.x.abs().max(edge_mid.y.abs()).max(1.0);
+        let eps = 1e-9 * scale;
+        let dx = v1.x - v0.x;
+        let dy = v1.y - v0.y;
+        let len = (dx * dx + dy * dy).sqrt().max(1e-12);
+        // Nudge toward the ring interior: for CCW rings that is the LEFT
+        // side; compute signed area to pick the correct side.
+        let mut sa = 0.0;
+        for w in ext_i.windows(2) {
+            sa += w[0].x * w[1].y - w[1].x * w[0].y;
+        }
+        let (nx, ny) = (-dy / len, dx / len);
+        let sign = if sa >= 0.0 { 1.0 } else { -1.0 };
+        let interior_probe = Coord {
+            x: edge_mid.x + nx * eps * sign,
+            y: edge_mid.y + ny * eps * sign,
+        };
+        let pt_candidates = [ext_i[0], edge_mid, interior_probe];
         let is_nested = with_area.iter().enumerate().any(|(j, (p_j, _))| {
             if i == j || !keep[j] { return false; }
             let ext_j = &p_j.exterior().0;
@@ -1165,14 +1208,28 @@ pub(crate) fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
         .enumerate()
         .filter_map(|(i, (p, _))| if keep[i] { Some(p) } else { None })
         .collect();
+    #[cfg(any(test, debug_assertions))]
+    if std::env::var("DIAG_DN").is_ok() {
+        use geo::Area;
+        let t: f64 = kept.iter().map(|p| p.unsigned_area()).sum();
+        eprintln!("DIAG_DN: kept={} total={t:.4}", kept.len());
+    }
     if kept.is_empty() { return empty_geom::<f64>(); }
     let kept_len = kept.len();
     if kept_len == 1 {
         return enforce_ogc_winding(Geometry::Polygon(kept.into_iter().next().unwrap()));
     }
+    let mp_kept = MultiPolygon::new(kept);
+    // If the components are already valid (disjoint or vertex-touching only —
+    // the normal case for BuildArea/symdiff output), return them as-is. The
+    // polygonizer fallback is ONLY for genuinely invalid MultiPolygons
+    // (edge-sharing components / nested holes); re-polygonizing valid shells
+    // re-expands the whole face decomposition (measured: 5 shells → 9 faces).
+    if mp_kept.is_valid() {
+        return enforce_ogc_winding(Geometry::MultiPolygon(mp_kept));
+    }
     // Edge-sharing case: containment didn't reduce components.
     // Try polygonizer fallback to split edge-sharing components.
-    let mp_kept = MultiPolygon::new(kept);
     #[cfg(feature = "arrange")]
     {
         if let Some(g) = polygonizer_fallback(&mp_kept) {
@@ -1204,24 +1261,32 @@ pub(crate) fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
 /// Polygonizer fallback for edge-sharing MultiPolygon components
 /// that containment-based drop_nested_components can't handle.
 fn polygonizer_fallback(mp: &MultiPolygon<f64>) -> Option<Geometry<f64>> {
+    use geo::LinesIter;
     let lines: Vec<geo::Line<f64>> = mp.0.iter()
         .flat_map(|p| p.lines_iter())
         .collect();
     if lines.is_empty() { return None; }
-    let noded = crate::arrange::prep::prepare_lines(lines).ok()?;
-    if noded.lines.is_empty() { return None; }
-    let faces = crate::structure::polygonizer::polygonize(&noded.lines);
-    if faces.is_empty() { return None; }
-    let valid: Vec<Polygon<f64>> = faces.into_iter()
+    // GEOS BuildArea: correct face extraction + shell/hole classification +
+    // even-parent. (The legacy polygonizer misclassifies multi-shell inputs:
+    // measured 1 poly with 6 holes instead of 5 disjoint shells.)
+    let area = crate::structure::build_area::build_area(&lines)?;
+    #[cfg(any(test, debug_assertions))]
+    if std::env::var("DIAG_PF").is_ok() {
+        use geo::Area;
+        eprintln!("PF: lines={} build_area -> {} polys", lines.len(), area.0.len());
+        for (i, p) in area.0.iter().enumerate() {
+            eprintln!("PF:   [{i}] area={:.4} holes={}", p.unsigned_area(), p.interiors().len());
+        }
+    }
+    let valid: Vec<Polygon<f64>> = area.0.into_iter()
         .filter(|p| {
             let ext = &p.exterior().0;
             ext.len() >= 4 && !ext.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
                 && shoelace_abs_sum(ext) >= 1e-12
-                // Also check for self-intersection using edge intersection test
-                && {
-                    let edges: Vec<geo::Line<f64>> = p.lines_iter().collect();
-                    edges.len() < 4 || crate::arrange::prep_intersect::has_no_intersections(&edges)
-                }
+                // Proper-crossing check only: hole/shell vertex touches are
+                // legal (GEOS makeValid emits them); only genuine crossings
+                // disqualify a component.
+                && !crate::structure::has_proper_self_crossing(p)
         })
         .collect();
     if valid.is_empty() { return None; }

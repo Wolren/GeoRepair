@@ -209,7 +209,7 @@ impl RTreeObject for ChainEnv {
     }
 }
 
-pub(crate) fn has_no_intersections(lines: &[Line<f64>]) -> bool {
+pub fn has_no_intersections(lines: &[Line<f64>]) -> bool {
     let n = lines.len();
     if n == 0 {
         return true;

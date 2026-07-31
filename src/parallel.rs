@@ -6,7 +6,7 @@
 //! Feature: `parallel` (enabled by default, non-WASM only).
 use geo::{
     GeoFloat, Geometry, GeometryCollection, LineString, MultiLineString, MultiPoint, MultiPolygon,
-    Point, Polygon,
+    Point, Polygon, Winding,
 };
 use rayon::prelude::*;
 
@@ -113,7 +113,20 @@ pub fn par_fix_multi_polygon(mp: &MultiPolygon<f64>, config: &MakeValidConfig) -
         return Geometry::Polygon(shells.pop().expect("len==1 verified"));
     }
     let mp = MultiPolygon::new(shells);
-    Geometry::MultiPolygon(geo::algorithm::bool_ops::unary_union(&mp))
+    // Normalize winding first: geo's unary_union silently drops area on CW
+    // input shells (verified 0.84 vs 1.80 for square+rect overlap).
+    let ccw: Vec<Polygon<f64>> = mp
+        .0
+        .iter()
+        .map(|p| {
+            let mut p = p.clone();
+            if p.exterior().0.len() >= 4 && !crate::util::robust_is_ccw(&p.exterior().0) {
+                p.exterior_mut(|r| r.make_ccw_winding());
+            }
+            p
+        })
+        .collect();
+    Geometry::MultiPolygon(geo::algorithm::bool_ops::unary_union(&MultiPolygon::new(ccw)))
 }
 
 /// Process a batch of independent polygons in parallel.

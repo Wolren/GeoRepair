@@ -1,4 +1,4 @@
-use geo::{Coord, MultiPolygon, Polygon};
+use geo::{Coord, MultiPolygon, Polygon, Winding};
 use log::warn;
 
 /// Merge overlapping shells using even-parent filter to prevent NestedHoles.
@@ -10,11 +10,41 @@ use log::warn;
 /// The BuildArea even-parent approach: sort shells by area, count how many
 /// larger shells contain each shell, keep only shells with even parent count.
 /// Then run unary_union on the kept shells.
-pub(crate) fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
+pub fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
     if shells.is_empty() {
         return MultiPolygon::new(Vec::new());
     }
+    // Normalize winding FIRST: geo's unary_union silently drops area when
+    // input shells are CW (verified: square+rect union = 0.84 CW vs 1.80 CCW).
+    // Per-polygon make_valid usually normalizes before calling us, but direct
+    // callers (XML fixtures, tests) may not.
+    let shells: Vec<Polygon<f64>> = shells
+        .into_iter()
+        .map(|mut p| {
+            if p.exterior().0.len() >= 4
+                && !crate::util::robust_is_ccw(&p.exterior().0)
+            {
+                p.exterior_mut(|r| r.make_ccw_winding());
+            }
+            for i in 0..p.interiors().len() {
+                let hole = p.interiors()[i].clone();
+                if crate::util::robust_is_ccw(&hole.0) {
+                    p.interiors_mut(|rings| rings[i].make_cw_winding());
+                }
+            }
+            p
+        })
+        .collect();
     if shells.len() == 1 {
+        return MultiPolygon::new(shells);
+    }
+    // Cancel identical shells pairwise: hole==shell (or duplicate MP
+    // components) produce two shells with the same coordinate set — geo's
+    // union used to cancel them via opposite winding, but after winding
+    // normalization both are CCW and the union keeps the full area (wrong:
+    // GEOS/JTS return empty for hole==shell). Remove the pair entirely.
+    let shells = cancel_identical_shells(shells);
+    if shells.len() <= 1 {
         return MultiPolygon::new(shells);
     }
     // Fast path: if bboxes are disjoint, no nesting possible
@@ -36,19 +66,14 @@ pub(crate) fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
         for i in 0..n {
             let ext_i = &with_area[i].0.exterior().0;
             if ext_i.len() < 4 { continue; }
-            // Multi-candidate probe: first vertex + first edge midpoint.
-            // A single point (e.g. centroid of first triangle) can fall OUTSIDE
-            // the shell when the shell overlaps another component — that misses
-            // containment and keeps overlapping pieces that union into an SI ring.
-            // First vertex alone also fails when it sits exactly on a boundary.
-            let pt_candidates = [ext_i[0], Coord {
-                x: (ext_i[0].x + ext_i[1].x) * 0.5,
-                y: (ext_i[0].y + ext_i[1].y) * 0.5,
-            }];
+            // Full-containment check: EVERY vertex of shell i must be strictly
+            // inside shell j (exclusive, holes excluded). A single probe point
+            // (or even two) misclassifies PARTIAL overlaps as nesting — e.g.
+            // rect (0.8 0.1, 2 0.1, ...) overlapping square (0 0, 1 1): its
+            // first vertex is inside the square, but the shell extends to x=2.
+            // GEOS's even-parent filter only drops fully-contained shells.
             for j in 0..i {
-                // Full polygon containment (exterior AND not in any hole of j).
-                // Exterior-only checks drop islands sitting inside a hole of j.
-                if pt_candidates.iter().any(|&pt| point_in_polygon_exclusive(pt, &with_area[j].0)) {
+                if ring_fully_inside(ext_i, &with_area[j].0) {
                     parent_count[i] += 1;
                 }
             }
@@ -73,6 +98,61 @@ pub(crate) fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
     // Union remaining (possibly overlapping) shells
     let mp = MultiPolygon::new(kept);
     geo::algorithm::bool_ops::unary_union(&mp)
+}
+
+/// True if every vertex of `ring` lies strictly inside `poly` (exterior
+/// exclusive, not inside any hole of `poly`). Used by the even-parent filter:
+/// a shell is only "nested" when fully contained — partial overlaps must be
+/// kept so unary_union can merge them.
+fn ring_fully_inside(ring: &[Coord<f64>], poly: &Polygon<f64>) -> bool {
+    if ring.len() < 4 {
+        return false;
+    }
+    for &pt in ring {
+        if !point_in_polygon_exclusive(pt, poly) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Remove shells that appear more than once with the same coordinate set
+/// (as unordered sets — winding/reversal/rotation-insensitive). Duplicate
+/// shells cancel: hole==shell must yield empty, duplicate MP components
+/// must not become DuplicatedRings.
+fn cancel_identical_shells(shells: Vec<Polygon<f64>>) -> Vec<Polygon<f64>> {
+    let mut fingerprints: Vec<(Vec<(u64, u64)>, Polygon<f64>)> = shells
+        .into_iter()
+        .map(|p| {
+            let mut pts: Vec<(u64, u64)> = p
+                .exterior()
+                .0
+                .iter()
+                .map(|c| (c.x.to_bits(), c.y.to_bits()))
+                .collect();
+            if pts.first() == pts.last() {
+                pts.pop();
+            }
+            pts.sort_unstable();
+            (pts, p)
+        })
+        .collect();
+    let mut i = 0;
+    while i < fingerprints.len() {
+        let mut j = i + 1;
+        while j < fingerprints.len() {
+            if fingerprints[i].0 == fingerprints[j].0 {
+                // Pair cancels — remove both
+                fingerprints.remove(j);
+                fingerprints.remove(i);
+                i = i.saturating_sub(1);
+                break;
+            }
+            j += 1;
+        }
+        i += 1;
+    }
+    fingerprints.into_iter().map(|(_, p)| p).collect()
 }
 
 fn shells_are_disjoint(shells: &[Polygon<f64>]) -> bool {
