@@ -303,10 +303,9 @@ fn run_validity_test(
             ValidityOutcome::Fail
         }
     } else {
-        // GEOS says invalid, we accept: a real validator gap. The one
-        // known case is a ring self-touch at a vertex (vertex-on-edge,
-        // T-junction) which our ring check misses - see
-        // KNOWN_VALIDATOR_GAP_BASELINE.
+        // GEOS says invalid, we accept: a real validator gap. Now zero -
+        // the ring vertex-on-edge T-junction (Test 22) is caught by
+        // edges_vertex_on_edge in the ring self-intersection predicate.
         ValidityOutcome::KnownValidatorGap
     }
 }
@@ -905,13 +904,11 @@ fn geos_xml_suite() {
 }
 
 /// Baseline for KNOWN validator gaps: inputs GEOS deems INVALID that our
-/// validator accepts (we are too lenient). Measured 2026-08-01: exactly one
-/// case - TestValid2 "Test 22", a ring whose vertex lies on a non-adjacent
-/// edge (T-junction self-touch): POLYGON((110 140, 110 50, 60 50, 60 90,
-/// 160 190, 20 110, 20 20, 200 20, 110 140)). GEOS isValid=false; our ring
-/// check only detects proper crossings and collinear overlap, missing the
-/// vertex-on-edge touch. The fix belongs in the ring self-intersection
-/// predicate (separate from edges_intersect_general, which is shared with
-/// hole-shell checks where single-vertex touches are VALID per GEOS). If
-/// this count grows, triage before accepting.
-const KNOWN_VALIDATOR_GAP_BASELINE: usize = 1;
+/// validator accepts (we are too lenient). Was 1 (TestValid2 "Test 22", a
+/// ring whose vertex lies on a non-adjacent edge - T-junction self-touch:
+/// POLYGON((110 140, 110 50, 60 50, 60 90, 160 190, 20 110, 20 20, 200 20,
+/// 110 140))) until the ring self-intersection predicate gained the
+/// vertex-on-edge check (edges_vertex_on_edge, same-ring pairs only -
+/// cross-ring touches like hole-on-shell stay VALID per GEOS). 2026-08-01:
+/// fixed, baseline now 0. If this count grows, triage before accepting.
+const KNOWN_VALIDATOR_GAP_BASELINE: usize = 0;

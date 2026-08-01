@@ -29,7 +29,7 @@ fn edge_envelope(coords: &[Coord<f64>], i: usize) -> AABB<[f64; 2]> {
 
 /// PROPER self-crossing detection over a whole polygon (exterior + holes)
 /// using an R-tree over edge bounding boxes. Interior-interior crossings
-/// only — shared endpoints (hole touching shell at a vertex, which GEOS
+/// only - shared endpoints (hole touching shell at a vertex, which GEOS
 /// makeValid legitimately emits) do NOT count.
 ///
 /// This is the sweep variant of `has_proper_self_crossing`: O(n log n)
@@ -84,6 +84,19 @@ pub(crate) fn has_proper_self_crossing_sweep(
                     );
                 }
                 std::ops::ControlFlow::Break(())
+            } else if ring_of_segment(i, ring_offsets) == ring_of_segment(j, ring_offsets)
+                && crate::validation::edges_vertex_on_edge(
+                    coords[i],
+                    coords[i + 1],
+                    coords[j],
+                    coords[j + 1],
+                )
+            {
+                // Same-ring vertex-on-edge self-touch (T-junction): GEOS
+                // rejects a ring vertex on a non-adjacent edge (Test 22).
+                // Cross-ring pairs stay untouched (hole vertex on shell
+                // edge is a VALID OGC touch).
+                std::ops::ControlFlow::Break(())
             } else {
                 std::ops::ControlFlow::Continue(())
             }
@@ -95,7 +108,7 @@ pub(crate) fn has_proper_self_crossing_sweep(
     false
 }
 
-/// True if segment index `s` is a PHANTOM — the last index before a ring
+/// True if segment index `s` is a PHANTOM - the last index before a ring
 /// boundary, which spans (closure vertex of ring r) → (first vertex of ring
 /// r+1). That line does not exist in the geometry (the flat array just
 /// concatenates rings) and must never be tested. Note: the closure vertex of
@@ -103,6 +116,18 @@ pub(crate) fn has_proper_self_crossing_sweep(
 /// so no phantom exists after the last ring.
 fn is_phantom_segment(s: usize, ring_offsets: &[usize]) -> bool {
     ring_offsets.iter().skip(1).any(|&off| s + 1 == off)
+}
+
+/// Ring index (0 = exterior) of segment `s` in the flat coord slice.
+fn ring_of_segment(s: usize, ring_offsets: &[usize]) -> usize {
+    let mut r = 0;
+    for (k, &off) in ring_offsets.iter().enumerate() {
+        if off > s {
+            break;
+        }
+        r = k;
+    }
+    r
 }
 
 /// True if segment indices `i` and `j` are adjacent within the SAME ring
@@ -144,7 +169,7 @@ fn segments_adjacent_in_ring(i: usize, j: usize, ring_offsets: &[usize]) -> bool
 /// overlap. Only checks each pair once (j > i). Early-exits on first intersection.
 ///
 /// The 2D envelope prunes on both x *and* y, which is strictly more selective
-/// than a 1D interval tree — especially for radial geometries like star-bursts
+/// than a 1D interval tree - especially for radial geometries like star-bursts
 /// where edges in different quadrants have disjoint y-ranges.
 pub(crate) fn has_self_intersections(coords: &[Coord<f64>], eps: f64) -> bool {
     let n = coords.len();
@@ -209,7 +234,7 @@ pub(crate) fn has_self_intersections(coords: &[Coord<f64>], eps: f64) -> bool {
 /// Returns `(edge_i, edge_j, intersection_point)` with `i < j`.
 ///
 /// This is the early-exit variant of `has_self_intersections` that also
-/// returns the intersection geometry — used by the ATR fast-path ring
+/// returns the intersection geometry - used by the ATR fast-path ring
 /// splitter.  O(n log n) average, exits after the first crossing found.
 pub(crate) fn find_first_intersection(
     coords: &[Coord<f64>],
