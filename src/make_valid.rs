@@ -9,8 +9,8 @@
 //! - **GeometryCollection**: Recursive repair of children
 //!
 //! The main entry points are:
-//! - [`MakeValid::make_valid`] — repair with default config
-//! - [`MakeValid::make_valid_with_config`] — repair with custom config
+//! - [`MakeValid::make_valid`] - repair with default config
+//! - [`MakeValid::make_valid_with_config`] - repair with custom config
 use geo::{
     Coord, CoordNum, GeoFloat, Geometry, GeometryCollection, Line, LineString, LinesIter,
     MultiLineString, MultiPoint, MultiPolygon, Point, Polygon, Rect, Triangle, Winding,
@@ -255,7 +255,7 @@ impl<T: GeoFloat> MakeValid for Rect<T> {
 }
 
 // ---------------------------------------------------------------------------
-// Triangle — concrete f64 when polygon features available
+// Triangle - concrete f64 when polygon features available
 // ---------------------------------------------------------------------------
 
 #[cfg(any(feature = "arrange", feature = "structure"))]
@@ -313,7 +313,7 @@ impl<T: GeoFloat> MakeValid for Triangle<T> {
 }
 
 // ---------------------------------------------------------------------------
-// Polygon — concrete f64 impl
+// Polygon - concrete f64 impl
 // ---------------------------------------------------------------------------
 
 #[cfg(any(feature = "arrange", feature = "structure"))]
@@ -322,7 +322,7 @@ impl MakeValid for Polygon<f64> {
 
     fn make_valid_with_config(&self, config: &MakeValidConfig) -> Geometry<f64> {
         // Fuse the NaN scan into the collapse-check loop to avoid a separate pass.
-        // The collapse check already iterates all coords — piggyback the is_finite
+        // The collapse check already iterates all coords - piggyback the is_finite
         // check there.  make_valid_clean handles the merged logic.
         if !config.keep_collapsed && self.exterior().0.len() >= 4 {
             let coords = &self.exterior().0;
@@ -345,7 +345,7 @@ impl MakeValid for Polygon<f64> {
                 return empty_geom();
             }
             if !has_nan {
-                // Also check interior rings — exterior might be clean but holes can have NaNs
+                // Also check interior rings - exterior might be clean but holes can have NaNs
                 if !self.interiors().is_empty() {
                     for ring in self.interiors().iter() {
                         if ring.0.iter().any(|c| !c.x.is_finite() || !c.y.is_finite()) {
@@ -474,7 +474,7 @@ fn make_valid_impl(
             PolyMethod::Auto => {
                 if let Some(r) = structure_fix(poly, config) {
                     // The structure path emits GEOS walker winding (CW shells,
-                    // CCW holes — GEOS polygonizer convention). OGC validity
+                    // CCW holes - GEOS polygonizer convention). OGC validity
                     // requires CCW shells; normalize before the gate.
                     let r_norm = enforce_ogc_winding(r);
                     #[cfg(any(test, debug_assertions))]
@@ -629,7 +629,7 @@ fn strip_degenerate(g: Geometry<f64>) -> Geometry<f64> {
                 // Area degeneracy: shoelace rounding noise is bounded by
                 // ~n * eps * M² where M = max coordinate MAGNITUDE (not bbox
                 // width!). A ring whose computed area is below that bound is
-                // collinear (or sub-ULP) in exact arithmetic — winding is
+                // collinear (or sub-ULP) in exact arithmetic - winding is
                 // meaningless → demote to LineString.
                 // Absolute threshold (1e-12) misses collinear rings at large
                 // coordinate magnitude (base=3.5e9 → noise ~2e3).
@@ -639,7 +639,7 @@ fn strip_degenerate(g: Geometry<f64>) -> Geometry<f64> {
                 let bbox_ok = (max_x - min_x).abs() >= f64::EPSILON * v_scale
                     && (max_y - min_y).abs() >= f64::EPSILON * v_scale;
                 if area_ok && bbox_ok && !has_nan {
-                    // Non-degenerate polygon — return as-is after hole cleanup
+                    // Non-degenerate polygon - return as-is after hole cleanup
                     let holes: Vec<LineString<f64>> = p.interiors().iter()
                         .filter(|ring| {
                             ring.0.len() >= 4
@@ -728,7 +728,7 @@ fn strip_degenerate(g: Geometry<f64>) -> Geometry<f64> {
                                     Geometry::MultiLineString(MultiLineString::new(boundary_lines))
                                 }
                             }
-                            // Keep MultiPolygon type even for a single component — Geometry
+                            // Keep MultiPolygon type even for a single component - Geometry
                             // dispatch runs strip_degenerate after MultiPolygon::make_valid.
                             (1, true) => Geometry::MultiPolygon(MultiPolygon::new(valid_polys)),
                             (1, false) => {
@@ -828,7 +828,7 @@ impl MakeValid for MultiPolygon<f64> {
                     };
                 }
         let mp = filtered;
-                // Check if shells have overlapping bboxes — if not, unary_union is overkill
+                // Check if shells have overlapping bboxes - if not, unary_union is overkill
                 let shells_overlap = shells_have_overlapping_bboxes(&mp);
                 let result = if !shells_overlap {
                     enforce_ogc_winding(Geometry::MultiPolygon(mp))
@@ -1051,7 +1051,7 @@ fn build_area_from_polygon(poly: &Polygon<f64>) -> Option<Geometry<f64>> {
 }
 
 /// Check if bounding boxes of any two shells in a MultiPolygon overlap.
-/// Used as a cheap pre-filter — if bboxes don't overlap, there's
+/// Used as a cheap pre-filter - if bboxes don't overlap, there's
 /// no chance of shell overlap, so we can safely skip the expensive union.
 #[cfg(any(feature = "arrange", feature = "structure"))]
 fn shells_have_overlapping_bboxes(mp: &MultiPolygon<f64>) -> bool {
@@ -1171,7 +1171,7 @@ pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
         if ext_i.len() < 4 { keep[i] = false; continue; }
         // Interior probes: first vertex, first-edge midpoint nudged toward
         // the interior, and a mid-edge probe. The vertex MEAN is NOT a safe
-        // candidate for concave faces (can land outside, inside a neighbor —
+        // candidate for concave faces (can land outside, inside a neighbor -
         // false "nested" flag). Edge-midpoint probes are always interior.
         let (v0, v1) = (ext_i[0], ext_i[1]);
         let edge_mid = Coord {
@@ -1203,8 +1203,8 @@ pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
             // Hole-aware nesting: a component is only nested when it lies in
             // another component's FILL (exterior minus holes). An island
             // inside another component's HOLE is positive space and must be
-            // kept — checking only the exterior ring drops it (measured:
-            // square-with-hole ∪ island → island 64 lost; GEOS keeps it).
+            // kept - checking only the exterior ring drops it (measured:
+            // square-with-hole + island → island 64 lost; GEOS keeps it).
             pt_candidates.iter().any(|&pt| {
                 if !point_in_ring_exclusive(pt, ext_j) { return false; }
                 // pt inside exterior: false if it lies in any hole of p_j
@@ -1213,9 +1213,10 @@ pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
         });
         if is_nested { keep[i] = false; }
     }
-    let kept: Vec<Polygon<f64>> = with_area.into_iter()
+    let kept: Vec<Polygon<f64>> = with_area
+        .iter()
         .enumerate()
-        .filter_map(|(i, (p, _))| if keep[i] { Some(p) } else { None })
+        .filter_map(|(i, (p, _))| if keep[i] { Some(p.clone()) } else { None })
         .collect();
     #[cfg(any(test, debug_assertions))]
     if std::env::var("DIAG_DN").is_ok() {
@@ -1229,7 +1230,7 @@ pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
         return enforce_ogc_winding(Geometry::Polygon(kept.into_iter().next().unwrap()));
     }
     let mp_kept = MultiPolygon::new(kept);
-    // If the components are already valid (disjoint or vertex-touching only —
+    // If the components are already valid (disjoint or vertex-touching only -
     // the normal case for BuildArea/symdiff output), return them as-is. The
     // polygonizer fallback is ONLY for genuinely invalid MultiPolygons
     // (edge-sharing components / nested holes); re-polygonizing valid shells
@@ -1253,7 +1254,7 @@ pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
             return strip_degenerate(g);
         }
     }
-    // Polygonizer failed — filter out components with PinchPoint,
+    // Polygonizer failed - filter out components with PinchPoint,
     // RepeatedPoint, or other remaining errors.
     let valid: Vec<Polygon<f64>> = mp_kept.0.into_iter().filter(|p| {
         let v = crate::validation::GeoValidation::validate(p);

@@ -4,14 +4,68 @@
 //! and then call `common::*` or `use common::*`.
 
 use geo::{Coord, Geometry, LineString, Polygon};
-use geo_repair::validation::GeoValidation;
+use geo_repair::validation::{GeoValidation, GeometryValidationError};
 use geo_repair::{MakeValidConfig, PolyMethod};
 use wkt::TryFromWkt;
 
+/// GEOS IsValidOp parity for the line family (verified against the GEOS XML
+/// corpus and geosop): a LineString is valid iff coordinates are finite and
+/// the component has >= 2 DISTINCT points. Simplicity (NotSimple) does NOT
+/// invalidate a line - OGC/PostGIS explicitly allow non-simple open curves
+/// as valid. Zero-length lines (1 distinct point) are invalid.
+pub fn line_family_geos_valid(g: &Geometry<f64>) -> bool {
+    fn ls_ok(ls: &LineString<f64>) -> bool {
+        if ls.0.iter().any(|c| !c.x.is_finite() || !c.y.is_finite()) {
+            return false;
+        }
+        let mut prev: Option<Coord<f64>> = None;
+        let mut distinct = 0usize;
+        for &c in ls.0.iter() {
+            if prev != Some(c) {
+                distinct += 1;
+                prev = Some(c);
+            }
+        }
+        distinct >= 2
+    }
+    match g {
+        Geometry::Line(l) => {
+            l.start.x.is_finite()
+                && l.start.y.is_finite()
+                && l.end.x.is_finite()
+                && l.end.y.is_finite()
+                && l.start != l.end
+        }
+        Geometry::LineString(ls) => ls_ok(ls),
+        Geometry::MultiLineString(mls) => mls.0.iter().all(ls_ok),
+        _ => true,
+    }
+}
+
 /// Assert the geometry is OGC-valid (using our Shewchuk-based validator).
+/// For the line family the OGC/GEOS rule is applied: NotSimple does not
+/// invalidate (our validator is stricter and flags it).
 pub fn assert_valid(g: &Geometry<f64>) {
     let r = g.validate();
+    if matches!(
+        g,
+        Geometry::Line(_) | Geometry::LineString(_) | Geometry::MultiLineString(_)
+    ) {
+        let ok = line_family_geos_valid(g);
+        assert!(ok, "expected valid, got: {:?}", r.errors);
+        return;
+    }
     assert!(r.valid, "expected valid, got: {:?}", r.errors);
+}
+
+/// True if the only validator errors are NotSimple on line-family output.
+#[allow(dead_code)]
+pub fn non_simple_only(g: &Geometry<f64>) -> bool {
+    let r = g.validate();
+    !r.errors.is_empty()
+        && r.errors
+            .iter()
+            .all(|e| matches!(e, GeometryValidationError::NotSimple))
 }
 
 /// Assert the geometry is OGC-valid AND all polygon rings

@@ -1,6 +1,11 @@
 .history/
 target/
-benches/real_world/
+benches/real_world/*
+!benches/real_world/alaska.shp
+!benches/real_world/alaska.dbf
+!benches/real_world/alaska.shx
+!benches/real_world/alaska.prj
+!benches/real_world/alaska.bin
 *.py
 *.py[cod]
 patches/

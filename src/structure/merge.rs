@@ -1,11 +1,11 @@
-use geo::{Area, Coord, MultiPolygon, Polygon, Winding};
+use geo::{Area, Coord, LineString, MultiPolygon, Polygon, Winding};
 use log::warn;
 
 /// Merge overlapping shells using even-parent filter to prevent NestedHoles.
 ///
 /// When shells are fully nested (one inside another), `unary_union` produces
 /// MultiPolygon components where one has a hole that exactly matches the next
-/// component — this is the NestedHoles validity error.
+/// component - this is the NestedHoles validity error.
 ///
 /// The BuildArea even-parent approach: sort shells by area, count how many
 /// larger shells contain each shell, keep only shells with even parent count.
@@ -40,7 +40,7 @@ pub fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
         return MultiPolygon::new(shells);
     }
     // Cancel identical shells pairwise: hole==shell (or duplicate MP
-    // components) produce two shells with the same coordinate set — geo's
+    // components) produce two shells with the same coordinate set - geo's
     // union used to cancel them via opposite winding, but after winding
     // normalization both are CCW and the union keeps the full area (wrong:
     // GEOS/JTS return empty for hole==shell). Remove the pair entirely.
@@ -63,28 +63,82 @@ pub fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
     with_area.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
     let n = with_area.len();
-        let mut parent_count: Vec<usize> = vec![0; n];
-        for i in 0..n {
-            let ext_i = &with_area[i].0.exterior().0;
-            if ext_i.len() < 4 { continue; }
-            // Full-containment check: EVERY vertex of shell i must be strictly
-            // inside shell j (exclusive, holes excluded). A single probe point
-            // (or even two) misclassifies PARTIAL overlaps as nesting — e.g.
-            // rect (0.8 0.1, 2 0.1, ...) overlapping square (0 0, 1 1): its
-            // first vertex is inside the square, but the shell extends to x=2.
-            // GEOS's even-parent filter only drops fully-contained shells.
-            for j in 0..i {
-                if ring_fully_inside(ext_i, &with_area[j].0) {
-                    parent_count[i] += 1;
-                }
+    // Even-odd (GEOS BuildArea semantics): parent_count[i] = how many LARGER
+    // shells fully contain shell i. Even count = fill (kept); odd count = the
+    // region is covered twice (nested-in-fill) → GEOS subtracts it as a HOLE
+    // of the immediate parent (smallest containing shell), NOT dropped -
+    // dropping loses the covered area (measured: nested squares → 144, not
+    // 400). parent[i] = immediate parent (the last containing j in area-desc
+    // order = smallest containing shell).
+    let mut parent_count: Vec<usize> = vec![0; n];
+    let mut parent: Vec<Option<usize>> = vec![None; n];
+    for i in 0..n {
+        let ext_i = &with_area[i].0.exterior().0;
+        if ext_i.len() < 4 { continue; }
+        // Full-containment check: EVERY vertex of shell i must be strictly
+        // inside shell j (exclusive, holes excluded). A single probe point
+        // (or even two) misclassifies PARTIAL overlaps as nesting - e.g.
+        // rect (0.8 0.1, 2 0.1, ...) overlapping square (0 0, 1 1): its
+        // first vertex is inside the square, but the shell extends to x=2.
+        // GEOS's even-parent filter only drops fully-contained shells.
+        for j in 0..i {
+            if ring_fully_inside(ext_i, &with_area[j].0) {
+                parent_count[i] += 1;
+                parent[i] = Some(j);
             }
         }
+    }
 
     let kept: Vec<Polygon<f64>> = with_area
-        .into_iter()
+        .iter()
         .enumerate()
         .filter_map(|(i, (poly, _))| {
-            if parent_count[i] % 2 == 0 { Some(poly) } else { None }
+            if parent_count[i] % 2 != 0 {
+                return None; // odd → becomes a hole of its parent
+            }
+            let mut poly = poly.clone();
+            // Ring-set fingerprint of the parent's existing holes, to avoid
+            // adding a hole ring that is ALREADY present (role-swap paths
+            // like hole_larger_than_shell arrive with the shell-as-hole
+            // already in place - adding it again yields DuplicatedRings).
+            let hole_fps: Vec<Vec<(u64, u64)>> = poly
+                .interiors()
+                .iter()
+                .map(|h| ring_fingerprint(&h.0))
+                .collect();
+            // Only convert when the parent will not be merged with any other
+            // KEPT shell: the conversion happens BEFORE the unary_union, and
+            // unioning the parent (with its new hole) against an overlapping
+            // shell can punch the hole through the merged boundary
+            // (SelfIntersection, measured on many-small-holes fuzz seeds).
+            let parent_bbox = crate::simd::aabb_minmax_simd(&poly.exterior().0);
+            let safe_to_convert = with_area
+                .iter()
+                .enumerate()
+                .filter(|(k, _)| *k != i && parent_count[*k] % 2 == 0)
+                .all(|(k, _)| {
+                    let (m2x, m2x2, m2y, m2y2) = crate::simd::aabb_minmax_simd(&with_area[k].0.exterior().0);
+                    let (mnx, mxx, mny, mxy) = parent_bbox;
+                    !(mnx <= m2x2 && mxx >= m2x && mny <= m2y2 && mxy >= m2y)
+                });
+            for k in 0..n {
+                if k == i || parent_count[k] % 2 == 0 {
+                    continue;
+                }
+                if safe_to_convert && parent[k] == Some(i) {
+                    let fp = ring_fingerprint(&with_area[k].0.exterior().0);
+                    if !hole_fps.contains(&fp) {
+                        // OGC: holes are CW. The converted ring came from a
+                        // CCW-normalized exterior; flip it or the output
+                        // trips WrongOrientation (our validator) and geo's
+                        // ring-containment check.
+                        let mut hole = LineString::new(with_area[k].0.exterior().0.clone());
+                        hole.make_cw_winding();
+                        poly.interiors_push(hole);
+                    }
+                }
+            }
+            Some(poly)
         })
         .collect();
 
@@ -101,7 +155,7 @@ pub fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
     // `is_fill_top` assertion on degenerate shell sets (measured seed:
     // shell [(54.36,0),(0,0),(18.55,82.91),(-48.92,33.44)] + 6-vert hole).
     // A panic inside a rayon batch kills the whole run, so catch it and
-    // return the even-parent-filtered shells without the union — the Auto
+    // return the even-parent-filtered shells without the union - the Auto
     // validator then routes to arrange/reduce; Structure only promises no
     // panic on its output.
     //
@@ -111,7 +165,7 @@ pub fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
     // lost; GEOS returns MULTIPOLYGON(square-with-hole, island) = 400-64).
     // Discriminator: when the union shrinks total area AND the
     // even-parent-filtered shells are already valid (winding-insensitive
-    // geo validation — island-in-hole is valid, nested-in-fill is not),
+    // geo validation - island-in-hole is valid, nested-in-fill is not),
     // the union was unnecessary or wrong: keep the filtered shells.
     // Legit nesting merges (deep nesting: l2 absorbed into l0) shrink the
     // pre-union MP's summed area too, but the pre-union MP is INVALID there
@@ -128,7 +182,7 @@ pub fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
         if after >= before - eps {
             Some(u)
         } else if geo::algorithm::Validation::is_valid(&mp) {
-            // Union dropped area but filtered shells are valid — keep them.
+            // Union dropped area but filtered shells are valid - keep them.
             None
         } else {
             Some(u)
@@ -139,7 +193,7 @@ pub fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
 
 /// True if every vertex of `ring` lies strictly inside `poly` (exterior
 /// exclusive, not inside any hole of `poly`). Used by the even-parent filter:
-/// a shell is only "nested" when fully contained — partial overlaps must be
+/// a shell is only "nested" when fully contained - partial overlaps must be
 /// kept so unary_union can merge them.
 fn ring_fully_inside(ring: &[Coord<f64>], poly: &Polygon<f64>) -> bool {
     if ring.len() < 4 {
@@ -154,7 +208,7 @@ fn ring_fully_inside(ring: &[Coord<f64>], poly: &Polygon<f64>) -> bool {
 }
 
 /// Remove shells that appear more than once with the same coordinate set
-/// (as unordered sets — winding/reversal/rotation-insensitive). Duplicate
+/// (as unordered sets - winding/reversal/rotation-insensitive). Duplicate
 /// shells cancel: hole==shell must yield empty, duplicate MP components
 /// must not become DuplicatedRings.
 fn cancel_identical_shells(shells: Vec<Polygon<f64>>) -> Vec<Polygon<f64>> {
@@ -179,7 +233,7 @@ fn cancel_identical_shells(shells: Vec<Polygon<f64>>) -> Vec<Polygon<f64>> {
         let mut j = i + 1;
         while j < fingerprints.len() {
             if fingerprints[i].0 == fingerprints[j].0 {
-                // Pair cancels — remove both
+                // Pair cancels - remove both
                 fingerprints.remove(j);
                 fingerprints.remove(i);
                 i = i.saturating_sub(1);
@@ -206,6 +260,19 @@ fn shells_are_disjoint(shells: &[Polygon<f64>]) -> bool {
         }
     }
     true
+}
+
+/// Winding/rotation/closure-insensitive ring fingerprint (u64 bits).
+fn ring_fingerprint(ring: &[Coord<f64>]) -> Vec<(u64, u64)> {
+    let mut pts: Vec<(u64, u64)> = ring
+        .iter()
+        .map(|c| (c.x.to_bits(), c.y.to_bits()))
+        .collect();
+    if pts.first() == pts.last() {
+        pts.pop();
+    }
+    pts.sort_unstable();
+    pts
 }
 
 fn shoelace_abs_sum(coords: &[Coord<f64>]) -> f64 {
@@ -304,7 +371,7 @@ mod tests {
 
     #[test]
     fn test_nested_removes_inner() {
-        // Outer fully contains inner → even-parent drops inner
+        // Outer fully contains inner → even-odd: inner becomes a hole of outer
         let outer = Polygon::new(
             LineString::new(vec![Coord { x: 0., y: 0. }, Coord { x: 10., y: 0. },
                 Coord { x: 10., y: 10. }, Coord { x: 0., y: 10. }, Coord { x: 0., y: 0. }]),

@@ -151,12 +151,12 @@ pub trait GeoValidation {
     /// The scalar coordinate type (e.g. `f64`, `f32`).
     type Scalar: GeoFloat;
 
-    /// Quick validity check — returns `true` if the geometry passes all OGC rules.
+    /// Quick validity check - returns `true` if the geometry passes all OGC rules.
     fn is_valid(&self) -> bool {
         self.validate().valid
     }
 
-    /// Full validation — returns a [`ValidationResult`] with all violations found.
+    /// Full validation - returns a [`ValidationResult`] with all violations found.
     fn validate(&self) -> ValidationResult;
 
     /// Human-readable validity reason (like GEOS `isValidReason`).
@@ -223,7 +223,7 @@ pub fn check_ring_validity(
     // Per-axis degeneracy: an axis is collapsed only if its extent is below
     // EPSILON × that AXIS'S OWN max magnitude. Comparing against the
     // cross-axis scale wrongly flags thin-but-real triangles (e.g. base
-    // 8.26e7, height 8.4e-9 — representable, GEOS-valid; measured: seed
+    // 8.26e7, height 8.4e-9 - representable, GEOS-valid; measured: seed
     // 00c11200 sibling → DegenerateExterior on a triangle GEOS validates).
     let x_scale = max_x.abs().max(min_x.abs()).max(1.0);
     let y_scale = max_y.abs().max(min_y.abs()).max(1.0);
@@ -375,7 +375,7 @@ pub(crate) fn edges_intersect_general(
     // signs on mixed-magnitude inputs (e.g. 1e-10-scale edges against an
     // 8.4e7-scale ring: fast orient2d gave -6.25e-2 / +6.25e-2 for two
     // genuinely non-crossing segments, producing a false SelfIntersection
-    // that GEOS does not report — measured: mixed4 fuzz seed). Shewchuk's
+    // that GEOS does not report - measured: mixed4 fuzz seed). Shewchuk's
     // adaptive version returns the exact sign for the same cost when the
     // f64 computation is exact (the common case).
     let o1 = crate::orient::orient2d(a1, a2, b1);
@@ -489,7 +489,7 @@ pub(crate) fn check_rings_intersect(ring1: &[Coord<f64>], ring2: &[Coord<f64>], 
         return false;
     }
 
-    // Brute-force when both rings are small — faster than building a tree.
+    // Brute-force when both rings are small - faster than building a tree.
     if n1.max(n2) <= 64 {
         for i in 0..n1 {
             let a1 = ring1[i];
@@ -866,7 +866,7 @@ impl GeoValidation for Point<f64> {
     type Scalar = f64;
 
     fn validate(&self) -> ValidationResult {
-        // Point(NaN, NaN) is the geo representation of POINT EMPTY — valid OGC
+        // Point(NaN, NaN) is the geo representation of POINT EMPTY - valid OGC
         ValidationResult::valid()
     }
 }
@@ -950,11 +950,22 @@ impl GeoValidation for LineString<f64> {
 }
 
 /// Check if a non-closed LineString has self-intersecting segments.
+///
+/// GEOS isSimple semantics (verified against geosop on the GEOS XML corpus):
+/// a LineString is simple iff no two segments intersect except at shared
+/// endpoints. This includes:
+///   - proper crossings,
+///   - a vertex of one segment lying on another segment (vertex-on-edge,
+///     including vertex revisits between non-adjacent segments),
+///   - collinear overlap beyond a shared point (out-and-back backtracking).
+/// Adjacent segments may touch ONLY at their shared vertex; a closed line's
+/// first and last segments may touch ONLY at the closure vertex.
 pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool {
     let n = coords.len() - 1;
-    if n < 3 {
+    if n < 2 {
         return false;
     }
+    let closed = coords[0] == coords[n];
     let scale = {
         let mut min_x = f64::MAX;
         let mut max_x = f64::MIN;
@@ -970,15 +981,51 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
     };
     let eps = 1e-12 * scale;
 
-    // Brute force for small inputs
-    if n <= 64 {
+    // Adjacent pairs (share a vertex): allowed to touch only at the shared
+    // vertex - collinear overlap beyond it (out-and-back) is non-simple.
+    for i in 0..n - 1 {
+        if segments_collinear_overlap(
+            coords[i],
+            coords[i + 1],
+            coords[i + 1],
+            coords[i + 2],
+            eps,
+        ) {
+            return true;
+        }
+    }
+    // Closed line: first and last segments may touch only at the closure vertex.
+    if closed
+        && segments_collinear_overlap(
+            coords[n - 1],
+            coords[n],
+            coords[0],
+            coords[1],
+            eps,
+        )
+    {
+        return true;
+    }
+
+    // Non-adjacent pairs: any intersection (crossing, vertex-on-edge,
+    // vertex revisit, collinear overlap) is non-simple.
+    let pair_intersects = |i: usize, j: usize| -> bool {
+        if closed && i == 0 && j == n - 1 {
+            return false; // closure pair handled above
+        }
+        segments_intersect_any(
+            coords[i],
+            coords[i + 1],
+            coords[j],
+            coords[j + 1],
+            eps,
+            true,
+        )
+    };
+    if n <= 128 {
         for i in 0..n {
-            let a1 = coords[i];
-            let a2 = coords[i + 1];
             for j in i + 2..n {
-                let b1 = coords[j];
-                let b2 = coords[j + 1];
-                if edges_intersect_general(a1, a2, b1, b2, eps) {
+                if pair_intersects(i, j) {
                     return true;
                 }
             }
@@ -1005,12 +1052,10 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
             let query = rstar::AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]);
             let found = tree.locate_in_envelope_intersecting_int(query, |c| {
                 let j = c.idx;
-                if j <= i + 1 {
+                if j <= i + 1 || (closed && i == 0 && j == n - 1) {
                     return std::ops::ControlFlow::<(), ()>::Continue(());
                 }
-                let b1 = coords[j];
-                let b2 = coords[j + 1];
-                if edges_intersect_general(a1, a2, b1, b2, eps) {
+                if segments_intersect_any(a1, a2, coords[j], coords[j + 1], eps, true) {
                     std::ops::ControlFlow::Break(())
                 } else {
                     std::ops::ControlFlow::<(), ()>::Continue(())
@@ -1025,18 +1070,103 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
     #[cfg(not(feature = "rstar"))]
     {
         for i in 0..n {
-            let a1 = coords[i];
-            let a2 = coords[i + 1];
             for j in i + 2..n {
-                let b1 = coords[j];
-                let b2 = coords[j + 1];
-                if edges_intersect_general(a1, a2, b1, b2, eps) {
+                if pair_intersects(i, j) {
                     return true;
                 }
             }
         }
         false
     }
+}
+
+/// Full segment-intersection predicate: proper crossing, collinear positive-
+/// length overlap, or a vertex of one segment lying on the other.
+/// `include_endpoint_share`: for a single line, a non-adjacent segment pair
+/// sharing an endpoint is a vertex revisit (non-simple); between MultiLine-
+/// String components, endpoint-to-endpoint touching is allowed (OGC Simple
+/// Features, verified vs geosop).
+fn segments_intersect_any(
+    a1: Coord<f64>,
+    a2: Coord<f64>,
+    b1: Coord<f64>,
+    b2: Coord<f64>,
+    eps: f64,
+    include_endpoint_share: bool,
+) -> bool {
+    let o1 = crate::orient::orient2d(a1, a2, b1);
+    let o2 = crate::orient::orient2d(a1, a2, b2);
+    let o3 = crate::orient::orient2d(b1, b2, a1);
+    let o4 = crate::orient::orient2d(b1, b2, a2);
+
+    if o1 * o2 < 0.0 && o3 * o4 < 0.0 {
+        return true;
+    }
+    if o1.abs() <= eps && o2.abs() <= eps {
+        return segments_collinear_overlap(a1, a2, b1, b2, eps);
+    }
+    // Vertex-on-segment.
+    let on_seg = |p: Coord<f64>, s1: Coord<f64>, s2: Coord<f64>| -> bool {
+        if !point_in_segment_bbox(p, s1, s2, eps) {
+            return false;
+        }
+        if include_endpoint_share {
+            true
+        } else {
+            // Cross-component: only STRICT interior contact is non-simple.
+            let d1 = (p.x - s1.x).abs().max((p.y - s1.y).abs());
+            let d2 = (p.x - s2.x).abs().max((p.y - s2.y).abs());
+            d1 > eps && d2 > eps
+        }
+    };
+    if o1.abs() <= eps && on_seg(b1, a1, a2) {
+        return true;
+    }
+    if o2.abs() <= eps && on_seg(b2, a1, a2) {
+        return true;
+    }
+    if o3.abs() <= eps && on_seg(a1, b1, b2) {
+        return true;
+    }
+    if o4.abs() <= eps && on_seg(a2, b1, b2) {
+        return true;
+    }
+    false
+}
+
+/// True if both segments are collinear and overlap over a positive-length
+/// interval (endpoint-only touching is NOT an overlap).
+fn segments_collinear_overlap(
+    a1: Coord<f64>,
+    a2: Coord<f64>,
+    b1: Coord<f64>,
+    b2: Coord<f64>,
+    eps: f64,
+) -> bool {
+    let o1 = crate::orient::orient2d(a1, a2, b1);
+    let o2 = crate::orient::orient2d(a1, a2, b2);
+    if o1.abs() > eps || o2.abs() > eps {
+        return false;
+    }
+    let dx = a2.x - a1.x;
+    let dy = a2.y - a1.y;
+    let len2 = dx * dx + dy * dy;
+    if len2 <= eps {
+        return false;
+    }
+    let t1 = ((b1.x - a1.x) * dx + (b1.y - a1.y) * dy) / len2;
+    let t2 = ((b2.x - a1.x) * dx + (b2.y - a1.y) * dy) / len2;
+    let lo = 0.0f64.max(t1.min(t2));
+    let hi = 1.0f64.min(t1.max(t2));
+    hi - lo > eps
+}
+
+/// Bbox containment with epsilon (endpoints included).
+fn point_in_segment_bbox(p: Coord<f64>, s1: Coord<f64>, s2: Coord<f64>, eps: f64) -> bool {
+    p.x >= s1.x.min(s2.x) - eps
+        && p.x <= s1.x.max(s2.x) + eps
+        && p.y >= s1.y.min(s2.y) - eps
+        && p.y <= s1.y.max(s2.y) + eps
 }
 
 /// Check whether two LineString components have any intersecting edges.
@@ -1051,6 +1181,40 @@ pub(crate) fn check_line_components_intersect(
         return false;
     }
 
+    // Shared-vertex contact between components. OGC/GEOS rule (verified vs
+    // geosop): an intersection point between two components is allowed ONLY
+    // when it lies on the BOUNDARY (an endpoint) of BOTH open components.
+    // A closed component has an empty boundary, so any shared vertex
+    // involving a closed component (or an interior vertex of either) is
+    // non-simple: MULTILINESTRING((0 0,1 1),(1 1,2 2)) = simple;
+    // MULTILINESTRING((0 0,1 0,1 1,0 0),(0 0,1 1)) = non-simple.
+    {
+        let open_ends = |ls: &[Coord<f64>]| -> (bool, Coord<f64>, Coord<f64>) {
+            let closed = ls.len() > 1 && ls[0] == ls[ls.len() - 1];
+            (closed, ls[0], ls[ls.len() - 1])
+        };
+        let (a_closed, a_first, a_last) = open_ends(ls1);
+        let (b_closed, b_first, b_last) = open_ends(ls2);
+        let a_boundary = |p: Coord<f64>| !a_closed && (p == a_first || p == a_last);
+        let b_boundary = |p: Coord<f64>| !b_closed && (p == b_first || p == b_last);
+        // Exact coordinate equality (to_bits) - the corpus uses exact
+        // coordinates; near-touches within eps still go through the segment
+        // sweep below (vertex-on-interior is always non-simple).
+        let mut b_verts: rustc_hash::FxHashSet<(u64, u64)> =
+            rustc_hash::FxHashSet::with_capacity_and_hasher(n2, Default::default());
+        for c in ls2 {
+            b_verts.insert((c.x.to_bits(), c.y.to_bits()));
+        }
+        for &p in ls1 {
+            if !b_verts.contains(&(p.x.to_bits(), p.y.to_bits())) {
+                continue;
+            }
+            if !(a_boundary(p) && b_boundary(p)) {
+                return true;
+            }
+        }
+    }
+
     // Brute force when both components are small
     if n1.max(n2) <= 64 {
         for i in 0..n1 - 1 {
@@ -1059,7 +1223,11 @@ pub(crate) fn check_line_components_intersect(
             for j in 0..n2 - 1 {
                 let b1 = ls2[j];
                 let b2 = ls2[j + 1];
-                if edges_intersect_general(a1, a2, b1, b2, eps) {
+                // Cross-component simplicity: interior contact (crossing,
+                // vertex-on-interior, collinear overlap) is non-simple;
+                // endpoint-to-endpoint touching between components is
+                // allowed (OGC Simple Features, verified vs geosop).
+                if segments_intersect_any(a1, a2, b1, b2, eps, false) {
                     return true;
                 }
             }
@@ -1090,7 +1258,7 @@ pub(crate) fn check_line_components_intersect(
             let found = tree.locate_in_envelope_intersecting_int(query, |c| {
                 let b1 = large[c.idx];
                 let b2 = large[c.idx + 1];
-                if edges_intersect_general(a1, a2, b1, b2, eps) {
+                if segments_intersect_any(a1, a2, b1, b2, eps, false) {
                     std::ops::ControlFlow::Break(())
                 } else {
                     std::ops::ControlFlow::<(), ()>::Continue(())
@@ -1224,7 +1392,7 @@ impl GeoValidation for Triangle<f64> {
 }
 
 // ---------------------------------------------------------------------------
-// Free functions — convenience wrappers around GeoValidation
+// Free functions - convenience wrappers around GeoValidation
 // ---------------------------------------------------------------------------
 
 /// Check whether a geometry is OGC-valid.

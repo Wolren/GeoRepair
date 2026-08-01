@@ -5,7 +5,7 @@
 //! To generate alaska.bin from alaska.shp:
 //!   python scripts/convert_shp_to_bin.py benches/real_world/alaska.shp benches/real_world/alaska.bin
 
-#![cfg(feature = "bench-geos")]
+#![cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
 
 use geo::{Geometry, Polygon};
 use geo_repair::io::{geo_area, load_bin, signed_area};
@@ -18,7 +18,7 @@ use wkt::ToWkt;
 #[test]
 fn alaska_all_polys_geos_valid_and_area_preserved() {
     let polys = load_bin("benches/real_world/alaska.bin")
-        .expect("alaska.bin not found — run: python scripts/convert_shp_to_bin.py benches/real_world/alaska.shp benches/real_world/alaska.bin");
+        .expect("alaska.bin not found - run: python scripts/convert_shp_to_bin.py benches/real_world/alaska.shp benches/real_world/alaska.bin");
     eprintln!("Total Alaska polys loaded: {}", polys.len());
 
     let cfg = MakeValidConfig {
