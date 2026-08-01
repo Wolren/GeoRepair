@@ -182,7 +182,7 @@ pub(crate) fn ring_has_non_finite(ring: &[Coord<f64>]) -> bool {
     ring.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
 }
 
-pub(crate) fn check_ring_validity(
+pub fn check_ring_validity(
     ring: &[Coord<f64>],
     is_exterior: bool,
 ) -> Vec<GeometryValidationError> {
@@ -371,12 +371,17 @@ pub(crate) fn edges_intersect_general(
     b2: Coord<f64>,
     eps: f64,
 ) -> bool {
-    // Fast f64 orient2d for validation. The repair pipeline uses Shewchuk
-    // for precision-critical intersection computation.
-    let o1 = crate::orient::orient2d_fast(a1, a2, b1);
-    let o2 = crate::orient::orient2d_fast(a1, a2, b2);
-    let o3 = crate::orient::orient2d_fast(b1, b2, a1);
-    let o4 = crate::orient::orient2d_fast(b1, b2, a2);
+    // Robust (Shewchuk adaptive) orient2d. The fast f64 predicate flips
+    // signs on mixed-magnitude inputs (e.g. 1e-10-scale edges against an
+    // 8.4e7-scale ring: fast orient2d gave -6.25e-2 / +6.25e-2 for two
+    // genuinely non-crossing segments, producing a false SelfIntersection
+    // that GEOS does not report — measured: mixed4 fuzz seed). Shewchuk's
+    // adaptive version returns the exact sign for the same cost when the
+    // f64 computation is exact (the common case).
+    let o1 = crate::orient::orient2d(a1, a2, b1);
+    let o2 = crate::orient::orient2d(a1, a2, b2);
+    let o3 = crate::orient::orient2d(b1, b2, a1);
+    let o4 = crate::orient::orient2d(b1, b2, a2);
 
     // Proper crossing
     if o1 * o2 < 0.0 && o3 * o4 < 0.0 {
