@@ -133,6 +133,7 @@ pub fn par_fix_multi_polygon(mp: &MultiPolygon<f64>, config: &MakeValidConfig) -
 /// Each polygon is fixed independently with no shared state — near-linear scaling.
 /// Returns the results in the same order as input.
 #[cfg(any(feature = "arrange", feature = "structure"))]
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn par_fix_polygon_batch(
     polys: &[&Polygon<f64>],
     config: &MakeValidConfig,
@@ -147,6 +148,7 @@ pub fn par_fix_polygon_batch(
 /// `chunk_size` polygons. Useful for streaming large datasets without loading
 /// everything into memory at once. Results preserve input order.
 #[cfg(any(feature = "arrange", feature = "structure"))]
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn par_fix_polygon_batch_chunked<I>(
     iter: I,
     chunk_size: usize,

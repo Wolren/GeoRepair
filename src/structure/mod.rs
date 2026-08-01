@@ -56,15 +56,15 @@ use crate::util;
 use log::warn;
 
 // ── Profiling counters (cumulative ns) ──
-pub(crate) static PROFILE_FP_NS: AtomicU64 = AtomicU64::new(0);
-pub(crate) static PROFILE_SR_NS: AtomicU64 = AtomicU64::new(0);
-pub(crate) static PROFILE_HR_NS: AtomicU64 = AtomicU64::new(0);
-pub(crate) static PROFILE_HN_NS: AtomicU64 = AtomicU64::new(0);
-pub(crate) static PROFILE_MG_NS: AtomicU64 = AtomicU64::new(0);
-pub(crate) static PROFILE_FSI_NS: AtomicU64 = AtomicU64::new(0);
-pub(crate) static PROFILE_CL_NS: AtomicU64 = AtomicU64::new(0);
-pub(crate) static PROFILE_NEST_NS: AtomicU64 = AtomicU64::new(0);
-pub(crate) static PROFILE_SUB_NS: AtomicU64 = AtomicU64::new(0);
+pub static PROFILE_FP_NS: AtomicU64 = AtomicU64::new(0);
+pub static PROFILE_SR_NS: AtomicU64 = AtomicU64::new(0);
+pub static PROFILE_HR_NS: AtomicU64 = AtomicU64::new(0);
+pub static PROFILE_HN_NS: AtomicU64 = AtomicU64::new(0);
+pub static PROFILE_MG_NS: AtomicU64 = AtomicU64::new(0);
+pub static PROFILE_FSI_NS: AtomicU64 = AtomicU64::new(0);
+pub static PROFILE_CL_NS: AtomicU64 = AtomicU64::new(0);
+pub static PROFILE_NEST_NS: AtomicU64 = AtomicU64::new(0);
+pub static PROFILE_SUB_NS: AtomicU64 = AtomicU64::new(0);
 
 pub fn reset_profile() {
     PROFILE_FP_NS.store(0, Ordering::Relaxed);
@@ -120,6 +120,7 @@ pub fn print_profile(n_polys: usize) {
     eprintln!("  total         {:>9.3}ms", ms(total_ns));
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geometry<f64>> {
     // Fast path: valid polygons can return immediately. Use a total-verts limit
     // to avoid the monotone-chain has_no_intersections cost on very large rings.
@@ -129,7 +130,6 @@ pub fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geom
         let total_verts: usize =
             poly.exterior().0.len() + poly.interiors().iter().map(|h| h.0.len()).sum::<usize>();
         if total_verts > 0
-            && total_verts <= core::FAST_PATH_MAX_VERTS
             && poly.exterior().0.len() >= 4
             && crate::arrange::poly_has_basic_form(poly)
             // Sub-ULP edge check: an edge shorter than EPSILON * bbox_scale
@@ -142,13 +142,29 @@ pub fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geom
             // Winding is then numerically ambiguous → WrongOrientation. The
             // fast path must not pass it through; full repair degrades it.
                     {
-            let lines: Vec<_> = poly.lines_iter().collect();
-            if !lines.is_empty()
-                && crate::arrange::prep::has_no_intersections(&lines)
-                && crate::arrange::holes_are_valid(poly)
-            {
-                PROFILE_FP_NS.fetch_add(_t_fp.elapsed().as_nanos() as u64, Ordering::Relaxed);
-                return Some(Geometry::Polygon(poly.clone()));
+            if total_verts <= core::FAST_PATH_MAX_VERTS {
+                let lines: Vec<_> = poly.lines_iter().collect();
+                if !lines.is_empty()
+                    && crate::arrange::prep::has_no_intersections(&lines)
+                    && crate::arrange::holes_are_valid(poly)
+                {
+                    PROFILE_FP_NS.fetch_add(_t_fp.elapsed().as_nanos() as u64, Ordering::Relaxed);
+                    return Some(Geometry::Polygon(poly.clone()));
+                }
+            } else {
+                // Very large rings: skip the monotone-chain has_no_intersections
+                // (O(n log n) but heavy constant) and use the R-tree proper-
+                // crossing sweep instead. A polygon with no proper crossing and
+                // valid holes IS the final result — the full repair pipeline
+                // (classify → subtract → merge) would only waste time. Measured:
+                // 159k-vert shell with 857 holes took 11.3s in subtract_holes
+                // for a polygon that was already valid.
+                if !crate::structure::has_proper_self_crossing(poly)
+                    && crate::arrange::holes_are_valid_inclusive(poly)
+                {
+                    PROFILE_FP_NS.fetch_add(_t_fp.elapsed().as_nanos() as u64, Ordering::Relaxed);
+                    return Some(Geometry::Polygon(poly.clone()));
+                }
             }
         }
     }
@@ -421,27 +437,38 @@ pub fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geom
 /// intersection). Shared endpoints (hole touching shell at a vertex — GEOS
 /// makeValid emits them) are legal and do NOT count. Used as a post-fix
 /// filter: only genuine floating-point self-crossings are discarded.
+///
+/// Uses the R-tree sweep for O(n log n) instead of the brute-force O(n²)
+/// pair loop — the quadratic version was fatal on large rings (59k verts →
+/// 9.1s, 181k verts → 143s measured on the real-world dataset).
+pub fn bbox_test(coords: &[Coord<f64>]) -> (f64, f64, f64, f64) {
+    crate::simd::aabb_minmax_simd(coords)
+}
+pub fn eps_test(coords: &[Coord<f64>]) -> f64 {
+    let b = crate::simd::aabb_minmax_simd(coords);
+    let scale = (b.1 - b.0).abs().max((b.3 - b.2).abs()).max(1.0);
+    crate::core::EPS * scale
+}
 pub fn has_proper_self_crossing(p: &geo::Polygon<f64>) -> bool {
     use geo::LinesIter;
-    let lines: Vec<geo::Line<f64>> = p.lines_iter().collect();
-    let n = lines.len();
-    if n < 4 {
+    // Flatten exterior + holes into one coord slice, remembering ring starts.
+    let mut coords: Vec<Coord<f64>> = Vec::with_capacity(
+        p.exterior().0.len() + p.interiors().iter().map(|h| h.0.len()).sum::<usize>(),
+    );
+    let mut ring_offsets: Vec<usize> = Vec::with_capacity(p.interiors().len() + 1);
+    ring_offsets.push(0);
+    coords.extend_from_slice(&p.exterior().0);
+    for h in p.interiors() {
+        ring_offsets.push(coords.len());
+        coords.extend_from_slice(&h.0);
+    }
+    if coords.len() < 4 {
         return false;
     }
-    for i in 0..n {
-        for j in (i + 1)..n {
-            // Skip adjacent segments of the SAME ring (they share an endpoint
-            // by construction). Rings are contiguous in lines_iter() order.
-            let same_ring_adjacent = j == i + 1 || (i == 0 && j == n - 1);
-            if same_ring_adjacent {
-                continue;
-            }
-            if segments_properly_cross(lines[i], lines[j]) {
-                return true;
-            }
-        }
-    }
-    false
+    let bbox = crate::simd::aabb_minmax_simd(&coords);
+    let scale = (bbox.1 - bbox.0).abs().max((bbox.3 - bbox.2).abs()).max(1.0);
+    let eps = crate::core::EPS * scale;
+    crate::structure::sweep::has_proper_self_crossing_sweep(&coords, &ring_offsets, eps)
 }
 
 /// Proper crossing: the two segments intersect at a point strictly interior

@@ -15,6 +15,7 @@ use rstar::{AABB, RTree, RTreeObject};
 
 type SplitPoint = SmallVec<[(f64, Coord<f64>); 2]>;
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn repair_ring(ring: &LineString<f64>) -> Option<Vec<Polygon<f64>>> {
     let coords = basic_cleanup(ring)?;
     if coords.len() < 4 {
@@ -153,6 +154,23 @@ fn has_self_intersections_bruteforce(coords: &[Coord<f64>], eps: f64) -> bool {
         }
     }
     false
+}
+
+/// Strict proper crossing of two segments (endpoints excluded), used by the
+/// R-tree sweep for `has_proper_self_crossing`.
+#[inline(always)]
+pub fn segments_properly_cross_seg(
+    a1: Coord<f64>,
+    a2: Coord<f64>,
+    b1: Coord<f64>,
+    b2: Coord<f64>,
+) -> bool {
+    let o1 = crate::orient::orient2d(a1, a2, b1);
+    let o2 = crate::orient::orient2d(a1, a2, b2);
+    let o3 = crate::orient::orient2d(b1, b2, a1);
+    let o4 = crate::orient::orient2d(b1, b2, a2);
+    (o1 > 0.0 && o2 < 0.0 || o1 < 0.0 && o2 > 0.0)
+        && (o3 > 0.0 && o4 < 0.0 || o3 < 0.0 && o4 > 0.0)
 }
 
 #[inline(always)]
@@ -398,6 +416,7 @@ fn find_first_intersection_bruteforce(
 /// ---------------------------------------------------------------------------
 /// Self-intersecting ring fixer
 /// ---------------------------------------------------------------------------
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn fix_self_intersecting(coords: &[Coord<f64>]) -> Option<Vec<Polygon<f64>>> {
     let _t = Instant::now();
     let edges = edges_from_coords(coords);
@@ -637,6 +656,7 @@ fn should_use_sweepline(edges: &[Line<f64>], n: usize) -> bool {
     freq.into_values().max().unwrap_or(0) > n / 4
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn split_edges(edges: &[Line<f64>]) -> Vec<Line<f64>> {
     let n = edges.len();
     let mut split_points: Vec<SplitPoint> = vec![SmallVec::new(); n];
@@ -682,6 +702,7 @@ pub fn split_edges(edges: &[Line<f64>]) -> Vec<Line<f64>> {
     result
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn split_edges_rtree(edges: &[Line<f64>], split_points: &mut [SplitPoint], eps: f64) {
     let n = edges.len();
 
@@ -768,6 +789,7 @@ fn split_edges_rtree(edges: &[Line<f64>], split_points: &mut [SplitPoint], eps: 
     }
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn split_edges_bruteforce(edges: &[Line<f64>], split_points: &mut [SplitPoint], eps: f64) {
     let n = edges.len();
     for i in 0..n {
@@ -818,6 +840,7 @@ fn split_edges_bruteforce(edges: &[Line<f64>], split_points: &mut [SplitPoint], 
     }
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn split_edges_sweepline(edges: &[Line<f64>], split_points: &mut [SplitPoint], eps: f64) {
     let pairs = crate::noding::sweep_line::find_intersecting_pairs(edges, eps);
     for &(i, j) in &pairs {

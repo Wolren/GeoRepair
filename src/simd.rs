@@ -308,6 +308,41 @@ pub(crate) fn point_in_ring_exclusive(pt: Coord<f64>, coords: &[Coord<f64>]) -> 
     wn != 0
 }
 
+/// Point-in-ring test that accepts boundary points as inside (inclusive).
+/// Used by the large-valid fast-path gate: GEOS IsValidOp allows a hole to
+/// touch the shell at a point (OGC polygon validity), so a hole whose probe
+/// vertex lies exactly ON the shell must not disqualify the polygon.
+pub fn point_in_ring_inclusive_test
+    (pt: Coord<f64>, coords: &[Coord<f64>]) -> bool {
+    point_in_ring_inclusive(pt, coords)
+}
+
+#[allow(dead_code)]
+pub(crate) fn point_in_ring_inclusive(pt: Coord<f64>, coords: &[Coord<f64>]) -> bool {
+    let n = coords.len();
+    if n < 3 {
+        return false;
+    }
+    // Boundary check: point on any segment → inside.
+    let eps = 1e-12;
+    for i in 0..n - 1 {
+        let a = coords[i];
+        let b = coords[i + 1];
+        let o = (b.x - a.x) * (pt.y - a.y) - (b.y - a.y) * (pt.x - a.x);
+        if o.abs() <= eps {
+            let between_x =
+                (a.x - b.x).abs() > eps && pt.x > a.x.min(b.x) + eps && pt.x < a.x.max(b.x) - eps;
+            let between_y =
+                (a.y - b.y).abs() > eps && pt.y > a.y.min(b.y) + eps && pt.y < a.y.max(b.y) - eps;
+            if between_x || between_y || pt == a || pt == b {
+                return true;
+            }
+        }
+    }
+    // Strict interior via winding number.
+    point_in_ring_exclusive(pt, coords)
+}
+
 // ============================================================================
 // x86_64 AVX2 intrinsics
 // ============================================================================
@@ -619,6 +654,11 @@ pub(crate) fn is_ring_ccw_simd(coords: &[Coord<f64>]) -> bool {
 /// 8-wide point-in-ring test using AVX-512.
 #[cfg(all(not(feature = "simd-portable"), target_arch = "x86_64"))]
 pub(crate) fn point_in_ring_exclusive(pt: Coord<f64>, coords: &[Coord<f64>]) -> bool {
+    point_in_ring_exclusive_test(pt, coords)
+}
+
+/// Test wrapper (x86_64 AVX2/AVX-512 path).
+pub fn point_in_ring_exclusive_test(pt: Coord<f64>, coords: &[Coord<f64>]) -> bool {
     let n = coords.len();
     if n < 3 {
         return false;

@@ -1225,7 +1225,15 @@ pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
     // polygonizer fallback is ONLY for genuinely invalid MultiPolygons
     // (edge-sharing components / nested holes); re-polygonizing valid shells
     // re-expands the whole face decomposition (measured: 5 shells → 9 faces).
-    if mp_kept.is_valid() {
+    //
+    // The gate MUST be winding-insensitive: merge_shells emits GEOS walker
+    // winding (CW shells), which OUR GeoValidation rejects as WrongOrientation
+    // (orientation is normalized later by enforce_ogc_winding). Using our
+    // validator here sent valid merged output into the polygonizer fallback,
+    // which re-expanded faces into edge-sharing components → SelfIntersection
+    // (measured: 3 valid comps → 4 comps with SI on seed a27dfba6).
+    use geo::algorithm::Validation as GeoValidationTrait;
+    if geo::algorithm::Validation::is_valid(&mp_kept) {
         return enforce_ogc_winding(Geometry::MultiPolygon(mp_kept));
     }
     // Edge-sharing case: containment didn't reduce components.

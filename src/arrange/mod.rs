@@ -114,21 +114,34 @@ pub(crate) fn fallback_polygon_fix(poly: &Polygon<f64>) -> Geometry<f64> {
     let holes: Vec<Polygon<f64>> = poly.interiors().iter()
         .map(|h| Polygon::new(h.clone(), Vec::new()))
         .collect();
-    if holes.len() == 1 {
-        let diff = shell.boolean_op(&holes[0], geo::OpType::Difference);
-        if !diff.0.is_empty() {
-            return Geometry::MultiPolygon(diff);
-        }
-    } else {
-        let shell_mp = MultiPolygon::new(vec![shell]);
-        let holes_mp = MultiPolygon::new(holes);
-        let diff = shell_mp.boolean_op(&holes_mp, geo::OpType::Difference);
-        if !diff.0.is_empty() {
-            return Geometry::MultiPolygon(diff);
-        }
+    match boolean_difference_catch(&shell, &holes) {
+        Some(diff) if !diff.0.is_empty() => Geometry::MultiPolygon(diff),
+        // boolean difference panicked (i_overlay is_fill_top assertion on
+        // degenerate input) or produced empty — polygon split failed for
+        // hole-touching-2-places.
+        _ => empty(),
     }
-    // polygon split failed for hole-touching-2-places — returned empty
-    empty()
+}
+
+/// `boolean_op(Difference)` wrapped in `catch_unwind`. i_overlay 4.5.2
+/// asserts `is_fill_top(link.fill)` internally on some degenerate inputs
+/// (measured: shell [(54.36,0),(0,0),(18.55,82.91),(-48.92,33.44)] with a
+/// 6-vertex hole). A panic inside a rayon batch kills the whole run, so
+/// callers must catch and route to their BuildArea fallback instead.
+pub(crate) fn boolean_difference_catch(
+    shell: &Polygon<f64>,
+    holes: &[Polygon<f64>],
+) -> Option<MultiPolygon<f64>> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if holes.len() == 1 {
+            shell.boolean_op(&holes[0], geo::OpType::Difference)
+        } else {
+            let shell_mp = MultiPolygon::new(vec![shell.clone()]);
+            let holes_mp = MultiPolygon::new(holes.to_vec());
+            shell_mp.boolean_op(&holes_mp, geo::OpType::Difference)
+        }
+    }))
+    .ok()
 }
 
 /// Validate a polygon against GEOS-compatible validity rules.
@@ -162,14 +175,33 @@ pub fn validate_polygon(poly: &Polygon<f64>) -> bool {
 
 /// Lightweight check: hole containment + nesting.
 /// Used after [`has_no_intersections`] for the fast path.
-pub(crate) fn holes_are_valid(poly: &Polygon<f64>) -> bool {
+pub fn holes_are_valid(poly: &Polygon<f64>) -> bool {
+    holes_valid_impl(poly, false)
+}
+
+/// GEOS-aligned hole validity for the large-valid fast-path gate. GEOS
+/// IsValidOp allows a hole to touch the shell at a point (OGC polygon
+/// validity), so the first-vertex probe is INCLUSIVE here — a vertex exactly
+/// on the shell boundary does not disqualify the polygon. Strictness matters
+/// for the gate: rejecting GEOS-valid polys forces the full subtract pipeline
+/// (measured: 857 holes on a 159k shell = 11.8s of wasted geo differences).
+pub fn holes_are_valid_inclusive(poly: &Polygon<f64>) -> bool {
+    holes_valid_impl(poly, true)
+}
+
+fn holes_valid_impl(poly: &Polygon<f64>, inclusive: bool) -> bool {
     let shell = poly.exterior();
     let shell_coords = &shell.0;
     for hole in poly.interiors() {
         let Some(pt) = hole.0.first().copied() else {
             return false;
         };
-        if !point_in_ring_exclusive(pt, shell_coords) {
+        let inside = if inclusive {
+            crate::simd::point_in_ring_inclusive(pt, shell_coords)
+        } else {
+            point_in_ring_exclusive(pt, shell_coords)
+        };
+        if !inside {
             return false;
         }
         let (mut min_x, mut max_x, mut min_y, mut max_y) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
@@ -249,6 +281,13 @@ pub(crate) fn holes_are_valid(poly: &Polygon<f64>) -> bool {
 }
 
 /// True if two rings share a collinear edge segment with positive-length overlap.
+pub fn rings_share_collinear_edge_test(
+    a: &[geo::Coord<f64>],
+    b: &[geo::Coord<f64>],
+) -> bool {
+    rings_share_collinear_edge(a, b)
+}
+
 fn rings_share_collinear_edge(a: &[geo::Coord<f64>], b: &[geo::Coord<f64>]) -> bool {
     let na = if a.first() == a.last() { a.len() - 1 } else { a.len() };
     let nb = if b.first() == b.last() { b.len() - 1 } else { b.len() };
@@ -269,13 +308,21 @@ fn rings_share_collinear_edge(a: &[geo::Coord<f64>], b: &[geo::Coord<f64>]) -> b
             let day = ay2 - ay1;
             let dbx = bx2 - bx1;
             let dby = by2 - by1;
-            let scale = dax.abs().max(day.abs()).max(dbx.abs()).max(dby.abs()).max(1.0);
+            // Relative collinearity: |cross| / (|da| * |db|) = sin(angle).
+            // The old absolute threshold with a 1.0 floor flagged genuinely
+            // non-collinear tiny edges as collinear (measured: two 1.6e-7
+            // edges with cross 2.8e-14 < 1e-12 → false DIR). Only true
+            // edge-sharing (positive-length overlap) is a real error;
+            // vertex touches are legal (GEOS IsValidOp accepts them).
+            let da_len = (dax * dax + day * day).sqrt().max(1e-300);
+            let db_len = (dbx * dbx + dby * dby).sqrt().max(1e-300);
+            let rel = 1e-12 * da_len * db_len;
             let cross = dax * dby - day * dbx;
-            if cross.abs() > 1e-12 * scale * scale {
+            if cross.abs() > rel {
                 continue;
             }
             let cross2 = (bx2 - bx1) * (ay1 - by1) - (by2 - by1) * (ax1 - bx1);
-            if cross2.abs() > 1e-12 * scale * scale {
+            if cross2.abs() > rel {
                 continue;
             }
             let aminx = ax1.min(ax2);
@@ -287,7 +334,8 @@ fn rings_share_collinear_edge(a: &[geo::Coord<f64>], b: &[geo::Coord<f64>]) -> b
             } else {
                 interval_overlap(aminy, amaxy, by1.min(by2), by1.max(by2))
             };
-            if overlap > 1e-12 * scale {
+            // Positive-length overlap only: a shared endpoint is length 0.
+            if overlap > 1e-12 * da_len.max(db_len) {
                 return true;
             }
         }
@@ -306,7 +354,7 @@ fn interval_overlap(a0: f64, a1: f64, b0: f64, b1: f64) -> f64 {
 /// representable precision of the bbox scale — collinear overlaps between
 /// such edges and big edges are invisible to proper-crossing detection.
 /// Cheap O(n): single pass over edges, only used in fast-path gates.
-pub(crate) fn has_sub_ulp_edge(poly: &Polygon<f64>) -> bool {
+pub fn has_sub_ulp_edge(poly: &Polygon<f64>) -> bool {
     fn ring_has_sub_ulp(ring: &[geo::Coord<f64>]) -> bool {
         let n = ring.len();
         if n < 2 {
@@ -441,7 +489,7 @@ pub fn diagnose_arrange(poly: &Polygon<f64>) -> Option<ArrangeTiming> {
     Some(t)
 }
 
-pub(crate) fn poly_has_basic_form(poly: &Polygon<f64>) -> bool {
+pub fn poly_has_basic_form(poly: &Polygon<f64>) -> bool {
     fn ring_is_plausible(ring: &geo::LineString<f64>) -> bool {
         let coords = &ring.0;
         if coords.len() < 4 || coords.first() != coords.last() {

@@ -97,6 +97,7 @@ pub fn build_graph(lines: &[Line<f64>]) -> Graph {
 /// Without this, faces merge across shared edges (measured: 7 faces instead
 /// of the correct 10 on a 9-vertex multi-crossing ring).
 /// ---------------------------------------------------------------------------
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn extract_all_faces_geos(graph: &Graph) -> Option<Vec<Vec<(usize, usize)>>> {
     let n_edges = graph.edges.len();
     // Directed edge indexing: idx e = forward (from->to), idx n_edges+e = reverse.

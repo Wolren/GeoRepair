@@ -27,6 +27,116 @@ fn edge_envelope(coords: &[Coord<f64>], i: usize) -> AABB<[f64; 2]> {
     AABB::from_corners([lo_x - ext, lo_y - ext], [hi_x + ext, hi_y + ext])
 }
 
+/// PROPER self-crossing detection over a whole polygon (exterior + holes)
+/// using an R-tree over edge bounding boxes. Interior-interior crossings
+/// only — shared endpoints (hole touching shell at a vertex, which GEOS
+/// makeValid legitimately emits) do NOT count.
+///
+/// This is the sweep variant of `has_proper_self_crossing`: O(n log n)
+/// average instead of the brute-force O(n²) pair loop, which is fatal on
+/// large rings (measured: 59k verts → 9.1s brute force, 181k verts → 143s).
+pub(crate) fn has_proper_self_crossing_sweep(
+    coords: &[Coord<f64>],
+    ring_offsets: &[usize],
+    eps: f64,
+) -> bool {
+    let n_edges = coords.len().saturating_sub(1);
+    if n_edges < 4 {
+        return false;
+    }
+    let edges: Vec<EdgeEnvelope> = (0..n_edges)
+        .filter(|&i| !is_phantom_segment(i, ring_offsets))
+        .map(|i| EdgeEnvelope {
+            index: i as u32,
+            envelope: edge_envelope(coords, i),
+        })
+        .collect();
+
+    let tree = RTree::bulk_load(edges);
+
+    for i in 0..n_edges {
+        // Skip phantom segments (closure-vertex boundary lines that don't
+        // exist in the geometry) when QUERYING too.
+        if is_phantom_segment(i, ring_offsets) {
+            continue;
+        }
+        let query_env = edge_envelope(coords, i);
+        let result = tree.locate_in_envelope_intersecting_int(query_env, |candidate| {
+            let j = candidate.index as usize;
+            if j <= i {
+                return std::ops::ControlFlow::Continue(());
+            }
+            // Same-ring adjacent segments share an endpoint by construction.
+            if segments_adjacent_in_ring(i, j, ring_offsets) {
+                return std::ops::ControlFlow::Continue(());
+            }
+            if super::fix_ring::segments_properly_cross_seg(
+                coords[i],
+                coords[i + 1],
+                coords[j],
+                coords[j + 1],
+            ) {
+                if std::env::var("DIAG_SWEEP_CROSS").is_ok() {
+                    eprintln!(
+                        "SWEEP CROSS i={i} j={j} a=({:.6},{:.6})-({:.6},{:.6}) b=({:.6},{:.6})-({:.6},{:.6})",
+                        coords[i].x, coords[i].y, coords[i + 1].x, coords[i + 1].y,
+                        coords[j].x, coords[j].y, coords[j + 1].x, coords[j + 1].y
+                    );
+                }
+                std::ops::ControlFlow::Break(())
+            } else {
+                std::ops::ControlFlow::Continue(())
+            }
+        });
+        if result.is_break() {
+            return true;
+        }
+    }
+    false
+}
+
+/// True if segment index `s` is a PHANTOM — the last index before a ring
+/// boundary, which spans (closure vertex of ring r) → (first vertex of ring
+/// r+1). That line does not exist in the geometry (the flat array just
+/// concatenates rings) and must never be tested. Note: the closure vertex of
+/// the LAST ring is covered by the ring's final real segment (end-2 → end-1),
+/// so no phantom exists after the last ring.
+fn is_phantom_segment(s: usize, ring_offsets: &[usize]) -> bool {
+    ring_offsets.iter().skip(1).any(|&off| s + 1 == off)
+}
+
+/// True if segment indices `i` and `j` are adjacent within the SAME ring
+/// (consecutive segments, or first/last of a closed ring). Ring offsets are
+/// the start index of each ring in the flat coord slice (offset 0 = exterior).
+fn segments_adjacent_in_ring(i: usize, j: usize, ring_offsets: &[usize]) -> bool {
+    if is_phantom_segment(j, ring_offsets) {
+        return true;
+    }
+    // Find the ring containing i (offsets are sorted; last ring runs to end).
+    let mut r = 0;
+    for (k, &off) in ring_offsets.iter().enumerate() {
+        if off > i {
+            break;
+        }
+        r = k;
+    }
+    let start = ring_offsets[r];
+    let end = ring_offsets.get(r + 1).copied().unwrap_or(usize::MAX);
+    // Segment k spans [k, k+1); the ring's real segments are [start, end-2]
+    // (end-1 is the phantom spanning into the next ring).
+    let seg_end = end.saturating_sub(1);
+    let in_ring = |s: usize| s >= start && s < seg_end;
+    if !in_ring(j) {
+        return false;
+    }
+    if j == i + 1 {
+        return true;
+    }
+    // First and last real segment of a closed ring share the closure vertex.
+    j == start && i == seg_end - 1
+}
+
+
 /// Self-intersection detection using an R-tree over edge bounding boxes.
 ///
 /// Builds an `rstar::RTree` keyed by each edge's 2D bounding envelope, then
