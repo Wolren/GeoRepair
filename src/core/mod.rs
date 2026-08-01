@@ -33,6 +33,14 @@ pub(crate) const GRID_THRESHOLD_N: usize = 2000;
 /// Larger polygons fall through to the full repair pipeline.
 pub(crate) const FAST_PATH_MAX_VERTS: usize = 50000;
 
+/// Total line count below which `has_no_intersections` uses a direct O(n²)
+/// pairwise sweep instead of the monotone-chain + grid + R-tree machinery.
+/// Measured on the 1.58M-poly real-world dataset: 95.6% of polygons have
+/// <= 32 vertices, and the chain path costs 1.295 µs/poly there — ~10x the
+/// cost of an allocation-free pairwise check. For n <= 32 the pairwise
+/// sweep is at most 496 pairs * 4 orient2d = ~2000 orientation tests.
+pub const SMALL_RING_LINES: usize = 32;
+
 /// Snap scale factor for integer-keyed graph construction.
 pub(crate) const SNAP_SCALE: f64 = 1e8;
 
