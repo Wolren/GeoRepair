@@ -24,6 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y libgeos-dev geos-bin
       - run: cargo test --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,ffi"
 
   test-no-defaults:
@@ -31,7 +32,21 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y libgeos-dev geos-bin
       - run: cargo test --no-default-features --features "arrange,structure,parallel,simd,validate"
+
+  # Real-GEOS oracle gate: runs geos_compare (geosop makeValid comparisons on
+  # every fixture) and alaska_fixture (GEOS-validity + area-preservation on
+  # the real-world dataset) against the system GEOS install. geosop and the
+  # alaska test data are committed; alaska.bin is regenerable via
+  # scripts/convert_shp_to_bin.py.
+  test-geos-oracle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y libgeos-dev geos-bin
+      - run: cargo test --features "arrange,structure,parallel,simd,validate,bench-geos-system" --test geos_compare --test alaska_fixture
 
   test-serde:
     runs-on: ubuntu-latest

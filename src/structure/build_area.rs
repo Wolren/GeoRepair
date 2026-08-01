@@ -28,6 +28,11 @@ pub fn build_area(lines: &[geo::Line<f64>]) -> Option<MultiPolygon<f64>> {
     if graph.edges.is_empty() {
         return Some(MultiPolygon::new(Vec::new()));
     }
+    // None = no walkable faces (open linework without cycles). Callers use
+    // None as a fallback signal (make_valid.rs polygonizer_fallback,
+    // fix_ring.rs) - keep the semantics: un-closable linework is a "try
+    // something else" signal, NOT an empty result. The GEOS buildarea
+    // oracle in the XML suite maps None to empty itself.
     let faces = extract_all_faces_geos(&graph)?;
     if faces.is_empty() {
         return Some(MultiPolygon::new(Vec::new()));
@@ -169,7 +174,7 @@ pub fn build_area(lines: &[geo::Line<f64>]) -> Option<MultiPolygon<f64>> {
 }
 
 /// Fingerprint of a ring: sorted coordinate bit pairs, closure removed.
-/// Direction/rotation-insensitive — GEOS ringsEqualAnyDirection equivalent.
+/// Direction/rotation-insensitive - GEOS ringsEqualAnyDirection equivalent.
 fn ring_fingerprint(ring: &[Coord<f64>]) -> Vec<(u64, u64)> {
     let mut pts: Vec<(u64, u64)> = ring.iter().map(|c| (c.x.to_bits(), c.y.to_bits())).collect();
     if pts.first() == pts.last() {
@@ -180,7 +185,7 @@ fn ring_fingerprint(ring: &[Coord<f64>]) -> Vec<(u64, u64)> {
 }
 
 /// Interior probe point for a ring: midpoint of first edge nudged toward the
-/// ring's interior (right of the directed edge — walker convention).
+/// ring's interior (right of the directed edge - walker convention).
 fn ring_probe(ring: &[Coord<f64>]) -> Option<Coord<f64>> {
     let (v0, v1) = (*ring.first()?, *ring.get(1)?);
     let mid = Coord {
