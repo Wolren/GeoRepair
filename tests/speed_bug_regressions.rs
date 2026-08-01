@@ -400,3 +400,68 @@ fn is_fill_top_seed_no_panic() {
         );
     }
 }
+
+// ============================================================================
+// 5. Sub-ULP spike collapse (mixed-magnitude ring, Structure-only gap)
+// ============================================================================
+
+/// Seed from invariant_mixed_magnitude_polygon: 5 large coords (~1e8) + 3
+/// tiny coords (~1e-9) in ONE ring. The tiny segment (0,0)→(0,5.089e-9) is
+/// sub-ULP relative to the ring bbox (~4.3e-8) — a degenerate spike that
+/// used to survive into noding, chop the big triangle face, and drop 62% of
+/// the area (Structure: 1.55e15 vs GEOS 4.10e15, HoleOutsideShell).
+/// basic_cleanup must collapse it before noding.
+#[test]
+fn sub_ulp_spike_mixed_magnitude_ring() {
+    let mut ring = vec![
+        Coord { x: 84956205.27307954, y: -45986769.5228732 },
+        Coord { x: -99794971.69789362, y: 4896957.693364016 },
+        Coord { x: 95593402.35083151, y: -37252189.83613572 },
+        Coord { x: 37149609.09726282, y: -63327990.14115548 },
+        Coord { x: 78418546.04729833, y: 69380301.01700698 },
+        Coord { x: 0.0, y: 0.0 },
+        Coord { x: 0.0, y: 0.0 },
+        Coord { x: 0.0, y: 5.089116040917129e-9 },
+    ];
+    if ring.first() != ring.last() {
+        ring.push(ring[0]);
+    }
+    let poly = Polygon::new(LineString::new(ring), Vec::new());
+    let g: Geometry<f64> = poly.clone().into();
+    for (name, cfg) in [
+        ("auto", geo_repair::MakeValidConfig::default()),
+        ("structure", geo_repair::MakeValidConfig {
+            poly_method: geo_repair::PolyMethod::Structure,
+            ..Default::default()
+        }),
+        ("arrange", geo_repair::MakeValidConfig {
+            poly_method: geo_repair::PolyMethod::Arrange,
+            ..Default::default()
+        }),
+    ] {
+        let out = g.make_valid_with_config(&cfg);
+        let v = geo_repair::validation::GeoValidation::validate(&out);
+        assert!(
+            v.valid,
+            "[{name}] mixed-magnitude ring invalid: {:?}",
+            v.errors
+        );
+    }
+    // Area must match GEOS (4096768239996903.5), modulo the collapsed sliver.
+    use geo::Area;
+    let cfg = geo_repair::MakeValidConfig {
+        poly_method: geo_repair::PolyMethod::Structure,
+        ..Default::default()
+    };
+    let out = g.make_valid_with_config(&cfg);
+    let area: f64 = match &out {
+        Geometry::Polygon(p) => p.unsigned_area(),
+        Geometry::MultiPolygon(mp) => mp.0.iter().map(|p| p.unsigned_area()).sum(),
+        _ => 0.0,
+    };
+    let geos_area = 4096768239996903.5f64;
+    assert!(
+        (area - geos_area).abs() / geos_area < 1e-5,
+        "Structure area {area:.4} diverges from GEOS {geos_area:.4}"
+    );
+}

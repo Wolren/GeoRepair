@@ -1200,7 +1200,16 @@ pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
             if i == j || !keep[j] { return false; }
             let ext_j = &p_j.exterior().0;
             if ext_j.len() < 4 { return false; }
-            pt_candidates.iter().any(|&pt| point_in_ring_exclusive(pt, ext_j))
+            // Hole-aware nesting: a component is only nested when it lies in
+            // another component's FILL (exterior minus holes). An island
+            // inside another component's HOLE is positive space and must be
+            // kept — checking only the exterior ring drops it (measured:
+            // square-with-hole ∪ island → island 64 lost; GEOS keeps it).
+            pt_candidates.iter().any(|&pt| {
+                if !point_in_ring_exclusive(pt, ext_j) { return false; }
+                // pt inside exterior: false if it lies in any hole of p_j
+                !p_j.interiors().iter().any(|h| point_in_ring_exclusive(pt, &h.0))
+            })
         });
         if is_nested { keep[i] = false; }
     }

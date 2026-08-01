@@ -185,11 +185,22 @@ impl GeoValidation for MultiPolygon<f64> {
                     let mut overlaps = false;
                     let _ = tree.locate_in_envelope_intersecting_int(query, |c| {
                         if c.idx != i && point_in_ring_exclusive(pt, shells[c.idx]) {
-                            overlaps = true;
-                            std::ops::ControlFlow::Break(())
-                        } else {
-                            std::ops::ControlFlow::<(), ()>::Continue(())
+                            // Hole-aware: a shell inside ANOTHER SHELL'S HOLE is
+                            // an island — valid positive space, NOT nesting
+                            // (GEOS isValid=true on square-with-hole ∪ island).
+                            // Only a probe in the other shell's FILL (exterior
+                            // minus holes) counts as nested.
+                            let p_other = &self.0[c.idx];
+                            let in_hole = p_other
+                                .interiors()
+                                .iter()
+                                .any(|h| point_in_ring_exclusive(pt, &h.0));
+                            if !in_hole {
+                                overlaps = true;
+                                return std::ops::ControlFlow::Break(());
+                            }
                         }
+                        std::ops::ControlFlow::<(), ()>::Continue(())
                     });
                     if overlaps {
                         errors.push(GeometryValidationError::NestedHoles);
@@ -205,9 +216,18 @@ impl GeoValidation for MultiPolygon<f64> {
                             continue;
                         }
                         if let Some(pt) = shells[j].first().copied()
-                            && point_in_ring_exclusive(pt, shells[i]) {
-                            errors.push(GeometryValidationError::NestedHoles);
-                            return ValidationResult::invalid(errors);
+                            && point_in_ring_exclusive(pt, shells[i])
+                        {
+                            // Hole-aware: island inside another shell's hole is
+                            // valid positive space (GEOS isValid=true).
+                            let in_hole = self.0[i]
+                                .interiors()
+                                .iter()
+                                .any(|h| point_in_ring_exclusive(pt, &h.0));
+                            if !in_hole {
+                                errors.push(GeometryValidationError::NestedHoles);
+                                return ValidationResult::invalid(errors);
+                            }
                         }
                     }
                 }

@@ -1,4 +1,4 @@
-use geo::LineString;
+use geo::{Coord, LineString};
 
 /// Check if a hole ring is entirely outside a shell ring by testing its first point.
 /// A simple non-self-intersecting ring is either entirely inside or entirely outside
@@ -17,12 +17,83 @@ fn is_hole_outside(hole: &LineString<f64>, shell: &LineString<f64>) -> bool {
     // First point was outside or on the shell boundary.  Holes that share
     // boundary with the shell (rare) may have their first vertex exactly on
     // the shell.  Check all vertices as a robustness fallback.
+    let mut any_outside = false;
     for pt in &hole.0 {
         if crate::simd::point_in_ring_exclusive(*pt, &shell.0) {
             return false;
         }
+        // Strictly outside = not inside AND not on the boundary.
+        if !crate::simd::point_in_ring_inclusive(*pt, &shell.0) {
+            any_outside = true;
+        }
+    }
+    // Boundary-touching hole: ALL vertices on the shell boundary (e.g. a
+    // diamond hole touching the shell at 4 edge midpoints — CGAL
+    // square_hole_rhombus). No vertex is strictly inside, but the hole
+    // INTERIOR is inside the shell: it must be classified INNER and
+    // subtracted (boolean difference splits the shell into 4 components),
+    // NOT outer. Classifying it outer makes merge_shells' unary_union fold
+    // it back into the shell — area 1.0 instead of GEOS's 0.5 (measured).
+    // A simple ring's centroid is strictly inside iff the ring interior is
+    // inside; for a truly outside ring the centroid is outside too.
+    //
+    // CRITICAL: only apply the centroid test when NO vertex is strictly
+    // outside. hole==shell (all vertices on boundary, centroid inside) and
+    // hole-larger-than-shell (some vertices outside) must keep the OUTER
+    // classification — flipping them to inner loses the whole polygon
+    // (measured: fuzz invariants 3.7/3.8 regressed to DuplicatedRings and
+    // HoleOutsideShell).
+    if !any_outside && !ring_set_equal(hole, shell) {
+        let mut cx = 0.0;
+        let mut cy = 0.0;
+        let n = hole.0.len();
+        if n > 0 {
+            for pt in &hole.0 {
+                cx += pt.x;
+                cy += pt.y;
+            }
+            cx /= n as f64;
+            cy /= n as f64;
+            if crate::simd::point_in_ring_exclusive(Coord { x: cx, y: cy }, &shell.0) {
+                return false;
+            }
+        }
     }
     true
+}
+
+/// True if two rings are the same coordinate set (rotation/reversal/
+/// closure-insensitive). hole==shell is a degenerate invalid polygon whose
+/// hole must NOT be reclassified inner by the centroid test — the
+/// cancel_identical_shells path in merge_shells handles it (GEOS drops the
+/// duplicate hole, yielding the shell; empty is also valid).
+fn ring_set_equal(a: &LineString<f64>, b: &LineString<f64>) -> bool {
+    if a.0.len() != b.0.len() {
+        return false;
+    }
+    let mut aset: Vec<(u64, u64)> = a
+        .0
+        .iter()
+        .map(|c| (c.x.to_bits(), c.y.to_bits()))
+        .collect();
+    let mut bset: Vec<(u64, u64)> = b
+        .0
+        .iter()
+        .map(|c| (c.x.to_bits(), c.y.to_bits()))
+        .collect();
+    // Closure duplicates: last == first appears in both.
+    if aset.first() == aset.last() {
+        aset.pop();
+    }
+    if bset.first() == bset.last() {
+        bset.pop();
+    }
+    if aset.len() != bset.len() {
+        return false;
+    }
+    aset.sort_unstable();
+    bset.sort_unstable();
+    aset == bset
 }
 
 pub(crate) fn classify_holes(
