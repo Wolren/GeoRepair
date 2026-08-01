@@ -20,6 +20,14 @@
 //!   conda install -c conda-forge geos   # Windows
 //!   sudo apt install libgeos-dev        # Debian/Ubuntu
 //!   brew install geos                   # macOS
+//!
+//! Fast iteration:
+//!   --fast       skip ALL GEOS comparison sections (validation head-to-head,
+//!                GEOS makeValid on invalid/full sets, GEOS output checks).
+//!                Keeps our metrics: validation, fast-path sample, invalid
+//!                subset Structure batch, full-dataset pass. ~10s vs ~40s.
+//!   BENCH_N=1000 cap the dataset to the first N polys (smoke runs).
+//!   Example: BENCH_N=200000 cargo bench --features bench-geos-system,arrange,structure,parallel,simd,io-shp --bench real_world -- --fast
 
 use std::env;
 use std::io::Write;
@@ -270,10 +278,24 @@ fn main() {
         .ok()
         .or_else(|| env::args().skip(1).find(|a| !a.starts_with("--")))
         .unwrap_or_else(|| "benches/real_world/data_0.bin".into());
+    // --fast: skip every GEOS comparison section (see header comment).
+    let fast = env::args().any(|a| a == "--fast");
+    // BENCH_N: cap the dataset to the first N polys for smoke runs.
+    let cap_n: Option<usize> = env::var("BENCH_N").ok().and_then(|v| v.parse().ok());
     eprintln!("Dataset: {path}");
+    if fast {
+        eprintln!("Mode: fast (--fast: GEOS comparison sections skipped)");
+    }
 
     let t0 = Instant::now();
     let polys = load_polys(&path);
+    let polys = if let Some(n) = cap_n {
+        let capped: Vec<_> = polys.into_iter().take(n).collect();
+        eprintln!("BENCH_N={n}: dataset capped to {} polys", capped.len());
+        capped
+    } else {
+        polys
+    };
     let load_time = t0.elapsed().as_secs_f64();
     let n_polys = polys.len();
     eprintln!("[1/5] Loaded {n_polys} polys in {load_time:.3}s");
@@ -315,6 +337,9 @@ fn main() {
     // =========================================================================
     #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
     {
+        if fast {
+            eprintln!("[2b/5] Validation head-to-head (skip: --fast)");
+        } else {
         eprint!("[2b/5] Validation head-to-head (all {n_polys} polys, parallel)...");
         std::io::stderr().flush().ok();
         use rayon::prelude::*;
@@ -399,6 +424,7 @@ fn main() {
         eprintln!("  │ Ours✗ GEOS✓       │ {our_invalid_geos_valid:>8}     │           │");
         eprintln!("  │ Agreement          │    {rate:.2}%     │           │");
         eprintln!("  └────────────────────┴──────────┴──────────┘");
+        }
     }
     #[cfg(not(any(feature = "bench-geos", feature = "bench-geos-system")))]
     eprintln!("  (skip: bench-geos feature not enabled)");
@@ -453,11 +479,11 @@ fn main() {
                 }
             } else {
                 eprintln!(
-                    "  ANALYZE_POLY={target} out of range (dataset has {n_polys} polys) — skipping"
+                    "  ANALYZE_POLY={target} out of range (dataset has {n_polys} polys) - skipping"
                 );
             }
         } else {
-            eprintln!("  ANALYZE_POLY='{target_str}' is not a valid index — skipping deep-dive");
+            eprintln!("  ANALYZE_POLY='{target_str}' is not a valid index - skipping deep-dive");
         }
     }
 
@@ -516,10 +542,10 @@ fn main() {
     geo_repair::structure::print_profile(sample_n);
 
     // Validate all Structure outputs through GEOS is_valid()
-    #[allow(unused_mut)]
+    // (--fast: use our validator instead - no GEOS oracle in fast mode)
     let mut stru_invalid_outputs = 0usize;
     #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
-    {
+    if !fast {
         for g in &results {
             match geom_to_geos(g) {
                 Some(gg) => {
@@ -540,11 +566,48 @@ fn main() {
             }
         }
     }
+    #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
+    if fast {
+        // Lightweight gate only (arrange::validate_polygon): the full
+        // Shewchuk validator on the repaired outputs costs ~35s on the
+        // giant invalid polys (187k verts) - defeats the purpose of
+        // --fast. The GEOS verdict stays the canonical one in full mode.
+        let mut invalid = 0usize;
+        for g in &results {
+            let mut bad = false;
+            let mut check = |p: &geo::Polygon<f64>| {
+                if !geo_repair::arrange::validate_polygon(p) {
+                    bad = true;
+                }
+            };
+            match g {
+                Geometry::Polygon(p) => check(p),
+                Geometry::MultiPolygon(mp) => mp.0.iter().for_each(&mut check),
+                Geometry::GeometryCollection(gc) => {
+                    for c in gc.0.iter() {
+                        match c {
+                            Geometry::Polygon(p) => check(p),
+                            Geometry::MultiPolygon(mp) => mp.0.iter().for_each(&mut check),
+                            _ => {}
+                        }
+                    }
+                }
+                _ => {}
+            }
+            if bad {
+                invalid += 1;
+            }
+        }
+        stru_invalid_outputs = invalid;
+    }
 
     // Pre-create GEOS geometries outside GEOS timer
     let geos_total: f64;
     #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
     {
+        if fast {
+            geos_total = 0.0;
+        } else {
         let geos_geoms: Vec<Option<GeosGeometry>> =
             geo_polys_to_geos_batch(invalid_polys.iter().copied());
         let t0 = Instant::now();
@@ -561,6 +624,7 @@ fn main() {
             }
         }
         geos_total = t0.elapsed().as_secs_f64();
+        }
     }
     #[cfg(not(any(feature = "bench-geos", feature = "bench-geos-system")))]
     {
@@ -591,6 +655,11 @@ fn main() {
     let (geos_setup, full_geos, full_geos_total): (f64, f64, f64);
     #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
     {
+        if fast {
+            geos_setup = 0.0;
+            full_geos = 0.0;
+            full_geos_total = 0.0;
+        } else {
         eprint!("  Pre-building {} GEOS geometries...", full_n);
         let t0 = Instant::now();
         let geos_geoms: Vec<Option<GeosGeometry>> = geo_polys_to_geos_batch(polys.iter());
@@ -612,6 +681,7 @@ fn main() {
         }
         full_geos = t0.elapsed().as_secs_f64();
         full_geos_total = full_geos;
+        }
     }
     #[cfg(not(any(feature = "bench-geos", feature = "bench-geos-system")))]
     {
@@ -633,10 +703,17 @@ fn main() {
     eprintln!("═════════════════════════════════════════════════════════════════════");
     eprintln!("  Data: {n_polys} polys ({n_valid} valid, {n_invalid} invalid)");
     eprintln!("  Fast-path: {:.3}µs/valid poly", fp_time * 1e6);
-    eprintln!(
-        "  Structure output GEOS-valid: {}/{} invalid polys",
-        stru_invalid_outputs, sample_n
-    );
+    if fast {
+        eprintln!(
+            "  Structure output invalid (our validator): {}/{} invalid polys",
+            stru_invalid_outputs, sample_n
+        );
+    } else {
+        eprintln!(
+            "  Structure output GEOS-valid: {}/{} invalid polys",
+            stru_invalid_outputs, sample_n
+        );
+    }
     eprintln!("─────────────────────────────────────────────────────────────────────");
     eprintln!("  Method (invalid polys)│  total (s) │ per-poly (ms) │  vs GEOS");
     eprintln!("  ──────────────────────┼────────────┼───────────────┼───────────");
@@ -650,16 +727,24 @@ fn main() {
     eprintln!(
         "  Structure             │ {stru_total:>9.4}s │ {stru_per:>11.3}    │ {stru_rat:>6.2}x"
     );
-    eprintln!("  GEOS                  │ {geos_total:>9.4}s │ {geos_per:>11.3}    │      —");
+    if geos_total > 0.0 {
+        eprintln!("  GEOS                  │ {geos_total:>9.4}s │ {geos_per:>11.3}    │      -");
+    } else {
+        eprintln!("  GEOS                  │        (skip: --fast)        │      -");
+    }
     eprintln!("─────────────────────────────────────────────────────────────────────");
     let full_stru_per = full_stru * 1000.0 / full_n as f64;
     let full_geos_per = full_geos * 1000.0 / full_n as f64;
     eprintln!(
         "  Full dataset ({full_n} poly) │ {full_stru:>9.4}s │ {full_stru_per:>9.4}    │ {full_ratio:>6.2}x"
     );
-    eprintln!(
-        "  GEOS (full)           │ {full_geos_total:>9.4}s │ {full_geos_per:>9.4}    │      —"
-    );
-    eprintln!("    (setup: {geos_setup:.3}s, make_valid loop: {full_geos:.3}s)");
+    if full_geos_total > 0.0 {
+        eprintln!(
+            "  GEOS (full)           │ {full_geos_total:>9.4}s │ {full_geos_per:>9.4}    │      -"
+        );
+        eprintln!("    (setup: {geos_setup:.3}s, make_valid loop: {full_geos:.3}s)");
+    } else {
+        eprintln!("  GEOS (full)           │        (skip: --fast)        │      -");
+    }
     eprintln!("═════════════════════════════════════════════════════════════════════");
 }
