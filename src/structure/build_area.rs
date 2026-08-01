@@ -19,6 +19,7 @@ use super::fix_ring_graph::{build_graph, extract_all_faces_geos};
 ///
 /// Verified bit-identical to GEOS on multi-crossing rings.
 /// ---------------------------------------------------------------------------
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn build_area(lines: &[geo::Line<f64>]) -> Option<MultiPolygon<f64>> {
     if lines.is_empty() {
         return Some(MultiPolygon::new(Vec::new()));

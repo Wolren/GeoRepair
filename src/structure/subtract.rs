@@ -1,4 +1,4 @@
-use geo::{Area, BooleanOps, Coord, LinesIter, MultiPolygon, OpType, Polygon};
+use geo::{Area, Coord, LinesIter, MultiPolygon, Polygon};
 
 /// Subtract holes from a shell, producing OGC-valid polygon components.
 ///
@@ -14,6 +14,7 @@ use geo::{Area, BooleanOps, Coord, LinesIter, MultiPolygon, OpType, Polygon};
 /// Input-side heuristics like "hole vertex on shell boundary" fire on
 /// ordinary real-world data and forced full noding + polygonize on nearly
 /// every polygon — a ~50-100x regression (305s vs 5.5s on 2298 invalid polys).
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn subtract_holes(shell: &Polygon<f64>, holes: &[Polygon<f64>]) -> MultiPolygon<f64> {
     if holes.is_empty() {
         return MultiPolygon::new(vec![shell.clone()]);
@@ -22,12 +23,22 @@ pub fn subtract_holes(shell: &Polygon<f64>, holes: &[Polygon<f64>]) -> MultiPoly
     // Boolean difference preserves ALL result components — a hole that
     // touches the shell in 2+ places splits the shell into multiple
     // polygons (the classic "hourglass" hole pattern).
-    let result = if holes.len() == 1 {
-        shell.boolean_op(&holes[0], OpType::Difference)
-    } else {
-        let shell_mp = MultiPolygon::new(vec![shell.clone()]);
-        let holes_mp = MultiPolygon::new(holes.to_vec());
-        shell_mp.boolean_op(&holes_mp, OpType::Difference)
+    let result = match crate::arrange::boolean_difference_catch(shell, holes) {
+        Some(mp) => mp,
+        // i_overlay panic (is_fill_top assertion on degenerate input) — the
+        // panic must not kill the rayon batch. Route to the BuildArea
+        // fallback below, which operates on noded edges and never panics.
+        None => {
+            if let Some(mp) = build_area_shell_holes(shell, holes) {
+                return mp;
+            }
+            let mut comps: Vec<Polygon<f64>> = vec![shell.clone()];
+            comps.extend(holes.iter().cloned());
+            if let Some(mp) = polygonize_mp(&MultiPolygon::new(comps)) {
+                return mp;
+            }
+            return MultiPolygon::new(vec![shell.clone()]);
+        }
     };
 
     let eps = 1e-15;

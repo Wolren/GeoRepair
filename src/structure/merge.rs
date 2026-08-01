@@ -10,6 +10,7 @@ use log::warn;
 /// The BuildArea even-parent approach: sort shells by area, count how many
 /// larger shells contain each shell, keep only shells with even parent count.
 /// Then run unary_union on the kept shells.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
     if shells.is_empty() {
         return MultiPolygon::new(Vec::new());
@@ -95,9 +96,19 @@ pub fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
         return MultiPolygon::new(kept);
     }
 
-    // Union remaining (possibly overlapping) shells
+    // Union remaining (possibly overlapping) shells.
+    // i_overlay (geo's boolean engine) can panic with an internal
+    // `is_fill_top` assertion on degenerate shell sets (measured seed:
+    // shell [(54.36,0),(0,0),(18.55,82.91),(-48.92,33.44)] + 6-vert hole).
+    // A panic inside a rayon batch kills the whole run, so catch it and
+    // return the even-parent-filtered shells without the union — the Auto
+    // validator then routes to arrange/reduce; Structure only promises no
+    // panic on its output.
     let mp = MultiPolygon::new(kept);
-    geo::algorithm::bool_ops::unary_union(&mp)
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        geo::algorithm::bool_ops::unary_union(&mp)
+    }))
+    .unwrap_or(mp)
 }
 
 /// True if every vertex of `ring` lies strictly inside `poly` (exterior
