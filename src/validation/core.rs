@@ -220,7 +220,15 @@ pub(crate) fn check_ring_validity(
     }
     let scale = (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
     let eps = 1e-12 * scale;
-    if (max_x - min_x).abs() < f64::EPSILON * scale || (max_y - min_y).abs() < f64::EPSILON * scale
+    // Per-axis degeneracy: an axis is collapsed only if its extent is below
+    // EPSILON × that AXIS'S OWN max magnitude. Comparing against the
+    // cross-axis scale wrongly flags thin-but-real triangles (e.g. base
+    // 8.26e7, height 8.4e-9 — representable, GEOS-valid; measured: seed
+    // 00c11200 sibling → DegenerateExterior on a triangle GEOS validates).
+    let x_scale = max_x.abs().max(min_x.abs()).max(1.0);
+    let y_scale = max_y.abs().max(min_y.abs()).max(1.0);
+    if (max_x - min_x).abs() < f64::EPSILON * x_scale
+        || (max_y - min_y).abs() < f64::EPSILON * y_scale
     {
         if is_exterior {
             errors.push(GeometryValidationError::DegenerateExterior);

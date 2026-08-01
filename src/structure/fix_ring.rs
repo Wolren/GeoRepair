@@ -100,7 +100,19 @@ pub(crate) fn basic_cleanup(ring: &LineString<f64>) -> Option<Vec<Coord<f64>>> {
 /// NOT in basic_cleanup — because valid fast-path passthrough must stay
 /// O(n) with no extra scan (measured: adding this to basic_cleanup cost
 /// ~0.45s on the 1.58M dataset, blowing the 5s bar).
-fn collapse_sub_ulp_vertices(coords: &[Coord<f64>]) -> Vec<Coord<f64>> {
+///
+/// Representative choice (`snap_clean`):
+/// - Structure repair path: keep the run's FIRST vertex (`snap_clean=false`).
+///   A sub-ULP run on an axis-aligned edge must collapse onto the axis
+///   (e.g. run (0,-8.4e-9),(-5.6e-10,8.6e-9),(-7.2e-10,6.5e-9) inside a ring
+///   with a y=0 edge → keep (0,-8.4e-9); snapping to the off-axis member
+///   (-7.2e-10,6.5e-9) turns the collinear overlap into a proper crossing,
+///   measured seed mixed4 → SelfIntersection).
+/// - Arrange CDT path: snap to the member closest to the origin
+///   (`snap_clean=true`). A spike at a random offset (e.g. (-7.55e-9,0)
+///   instead of (0,0)) produces CDT triangles that cross each other,
+///   measured seed 00c11200 → cross-component SelfIntersection.
+pub(crate) fn collapse_sub_ulp_vertices(coords: &[Coord<f64>], snap_clean: bool) -> Vec<Coord<f64>> {
     if coords.len() < 4 {
         return coords.to_vec();
     }
@@ -123,16 +135,46 @@ fn collapse_sub_ulp_vertices(coords: &[Coord<f64>]) -> Vec<Coord<f64>> {
     let mut i = 0usize;
     while i < interior_len {
         cleaned.push(coords[i]);
-        let anchor = coords[i];
-        // Skip any run of vertices within sub_ulp of the anchor.
+        // Skip any run of vertices within sub_ulp of the previous run
+        // member. A run of >= 2 sub-ULP-consecutive vertices is a
+        // degenerate detour (the ring dives to a point within float noise
+        // of another and returns). Collapse the run to ONE vertex: its
+        // members are all within sub_ulp of each other, so any choice is
+        // area-preserving to sub-ULP — but the representative must be a
+        // "clean" point (the CDT chokes on a spike at a random offset,
+        // e.g. (-7.55e-9, 0) instead of (0,0) — measured: seed 00c11200
+        // → cross-component SelfIntersection). Pick the member closest to
+        // the coordinate origin.
         let mut j = i + 1;
+        let mut best = coords[i];
+        let mut best_mag = coords[i].x.abs().max(coords[i].y.abs());
+        let mut run_len = 1usize;
+        let mut last_in_run = coords[i];
         while j < interior_len {
-            let d = (coords[j].x - anchor.x).abs().max((coords[j].y - anchor.y).abs());
+            let d = (coords[j].x - last_in_run.x).abs().max((coords[j].y - last_in_run.y).abs());
             if d <= sub_ulp {
+                last_in_run = coords[j];
+                let m = coords[j].x.abs().max(coords[j].y.abs());
+                if m < best_mag {
+                    best = coords[j];
+                    best_mag = m;
+                }
+                run_len += 1;
                 j += 1;
             } else {
                 break;
             }
+        }
+        if run_len > 1 && i > 0 {
+            if snap_clean {
+                // Arrange CDT: replace the run start (already pushed) with the
+                // cleanest run member (closest to the coordinate origin).
+                if let Some(last) = cleaned.last_mut() {
+                    *last = best;
+                }
+            }
+            // Structure repair: keep the run start as-is (collapse onto the
+            // axis-aligned first member — see doc comment).
         }
         i = j;
     }
@@ -487,7 +529,7 @@ fn find_first_intersection_bruteforce(
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn fix_self_intersecting(coords: &[Coord<f64>]) -> Option<Vec<Polygon<f64>>> {
     let _t = Instant::now();
-    let coords = collapse_sub_ulp_vertices(coords);
+    let coords = collapse_sub_ulp_vertices(coords, false);
     let edges = edges_from_coords(&coords);
     let mut noded = split_edges(&edges);
     if noded.is_empty() {

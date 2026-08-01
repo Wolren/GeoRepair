@@ -43,7 +43,7 @@ pub mod prep_intersect;
 
 use crate::core::MakeValidConfig;
 use crate::validation::GeoValidation;
-use geo::{BooleanOps, Coord, Geometry, GeometryCollection, LinesIter, MultiPolygon, Polygon};
+use geo::{BooleanOps, Coord, Geometry, GeometryCollection, LineString, LinesIter, MultiPolygon, Polygon};
 use rstar::{AABB, RTree, RTreeObject};
 use rustc_hash::FxHashSet;
 use spade::{ConstrainedDelaunayTriangulation, Triangulation};
@@ -61,6 +61,40 @@ fn build_cdt_safe(
 }
 
 pub(crate) fn fix_polygon(poly: &Polygon<f64>, _config: &MakeValidConfig) -> Geometry<f64> {
+    // Sub-ULP gate FIRST (before poly_has_basic_form): mixed-magnitude rings
+    // (1e8 + 1e-9 coords) have sub-precision spikes that fail basic form
+    // (consecutive duplicates) AND poison the CDT with crossing triangles
+    // (measured: seed 00c11200 → MultiPolygon with cross-component
+    // SelfIntersection; GEOS snaps the spike to the grid). Collapsing the
+    // run up front routes everything downstream through clean geometry.
+    if has_sub_ulp_edge(poly) {
+        let ext: LineString<f64> =
+            LineString::new(crate::structure::fix_ring::collapse_sub_ulp_vertices(&poly.exterior().0, true));
+        let holes: Vec<LineString<f64>> = poly
+            .interiors()
+            .iter()
+            .map(|h| {
+                LineString::new(
+                    crate::structure::fix_ring::collapse_sub_ulp_vertices(&h.0, true),
+                )
+            })
+            .collect();
+        #[cfg(any(test, debug_assertions))]
+        if std::env::var("DIAG_COLLAPSE").is_ok() {
+            eprintln!(
+                "DIAG_COLLAPSE: {} coords -> {} coords",
+                poly.exterior().0.len(),
+                ext.0.len()
+            );
+        }
+        // No-op collapse guard: if the ring is unchanged, recursion would be
+        // infinite (measured: invariant_mixed_fp_in_same_ring stack
+        // overflow). Fall through to the normal path instead.
+        let collapsed = Polygon::new(ext, holes);
+        if collapsed.exterior().0.len() != poly.exterior().0.len() {
+            return fix_polygon(&collapsed, _config);
+        }
+    }
     if !poly_has_basic_form(poly) {
         let lines: Vec<_> = poly.lines_iter().collect();
         if lines.is_empty() {
@@ -74,13 +108,6 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, _config: &MakeValidConfig) -> Geo
     let lines: Vec<_> = poly.lines_iter().collect();
     if lines.is_empty() {
         return empty();
-    }
-    // Degenerate gate shared with Structure fast path: mixed-magnitude rings
-    // (sub-ULP edges) must NOT pass through — proper-crossing detection is
-    // blind to their collinear overlap. Collinear rings are handled by
-    // strip_degenerate's noise-bound demotion downstream.
-    if has_sub_ulp_edge(poly) {
-        return fallback_polygon_fix(poly);
     }
     if prep::has_no_intersections(&lines) && holes_are_valid(poly) {
         return Geometry::Polygon(poly.clone());
