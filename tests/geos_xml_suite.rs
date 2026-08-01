@@ -164,6 +164,40 @@ enum ValidityOutcome {
     Fail,
 }
 
+/// Tally of WHY masked divergences happen (first error class our validator
+/// produced on a GEOS-valid input). Printed at the end of the run so the
+/// strictness divergence is classed, not just counted.
+static DIVERGENCE_REASONS: std::sync::Mutex<Option<std::collections::BTreeMap<String, usize>>> =
+    std::sync::Mutex::new(None);
+
+fn record_divergence_reason(geom: &Geometry<f64>) {
+    let errors = geom.validate().errors;
+    let key = errors
+        .first()
+        .map(|e| {
+            let s = format!("{e:?}");
+            s.split(|c: char| c == '(' || c == ' ' || c == '{')
+                .next()
+                .unwrap_or(&s)
+                .to_string()
+        })
+        .unwrap_or_else(|| "unknown".to_string());
+    let mut guard = DIVERGENCE_REASONS.lock().expect("divergence tally lock");
+    let m = guard.get_or_insert_with(std::collections::BTreeMap::new);
+    *m.entry(key).or_insert(0) += 1;
+}
+
+fn print_divergence_reasons() {
+    let reasons = DIVERGENCE_REASONS.lock().expect("divergence tally lock").take();
+    if let Some(m) = reasons {
+        let total: usize = m.values().sum();
+        eprintln!("  Masked divergence classes ({total}):");
+        for (k, v) in m {
+            eprintln!("    {k}: {v}");
+        }
+    }
+}
+
 /// GEOS IsValidOp for the line family (verified against the corpus and
 /// geosop):
 /// - LINESTRING (open OR closed): invalid iff a non-finite coordinate or
@@ -256,12 +290,14 @@ fn run_validity_test(
     }
     if expected_valid {
         // GEOS says valid, we say invalid: documented divergence classes
-        // (WrongOrientation 229, NotSimple 72, RepeatedPoint 13,
-        // MultiPointDuplicatePoints 7, RingTooFewPoints-on-empty 10).
+        // (measured 2026-08-01 on the 858-case corpus: WrongOrientation 189,
+        // RepeatedPoint 8, MultiPointDuplicatePoints 7, RingTooFewPoints 5,
+        // PinchPoint 1; printed per-class at the end of the run).
         // Repair; a valid repair is a masked divergence (drift-checked),
         // an invalid repair is a real failure.
         let fixed = geom.make_valid_with_config(cfg);
         if fixed.validate().valid {
+            record_divergence_reason(geom);
             ValidityOutcome::MaskedDivergence
         } else {
             ValidityOutcome::Fail
@@ -802,8 +838,9 @@ fn run_all_geos_xml_tests() -> Vec<(String, usize, usize, usize, usize, usize, V
 }
 
 /// Documented validator-strictness divergence baseline (measured 2026-08-01
-/// on the 858-case corpus: 210 masked; classes: WrongOrientation,
-/// NotSimple, RepeatedPoint, MultiPointDuplicatePoints, RingTooFewPoints).
+/// on the 858-case corpus: 210 masked; classes WrongOrientation 189,
+/// RepeatedPoint 8, MultiPointDuplicatePoints 7, RingTooFewPoints 5,
+/// PinchPoint 1 - the suite prints the live class tally on every run).
 /// The isValid suite counts expected-valid inputs our validator rejects and
 /// repair restores as MASKED-DIVERGENCE. If the count grows beyond this
 /// baseline, the suite fails: validator drift must be triaged, not hidden.
@@ -845,6 +882,7 @@ fn geos_xml_suite() {
     eprintln!("  Masked validator divergence: {total_masked} (baseline {VALIDATOR_DIVERGENCE_BASELINE})");
     eprintln!("  Known validator gaps (too lenient): {total_known_gaps} (baseline {KNOWN_VALIDATOR_GAP_BASELINE})");
     eprintln!("  Skipped (overlay-only) cases: {total_skipped}");
+    print_divergence_reasons();
     eprintln!("==============================");
 
     if total_masked > VALIDATOR_DIVERGENCE_BASELINE {
