@@ -1,4 +1,4 @@
-use geo::{Coord, MultiPolygon, Polygon, Winding};
+use geo::{Area, Coord, MultiPolygon, Polygon, Winding};
 use log::warn;
 
 /// Merge overlapping shells using even-parent filter to prevent NestedHoles.
@@ -104,11 +104,37 @@ pub fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
     // return the even-parent-filtered shells without the union — the Auto
     // validator then routes to arrange/reduce; Structure only promises no
     // panic on its output.
+    //
+    // Area-preservation guard: unary_union must not LOSE area. geo's
+    // OverlayNG port drops an island-in-hole component during union
+    // (measured: square-with-hole ∪ island-inside-hole → 144, island 64
+    // lost; GEOS returns MULTIPOLYGON(square-with-hole, island) = 400-64).
+    // Discriminator: when the union shrinks total area AND the
+    // even-parent-filtered shells are already valid (winding-insensitive
+    // geo validation — island-in-hole is valid, nested-in-fill is not),
+    // the union was unnecessary or wrong: keep the filtered shells.
+    // Legit nesting merges (deep nesting: l2 absorbed into l0) shrink the
+    // pre-union MP's summed area too, but the pre-union MP is INVALID there
+    // (nested-in-fill), so the union result stands.
     let mp = MultiPolygon::new(kept);
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let before: f64 = mp.0.iter().map(|p| p.unsigned_area()).sum();
+    let eps = 1e-9;
+    let unioned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         geo::algorithm::bool_ops::unary_union(&mp)
     }))
-    .unwrap_or(mp)
+    .ok()
+    .and_then(|u| {
+        let after: f64 = u.0.iter().map(|p| p.unsigned_area()).sum();
+        if after >= before - eps {
+            Some(u)
+        } else if geo::algorithm::Validation::is_valid(&mp) {
+            // Union dropped area but filtered shells are valid — keep them.
+            None
+        } else {
+            Some(u)
+        }
+    });
+    unioned.unwrap_or(mp)
 }
 
 /// True if every vertex of `ring` lies strictly inside `poly` (exterior

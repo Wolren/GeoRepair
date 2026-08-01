@@ -87,6 +87,74 @@ pub(crate) fn basic_cleanup(ring: &LineString<f64>) -> Option<Vec<Coord<f64>>> {
     Some(deduped)
 }
 
+/// Collapse SUB-ULP spikes: consecutive vertices closer than
+/// f64::EPSILON × ring-bbox-scale are below the coordinate's own
+/// representable precision — degenerate spikes that poison noding and face
+/// extraction (measured: mixed-magnitude ring with a 5.089e-9 spike at 1e8
+/// scale → 7 GEOS-exact faces collapsed to 6, 62% area loss; GEOS degrades
+/// such spikes, as does arrange's prepare_lines snap). Merge the spike
+/// vertex into its predecessor. Only interior vertices are dropped (the
+/// closure vertex is protected by the loop range).
+///
+/// Runs ONLY on the repair path (before noding in fix_self_intersecting) —
+/// NOT in basic_cleanup — because valid fast-path passthrough must stay
+/// O(n) with no extra scan (measured: adding this to basic_cleanup cost
+/// ~0.45s on the 1.58M dataset, blowing the 5s bar).
+fn collapse_sub_ulp_vertices(coords: &[Coord<f64>]) -> Vec<Coord<f64>> {
+    if coords.len() < 4 {
+        return coords.to_vec();
+    }
+    let (mut min_x, mut max_x, mut min_y, mut max_y) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+    for c in coords {
+        min_x = min_x.min(c.x);
+        max_x = max_x.max(c.x);
+        min_y = min_y.min(c.y);
+        max_y = max_y.max(c.y);
+    }
+    let scale = (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
+    let sub_ulp = f64::EPSILON * scale;
+    if sub_ulp <= 0.0 {
+        return coords.to_vec();
+    }
+    let mut cleaned: Vec<Coord<f64>> = Vec::with_capacity(coords.len());
+    // Keep the first vertex; scan interior vertices (skip the closure at
+    // the end — it equals the first vertex).
+    let interior_len = coords.len() - 1;
+    let mut i = 0usize;
+    while i < interior_len {
+        cleaned.push(coords[i]);
+        let anchor = coords[i];
+        // Skip any run of vertices within sub_ulp of the anchor.
+        let mut j = i + 1;
+        while j < interior_len {
+            let d = (coords[j].x - anchor.x).abs().max((coords[j].y - anchor.y).abs());
+            if d <= sub_ulp {
+                j += 1;
+            } else {
+                break;
+            }
+        }
+        i = j;
+    }
+    // Re-close: the ring's last interior vertex connects back to the first
+    // vertex. If the last interior vertex itself is within sub_ulp of the
+    // first, drop it (spike at the closure).
+    if cleaned.len() >= 2 {
+        let last = *cleaned.last().unwrap();
+        let first = cleaned[0];
+        let d = (last.x - first.x).abs().max((last.y - first.y).abs());
+        if d <= sub_ulp && cleaned.len() > 2 {
+            cleaned.pop();
+        }
+    }
+    cleaned.push(cleaned[0]);
+    if cleaned.len() >= 4 {
+        cleaned
+    } else {
+        coords.to_vec()
+    }
+}
+
 pub(crate) fn is_collinear_ring(coords: &[Coord<f64>]) -> bool {
     if coords.len() < 4 {
         return true;
@@ -419,7 +487,8 @@ fn find_first_intersection_bruteforce(
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn fix_self_intersecting(coords: &[Coord<f64>]) -> Option<Vec<Polygon<f64>>> {
     let _t = Instant::now();
-    let edges = edges_from_coords(coords);
+    let coords = collapse_sub_ulp_vertices(coords);
+    let edges = edges_from_coords(&coords);
     let mut noded = split_edges(&edges);
     if noded.is_empty() {
         return None;

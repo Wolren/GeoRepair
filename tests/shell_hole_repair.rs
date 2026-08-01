@@ -5,7 +5,7 @@
 //! complex invalid polygons, PostGIS regressions, and bowtie variants.
 
 #[allow(unused_imports)]
-use geo::{Coord, Geometry, GeometryCollection, LineString, MultiPolygon, Polygon};
+use geo::{Area, Coord, Geometry, GeometryCollection, LineString, MultiPolygon, Polygon};
 use geo_repair::{MakeValid, MakeValidConfig};
 
 #[path = "common/mod.rs"]
@@ -160,7 +160,21 @@ fn test_nested_holes() {
     );
     let result = g.make_valid_with_config(&cfg_auto());
     assert_valid_ogc(&result);
-    assert_multipolygon_count(&result, 1);
+    // Nested hole → island: GEOS makeValid returns MULTIPOLYGON with 2
+    // components — the 20x20 square with the outer (2,2)-(18,18) hole, plus
+    // the inner (6,6)-(14,14) ring as a separate island polygon (total
+    // area 208, verified via geosop). A single-Polygon assertion is wrong:
+    // the island is positive space inside the hole and must survive.
+    assert_multipolygon_count(&result, 2);
+    let area: f64 = match &result {
+        Geometry::Polygon(p) => p.unsigned_area(),
+        Geometry::MultiPolygon(mp) => mp.0.iter().map(|p| p.unsigned_area()).sum(),
+        _ => 0.0,
+    };
+    assert!(
+        (area - 208.0).abs() < 1e-9,
+        "nested-holes area {area} != GEOS 208"
+    );
 }
 
 #[test]
