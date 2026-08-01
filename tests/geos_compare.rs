@@ -502,6 +502,10 @@ fn make_valid_fixtures() -> Vec<(&'static str, &'static str)> {
         ("mls_degenerate", "MULTILINESTRING ((0 0, 0 0), (1 1, 2 2))"),
         // All-repeated-point polygon - GEOS makeValid → empty.
         ("poly_all_repeated", "POLYGON ((0 0, 0 0, 0 0, 0 0, 0 0))"),
+        // Ring vertex-on-edge T-junction (GEOS TestValid2 Test 22): the
+        // closing vertex (110 140) lies on edge (60 90)-(160 190). GEOS
+        // nodes the touch: outer lobe with the inner lobe as a hole.
+        ("ring_tjunction", "POLYGON ((110 140, 110 50, 60 50, 60 90, 160 190, 20 110, 20 20, 200 20, 110 140))"),
     ]
 }
 

@@ -419,7 +419,70 @@ pub(crate) fn check_edge_pair_intersection(
     let a2 = coords[(i + 1) % n];
     let b1 = coords[j];
     let b2 = coords[(j + 1) % n];
-    edges_intersect_general(a1, a2, b1, b2, eps)
+    if edges_intersect_general(a1, a2, b1, b2, eps) {
+        return true;
+    }
+    // Ring self-touch at a vertex lying on a non-adjacent edge (T-junction):
+    // proper-crossing and collinear-overlap miss it, GEOS IsValidOp rejects
+    // it (Test 22: closing vertex (110 140) on edge (60 90)-(160 190)).
+    // Same-ring pairs only - this function is only called from
+    // check_ring_validity. Cross-ring T-junctions (hole vertex on shell
+    // edge) are VALID OGC touches and must never be flagged.
+    edges_vertex_on_edge(a1, a2, b1, b2)
+}
+
+/// Strict-interior vertex-on-edge touch between two segments: an endpoint
+/// of one segment lying strictly on the interior of the other. Endpoint
+/// equality is excluded (shared vertices are handled by the pinch/adjacency
+/// logic). Bbox-gated before the robust orient tests so clean data pays
+/// only 4 comparisons per pair. #[inline] is REQUIRED: this runs inside the
+/// per-pair small-ring sweep on the 1.58M-poly hot path (measured: a
+/// non-inlined call cost +25% on the full dataset).
+///
+/// Tolerance is RELATIVE to the larger edge length: orient2d magnitudes are
+/// O(L²) (twice the triangle area), so the collinearity threshold is
+/// `1e-12 * L²`. An absolute or max(1.0)-scaled eps inflates past tiny rings
+/// (1e-8-scale coords produce 1e-16 orients; a 1e-12 absolute eps flags
+/// every pair as touching - measured: small_ring_equiv seed 85).
+#[inline]
+pub(crate) fn edges_vertex_on_edge(
+    a1: Coord<f64>,
+    a2: Coord<f64>,
+    b1: Coord<f64>,
+    b2: Coord<f64>,
+) -> bool {
+    let (lo_x, hi_x) = if a1.x < a2.x { (a1.x, a2.x) } else { (a2.x, a1.x) };
+    let (lo_y, hi_y) = if a1.y < a2.y { (a1.y, a2.y) } else { (a2.y, a1.y) };
+    let (lo_x2, hi_x2) = if b1.x < b2.x { (b1.x, b2.x) } else { (b2.x, b1.x) };
+    let (lo_y2, hi_y2) = if b1.y < b2.y { (b1.y, b2.y) } else { (b2.y, b1.y) };
+    if hi_x < lo_x2 || lo_x > hi_x2 || hi_y < lo_y2 || lo_y > hi_y2 {
+        return false;
+    }
+    let la2 = (a2.x - a1.x).powi(2) + (a2.y - a1.y).powi(2);
+    let lb2 = (b2.x - b1.x).powi(2) + (b2.y - b1.y).powi(2);
+    let eps = 1e-12 * la2.max(lb2);
+    point_strictly_on_segment(a1, b1, b2, eps)
+        || point_strictly_on_segment(a2, b1, b2, eps)
+        || point_strictly_on_segment(b1, a1, a2, eps)
+        || point_strictly_on_segment(b2, a1, a2, eps)
+}
+
+/// True if `p` lies strictly on the interior of segment (a, b): on the
+/// segment's line (robust orient within eps) and strictly between the
+/// endpoints. Endpoint equality returns false.
+fn point_strictly_on_segment(p: Coord<f64>, a: Coord<f64>, b: Coord<f64>, eps: f64) -> bool {
+    if p == a || p == b {
+        return false;
+    }
+    let o = crate::orient::orient2d(a, b, p);
+    if o.abs() > eps {
+        return false;
+    }
+    let (lo_x, hi_x) = if a.x < b.x { (a.x, b.x) } else { (b.x, a.x) };
+    let (lo_y, hi_y) = if a.y < b.y { (a.y, b.y) } else { (b.y, a.y) };
+    // Strict interior on at least one axis (axis-aligned segments have a
+    // constant axis; diagonal segments satisfy both).
+    (p.x > lo_x + eps && p.x < hi_x - eps) || (p.y > lo_y + eps && p.y < hi_y - eps)
 }
 
 /// Minimal edge-index wrapper for R-tree intersection queries.

@@ -161,7 +161,23 @@ fn rec_overlaps(
         let o2 = orient2d(li.start, li.end, lj.end);
         let o3 = orient2d(lj.start, lj.end, li.start);
         let o4 = orient2d(lj.start, lj.end, li.end);
-        return (o1 > 0.0) != (o2 > 0.0) && (o3 > 0.0) != (o4 > 0.0);
+        if (o1 > 0.0) != (o2 > 0.0) && (o3 > 0.0) != (o4 > 0.0) {
+            return true;
+        }
+        // Same-ring vertex-on-edge self-touch (T-junction): GEOS rejects a
+        // ring vertex on a non-adjacent edge (Test 22). Cross-ring pairs
+        // stay untouched (hole vertex on shell edge is a VALID OGC touch).
+        if mc1.ring_id == mc2.ring_id
+            && crate::validation::edges_vertex_on_edge(
+                li.start,
+                li.end,
+                lj.start,
+                lj.end,
+            )
+        {
+            return true;
+        }
+        return false;
     }
 
     let (minx0, miny0, maxx0, maxy0) = mc1.sub_aabb(lines, start0, end0);
@@ -205,7 +221,7 @@ fn compute_overlaps(lines: &[Line<f64>], mc1: &MonoChain, mc2: &MonoChain) -> bo
 /// - strict proper crossing: `(o1 > 0.0) != (o2 > 0.0) && (o3 > 0.0) != (o4 > 0.0)`
 ///   using the same `orient2d` (Shewchuk via crate::orient)
 /// - same-ring adjacency skip: edges i and j are adjacent if `j == i + 1`
-///   or `j + 1 == i`, and the closing pair (first, last) is skipped —
+///   or `j + 1 == i`, and the closing pair (first, last) is skipped -
 ///   both mirror rec_overlaps lines 148-156
 /// - different rings always compare (ring boundary = segment whose start
 ///   != previous segment's end, same as build_mono_chains)
@@ -256,6 +272,20 @@ pub fn has_no_intersections_small(lines: &[Line<f64>]) -> bool {
             let o3 = orient2d(lj.start, lj.end, li.start);
             let o4 = orient2d(lj.start, lj.end, li.end);
             if (o1 > 0.0) != (o2 > 0.0) && (o3 > 0.0) != (o4 > 0.0) {
+                return false;
+            }
+            // Same-ring vertex-on-edge self-touch (T-junction): GEOS rejects
+            // a ring vertex on a non-adjacent edge (Test 22). Cross-ring
+            // pairs stay untouched (hole vertex on shell edge is a VALID
+            // OGC touch). Bbox-gated inside edges_vertex_on_edge.
+            if ri == ring_of[j]
+                && crate::validation::edges_vertex_on_edge(
+                    li.start,
+                    li.end,
+                    lj.start,
+                    lj.end,
+                )
+            {
                 return false;
             }
         }
