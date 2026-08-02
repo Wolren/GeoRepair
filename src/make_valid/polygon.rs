@@ -236,6 +236,125 @@ pub(super) fn make_valid_impl(
         if has_nan(&result) { empty_geom::<f64>() } else { result }
         }
 
+/// Owned twin of [`make_valid_impl`]: takes ownership of the working
+/// polygon so the Structure fast path can MOVE it into the output instead of
+/// cloning (zero-copy passthrough for valid input). Arrange rebuilds anyway
+/// and borrows; Auto keeps the borrowed path (its full validation gate
+/// dwarfs the clone cost).
+pub(super) fn make_valid_impl_owned(
+    poly: Polygon<f64>,
+    config: &MakeValidConfig,
+    _first_valid: Coord<f64>,
+) -> Geometry<f64> {
+    // Same NaN-free guarantee as make_valid_impl's callers.
+    debug_assert!(
+        !has_nan_or_infinite(&poly),
+        "make_valid_impl_owned requires NaN-free input"
+    );
+    match config.poly_method {
+        PolyMethod::Arrange => arrange_or_empty(&poly, config),
+        PolyMethod::Structure => match structure_fix_owned(poly, config) {
+            Ok(g) => g,
+            Err(p) => {
+                warn!("Structure mode: fix failed, retrying with precision reduction");
+                reduce_fallback(&p, config)
+            }
+        },
+        PolyMethod::Auto => make_valid_impl(&poly, &poly, config, _first_valid),
+    }
+}
+
+/// Owned twin of [`Polygon::make_valid_with_config`] for batch pipelines
+/// that already own their polygons (e.g. [`crate::parallel::par_fix_polygon_batch_owned`]).
+/// Moves the polygon through the Structure fast path — zero-copy for the
+/// ~99.85% of real-world polygons that are already valid.
+pub fn make_valid_owned(poly: Polygon<f64>, config: &MakeValidConfig) -> Geometry<f64> {
+    // Mirrors make_valid_with_config with `poly` owned instead of `&self`.
+    // Keep the two bodies in sync.
+    if !config.keep_collapsed && poly.exterior().0.len() >= 4 {
+        let coords = &poly.exterior().0;
+        let (mut min_x, mut max_x, mut min_y, mut max_y) =
+            (coords[0].x, coords[0].x, coords[0].y, coords[0].y);
+        let mut has_nan = !coords[0].x.is_finite() || !coords[0].y.is_finite();
+        for w in coords.windows(2) {
+            min_x = min_x.min(w[1].x);
+            max_x = max_x.max(w[1].x);
+            min_y = min_y.min(w[1].y);
+            max_y = max_y.max(w[1].y);
+            if !has_nan && (!w[1].x.is_finite() || !w[1].y.is_finite()) {
+                has_nan = true;
+            }
+        }
+        let scale = (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
+        if (max_x - min_x).abs() < f64::EPSILON * scale
+            || (max_y - min_y).abs() < f64::EPSILON * scale
+        {
+            return empty_geom();
+        }
+        if !has_nan && !poly.interiors().is_empty() {
+            for ring in poly.interiors().iter() {
+                if ring.0.iter().any(|c| !c.x.is_finite() || !c.y.is_finite()) {
+                    has_nan = true;
+                    break;
+                }
+            }
+        }
+        if !has_nan {
+            let first = coords[0];
+            return strip_degenerate(make_valid_impl_owned(poly, config, first));
+        }
+        // has_nan: fall through to the NaN path below (mirrors the borrowed version).
+    }
+    if !config.keep_collapsed && poly.exterior().0.len() < 4 {
+        if config.keep_collapsed && !poly.exterior().0.is_empty() {
+            return Geometry::Point(Point(poly.exterior().0[0]));
+        }
+        return empty_geom();
+    }
+    // keep_collapsed: true with >= 4 verts, or NaN present: rebuild clean.
+    let ext_clean: Vec<Coord<f64>> = poly
+        .exterior()
+        .0
+        .iter()
+        .copied()
+        .filter(|c| c.x.is_finite() && c.y.is_finite())
+        .collect();
+    if ext_clean.is_empty() {
+        return empty_geom();
+    }
+    let first_valid = ext_clean[0];
+    let int_clean: Vec<LineString<f64>> = poly
+        .interiors()
+        .iter()
+        .map(|ring| {
+            LineString::new(
+                ring.0
+                    .iter()
+                    .copied()
+                    .filter(|c| c.x.is_finite() && c.y.is_finite())
+                    .collect(),
+            )
+        })
+        .collect();
+    let deduped = crate::noding::remove_consecutive_duplicates(&ext_clean);
+    if deduped.len() < 3 {
+        return match deduped.len() {
+            0 => empty_geom(),
+            1 => Geometry::Point(Point(deduped[0])),
+            _ => Geometry::LineString(LineString::new(deduped)),
+        };
+    }
+    let ext_ring = if deduped.first() == deduped.last() {
+        LineString::new(deduped)
+    } else {
+        let mut c = deduped;
+        c.push(c[0]);
+        LineString::new(c)
+    };
+    let cleaned = Polygon::new(ext_ring, int_clean);
+    strip_degenerate(make_valid_impl_owned(cleaned, config, first_valid))
+}
+
 /// Enforce OGC winding: CCW exterior, CW interior rings.
 /// Consumes the geometry and rebuilds rings in place — no cloning: the
 /// exterior and hole `LineString`s are moved out via `into_inner` and only
@@ -331,12 +450,34 @@ pub(super) fn structure_fix(poly: &Polygon<f64>, config: &MakeValidConfig) -> Op
     crate::structure::fix_polygon(poly, config)
 }
 
+/// Owned structure fix: `Ok(geometry)` or `Err(polygon)` for the caller's
+/// precision-reduction fallback. Moves the polygon through the fast path
+/// (zero-copy passthrough for valid input) instead of cloning it.
+#[cfg(feature = "structure")]
+pub(super) fn structure_fix_owned(
+    poly: Polygon<f64>,
+    config: &MakeValidConfig,
+) -> Result<Geometry<f64>, Polygon<f64>> {
+    crate::structure::fix_polygon_owned(poly, config)
+}
+
 #[cfg(not(feature = "structure"))]
 fn structure_fix(poly: &Polygon<f64>, _config: &MakeValidConfig) -> Option<Geometry<f64>> {
     if !poly.exterior().0.is_empty() {
         warn!("PolyMethod::Structure selected but 'structure' feature is not enabled. Enable the 'structure' feature in Cargo.toml to use Structure mode.");
     }
     None
+}
+
+#[cfg(not(feature = "structure"))]
+fn structure_fix_owned(
+    poly: Polygon<f64>,
+    _config: &MakeValidConfig,
+) -> Result<Geometry<f64>, Polygon<f64>> {
+    if !poly.exterior().0.is_empty() {
+        warn!("PolyMethod::Structure selected but 'structure' feature is not enabled. Enable the 'structure' feature in Cargo.toml to use Structure mode.");
+    }
+    Err(poly)
 }
 
 /// Check OGC validity using our own GeoValidation (Shewchuk-based).

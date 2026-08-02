@@ -125,8 +125,26 @@ pub fn print_profile(n_polys: usize) {
     eprintln!("  total         {:>9.3}ms", ms(total_ns));
 }
 
-#[cfg_attr(feature = "hotpath", hotpath::measure)]
+/// Borrowed convenience wrapper: clones the polygon and delegates to
+/// [`fix_polygon_owned`]. The hot batch paths use the owned variant to avoid
+/// the clone (measured: the fast-path clone was ~2 allocs + full ring memcpy
+/// per polygon, the dominant per-poly cost on the 1.58M-poly full pass).
 pub fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geometry<f64>> {
+    fix_polygon_owned(poly.clone(), config).ok()
+}
+
+/// Owned repair entry: `Ok(geometry)` on success, `Err(polygon)` when the
+/// polygon is returned unconsumed (structure repair produced no result and
+/// the caller may fall back to precision reduction).
+///
+/// The fast path MOVES the polygon into the output instead of cloning it —
+/// for the ~99.85% of real-world polygons that are already valid this is a
+/// zero-copy passthrough, matching GEOS's shared-geometry return.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+pub(crate) fn fix_polygon_owned(
+    poly: Polygon<f64>,
+    config: &MakeValidConfig,
+) -> Result<Geometry<f64>, Polygon<f64>> {
     // Fast path: valid polygons can return immediately. Use a total-verts limit
     // to avoid the monotone-chain has_no_intersections cost on very large rings.
     let _t_fp = Instant::now();
@@ -136,12 +154,12 @@ pub fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geom
             poly.exterior().0.len() + poly.interiors().iter().map(|h| h.0.len()).sum::<usize>();
         if total_verts > 0
             && poly.exterior().0.len() >= 4
-            && crate::arrange::poly_has_basic_form(poly)
+            && crate::arrange::poly_has_basic_form(&poly)
             // Sub-ULP edge check: an edge shorter than EPSILON * bbox_scale
             // (mixed-magnitude rings, e.g. 1e8 coords with 1e-8 spikes) makes
             // proper-crossing detection blind — collinear overlap is invisible.
             // Such inputs are invalid anyway; route them to the full repair.
-            && !crate::arrange::has_sub_ulp_edge(poly)
+            && !crate::arrange::has_sub_ulp_edge(&poly)
             // Collinear ring check: a wide-bbox ring can still be exactly
             // collinear (base=1e10, step=0.09, n=3 — all points on one line).
             // Winding is then numerically ambiguous → WrongOrientation. The
@@ -156,10 +174,10 @@ pub fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geom
                     poly.lines_iter().collect();
                 if !lines.is_empty()
                     && crate::arrange::prep::has_no_intersections(&lines)
-                    && crate::arrange::holes_are_valid(poly)
+                    && crate::arrange::holes_are_valid(&poly)
                 {
                     PROFILE_FP_NS.fetch_add(_t_fp.elapsed().as_nanos() as u64, Ordering::Relaxed);
-                    return Some(Geometry::Polygon(poly.clone()));
+                    return Ok(Geometry::Polygon(poly));
                 }
             } else {
                 // Very large rings: skip the monotone-chain has_no_intersections
@@ -169,11 +187,11 @@ pub fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geom
                 // (classify → subtract → merge) would only waste time. Measured:
                 // 159k-vert shell with 857 holes took 11.3s in subtract_holes
                 // for a polygon that was already valid.
-                if !crate::structure::has_proper_self_crossing(poly)
-                    && crate::arrange::holes_are_valid_inclusive(poly)
+                if !crate::structure::has_proper_self_crossing(&poly)
+                    && crate::arrange::holes_are_valid_inclusive(&poly)
                 {
                     PROFILE_FP_NS.fetch_add(_t_fp.elapsed().as_nanos() as u64, Ordering::Relaxed);
-                    return Some(Geometry::Polygon(poly.clone()));
+                    return Ok(Geometry::Polygon(poly));
                 }
             }
         }
@@ -211,7 +229,7 @@ pub fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geom
             hole_vertex_strictly_outside(h, poly.exterior())
         });
         if crossing {
-            return Some(crate::arrange::fallback_polygon_fix(poly));
+            return Ok(crate::arrange::fallback_polygon_fix(&poly));
         }
     }
 
@@ -271,9 +289,9 @@ pub fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geom
                 warn!("Structure: shell ring repair failed, falling back to CDT arrange");
                 #[cfg(feature = "arrange")]
                 if !poly.exterior().0.is_empty() {
-                    return Some(crate::arrange::fallback_polygon_fix(poly));
+                    return Ok(crate::arrange::fallback_polygon_fix(&poly));
                 }
-                return handle_collapse_result(poly.exterior(), config);
+                return Ok(handle_collapse_result(poly.exterior(), config).unwrap_or_else(crate::make_valid::empty_geom));
             }
         };
         (valid_shells, holes)
@@ -289,19 +307,19 @@ pub fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geom
                 warn!("Structure: shell ring repair failed, falling back to CDT arrange");
                 #[cfg(feature = "arrange")]
                 if !poly.exterior().0.is_empty() {
-                    return Some(crate::arrange::fallback_polygon_fix(poly));
+                    return Ok(crate::arrange::fallback_polygon_fix(&poly));
 
                 }
-                return handle_collapse_result(poly.exterior(), config);
+                return Ok(handle_collapse_result(poly.exterior(), config).unwrap_or_else(crate::make_valid::empty_geom));
             }
         };
         if shell_polys.is_empty() {
-            return handle_collapse_result(poly.exterior(), config);
+            return Ok(handle_collapse_result(poly.exterior(), config).unwrap_or_else(crate::make_valid::empty_geom));
         }
         let valid_shells: Vec<Polygon<f64>> =
             shell_polys.into_iter().filter(|p| p.exterior().0.len() >= 4).collect();
         if valid_shells.is_empty() {
-            return handle_collapse_result(poly.exterior(), config);
+            return Ok(handle_collapse_result(poly.exterior(), config).unwrap_or_else(crate::make_valid::empty_geom));
         }
         PROFILE_SR_NS.fetch_add(_t_sr.elapsed().as_nanos() as u64, Ordering::Relaxed);
 
@@ -407,7 +425,7 @@ pub fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geom
 
     if result_polys.is_empty() {
         warn!("Structure: subtract/merge produced no result polygons");
-        return None;
+        return Err(poly);
     }
 
     #[cfg(any(test, debug_assertions))]
@@ -486,7 +504,7 @@ pub fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geom
         crate::make_valid::drop_nested_components(merged)
     };
 
-    Some(result)
+    Ok(result)
 }
 
 /// True if the polygon's linework has a PROPER self-crossing (interior-interior

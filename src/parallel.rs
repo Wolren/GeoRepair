@@ -157,6 +157,24 @@ pub fn par_fix_polygon_batch(
         .collect()
 }
 
+/// Owned parallel batch repair: consumes the polygons and MOVES each one
+/// through the repair fast path instead of cloning it. For the ~99.85% of
+/// real-world polygons that are already valid this is a zero-copy
+/// passthrough (the borrowed variant pays a full ring clone per polygon).
+///
+/// Output order matches the input order (rayon indexed collect).
+#[cfg(any(feature = "arrange", feature = "structure"))]
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+pub fn par_fix_polygon_batch_owned(
+    polys: Vec<Polygon<f64>>,
+    config: &MakeValidConfig,
+) -> Vec<Geometry<f64>> {
+    polys
+        .into_par_iter()
+        .map(|p| crate::make_valid::make_valid_owned(p, config))
+        .collect()
+}
+
 /// Process polygons from an iterator in chunks — peak memory is bounded by
 /// `chunk_size` polygons. Useful for streaming large datasets without loading
 /// everything into memory at once. Results preserve input order.
