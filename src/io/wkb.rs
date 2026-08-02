@@ -636,7 +636,7 @@ fn ewkb_size(geom: &Geometry<f64>, dims: EwkbDims, has_srid: bool) -> usize {
         }
         // OGC WKB has no Line/Rect/Triangle types; encode them losslessly as
         // their closest OGC equivalents, matching write_geometry.
-        Line(l) => header + 4 + 2 * coord_bytes,
+        Line(_) => header + 4 + 2 * coord_bytes,
         Rect(_) => header + 4 + (4 + 5 * coord_bytes),
         Triangle(_) => header + 4 + (4 + 4 * coord_bytes),
     }

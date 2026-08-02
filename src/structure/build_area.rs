@@ -41,7 +41,6 @@ pub fn build_area(lines: &[geo::Line<f64>]) -> Option<MultiPolygon<f64>> {
     // ---- Step 1: rings + orientation classification -------------------------
     struct Face {
         ring: Vec<Coord<f64>>, // as walked (shells CW, holes CCW)
-        signed_area: f64,
         envelope_area: f64,
         is_shell: bool,
         parent: Option<usize>,
@@ -70,7 +69,6 @@ pub fn build_area(lines: &[geo::Line<f64>]) -> Option<MultiPolygon<f64>> {
         faces_out.push(Face {
             envelope_area: (max_x - min_x) * (max_y - min_y),
             ring,
-            signed_area: sa,
             is_shell: sa < 0.0, // GEOS: CW = shell
             parent: None,
         });
@@ -121,7 +119,7 @@ pub fn build_area(lines: &[geo::Line<f64>]) -> Option<MultiPolygon<f64>> {
     // ---- Step 4: even-parent filter (ring equality, direction-agnostic) ----
     // owner_of_ring: fingerprint of a hole ring -> the shell that owns it.
     let mut owner_of_ring: FxHashMap<Vec<(u64, u64)>, usize> = FxHashMap::default();
-    for (h, f) in faces_out.iter().enumerate() {
+    for f in &faces_out {
         if let Some(s) = f.parent {
             owner_of_ring.insert(ring_fingerprint(&f.ring), s);
         }

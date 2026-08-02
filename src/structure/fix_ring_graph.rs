@@ -1,12 +1,10 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
-use std::collections::VecDeque;
 
 #[cfg_attr(not(test), allow(unused_imports))]
 use geo::{Coord, Line, LineString};
 
 use crate::core;
-use crate::orient::orient2d;
 
 /// ---------------------------------------------------------------------------
 /// Graph construction
@@ -89,9 +87,9 @@ pub fn build_graph(lines: &[Line<f64>]) -> Graph {
 }
 
 /// ---------------------------------------------------------------------------
-/// Face extraction — faithful port of GEOS PolygonizeGraph::getEdgeRings
-/// (computeNextCWEdges + findLabeledEdgeRings + convertMaximalToMinimalEdgeRings
-/// + findEdgeRing). Labels are per-DIRECTED edge (2*n_edges entries): the two
+/// Face extraction - faithful port of GEOS PolygonizeGraph::getEdgeRings
+/// (computeNextCWEdges + findLabeledEdgeRings + convertMaximalToMinimalEdgeRings,
+/// then findEdgeRing). Labels are per-DIRECTED edge (2*n_edges entries): the two
 /// faces on either side of an undirected edge carry different labels, and the
 /// CCW conversion distinguishes de->getLabel() from sym->getLabel().
 /// Without this, faces merge across shared edges (measured: 7 faces instead
@@ -512,54 +510,7 @@ fn split_face_at_pinch_points_depth(
     }
 
     vec![face.to_vec()]
-}
-
-fn face_winding(
-    face: &[(usize, usize)],
-    verts: &[Coord<f64>],
-    graph_edges: &[(usize, usize)],
-    input_ring: &[Coord<f64>],
-) -> i32 {
-    let &(ei, to_idx) = &face[0];
-    let (from_vi, to_vi) = graph_edges[ei];
-    let (start_coord, end_coord) = if to_vi == to_idx {
-        (verts[from_vi], verts[to_vi])
-    } else {
-        (verts[to_vi], verts[from_vi])
-    };
-
-    let dx = end_coord.x - start_coord.x;
-    let dy = end_coord.y - start_coord.y;
-    let len = (dx * dx + dy * dy).sqrt().max(1e-16);
-    let mx = (start_coord.x + end_coord.x) * 0.5;
-    let my = (start_coord.y + end_coord.y) * 0.5;
-    let cx = mx + (-dy / len) * 1e-7;
-    let cy = my + (dx / len) * 1e-7;
-
-    let mut wn = 0i32;
-    for i in 0..input_ring.len() - 1 {
-        let a = input_ring[i];
-        let b = input_ring[i + 1];
-        if a.y <= cy {
-            if b.y > cy && orient2d(a, b, Coord { x: cx, y: cy }) > 0.0 {
-                wn += 1;
-            }
-        } else if b.y <= cy && orient2d(a, b, Coord { x: cx, y: cy }) < 0.0 {
-            wn -= 1;
-        }
-    }
-    #[cfg(any(test, debug_assertions))]
-    if std::env::var("DIAG_FIX_RING").is_ok() {
-        let vert_indices: Vec<usize> = face.iter().map(|&(_, to)| to).collect();
-        eprintln!(
-            "  face_winding: verts={:?}, test=({:.10},{:.10}), wn={}",
-            vert_indices, cx, cy, wn
-        );
-    }
-    wn
-}
-
-/// ---------------------------------------------------------------------------
+}/// ---------------------------------------------------------------------------
 /// Face labeling: even-odd winding parity (GEOS MakeValidPoly equivalent)
 /// ---------------------------------------------------------------------------
 /// GEOS's BuildArea + symdiff loop selects the faces whose winding number
@@ -570,7 +521,7 @@ fn face_winding(
 /// interior 11956). Winding parity is exact:
 ///   face winding = winding number of any interior probe point vs the ring.
 pub fn label_interior_faces(
-    edges: &[Line<f64>],
+    _edges: &[Line<f64>],
     verts: &[Coord<f64>],
     input_ring: &[Coord<f64>],
     faces: &[Vec<(usize, usize)>],
@@ -608,16 +559,6 @@ fn face_probe_point(
         x: (v0.x + v1.x) * 0.5,
         y: (v0.y + v1.y) * 0.5,
     };
-    // Signed area of the face tells us which side is interior. Compute the
-    // face's shoelace; if negative (CW), interior is to the RIGHT of (v0->v1).
-    let mut shoelace = 0.0;
-    for i in 0..face.len() {
-        let (_, ta) = face[i];
-        let (_, tb) = face[(i + 1) % face.len()];
-        let a = verts[ta];
-        let b = verts[tb];
-        shoelace += a.x * b.y - b.x * a.y;
-    }
     // WALKER CONVENTION: every face (bounded AND outer) is walked with the
     // face interior on the RIGHT of the directed edge. Bounded faces come
     // out CW (negative shoelace), the outer face comes out CCW (positive)

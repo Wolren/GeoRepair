@@ -22,8 +22,8 @@ pub(crate) fn robust_is_ccw(ring: &[Coord<f64>]) -> bool {
     let mut min_idx = 0;
     let mut min_x = ring[0].x;
     let mut min_y = ring[0].y;
-    for i in 1..interior_n {
-        let c = &ring[i];
+    for (k, c) in ring[1..interior_n].iter().enumerate() {
+        let i = k + 1;
         if c.x < min_x || (c.x == min_x && c.y < min_y) {
             min_x = c.x;
             min_y = c.y;

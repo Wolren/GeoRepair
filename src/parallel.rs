@@ -17,7 +17,7 @@ use crate::noding::NodingFloat;
 /// Repair a MultiPoint in parallel — each point is processed on a separate rayon thread.
 pub fn par_fix_multi_point<T: GeoFloat + Send + Sync>(
     mp: &MultiPoint<T>,
-    config: &MakeValidConfig,
+    _config: &MakeValidConfig,
 ) -> Geometry<T> {
     // Same GEOS-parity rule as the serial MultiPoint impl: a point with a
     // single non-finite ordinate is invalid (CoordinateNaN) and dropped; a

@@ -12,7 +12,7 @@
 //! - [`MakeValid::make_valid`] - repair with default config
 //! - [`MakeValid::make_valid_with_config`] - repair with custom config
 use geo::{
-    Coord, CoordNum, GeoFloat, Geometry, GeometryCollection, Line, LineString, LinesIter,
+    Coord, CoordNum, GeoFloat, Geometry, GeometryCollection, Line, LineString,
     MultiLineString, MultiPoint, MultiPolygon, Point, Polygon, Rect, Triangle, Winding,
 };
 
@@ -704,7 +704,7 @@ fn strip_degenerate(g: Geometry<f64>) -> Geometry<f64> {
                                             }
                                             let simple: Vec<LineString<f64>> = lines
                                                 .into_iter()
-                                                .filter(|ls| linestring_is_simple(ls))
+                                                .filter(linestring_is_simple)
                                                 .collect();
                                             if simple.is_empty() {
                                                 empty_geom::<f64>()
@@ -1037,38 +1037,6 @@ fn reduce_fallback(poly: &Polygon<f64>, config: &MakeValidConfig) -> Geometry<f6
     reducer.reduce_raw(poly)
 }
 
-/// BuildArea on polygon boundary edges (node + polygonize + pack).
-#[cfg(all(feature = "arrange", feature = "structure"))]
-fn build_area_from_polygon(poly: &Polygon<f64>) -> Option<Geometry<f64>> {
-    use geo::LinesIter;
-    let lines: Vec<Line<f64>> = poly.lines_iter().collect();
-    if lines.is_empty() {
-        return None;
-    }
-    let noded = crate::arrange::prep::prepare_lines(lines).ok()?;
-    if noded.lines.is_empty() {
-        return None;
-    }
-    let faces = crate::structure::polygonizer::polygonize(&noded.lines);
-    let valid: Vec<Polygon<f64>> = faces
-        .into_iter()
-        .filter(|p| {
-            let ext = &p.exterior().0;
-            ext.len() >= 4
-                && !ext.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
-                && shoelace_abs_sum(ext) >= 1e-12
-        })
-        .collect();
-    if valid.is_empty() {
-        return None;
-    }
-    if valid.len() == 1 {
-        Some(Geometry::Polygon(valid.into_iter().next().unwrap()))
-    } else {
-        Some(drop_nested_components(MultiPolygon::new(valid)))
-    }
-}
-
 /// Check if bounding boxes of any two shells in a MultiPolygon overlap.
 /// Used as a cheap pre-filter - if bboxes don't overlap, there's
 /// no chance of shell overlap, so we can safely skip the expensive union.
@@ -1268,7 +1236,6 @@ pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
     // validator here sent valid merged output into the polygonizer fallback,
     // which re-expanded faces into edge-sharing components → SelfIntersection
     // (measured: 3 valid comps → 4 comps with SI on seed a27dfba6).
-    use geo::algorithm::Validation as GeoValidationTrait;
     if geo::algorithm::Validation::is_valid(&mp_kept) {
         return enforce_ogc_winding(Geometry::MultiPolygon(mp_kept));
     }

@@ -137,7 +137,7 @@ impl<'a> Parser<'a> {
         let kw = &self.s[start..self.i];
         let dims = self.read_dims()?;
         // Case-insensitive keywords (the corpus carries "MultiPolygon").
-        let mut kw_upper: Vec<u8> = kw.iter().map(|b| b.to_ascii_uppercase()).collect();
+        let kw_upper: Vec<u8> = kw.iter().map(|b| b.to_ascii_uppercase()).collect();
         let kw = kw_upper.as_slice();
         let kw = match kw {
             b"POINT" => Keyword::Point,

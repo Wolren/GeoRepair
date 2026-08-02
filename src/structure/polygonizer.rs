@@ -151,11 +151,11 @@ fn build_area_filter(polys: Vec<Polygon<f64>>) -> Vec<Polygon<f64>> {
         if nholes == 0 { continue; }
         for h in 0..nholes {
             let hole_ring = faces[i].poly.interiors()[h].clone();
-            for j in i + 1..n {
-                if faces[j].parent.is_some() { continue; }
-                let ext_ring = faces[j].poly.exterior().clone();
+            for f in faces.iter_mut().skip(i + 1) {
+                if f.parent.is_some() { continue; }
+                let ext_ring = f.poly.exterior().clone();
                 if rings_equal_any_direction(&hole_ring.0, &ext_ring.0) {
-                    faces[j].parent = Some(i);
+                    f.parent = Some(i);
                     break;
                 }
             }
@@ -196,18 +196,18 @@ fn rings_equal_any_direction(r1: &[Coord<f64>], r2: &[Coord<f64>]) -> bool {
     };
     // Forward
     let mut eq = true;
-    for i in 1..n {
-        let j = (offset + i) % n;
-        if (r1[i].x - r2[j].x).abs() > 1e-10 || (r1[i].y - r2[j].y).abs() > 1e-10 {
+    for (k, &p1) in r1[1..n].iter().enumerate() {
+        let j = (offset + k + 1) % n;
+        if (p1.x - r2[j].x).abs() > 1e-10 || (p1.y - r2[j].y).abs() > 1e-10 {
             eq = false; break;
         }
     }
     if eq { return true; }
     // Backward
     eq = true;
-    for i in 1..n {
-        let j = (offset + n - i) % n;
-        if (r1[i].x - r2[j].x).abs() > 1e-10 || (r1[i].y - r2[j].y).abs() > 1e-10 {
+    for (k, &p1) in r1[1..n].iter().enumerate() {
+        let j = (offset + n - (k + 1)) % n;
+        if (p1.x - r2[j].x).abs() > 1e-10 || (p1.y - r2[j].y).abs() > 1e-10 {
             eq = false; break;
         }
     }

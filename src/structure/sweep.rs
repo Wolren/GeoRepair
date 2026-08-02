@@ -38,7 +38,7 @@ fn edge_envelope(coords: &[Coord<f64>], i: usize) -> AABB<[f64; 2]> {
 pub(crate) fn has_proper_self_crossing_sweep(
     coords: &[Coord<f64>],
     ring_offsets: &[usize],
-    eps: f64,
+    _eps: f64,
 ) -> bool {
     let n_edges = coords.len().saturating_sub(1);
     if n_edges < 4 {
