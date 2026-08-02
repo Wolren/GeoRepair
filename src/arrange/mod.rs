@@ -67,7 +67,7 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, _config: &MakeValidConfig) -> Geo
     // (measured: seed 00c11200 → MultiPolygon with cross-component
     // SelfIntersection; GEOS snaps the spike to the grid). Collapsing the
     // run up front routes everything downstream through clean geometry.
-    if has_sub_ulp_edge(poly) {
+    if has_sub_ulp_edge(poly, None) {
         let ext: LineString<f64> =
             LineString::new(crate::structure::fix_ring::collapse_sub_ulp_vertices(&poly.exterior().0, true));
         let holes: Vec<LineString<f64>> = poly
@@ -320,21 +320,16 @@ pub fn rings_share_collinear_edge_test(
 /// representable precision of the bbox scale — collinear overlaps between
 /// such edges and big edges are invisible to proper-crossing detection.
 /// Cheap O(n): single pass over edges, only used in fast-path gates.
-pub fn has_sub_ulp_edge(poly: &Polygon<f64>) -> bool {
-    fn ring_has_sub_ulp(ring: &[geo::Coord<f64>]) -> bool {
+///
+/// `scale_hint` is a precomputed exterior scale from the caller's earlier
+/// bbox pass (skips recomputing the exterior ring bbox — one less pass on
+/// the hot path). `None` computes it.
+pub fn has_sub_ulp_edge(poly: &Polygon<f64>, scale_hint: Option<f64>) -> bool {
+    fn ring_has_sub_ulp(ring: &[geo::Coord<f64>], scale: f64) -> bool {
         let n = ring.len();
         if n < 2 {
             return false;
         }
-        let (mut min_x, mut max_x, mut min_y, mut max_y) =
-            (ring[0].x, ring[0].x, ring[0].y, ring[0].y);
-        for c in &ring[1..] {
-            min_x = min_x.min(c.x);
-            max_x = max_x.max(c.x);
-            min_y = min_y.min(c.y);
-            max_y = max_y.max(c.y);
-        }
-        let scale = (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
         let eps = f64::EPSILON * scale;
         if eps <= 0.0 {
             return false;
@@ -355,10 +350,28 @@ pub fn has_sub_ulp_edge(poly: &Polygon<f64>) -> bool {
         }
         false
     }
-    if ring_has_sub_ulp(&poly.exterior().0) {
+    fn ring_scale(ring: &[geo::Coord<f64>]) -> f64 {
+        if ring.len() < 2 {
+            // ring_has_sub_ulp exits on n<2 before touching the ring — the
+            // scale value is irrelevant, keep the floor.
+            return 1.0;
+        }
+        let (mut min_x, mut max_x, mut min_y, mut max_y) =
+            (ring[0].x, ring[0].x, ring[0].y, ring[0].y);
+        for c in &ring[1..] {
+            min_x = min_x.min(c.x);
+            max_x = max_x.max(c.x);
+            min_y = min_y.min(c.y);
+            max_y = max_y.max(c.y);
+        }
+        (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0)
+    }
+    let ext = &poly.exterior().0;
+    let ext_scale = scale_hint.unwrap_or_else(|| ring_scale(ext));
+    if ring_has_sub_ulp(ext, ext_scale) {
         return true;
     }
-    poly.interiors().iter().any(|h| ring_has_sub_ulp(&h.0))
+    poly.interiors().iter().any(|h| ring_has_sub_ulp(&h.0, ring_scale(&h.0)))
 }
 
 /// Winding-number point-in-ring test (strict interior, boundary counts as outside).
