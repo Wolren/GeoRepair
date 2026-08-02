@@ -929,7 +929,16 @@ impl GeoValidation for Point<f64> {
     type Scalar = f64;
 
     fn validate(&self) -> ValidationResult {
-        // Point(NaN, NaN) is the geo representation of POINT EMPTY - valid OGC
+        // Point(NaN, NaN) is the geo representation of POINT EMPTY - valid OGC.
+        if self.x().is_nan() && self.y().is_nan() {
+            return ValidationResult::valid();
+        }
+        // A point with a non-finite ordinate (NaN or inf) is invalid -
+        // GEOS reports "Invalid Coordinate" (verified: TestValid NaN cases
+        // expect isValid=false).
+        if !self.x().is_finite() || !self.y().is_finite() {
+            return ValidationResult::invalid(vec![GeometryValidationError::CoordinateNaN]);
+        }
         ValidationResult::valid()
     }
 }

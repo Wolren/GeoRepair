@@ -87,7 +87,17 @@ impl<T: GeoFloat> MakeValid for Point<T> {
     type Scalar = T;
 
     fn make_valid_with_config(&self, _config: &MakeValidConfig) -> Geometry<T> {
-        Geometry::Point(*self)
+        // POINT(NaN NaN) is the canonical empty point - valid, unchanged.
+        // A point with a single non-finite ordinate is invalid (GEOS
+        // "Invalid Coordinate"); makeValid demotes it to the canonical
+        // empty point so the output is always valid.
+        if (self.x().is_finite() && self.y().is_finite())
+            || (self.x().is_nan() && self.y().is_nan())
+        {
+            Geometry::Point(*self)
+        } else {
+            Geometry::Point(Point::new(T::nan(), T::nan()))
+        }
     }
 }
 
@@ -106,6 +116,15 @@ impl<T: GeoFloat> MakeValid for MultiPoint<T> {
             .iter()
             .copied()
             .filter(|p| {
+                // GEOS parity: a point with a single non-finite ordinate is
+                // invalid (CoordinateNaN) and makeValid drops it; a true
+                // empty point (NaN, NaN) is valid and preserved. Dedup
+                // unchanged.
+                let finite = p.0.x.is_finite() && p.0.y.is_finite();
+                let empty_point = p.0.x.is_nan() && p.0.y.is_nan();
+                if !(finite || empty_point) {
+                    return false;
+                }
                 let key = (
                     p.0.x.to_f64().expect("to_f64").to_bits(),
                     p.0.y.to_f64().expect("to_f64").to_bits(),
@@ -1205,11 +1224,18 @@ pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
             // inside another component's HOLE is positive space and must be
             // kept - checking only the exterior ring drops it (measured:
             // square-with-hole + island → island 64 lost; GEOS keeps it).
-            pt_candidates.iter().any(|&pt| {
-                if !point_in_ring_exclusive(pt, ext_j) { return false; }
-                // pt inside exterior: false if it lies in any hole of p_j
-                !p_j.interiors().iter().any(|h| point_in_ring_exclusive(pt, &h.0))
-            })
+            // The hole test uses the strictly-interior probe: vertex/edge
+            // probes lie ON the hole ring for islands that touch it, and
+            // exclusive semantics misread that as fill (island converted
+            // to a hole, area lost).
+            let in_ext = pt_candidates
+                .iter()
+                .any(|&pt| point_in_ring_exclusive(pt, ext_j));
+            in_ext
+                && !p_j
+                    .interiors()
+                    .iter()
+                    .any(|h| point_in_ring_exclusive(interior_probe, &h.0))
         });
         if is_nested { keep[i] = false; }
     }

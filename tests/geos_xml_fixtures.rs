@@ -1,4 +1,5 @@
 use geo::{Geometry, Point};
+use geo_repair::validation::GeoValidation;
 use geo_repair::MakeValid;
 
 #[path = "common/mod.rs"]
@@ -88,17 +89,55 @@ fn xml_multilinestring_empty() {
 fn xml_multilinestring_case1() {
     let g = geom_from_wkt("MULTILINESTRING ((0 0, 0 0), (1 1, 2 2))");
     let result = g.make_valid_with_config(&cfg_auto());
-    assert_valid_ogc(&result);
-    assert_not_empty(&result);
-    // Must contain the valid line (1,1)-(2,2) — should be GeometryCollection or MultiLineString
-    assert!(matches!(
-        &result,
-        Geometry::GeometryCollection(_) | Geometry::MultiLineString(_)
-    ));
+    // GEOS exact output (makevalid.xml) - asserted, not just typed:
+    let expected = geom_from_wkt("GEOMETRYCOLLECTION (LINESTRING (1 1, 2 2), POINT (0 0))");
+    assert_eq!(
+        result, expected,
+        "GEOS makevalid.xml case 7 exact output"
+    );
+}
+
+/// Flatten a geometry to (line coordinate lists, point coordinates) so a
+/// GEOS GC grouping (MULTILINESTRING instead of separate LINESTRINGs,
+/// component order) does not hide a real content difference.
+fn flatten_gc(g: &Geometry<f64>) -> (Vec<Vec<(f64, f64)>>, Vec<(f64, f64)>) {
+    let mut lines = Vec::new();
+    let mut points = Vec::new();
+    fn walk(
+        g: &Geometry<f64>,
+        lines: &mut Vec<Vec<(f64, f64)>>,
+        points: &mut Vec<(f64, f64)>,
+    ) {
+        match g {
+            Geometry::LineString(ls) => {
+                lines.push(ls.0.iter().map(|c| (c.x, c.y)).collect());
+            }
+            Geometry::MultiLineString(mls) => {
+                for ls in &mls.0 {
+                    lines.push(ls.0.iter().map(|c| (c.x, c.y)).collect());
+                }
+            }
+            Geometry::Point(p) => points.push((p.x(), p.y())),
+            Geometry::MultiPoint(mp) => {
+                for p in &mp.0 {
+                    points.push((p.x(), p.y()));
+                }
+            }
+            Geometry::GeometryCollection(gc) => {
+                for sub in &gc.0 {
+                    walk(sub, lines, points);
+                }
+            }
+            _ => {}
+        }
+    }
+    walk(g, &mut lines, &mut points);
+    (lines, points)
 }
 
 // ---------------------------------------------------------------------------
-// 8. multilinestring/case2: two valid lines -> MLS
+// 8. multilinestring/case2: two valid lines -> MLS (GEOS groups into MLS;
+// we emit separate LINESTRINGs - assert component-set parity)
 // ---------------------------------------------------------------------------
 // Input: MULTILINESTRING((0 0,0 0),(1 1,2 2),(2 2,3 3))
 // Expected: GEOMETRYCOLLECTION(MULTILINESTRING((2 2,3 3),(1 1,2 2)), POINT(0 0))
@@ -108,10 +147,17 @@ fn xml_multilinestring_case2() {
     let result = g.make_valid_with_config(&cfg_auto());
     assert_valid_ogc(&result);
     assert_not_empty(&result);
-    assert!(matches!(
-        &result,
-        Geometry::GeometryCollection(_) | Geometry::MultiLineString(_)
-    ));
+    let (lines, points) = flatten_gc(&result);
+    // GEOS expected: two lines (1 1,2 2) and (2 2,3 3), one point (0 0)
+    assert_eq!(
+        lines,
+        vec![
+            vec![(1.0, 1.0), (2.0, 2.0)],
+            vec![(2.0, 2.0), (3.0, 3.0)]
+        ],
+        "GEOS makevalid.xml case 8 line components"
+    );
+    assert_eq!(points, vec![(0.0, 0.0)], "GEOS makevalid.xml case 8 point component");
 }
 
 // ---------------------------------------------------------------------------
@@ -125,6 +171,22 @@ fn xml_multilinestring_two_collapses() {
     let result = g.make_valid_with_config(&cfg_auto());
     assert_valid_ogc(&result);
     assert_not_empty(&result);
+    let (lines, points) = flatten_gc(&result);
+    assert_eq!(
+        lines,
+        vec![
+            vec![(1.0, 1.0), (2.0, 2.0)],
+            vec![(2.0, 2.0), (3.0, 3.0)]
+        ],
+        "GEOS makevalid.xml case 9 line components"
+    );
+    let mut pts = points.clone();
+    pts.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    assert_eq!(
+        pts,
+        vec![(0.0, 0.0), (4.0, 4.0)],
+        "GEOS makevalid.xml case 9 point components"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -195,4 +257,58 @@ fn xml_geometry_collection_with_empties() {
     );
     let result = g.make_valid_with_config(&cfg_auto());
     assert_not_empty(&result);
+}
+
+// =========================================================================
+// GEOS unit-test port: operation/valid/MakeValidTest.cpp test<4>
+// (https://github.com/libgeos/geos/issues/265, WKB from PostGIS
+// liblwgeom/cunit/cu_geos.c#L147)
+// =========================================================================
+#[test]
+fn geos_makevalid_test4_postgis_ring() {
+    use geo::Area;
+
+    let hex = concat!(
+        "0103000000010000000900000062105839207df640378941e09d491c41ced67431387df640c667e7d398491",
+        "c4179e92631387df640d9cef7d398491c41fa7e6abcf87df640cdcccc4c70491c41e3a59bc4527df64052b8",
+        "1e053f491c41cdcccccc5a7ef640e3a59bc407491c4104560e2da27df640aaf1d24dd3481c41e9263108c67",
+        "bf64048e17a1437491c4162105839207df640378941e09d491c41",
+    );
+    let bytes: Vec<u8> = (0..hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+        .collect();
+    let g = geo_repair::io::wkb::read_wkb(&bytes).expect("GEOS test<4> WKB parses");
+
+    // GEOS asserts !isValid() on the input.
+    assert!(!g.validate().valid, "test<4> input must be invalid (GEOS parity)");
+
+    let result = g.make_valid_with_config(&cfg_auto());
+    // GEOS asserts isValid() on the output.
+    assert_valid_ogc(&result);
+
+    // GEOS expected exact output (WKTWriter trim):
+    // POLYGON((92127.546 463452.075,92117.173 463439.755,92133.675 463425.942,
+    //          92122.136 463412.826,92092.377 463437.77,92114.014 463463.469,
+    //          92115.512 463462.207,92115.51207431706 463462.2069374289,
+    //          92127.546 463452.075))
+    // Divergence (documented, not asserted bit-exact): GEOS keeps both the
+    // spike vertex (92115.512) and the noded intersection (92115.51207431706)
+    // as separate vertices (9-vertex ring); our repair merges them into one
+    // (8-vertex ring) and the merged coordinates differ from GEOS's by
+    // ~1e-9 absolute. The parity properties that DO hold are asserted:
+    // valid output and area preservation.
+    let input_area = match &g {
+        Geometry::Polygon(p) => p.unsigned_area(),
+        _ => unreachable!(),
+    };
+    let out_area = match &result {
+        Geometry::Polygon(p) => p.unsigned_area(),
+        other => panic!("test<4> expected polygon output, got {other:?}"),
+    };
+    let scale = input_area.abs().max(1.0);
+    assert!(
+        (out_area - input_area).abs() <= 1e-6 * scale,
+        "test<4> repair must preserve area (input {input_area}, output {out_area})"
+    );
 }

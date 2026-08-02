@@ -58,45 +58,55 @@ fn test_point_valid() {
 
 #[test]
 fn test_point_nan() {
-    // Point(NaN) is POINT EMPTY — preserved as valid
+    // A single NaN ordinate is invalid (GEOS parity: CoordinateNaN) and
+    // makeValid demotes it to the canonical empty point POINT(NaN NaN).
     let p = Point::new(f64::NAN, 2.0);
     let result = p.make_valid();
     if let Geometry::Point(rp) = result {
         assert!(rp.x().is_nan());
-        assert_eq!(rp.y(), 2.0);
+        assert!(rp.y().is_nan(), "demoted to canonical empty point");
     } else {
         panic!("expected Point, got {:?}", result);
     }
-    assert!(p.is_valid());
+    assert!(!p.is_valid());
+    // The canonical empty point itself is valid and unchanged.
+    // (assert_eq is unusable on NaN coords - NaN != NaN - check fields.)
+    let empty = Point::new(f64::NAN, f64::NAN);
+    assert!(empty.is_valid());
+    match empty.make_valid() {
+        Geometry::Point(rp) => {
+            assert!(rp.x().is_nan() && rp.y().is_nan());
+        }
+        other => panic!("expected Point, got {other:?}"),
+    }
 }
 
 #[test]
 fn test_point_infinite_x() {
-    // Point(Infinity) is considered valid by Point::validate
+    // Non-finite ordinates are invalid (GEOS parity); makeValid demotes
+    // to the canonical empty point.
     let p = Point::new(f64::INFINITY, 2.0);
     let result = p.make_valid();
     if let Geometry::Point(rp) = result {
-        assert!(rp.x().is_infinite());
-        assert_eq!(rp.y(), 2.0);
+        assert!(rp.x().is_nan());
+        assert!(rp.y().is_nan());
     } else {
         panic!("expected Point, got {:?}", result);
     }
-    assert!(p.is_valid());
+    assert!(!p.is_valid());
 }
 
 #[test]
 fn test_point_infinite_y() {
-    // Point(Infinity) is considered valid by Point::validate
     let p = Point::new(1.0, f64::NEG_INFINITY);
     let result = p.make_valid();
     if let Geometry::Point(rp) = result {
-        assert_eq!(rp.x(), 1.0);
-        assert!(rp.y().is_infinite());
-        assert!(rp.y().is_sign_negative());
+        assert!(rp.x().is_nan());
+        assert!(rp.y().is_nan());
     } else {
         panic!("expected Point, got {:?}", result);
     }
-    assert!(p.is_valid());
+    assert!(!p.is_valid());
 }
 
 // ---------------------------------------------------------------------------
@@ -223,20 +233,18 @@ fn test_multipoint_valid() {
 
 #[test]
 fn test_multipoint_filters_nan() {
-    // NaN points in MultiPoint are valid OGC (Point(NaN) = POINT EMPTY)
+    // NaN-ordinate points are invalid (GEOS parity) and makeValid drops
+    // them; the canonical empty point (NaN NaN) is preserved.
     let mp = MultiPoint::new(vec![
         Point::new(0.0, 0.0),
         Point::new(f64::NAN, 1.0),
         Point::new(2.0, 2.0),
     ]);
     let result = mp.make_valid();
-    // NaN preserved — Point(NaN) is valid
     if let Geometry::MultiPoint(rmp) = result {
-        assert_eq!(rmp.0.len(), 3);
+        assert_eq!(rmp.0.len(), 2, "NaN-ordinate point must be dropped");
         assert_eq!(rmp.0[0], Point::new(0.0, 0.0));
-        assert!(rmp.0[1].x().is_nan());
-        assert_eq!(rmp.0[1].y(), 1.0);
-        assert_eq!(rmp.0[2], Point::new(2.0, 2.0));
+        assert_eq!(rmp.0[1], Point::new(2.0, 2.0));
     } else {
         panic!("expected MultiPoint, got {:?}", result);
     }
@@ -246,7 +254,7 @@ fn test_multipoint_filters_nan() {
 fn test_multipoint_all_invalid() {
     let mp = MultiPoint::new(vec![Point::new(f64::NAN, f64::NAN)]);
     let result = mp.make_valid();
-    // Point(NaN) is valid POINT EMPTY — preserved
+    // The canonical empty point (NaN NaN) is valid - preserved
     if let Geometry::MultiPoint(rmp) = result {
         assert_eq!(rmp.0.len(), 1);
         assert!(rmp.0[0].x().is_nan());
@@ -620,12 +628,13 @@ fn test_geometry_dispatch_bowtie() {
 
 #[test]
 fn test_geometry_dispatch_empty() {
-    // Point(NaN) is valid POINT EMPTY — preserved
+    // A single NaN ordinate is invalid; makeValid demotes it to the
+    // canonical empty point POINT(NaN NaN).
     let g = Geometry::Point(Point::new(f64::NAN, 0.0));
     let result = g.make_valid();
     if let Geometry::Point(rp) = result {
         assert!(rp.x().is_nan());
-        assert_eq!(rp.y(), 0.0);
+        assert!(rp.y().is_nan(), "demoted to canonical empty point");
     } else {
         panic!("expected Point, got {:?}", result);
     }

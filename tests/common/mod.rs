@@ -6,7 +6,6 @@
 use geo::{Coord, Geometry, LineString, Polygon};
 use geo_repair::validation::{GeoValidation, GeometryValidationError};
 use geo_repair::{MakeValidConfig, PolyMethod};
-use wkt::TryFromWkt;
 
 /// GEOS IsValidOp parity for the line family (verified against the GEOS XML
 /// corpus and geosop): a LineString is valid iff coordinates are finite and
@@ -244,7 +243,7 @@ pub fn cfg_structure() -> MakeValidConfig {
     }
 }
 
-/// Parse a WKT string into a Geometry.
+/// Parse a WKT string into a Geometry (our own reader).
 pub fn geom_from_wkt(s: &str) -> Geometry<f64> {
-    Geometry::<f64>::try_from_wkt_str(s).unwrap()
+    geo_repair::io::wkt::read_wkt(s).unwrap()
 }

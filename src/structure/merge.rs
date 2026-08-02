@@ -204,6 +204,31 @@ fn ring_fully_inside(ring: &[Coord<f64>], poly: &Polygon<f64>) -> bool {
             return false;
         }
     }
+    // Island-in-hole guard: a ring whose vertices all pass the exclusive
+    // test may still lie in a HOLE of `poly` (touching the hole ring at
+    // vertices - on-boundary reads as "not in hole"). Such a ring is
+    // positive space (island), NOT nested-in-fill; converting it to a
+    // hole loses its area (measured: general_TestValid island sharing
+    // hole-ring vertices -> -3.75% even-odd area). Test with a point
+    // strictly interior to the ring.
+    if let Some(probe) = crate::util::ring_interior_probe(ring)
+        && poly
+            .interiors()
+            .iter()
+            .any(|h| point_in_ring_exclusive(probe, &h.0))
+        // But a ring COINCIDENT with one of the parent's holes is that
+        // hole itself (role-swap path: hole_larger_than_shell arrives
+        // with the shell-as-hole already in place). Converting it is a
+        // no-op; keeping it as a shell lets unary_union FILL the hole
+        // (measured: 300 -> 400 even-odd area). Only a ring DIFFERENT
+        // from every parent hole is a true island.
+        && !poly
+            .interiors()
+            .iter()
+            .any(|h| ring_fingerprint(&h.0) == ring_fingerprint(ring))
+    {
+        return false;
+    }
     true
 }
 

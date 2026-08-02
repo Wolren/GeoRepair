@@ -12,6 +12,13 @@ impl GeoValidation for Polygon<f64> {
     fn validate(&self) -> ValidationResult {
         let mut errors = Vec::new();
 
+        // An empty exterior is an empty polygon - valid OGC (same as
+        // POINT EMPTY / LINESTRING EMPTY; GEOS isValid=true on
+        // POLYGON (EMPTY, EMPTY, EMPTY)).
+        if self.exterior().0.is_empty() {
+            return ValidationResult::valid();
+        }
+
         let ext_errors = check_ring_validity(&self.exterior().0, true);
         if !ext_errors.is_empty() {
             errors.extend(ext_errors);
@@ -181,6 +188,11 @@ impl GeoValidation for MultiPolygon<f64> {
                     let Some(pt) = s2.first().copied() else {
                         continue;
                     };
+                    // Strictly-interior probe of shell j for the hole test:
+                    // the first vertex lies ON a hole ring for islands that
+                    // touch it, and exclusive semantics misread that as fill
+                    // (island-in-hole falsely flagged NestedHoles).
+                    let probe = crate::util::ring_interior_probe(s2).unwrap_or(pt);
                     let query = rstar::AABB::from_corners([pt.x, pt.y], [pt.x, pt.y]);
                     let mut overlaps = false;
                     let _ = tree.locate_in_envelope_intersecting_int(query, |c| {
@@ -194,7 +206,7 @@ impl GeoValidation for MultiPolygon<f64> {
                             let in_hole = p_other
                                 .interiors()
                                 .iter()
-                                .any(|h| point_in_ring_exclusive(pt, &h.0));
+                                .any(|h| point_in_ring_exclusive(probe, &h.0));
                             if !in_hole {
                                 overlaps = true;
                                 return std::ops::ControlFlow::Break(());
@@ -219,11 +231,16 @@ impl GeoValidation for MultiPolygon<f64> {
                             && point_in_ring_exclusive(pt, shells[i])
                         {
                             // Hole-aware: island inside another shell's hole is
-                            // valid positive space (GEOS isValid=true).
+                            // valid positive space (GEOS isValid=true). The
+                            // hole test uses a strictly-interior probe of
+                            // shell j: its first vertex lies ON a hole ring
+                            // for islands touching the hole, and exclusive
+                            // semantics misread that as fill.
+                            let probe = crate::util::ring_interior_probe(shells[j]).unwrap_or(pt);
                             let in_hole = self.0[i]
                                 .interiors()
                                 .iter()
-                                .any(|h| point_in_ring_exclusive(pt, &h.0));
+                                .any(|h| point_in_ring_exclusive(probe, &h.0));
                             if !in_hole {
                                 errors.push(GeometryValidationError::NestedHoles);
                                 return ValidationResult::invalid(errors);
@@ -326,8 +343,13 @@ mod tests {
 
     #[test]
     fn test_point_nan() {
-        // Point(NaN, NaN) is the geo representation of POINT EMPTY — valid OGC
-        assert!(Point::new(f64::NAN, 2.0).is_valid());
+        // Point(NaN, NaN) is the geo representation of POINT EMPTY - valid OGC
+        assert!(Point::new(f64::NAN, f64::NAN).is_valid());
+        // A single NaN ordinate is invalid (GEOS TestValid: "P - invalid
+        // NaN X ordinate" expects isValid=false; CoordinateNaN).
+        assert!(!Point::new(f64::NAN, 2.0).is_valid());
+        assert!(!Point::new(2.0, f64::NAN).is_valid());
+        assert!(Point::new(1.0, 2.0).is_valid());
     }
 
     #[test]
@@ -556,18 +578,26 @@ mod tests {
         let g = Geometry::Point(Point::new(1.0, 2.0));
         assert!(g.is_valid());
 
+        // Single NaN ordinate: invalid (GEOS parity, CoordinateNaN).
         let g2 = Geometry::Point(Point::new(f64::NAN, 2.0));
-        assert!(g2.is_valid());
+        assert!(!g2.is_valid());
     }
 
     #[test]
     fn test_geometry_collection() {
+        // Empty point (NaN, NaN) is valid; a NaN ordinate is not.
         let gc = GeometryCollection(vec![
             Geometry::Point(Point::new(1.0, 2.0)),
-            Geometry::Point(Point::new(f64::NAN, 2.0)),
+            Geometry::Point(Point::new(f64::NAN, f64::NAN)),
         ]);
         assert!(gc.is_valid());
         assert_eq!(gc.validate().errors.len(), 0);
+
+        let gc2 = GeometryCollection(vec![
+            Geometry::Point(Point::new(1.0, 2.0)),
+            Geometry::Point(Point::new(f64::NAN, 2.0)),
+        ]);
+        assert!(!gc2.is_valid());
     }
 
     #[test]

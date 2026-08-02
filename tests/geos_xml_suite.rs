@@ -19,7 +19,6 @@ use geo_repair::validation::{GeoValidation, GeometryValidationError};
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 use std::collections::HashMap;
 use std::path::Path;
-use wkt::TryFromWkt;
 
 fn geometry_type_name(g: &Geometry<f64>) -> &'static str {
     match g {
@@ -36,10 +35,43 @@ fn geometry_type_name(g: &Geometry<f64>) -> &'static str {
     }
 }
 
-/// Parse a WKT string to Geometry.
+/// Parse a WKT string to Geometry (our own reader - handles NaN ordinates,
+/// LINEARING, and EMPTY elements that the corpus carries).
 fn parse_wkt(s: &str) -> Option<Geometry<f64>> {
-    let trimmed = s.trim().trim_matches('\"');
-    Geometry::<f64>::try_from_wkt_str(trimmed).ok()
+    let trimmed = s.trim().trim_matches('"');
+    geo_repair::io::wkt::read_wkt(trimmed).ok()
+}
+
+/// Hex-decode a string of hex digits (whitespace tolerated).
+fn hex_to_bytes(s: &str) -> Option<Vec<u8>> {
+    let cleaned: String = s.chars().filter(|c| !c.is_whitespace()).collect();
+    if cleaned.is_empty()
+        || cleaned.len() % 2 != 0
+        || !cleaned.chars().all(|c| c.is_ascii_hexdigit())
+    {
+        return None;
+    }
+    let bytes = cleaned.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len() / 2);
+    for i in (0..bytes.len()).step_by(2) {
+        let hi = (bytes[i] as char).to_digit(16)?;
+        let lo = (bytes[i + 1] as char).to_digit(16)?;
+        out.push((hi * 16 + lo) as u8);
+    }
+    Some(out)
+}
+
+/// Parse WKT, then HEX-WKB as fallback - GEOS's xmltester dispatches the
+/// same way (`parseGeometry`: first char digit/A-F -> readHEX, else WKT).
+/// The corpus carries hex-encoded validity cases (misc/hexwkb.xml, issues
+/// 392 and 599) that previously never dispatched.
+fn parse_geometry(s: &str) -> Option<Geometry<f64>> {
+    let trimmed = s.trim().trim_matches('"');
+    if let Some(g) = parse_wkt(trimmed) {
+        return Some(g);
+    }
+    let bytes = hex_to_bytes(trimmed)?;
+    geo_repair::io::wkb::read_wkb(&bytes).ok()
 }
 
 /// Simple XML case parser - extracts <case> blocks with <a>, <b>, <op>.
@@ -74,7 +106,7 @@ fn parse_xml_cases(xml: &str) -> Vec<XmlCase> {
         for tag in &["a", "b", "c"] {
             if let Some(wkt) = extract_tag(block, tag) {
                 raw_geoms.insert(tag.to_string(), wkt.clone());
-                if let Some(g) = parse_wkt(&wkt) {
+                if let Some(g) = parse_geometry(&wkt) {
                     geoms.insert(tag.to_string(), g);
                 }
             }
@@ -297,8 +329,23 @@ fn run_validity_test(
         // an invalid repair is a real failure.
         let fixed = geom.make_valid_with_config(cfg);
         if fixed.validate().valid {
-            record_divergence_reason(geom);
-            ValidityOutcome::MaskedDivergence
+            // Area-preservation gate: the repair of a GEOS-valid input
+            // must not destroy coverage. Even-odd (set-theoretic) area,
+            // shell minus holes. Measured: general_TestValid's
+            // island-in-hole case (island sharing hole-ring vertices) was
+            // repaired to -3.75% even-odd area by nesting
+            // misclassification and still passed as masked divergence;
+            // this gate turns such repairs into real failures.
+            let in_area = even_odd_area(geom);
+            let fx_area = even_odd_area(&fixed);
+            let scale = in_area.abs().max(1.0);
+            let area_ok = in_area <= 1e-9 || (fx_area - in_area).abs() <= 1e-6 * scale;
+            if area_ok {
+                record_divergence_reason(geom);
+                ValidityOutcome::MaskedDivergence
+            } else {
+                ValidityOutcome::Fail
+            }
         } else {
             ValidityOutcome::Fail
         }
@@ -657,6 +704,36 @@ fn total_poly_area(g: &Geometry<f64>) -> f64 {
     }
 }
 
+/// Even-odd (set-theoretic) area of a geometry's polygon parts: shell area
+/// minus hole areas (manual shoelace - geo's Area impl returns 0 for
+/// LineString rings, and unsigned_area counts holes as positive).
+fn even_odd_area(g: &Geometry<f64>) -> f64 {
+    fn ring_area(ring: &[Coord<f64>]) -> f64 {
+        let n = ring.len();
+        if n < 3 {
+            return 0.0;
+        }
+        let mut s = 0.0;
+        for i in 0..n {
+            let a = ring[i];
+            let b = ring[(i + 1) % n];
+            s += a.x * b.y - b.x * a.y;
+        }
+        s.abs() / 2.0
+    }
+    fn poly_eo(p: &Polygon<f64>) -> f64 {
+        let shell = ring_area(&p.exterior().0);
+        let holes: f64 = p.interiors().iter().map(|h| ring_area(&h.0)).sum();
+        shell - holes
+    }
+    match g {
+        Geometry::Polygon(p) => poly_eo(p),
+        Geometry::MultiPolygon(mp) => mp.0.iter().map(poly_eo).sum(),
+        Geometry::GeometryCollection(gc) => gc.0.iter().map(even_odd_area).sum(),
+        _ => 0.0,
+    }
+}
+
 fn component_count(g: &Geometry<f64>) -> usize {
     match g {
         Geometry::MultiPolygon(mp) => mp.0.len(),
@@ -667,12 +744,13 @@ fn component_count(g: &Geometry<f64>) -> usize {
     }
 }
 
-fn run_all_geos_xml_tests() -> Vec<(String, usize, usize, usize, usize, usize, Vec<String>)> {
+fn run_all_geos_xml_tests() -> Vec<(String, usize, usize, usize, usize, usize, usize, Vec<String>)> {
     let mut results = Vec::new();
     let dir = Path::new("tests/geos_xml");
     if !dir.is_dir() {
         results.push((
             "NO TEST DIR".into(),
+            0,
             0,
             0,
             0,
@@ -701,7 +779,7 @@ fn run_all_geos_xml_tests() -> Vec<(String, usize, usize, usize, usize, usize, V
         let xml = match std::fs::read_to_string(&path) {
             Ok(s) => s,
             Err(_) => {
-                results.push((fname.clone(), 0, 1, 0, 0, 0, vec!["read error".into()]));
+                results.push((fname.clone(), 0, 1, 0, 0, 0, 0, vec!["read error".into()]));
                 continue;
             }
         };
@@ -712,6 +790,7 @@ fn run_all_geos_xml_tests() -> Vec<(String, usize, usize, usize, usize, usize, V
         let mut masked = 0usize;
         let mut known_gaps = 0usize;
         let mut skipped_cases = 0usize;
+        let mut unparseable_cases = 0usize;
         // All failures, printed per file (visible with --nocapture or on
         // failure - the suite fails when any case fails, so this is exactly
         // when the details are needed).
@@ -723,8 +802,19 @@ fn run_all_geos_xml_tests() -> Vec<(String, usize, usize, usize, usize, usize, V
             // one of its ops was actually checked. Pure-overlay cases are
             // counted as skipped, never as passed.
             let mut case_dispatched = false;
+            // A case with a dispatchable op that never ran (geometry
+            // unparseable, missing arg) is a coverage miss, not an
+            // overlay-only skip.
+            let mut case_has_dispatchable = false;
 
             for (op_name, args, expected) in &case.ops {
+                let op_lower = op_name.to_ascii_lowercase();
+                if matches!(
+                    op_lower.as_str(),
+                    "isvalid" | "makevalid" | "buildarea" | "issimple"
+                ) {
+                    case_has_dispatchable = true;
+                }
                 // GEOS XML uses uppercase arg ids (arg1="A") while <a> tags
                 // are lowercase - match both. Without this, every isValid /
                 // isSimple case silently skips (the case passes trivially).
@@ -738,7 +828,7 @@ fn run_all_geos_xml_tests() -> Vec<(String, usize, usize, usize, usize, usize, V
                     None => continue,
                 };
 
-                let ok = match op_name.to_ascii_lowercase().as_str() {
+                let ok = match op_lower.as_str() {
                     "isvalid" => {
                         case_dispatched = true;
                         let exp = expected.trim() == "true";
@@ -821,7 +911,13 @@ fn run_all_geos_xml_tests() -> Vec<(String, usize, usize, usize, usize, usize, V
             }
 
             if !case_dispatched {
-                skipped_cases += 1;
+                if case_has_dispatchable {
+                    // Dispatchable op existed but its geometry never
+                    // parsed (or the arg was missing): a coverage miss.
+                    unparseable_cases += 1;
+                } else {
+                    skipped_cases += 1;
+                }
                 continue;
             }
             if case_ok {
@@ -831,20 +927,111 @@ fn run_all_geos_xml_tests() -> Vec<(String, usize, usize, usize, usize, usize, V
             }
         }
 
-        results.push((fname, passed, failed, masked, known_gaps, skipped_cases, failures));
+        results.push((
+            fname,
+            passed,
+            failed,
+            masked,
+            known_gaps,
+            skipped_cases,
+            unparseable_cases,
+            failures,
+        ));
     }
     results
 }
 
-/// Documented validator-strictness divergence baseline (measured 2026-08-01
-/// on the 858-case corpus: 210 masked; classes WrongOrientation 189,
-/// RepeatedPoint 8, MultiPointDuplicatePoints 7, RingTooFewPoints 5,
+/// GEOS ValidSelfTouchingRingFormingHoleTest - all 10 cases, ported from
+/// tests/unit/operation/valid/ValidSelfTouchingRingFormingHoleTest.cpp.
+/// (wkt, geos_default_valid, geos_str_valid). GEOS default IsValidOp is
+/// strict OGC (self-touching rings forming holes are INVALID; shell-hole
+/// and hole-hole touches at a point are VALID - test 2). The permissive
+/// mode (setSelfTouchingRingFormingHoleValid) additionally accepts
+/// inverted rings that do not disconnect the interior.
+/// Our validator is strict-only, so:
+/// - default expectations run through the masked machinery (GEOS-valid
+///   inputs we reject must repair valid AND area-preserving)
+/// - STR=false cases must be rejected by us too (never more lenient)
+/// - STR=true / default=false cases (1, 8, 10) document the unsupported
+///   permissive mode: we reject them, which is the strict answer
+const ST_RFH_CASES: &[(&str, bool, bool)] = &[
+    // 1 - testShellAndHoleSelfTouch: STR valid, OGC invalid
+    ("POLYGON ((0 0, 0 340, 320 340, 320 0, 120 0, 180 100, 60 100, 120 0, 0 0), (80 300, 80 180, 200 180, 200 240, 280 200, 280 280, 200 240, 200 300, 80 300))", false, true),
+    // 2 - testShellHoleAndHoleHoleTouch: valid in OGC
+    ("POLYGON ((0 0, 0 340, 320 340, 320 0, 120 0, 0 0), (120 0, 180 100, 60 100, 120 0), (80 300, 80 180, 200 180, 200 240, 200 300, 80 300), (200 240, 280 200, 280 280, 200 240))", true, true),
+    // 3 - testShellSelfTouchHoleOverlappingHole: never valid
+    ("POLYGON ((0 0, 220 0, 220 200, 120 200, 140 100, 80 100, 120 200, 0 200, 0 0), (200 80, 20 80, 120 200, 200 80))", false, false),
+    // 4 - testDisconnectedInteriorShellSelfTouchAtNonVertex
+    ("POLYGON ((40 180, 40 60, 240 60, 240 180, 140 60, 40 180))", false, false),
+    // 5 - testDisconnectedInteriorShellSelfTouchAtVertex
+    ("POLYGON ((20 20, 20 100, 140 100, 140 180, 260 180, 260 100, 140 100, 140 20, 20 20))", false, false),
+    // 6 - testShellCross
+    ("POLYGON ((20 20, 120 20, 120 220, 240 220, 240 120, 20 120, 20 20))", false, false),
+    // 7 - testShellCrossAndSTR
+    ("POLYGON ((20 20, 120 20, 120 220, 180 220, 140 160, 200 160, 180 220, 240 220, 240 120, 20 120, 20 20))", false, false),
+    // 8 - basic one-ring self-touch (ring forming hole): STR valid, OGC invalid
+    ("POLYGON ((100 0, 100 100, 200 100, 200 0, 150 0, 170 40, 130 40, 150 0, 100 0))", false, true),
+    // 9 - testExvertedHoleStarTouchHoleCycle (STR=false asserted; default
+    // unchecked in GEOS - never valid, we must reject)
+    ("POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), (20 80, 50 30, 80 80, 80 30, 20 30, 20 80), (40 70, 50 70, 50 30, 40 70), (40 20, 60 20, 50 30, 40 20), (40 80, 20 80, 40 70, 40 80))", false, false),
+    // 10 - testExvertedHoleStarTouchHoleCycle: STR valid, OGC invalid
+    ("POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), (20 80, 50 30, 80 80, 80 30, 20 30, 20 80), (40 70, 50 70, 50 30, 40 70), (40 20, 60 20, 50 30, 40 20))", false, true),
+];
+
+/// Run the ported ST_RFH corpus. Returns (passed, masked, failed, failures).
+fn run_st_rfh_suite(cfg: &MakeValidConfig) -> (usize, usize, usize, Vec<String>) {
+    let mut passed = 0usize;
+    let mut masked = 0usize;
+    let mut failed = 0usize;
+    let mut failures = Vec::new();
+    for (idx, (wkt, default_valid, str_valid)) in ST_RFH_CASES.iter().enumerate() {
+        let name = format!("st_rfh_case_{}", idx + 1);
+        let Some(geom) = parse_wkt(wkt) else {
+            failed += 1;
+            failures.push(format!("{name}: WKT unparseable"));
+            continue;
+        };
+        // Permissive-mode invariant: our strict validator must reject
+        // everything GEOS rejects even in the permissive mode.
+        if !str_valid && geom.validate().valid {
+            failed += 1;
+            failures.push(format!(
+                "{name}: STR-invalid input accepted by our validator (too lenient)"
+            ));
+            continue;
+        }
+        match run_validity_test(&geom, *default_valid, false, cfg) {
+            ValidityOutcome::Pass => passed += 1,
+            ValidityOutcome::MaskedDivergence => masked += 1,
+            ValidityOutcome::KnownValidatorGap => {
+                failed += 1;
+                failures.push(format!(
+                    "{name}: we accept an input GEOS deems invalid (too lenient)"
+                ));
+            }
+            ValidityOutcome::Fail => {
+                failed += 1;
+                failures.push(format!(
+                    "{name}: we reject what GEOS accepts and the repair is invalid or destroys area"
+                ));
+            }
+        }
+    }
+    (passed, masked, failed, failures)
+}
+
+/// Documented validator-strictness divergence baseline (measured 2026-08-02
+/// on the 858+10-case corpus: 211 masked; classes WrongOrientation 192,
+/// RepeatedPoint 8, MultiPointDuplicatePoints 8, RingTooFewPoints 2,
 /// PinchPoint 1 - the suite prints the live class tally on every run).
+/// 210 come from the XML corpus; +1 is the ported ST_RFH case 2
+/// (shell-hole + hole-hole touch at points: GEOS-valid, we reject as
+/// PinchPoint, repair valid + area-preserving).
 /// The isValid suite counts expected-valid inputs our validator rejects and
 /// repair restores as MASKED-DIVERGENCE. If the count grows beyond this
 /// baseline, the suite fails: validator drift must be triaged, not hidden.
 /// Detail: georepair-fuzz-workflow references/geos-reference-oracle-2026-07-31.md
-const VALIDATOR_DIVERGENCE_BASELINE: usize = 210;
+const VALIDATOR_DIVERGENCE_BASELINE: usize = 211;
 
 // We run everything in a single #[test] to avoid 123 separate test binaries
 #[test]
@@ -855,16 +1042,17 @@ fn geos_xml_suite() {
     let mut total_masked = 0usize;
     let mut total_known_gaps = 0usize;
     let mut total_skipped = 0usize;
+    let mut total_unparseable = 0usize;
     eprintln!("\n=== GEOS XML Test Suite ===");
     let mut had_issues = false;
-    for (fname, passed, failed, masked, known_gaps, skipped_cases, failures) in &results {
+    for (fname, passed, failed, masked, known_gaps, skipped_cases, unparseable, failures) in &results {
         let status = if *failed == 0 { "ok" } else { "FAIL" };
         if *failed > 0 {
             had_issues = true;
         }
         let total = passed + failed;
         eprintln!(
-            "  {status} {fname}: {passed}/{total} dispatched-case passed, {masked} masked-divergence, {known_gaps} known-gap, {skipped_cases} skipped-case"
+            "  {status} {fname}: {passed}/{total} dispatched-case passed, {masked} masked-divergence, {known_gaps} known-gap, {skipped_cases} overlay-skipped, {unparseable} unparseable"
         );
         for f in failures {
             eprintln!("      fail: {f}");
@@ -874,13 +1062,33 @@ fn geos_xml_suite() {
         total_masked += masked;
         total_known_gaps += known_gaps;
         total_skipped += skipped_cases;
+        total_unparseable += unparseable;
+    }
+    // ST_RFH corpus (GEOS ValidSelfTouchingRingFormingHoleTest port)
+    let cfg = MakeValidConfig {
+        poly_method: PolyMethod::Auto,
+        ..Default::default()
+    };
+    let (rfh_passed, rfh_masked, rfh_failed, rfh_failures) = run_st_rfh_suite(&cfg);
+    if rfh_failed > 0 {
+        had_issues = true;
+    }
+    total_passed += rfh_passed;
+    total_masked += rfh_masked;
+    total_failed += rfh_failed;
+    let rfh_total = rfh_passed + rfh_failed;
+    eprintln!(
+        "  ST_RFH (ValidSelfTouchingRingFormingHoleTest port): {rfh_passed}/{rfh_total} passed, {rfh_masked} masked-divergence"
+    );
+    for f in &rfh_failures {
+        eprintln!("      fail: {f}");
     }
     let total = total_passed + total_failed;
     eprintln!("  -----");
     eprintln!("  Total: {total_passed}/{total} dispatched-case passed ({total_failed} failed)");
     eprintln!("  Masked validator divergence: {total_masked} (baseline {VALIDATOR_DIVERGENCE_BASELINE})");
     eprintln!("  Known validator gaps (too lenient): {total_known_gaps} (baseline {KNOWN_VALIDATOR_GAP_BASELINE})");
-    eprintln!("  Skipped (overlay-only) cases: {total_skipped}");
+    eprintln!("  Overlay-only skipped cases: {total_skipped}; unparseable dispatch misses: {total_unparseable}");
     print_divergence_reasons();
     eprintln!("==============================");
 
@@ -894,6 +1102,12 @@ fn geos_xml_suite() {
         had_issues = true;
         eprintln!(
             "KNOWN VALIDATOR GAPS GREW: {total_known_gaps} > baseline {KNOWN_VALIDATOR_GAP_BASELINE} - triage before accepting"
+        );
+    }
+    if total_unparseable > 0 {
+        had_issues = true;
+        eprintln!(
+            "UNPARSEABLE DISPATCH MISSES: {total_unparseable} - dispatchable cases whose geometry did not parse"
         );
     }
 
