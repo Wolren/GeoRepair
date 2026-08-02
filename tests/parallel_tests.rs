@@ -67,7 +67,8 @@ fn test_par_fix_multi_point_mixed() {
 fn test_par_fix_multi_point_all_invalid() {
     let mp = MultiPoint::new(vec![Point::new(f64::NAN, 0.0)]);
     let result = parallel::par_fix_multi_point(&mp, &cfg_auto());
-    // NaN points are valid POINT EMPTY — preserved in MultiPoint output
+    // NaN-ordinate points are invalid (GEOS parity: CoordinateNaN) and
+    // dropped by makeValid; all-invalid -> empty output (still valid)
     assert!(result.is_valid());
 }
 

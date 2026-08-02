@@ -19,18 +19,31 @@ pub fn par_fix_multi_point<T: GeoFloat + Send + Sync>(
     mp: &MultiPoint<T>,
     config: &MakeValidConfig,
 ) -> Geometry<T> {
-    let points =
-        mp.0.par_iter()
-            .copied()
-            .map(|p| p.make_valid_with_config(config))
-            .filter_map(|g| {
-                if let Geometry::Point(p) = g {
-                    Some(p)
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
+    // Same GEOS-parity rule as the serial MultiPoint impl: a point with a
+    // single non-finite ordinate is invalid (CoordinateNaN) and dropped; a
+    // true empty point (NaN, NaN) is valid and preserved.
+    let filtered: Vec<Point<T>> = mp
+        .0
+        .par_iter()
+        .copied()
+        .filter(|p| {
+            let finite = p.0.x.is_finite() && p.0.y.is_finite();
+            let empty_point = p.0.x.is_nan() && p.0.y.is_nan();
+            finite || empty_point
+        })
+        .collect();
+    // Serial dedup: a shared hash set inside par_iter would race.
+    use rustc_hash::FxHashSet;
+    let mut seen: FxHashSet<(u64, u64)> = FxHashSet::default();
+    let points: Vec<Point<T>> = filtered
+        .into_iter()
+        .filter(|p| {
+            seen.insert((
+                p.0.x.to_f64().expect("to_f64").to_bits(),
+                p.0.y.to_f64().expect("to_f64").to_bits(),
+            ))
+        })
+        .collect();
     if points.is_empty() {
         Geometry::GeometryCollection(GeometryCollection(Vec::new()))
     } else {

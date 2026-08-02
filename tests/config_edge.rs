@@ -437,9 +437,22 @@ fn test_multipoint_mixed_nan_inf() {
         Point::new(2.0, f64::INFINITY),
         Point::new(3.0, 3.0),
     ]);
+    // NaN/inf ordinates are invalid (GEOS parity: CoordinateNaN)
+    assert!(!mp.validate().valid);
     let result = mp.make_valid();
-    // NaN/Inf points are valid POINT EMPTY — preserved in output
+    // makeValid drops the invalid points, keeps the finite ones
     assert!(result.is_valid());
+    let out = match result {
+        Geometry::MultiPoint(mp) => mp,
+        other => panic!("expected MultiPoint, got {other:?}"),
+    };
+    assert_eq!(
+        out.0.len(),
+        2,
+        "invalid NaN/inf points must be dropped (GEOS makeValid)"
+    );
+    assert!(out.0.contains(&Point::new(0.0, 0.0)));
+    assert!(out.0.contains(&Point::new(3.0, 3.0)));
 }
 
 #[test]
@@ -449,9 +462,17 @@ fn test_multipoint_all_nan_inf() {
         Point::new(2.0, f64::INFINITY),
         Point::new(f64::NAN, f64::NEG_INFINITY),
     ]);
+    assert!(!mp.validate().valid);
     let result = mp.make_valid();
-    // All-NaN MultiPoint is still a valid MultiPoint (with NaN points)
-    assert!(result.is_valid());
+    // All components invalid -> empty output
+    assert!(
+        matches!(
+            &result,
+            Geometry::GeometryCollection(gc) if gc.0.is_empty()
+        ) || matches!(&result, Geometry::MultiPoint(mp) if mp.0.is_empty()),
+        "expected empty output, got {}",
+        geo_repair::write_wkt(&result)
+    );
 }
 
 // =========================================================================
@@ -615,9 +636,15 @@ fn test_geometry_dispatch_multipoint() {
         Point::new(f64::NAN, 0.0),
     ]));
     let result = g.make_valid();
-    // NaN points are valid POINT EMPTY — preserved in MultiPoint output
+    // NaN-ordinate point is invalid; makeValid drops it, keeps (1 2)
     assert!(result.is_valid());
     assert_not_empty(&result);
+    let out = match result {
+        Geometry::MultiPoint(mp) => mp,
+        other => panic!("expected MultiPoint, got {other:?}"),
+    };
+    assert_eq!(out.0.len(), 1);
+    assert!(out.0.contains(&Point::new(1.0, 2.0)));
 }
 
 #[test]

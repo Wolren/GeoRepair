@@ -349,6 +349,8 @@ pub mod arrange;
 pub mod noding;
 /// Geometry precision reduction with topology preservation.
 pub mod reduce;
+/// Tolerance-based repeated-point removal (GEOS RepeatedPointRemover parity).
+pub mod cleanup;
 #[cfg(feature = "structure")]
 /// GEOS-compatible fast-path polygon repair via planar graph extraction.
 pub mod structure;
@@ -380,6 +382,8 @@ pub use io::{
     read_wkb_from, read_wkt, read_wkt_from, repair_file, save, write_ewkb, write_wkb, write_wkb_to,
     write_wkb_with_opts, write_wkt, write_wkt_to,
 };
+/// Tolerance-based repeated-point removal.
+pub use cleanup::{remove_repeated_coords, remove_repeated_points};
 /// Trait for repairing invalid geometries.
 pub use make_valid::MakeValid;
 #[cfg(any(feature = "arrange", feature = "structure"))]
