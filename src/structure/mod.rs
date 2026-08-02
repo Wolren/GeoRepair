@@ -39,6 +39,10 @@ pub mod merge;
 pub mod polygonizer;
 /// Hole subtraction during polygon face assembly.
 pub mod subtract;
+/// Edge splitting at intersection points (R-tree / sweep / brute force).
+pub(crate) mod edge_split;
+/// GEOS MakeValidPoly symdiff loop (BuildArea + XOR accumulation).
+pub(crate) mod symdiff;
 /// Plane-sweep intersection detection for edge segments.
 pub mod sweep;
 

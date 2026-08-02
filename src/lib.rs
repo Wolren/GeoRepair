@@ -355,17 +355,16 @@ pub mod cleanup;
 /// GEOS-compatible fast-path polygon repair via planar graph extraction.
 pub mod structure;
 
+/// Language bindings: C FFI and Python (PyO3).
+#[cfg(any(feature = "ffi", feature = "python"))]
+pub mod bindings;
 #[cfg(feature = "ffi")]
-#[path = "bindings/ffi.rs"]
-/// C-compatible FFI bindings for geo-repair.
-pub mod ffi;
+pub use bindings::ffi;
+#[cfg(feature = "python")]
+pub use bindings::python;
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 /// Rayon-based parallel batch geometry repair.
 pub mod parallel;
-#[cfg(feature = "python")]
-#[path = "bindings/python.rs"]
-/// Python bindings via PyO3.
-pub mod python;
 #[cfg(feature = "simd")]
 /// AVX2-accelerated geometric predicates (x86_64).
 pub mod simd;
