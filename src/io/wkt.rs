@@ -296,9 +296,9 @@ impl<'a> Parser<'a> {
 
     fn read_coord_list(&mut self, dims: u32) -> Result<Vec<Coord<f64>>, WktError> {
         self.skip_ws();
-        if self.i < self.s.len() && self.s[self.i] == b')' {
-            return Ok(Vec::new());
-        }
+        // A bare '(' ')' coordinate list is rejected (GEOS rejects it too);
+        // emptiness is expressed with the EMPTY keyword. POLYGON (EMPTY)
+        // is handled by the ring parsers before reaching this point.
         let mut coords = Vec::new();
         coords.push(self.read_coord(dims)?);
         loop {
@@ -365,6 +365,7 @@ impl<'a> Parser<'a> {
         }
         self.expect(b'(')?;
         let mut rings = Vec::new();
+        let mut saw_any = false;
         loop {
             self.skip_ws();
             if self.i < self.s.len() && self.s[self.i] == b')' {
@@ -385,6 +386,7 @@ impl<'a> Parser<'a> {
                 let rest = &self.s[self.i..];
                 if rest.starts_with(b"EMPTY") || rest.starts_with(b"empty") {
                     self.i += 5;
+                    saw_any = true;
                     self.skip_ws();
                     if self.i < self.s.len() && self.s[self.i] == b',' {
                         self.i += 1;
@@ -396,8 +398,14 @@ impl<'a> Parser<'a> {
             let coords = self.read_coord_list(dims)?;
             self.expect(b')')?;
             rings.push(LineString::new(coords));
+            saw_any = true;
         }
         self.expect(b')')?;
+        // POLYGON () is rejected (GEOS rejects it too); POLYGON (EMPTY)
+        // is a valid empty polygon.
+        if !saw_any {
+            return Err(self.err("expected at least one ring"));
+        }
         if rings.is_empty() {
             return Ok(Geometry::Polygon(Polygon::new(
                 LineString::new(vec![]),
@@ -419,6 +427,7 @@ impl<'a> Parser<'a> {
         }
         self.expect(b'(')?;
         let mut points = Vec::new();
+        let mut saw_any = false;
         loop {
             self.skip_ws();
             if self.i >= self.s.len() || self.s[self.i] == b')' {
@@ -431,6 +440,7 @@ impl<'a> Parser<'a> {
                 if rest.starts_with(b"EMPTY") || rest.starts_with(b"empty") {
                     self.i += 5;
                     points.push(Point::new(f64::NAN, f64::NAN));
+                    saw_any = true;
                     self.skip_ws();
                     if self.i < self.s.len() && self.s[self.i] == b',' {
                         self.i += 1;
@@ -447,12 +457,17 @@ impl<'a> Parser<'a> {
                 self.read_coord(dims)?
             };
             points.push(Point(c));
+            saw_any = true;
             self.skip_ws();
             if self.i < self.s.len() && self.s[self.i] == b',' {
                 self.i += 1;
             }
         }
         self.expect(b')')?;
+        // MULTIPOINT () is rejected (GEOS rejects it too).
+        if !saw_any {
+            return Err(self.err("expected at least one point"));
+        }
         Ok(Geometry::MultiPoint(MultiPoint(points)))
     }
 
@@ -467,6 +482,7 @@ impl<'a> Parser<'a> {
         }
         self.expect(b'(')?;
         let mut lines = Vec::new();
+        let mut saw_any = false;
         loop {
             self.skip_ws();
             if self.i >= self.s.len() || self.s[self.i] == b')' {
@@ -488,6 +504,7 @@ impl<'a> Parser<'a> {
                 if rest.starts_with(b"EMPTY") || rest.starts_with(b"empty") {
                     self.i += 5;
                     lines.push(LineString::new(vec![]));
+                    saw_any = true;
                     continue;
                 }
             }
@@ -495,8 +512,13 @@ impl<'a> Parser<'a> {
             let coords = self.read_coord_list(dims)?;
             self.expect(b')')?;
             lines.push(LineString::new(coords));
+            saw_any = true;
         }
         self.expect(b')')?;
+        // MULTILINESTRING () is rejected (GEOS rejects it too).
+        if !saw_any {
+            return Err(self.err("expected at least one line"));
+        }
         Ok(Geometry::MultiLineString(MultiLineString(lines)))
     }
 
@@ -511,6 +533,7 @@ impl<'a> Parser<'a> {
         }
         self.expect(b'(')?;
         let mut polys = Vec::new();
+        let mut saw_any = false;
         loop {
             self.skip_ws();
             if self.i >= self.s.len() || self.s[self.i] == b')' {
@@ -532,11 +555,13 @@ impl<'a> Parser<'a> {
                 if rest.starts_with(b"EMPTY") || rest.starts_with(b"empty") {
                     self.i += 5;
                     polys.push(Polygon::new(LineString::new(vec![]), vec![]));
+                    saw_any = true;
                     continue;
                 }
             }
             self.expect(b'(')?;
             let mut rings = Vec::new();
+            let mut saw_ring = false;
             loop {
                 self.skip_ws();
                 if self.i < self.s.len() && self.s[self.i] == b')' {
@@ -557,6 +582,7 @@ impl<'a> Parser<'a> {
                     let rest = &self.s[self.i..];
                     if rest.starts_with(b"EMPTY") || rest.starts_with(b"empty") {
                         self.i += 5;
+                        saw_ring = true;
                         continue;
                     }
                 }
@@ -564,16 +590,27 @@ impl<'a> Parser<'a> {
                 let coords = self.read_coord_list(dims)?;
                 self.expect(b')')?;
                 rings.push(LineString::new(coords));
+                saw_ring = true;
             }
             self.expect(b')')?;
+            // An empty-paren polygon inside MULTIPOLYGON is rejected
+            // (GEOS rejects it too); (EMPTY) is a valid empty component.
+            if !saw_ring {
+                return Err(self.err("expected at least one ring"));
+            }
             let exterior = if rings.is_empty() {
                 LineString::new(vec![])
             } else {
                 rings.swap_remove(0)
             };
             polys.push(Polygon::new(exterior, rings));
+            saw_any = true;
         }
         self.expect(b')')?;
+        // MULTIPOLYGON () is rejected (GEOS rejects it too).
+        if !saw_any {
+            return Err(self.err("expected at least one polygon"));
+        }
         Ok(Geometry::MultiPolygon(MultiPolygon(polys)))
     }
 
@@ -588,6 +625,7 @@ impl<'a> Parser<'a> {
         }
         self.expect(b'(')?;
         let mut geoms = Vec::new();
+        let mut saw_any = false;
         loop {
             self.skip_ws();
             if self.i >= self.s.len() || self.s[self.i] == b')' {
@@ -609,12 +647,18 @@ impl<'a> Parser<'a> {
                 if rest.starts_with(b"EMPTY") || rest.starts_with(b"empty") {
                     self.i += 5;
                     geoms.push(Geometry::Point(Point::new(f64::NAN, f64::NAN)));
+                    saw_any = true;
                     continue;
                 }
             }
             geoms.push(self.parse_any()?);
+            saw_any = true;
         }
         self.expect(b')')?;
+        // GEOMETRYCOLLECTION () is rejected (GEOS rejects it too).
+        if !saw_any {
+            return Err(self.err("expected at least one element"));
+        }
         Ok(Geometry::GeometryCollection(GeometryCollection(geoms)))
     }
 
@@ -867,8 +911,53 @@ fn write_geom(s: &mut String, geom: &Geometry<f64>) {
                 s.push(')');
             }
         }
-        _ => {
-            s.push_str("GEOMETRYCOLLECTION EMPTY");
+        // OGC WKT has no Line/Rect/Triangle types; serialize them losslessly
+        // as their closest OGC equivalents (coordinate-exact).
+        Geometry::Line(line) => {
+            s.push_str("LINESTRING (");
+            write_coord(s, &line.start);
+            s.push_str(", ");
+            write_coord(s, &line.end);
+            s.push(')');
+        }
+        Geometry::Rect(rect) => {
+            s.push_str("POLYGON ((");
+            write_coord(s, &Coord {
+                x: rect.min().x,
+                y: rect.min().y,
+            });
+            s.push_str(", ");
+            write_coord(s, &Coord {
+                x: rect.max().x,
+                y: rect.min().y,
+            });
+            s.push_str(", ");
+            write_coord(s, &Coord {
+                x: rect.max().x,
+                y: rect.max().y,
+            });
+            s.push_str(", ");
+            write_coord(s, &Coord {
+                x: rect.min().x,
+                y: rect.max().y,
+            });
+            s.push_str(", ");
+            write_coord(s, &Coord {
+                x: rect.min().x,
+                y: rect.min().y,
+            });
+            s.push_str("))");
+        }
+        Geometry::Triangle(tri) => {
+            s.push_str("POLYGON ((");
+            write_coord(s, &tri.v1());
+            s.push_str(", ");
+            write_coord(s, &tri.v2());
+            s.push_str(", ");
+            write_coord(s, &tri.v3());
+            s.push_str(", ");
+            write_coord(s, &tri.v1());
+            s.push_str("))");
         }
     }
 }
@@ -1533,5 +1622,210 @@ mod tests {
     fn infer_type_unknown_fails() {
         let err = infer_wkt_type("CIRCULARSTRING (1 2, 3 4)").unwrap_err();
         assert!(matches!(err, WktError::ParseError { .. }));
+    }
+
+    // -----------------------------------------------------------------------
+    // Production-readiness battery: strtod specials, case-insensitive
+    // keywords, EMPTY elements, malformed inputs, non-OGC variants.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn special_values_strtod_semantics() {
+        // GEOS parses numbers via strtod: nan/inf/infinity, any case, signed.
+        for (wkt, x, y) in [
+            ("POINT (NaN NaN)", f64::NAN, f64::NAN),
+            ("POINT (nan 5)", f64::NAN, 5.0),
+            ("POINT (NAN 5)", f64::NAN, 5.0),
+            ("POINT (-nan 5)", f64::NAN, 5.0),
+            ("POINT (Inf 5)", f64::INFINITY, 5.0),
+            ("POINT (inf 5)", f64::INFINITY, 5.0),
+            ("POINT (INF 5)", f64::INFINITY, 5.0),
+            ("POINT (-Inf 5)", f64::NEG_INFINITY, 5.0),
+            ("POINT (+Inf 5)", f64::INFINITY, 5.0),
+            ("POINT (Infinity 5)", f64::INFINITY, 5.0),
+            ("POINT (-Infinity 5)", f64::NEG_INFINITY, 5.0),
+        ] {
+            let g = read_wkt(wkt).unwrap();
+            if let Geometry::Point(p) = g {
+                assert_eq!(p.0.y.is_nan(), y.is_nan(), "y nan-ness mismatch for {wkt}");
+                if !y.is_nan() {
+                    assert_eq!(p.0.y, y, "y mismatch for {wkt}");
+                }
+                assert_eq!(p.0.x.is_nan(), x.is_nan(), "nan-ness mismatch for {wkt}");
+                if !x.is_nan() {
+                    assert_eq!(p.0.x, x, "x mismatch for {wkt}");
+                }
+            } else {
+                panic!("expected point for {wkt}");
+            }
+        }
+    }
+
+    #[test]
+    fn keywords_case_insensitive() {
+        for (wkt, expect) in [
+            ("point (1 2)", "POINT (1.0 2.0)"),
+            ("linestring (0 0, 1 1)", "LINESTRING (0.0 0.0, 1.0 1.0)"),
+            ("Polygon ((0 0, 1 0, 1 1, 0 1, 0 0))", "POLYGON ((0.0 0.0, 1.0 0.0, 1.0 1.0, 0.0 1.0, 0.0 0.0))"),
+            ("multipoint (1 2, 3 4)", "MULTIPOINT (1.0 2.0, 3.0 4.0)"),
+            ("MultiPolygon (((0 0, 1 0, 1 1, 0 1, 0 0)))", "MULTIPOLYGON (((0.0 0.0, 1.0 0.0, 1.0 1.0, 0.0 1.0, 0.0 0.0)))"),
+            ("geometrycollection (point (1 2))", "GEOMETRYCOLLECTION (POINT (1.0 2.0))"),
+        ] {
+            let g = read_wkt(wkt).unwrap();
+            assert_eq!(write_wkt(&g), expect, "mismatch for {wkt}");
+        }
+    }
+
+    #[test]
+    fn linearring_parsed_as_linestring() {
+        let g = read_wkt("LINEARRING (0 0, 0 10, 10 10, 10 0, 0 0)").unwrap();
+        assert!(matches!(g, Geometry::LineString(_)));
+    }
+
+    #[test]
+    fn empty_elements_in_collections() {
+        let g = read_wkt("MULTIPOINT (EMPTY, (1 2), empty)").unwrap();
+        if let Geometry::MultiPoint(mp) = g {
+            assert_eq!(mp.0.len(), 3);
+            assert!(mp.0[0].0.x.is_nan() && mp.0[0].0.y.is_nan());
+            assert_eq!(mp.0[1], Point::new(1.0, 2.0));
+            assert!(mp.0[2].0.x.is_nan());
+        } else {
+            panic!("expected multipoint");
+        }
+
+        let g = read_wkt("MULTILINESTRING (EMPTY, (1 1, 2 2))").unwrap();
+        if let Geometry::MultiLineString(mls) = g {
+            assert_eq!(mls.0.len(), 2);
+            assert!(mls.0[0].0.is_empty());
+        } else {
+            panic!("expected multilinestring");
+        }
+
+        let g = read_wkt("MULTIPOLYGON (EMPTY, ((0 0, 1 0, 1 1, 0 1, 0 0)))").unwrap();
+        if let Geometry::MultiPolygon(mp) = g {
+            assert_eq!(mp.0.len(), 2);
+            assert!(mp.0[0].exterior().0.is_empty());
+        } else {
+            panic!("expected multipolygon");
+        }
+
+        let g = read_wkt("GEOMETRYCOLLECTION (EMPTY, POINT (1 2))").unwrap();
+        if let Geometry::GeometryCollection(gc) = g {
+            assert_eq!(gc.0.len(), 2);
+            assert!(matches!(gc.0[0], Geometry::Point(p) if p.0.x.is_nan()));
+        } else {
+            panic!("expected geometrycollection");
+        }
+
+        // All-EMPTY polygon rings parse to an empty polygon.
+        let g = read_wkt("POLYGON (EMPTY, EMPTY, EMPTY)").unwrap();
+        if let Geometry::Polygon(p) = g {
+            assert!(p.exterior().0.is_empty());
+        } else {
+            panic!("expected polygon");
+        }
+    }
+
+    #[test]
+    fn malformed_wkt_rejected() {
+        let bad = [
+            "POINT (EMPTY)",      // EMPTY is a token, not a coordinate
+            "LINESTRING ()",      // empty coordinate list without EMPTY keyword
+            "POINT (1)",          // missing y
+            "POINT (1 2 3)",      // undeclared Z is rejected (2D only)
+            "POINT (1 2, 3 4)",   // extra coordinate
+            "POINT 1 2",          // missing parens
+            "POINT (1 2))",       // unbalanced
+            "LINESTRING (1 2,, 3 4)", // double comma
+            "POINT (1 2) POINT (3 4)", // trailing geometry
+            "",                   // empty input
+            "   ",                // whitespace only
+            "POINT Z (1 2 3)",    // Z modifier
+            "POINT (1 2",         // truncated
+            "GEOMETRYCOLLECTION (POINT (1 2)", // unbalanced collection
+            "MULTIPOINT ()",      // empty parens without EMPTY keyword
+        ];
+        for wkt in bad {
+            assert!(
+                read_wkt(wkt).is_err(),
+                "expected rejection of {wkt:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn degenerate_ring_parses_but_flagged_by_validator() {
+        // A 2-coordinate ring is structurally parsed (Polygon::new
+        // auto-closes), then the validator flags it - the reader is
+        // deliberately structural; validity is the validator's gate.
+        let g = read_wkt("POLYGON ((0 0, 1 1))").unwrap();
+        assert!(!crate::validation::validate(&g).valid);
+    }
+
+    #[test]
+    fn non_ogc_variants_serialized_losslessly() {
+        // OGC WKT has no Line/Rect/Triangle; they must serialize to their
+        // closest OGC equivalents (coordinate-exact), never silently drop
+        // to GEOMETRYCOLLECTION EMPTY.
+        let line = Geometry::Line(geo::Line::new(
+            Coord { x: 1.0, y: 2.0 },
+            Coord { x: 3.0, y: 4.0 },
+        ));
+        assert_eq!(write_wkt(&line), "LINESTRING (1.0 2.0, 3.0 4.0)");
+        assert_eq!(read_wkt(&write_wkt(&line)).unwrap(), Geometry::LineString(LineString::new(vec![
+            Coord { x: 1.0, y: 2.0 },
+            Coord { x: 3.0, y: 4.0 },
+        ])));
+
+        let rect = Geometry::Rect(geo::Rect::new(
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 10.0, y: 5.0 },
+        ));
+        assert_eq!(
+            write_wkt(&rect),
+            "POLYGON ((0.0 0.0, 10.0 0.0, 10.0 5.0, 0.0 5.0, 0.0 0.0))"
+        );
+
+        let tri = Geometry::Triangle(geo::Triangle::new(
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 2.0, y: 0.0 },
+            Coord { x: 1.0, y: 2.0 },
+        ));
+        assert_eq!(
+            write_wkt(&tri),
+            "POLYGON ((0.0 0.0, 2.0 0.0, 1.0 2.0, 0.0 0.0))"
+        );
+        // And they round-trip through the reader.
+        assert!(matches!(
+            read_wkt(&write_wkt(&tri)).unwrap(),
+            Geometry::Polygon(_)
+        ));
+    }
+
+    #[test]
+    fn collection_empties_roundtrip() {
+        for wkt in [
+            "MULTIPOINT EMPTY",
+            "MULTILINESTRING EMPTY",
+            "MULTIPOLYGON EMPTY",
+            "GEOMETRYCOLLECTION EMPTY",
+            "POINT EMPTY",
+            "LINESTRING EMPTY",
+            "POLYGON EMPTY",
+        ] {
+            let g = read_wkt(wkt).unwrap();
+            assert_eq!(write_wkt(&g), wkt, "writer must canonicalize {wkt}");
+            assert_eq!(write_wkt(&read_wkt(&write_wkt(&g)).unwrap()), wkt);
+        }
+    }
+
+    #[test]
+    fn read_wkt_from_and_write_wkt_to() {
+        let mut rdr = std::io::Cursor::new(b"POINT (1 2)".to_vec());
+        let g = read_wkt_from(&mut rdr).unwrap();
+        let mut out = Vec::new();
+        write_wkt_to(&g, &mut out).unwrap();
+        assert_eq!(out, b"POINT (1.0 2.0)");
     }
 }

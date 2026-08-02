@@ -34,6 +34,7 @@ pub enum WkbError {
     UnknownTypeCode(u32),
     UnexpectedGeometryType { expected: &'static str, code: u32 },
     UnsupportedDimension { actual_dims: u8 },
+    TrailingBytes { consumed: usize, total: usize },
     IoError(std::io::Error),
 }
 
@@ -55,6 +56,12 @@ impl fmt::Display for WkbError {
                 write!(
                     f,
                     "unsupported WKB dimension: {actual_dims}D (only 2D is supported)"
+                )
+            }
+            WkbError::TrailingBytes { consumed, total } => {
+                write!(
+                    f,
+                    "trailing bytes after WKB geometry: consumed {consumed} of {total} bytes"
                 )
             }
             WkbError::IoError(e) => write!(f, "WKB I/O error: {e}"),
@@ -174,7 +181,16 @@ const WKB_SRID_FLAG: u32 = 0x20000000;
 pub fn read_wkb(buf: &[u8]) -> Result<Geometry<f64>, WkbError> {
     let mut pos = 0;
     let mut dummy_extra = Vec::new();
-    let (geom, _, _) = read_geometry_inner(buf, &mut pos, &mut dummy_extra)?;
+    let (geom, _, _, _) = read_geometry_inner(buf, &mut pos, &mut dummy_extra)?;
+    // Strict single-geometry parse: trailing bytes mean the buffer was
+    // truncated, concatenated, or garbage - surface it instead of silently
+    // dropping data. Use read_wkb_concat for multi-geometry buffers.
+    if pos != buf.len() {
+        return Err(WkbError::TrailingBytes {
+            consumed: pos,
+            total: buf.len(),
+        });
+    }
     Ok(geom)
 }
 
@@ -198,7 +214,7 @@ pub fn read_wkb_from(mut reader: impl Read) -> Result<Geometry<f64>, WkbError> {
 pub fn read_ewkb(buf: &[u8]) -> Result<EwkbGeometry, WkbError> {
     let mut pos = 0;
     let mut extra_coords = Vec::new();
-    let (geometry, srid, raw_dims) = read_geometry_inner(buf, &mut pos, &mut extra_coords)?;
+    let (geometry, srid, raw_dims, _) = read_geometry_inner(buf, &mut pos, &mut extra_coords)?;
     let dims = match raw_dims {
         4 => EwkbDims::XYZM,
         3 => EwkbDims::XYZ,
@@ -213,12 +229,13 @@ pub fn read_ewkb(buf: &[u8]) -> Result<EwkbGeometry, WkbError> {
 }
 /// Low-level: read one geometry from `buf` starting at `pos`, advancing
 /// `pos` past the geometry. Optionally accumulates Z/M extra coordinate
-/// values into `extra_coords`.
+/// values into `extra_coords`. Returns the geometry, SRID, dimension
+/// count, and the raw WKB type code (for error reporting).
 fn read_geometry_inner(
     buf: &[u8],
     pos: &mut usize,
     extra_coords: &mut Vec<f64>,
-) -> Result<(Geometry<f64>, Option<i32>, u8), WkbError> {
+) -> Result<(Geometry<f64>, Option<i32>, u8, u32), WkbError> {
     let le = read_byte_order(buf, pos)?;
     let raw_type = read_u32(buf, pos, le)?;
     let has_z = (raw_type & WKB_Z_FLAG) != 0;
@@ -252,13 +269,13 @@ fn read_geometry_inner(
             let n = read_u32(buf, pos, le)? as usize;
             let mut points = Vec::with_capacity(n);
             for _ in 0..n {
-                let (sub, _, _) = read_geometry_inner(buf, pos, extra_coords)?;
+                let (sub, _, _, sub_code) = read_geometry_inner(buf, pos, extra_coords)?;
                 match sub {
                     Geometry::Point(p) => points.push(p),
                     _ => {
                         return Err(WkbError::UnexpectedGeometryType {
                             expected: "Point",
-                            code: 0,
+                            code: sub_code & 0xff,
                         });
                     }
                 }
@@ -269,13 +286,13 @@ fn read_geometry_inner(
             let n = read_u32(buf, pos, le)? as usize;
             let mut lines = Vec::with_capacity(n);
             for _ in 0..n {
-                let (sub, _, _) = read_geometry_inner(buf, pos, extra_coords)?;
+                let (sub, _, _, sub_code) = read_geometry_inner(buf, pos, extra_coords)?;
                 match sub {
                     Geometry::LineString(ls) => lines.push(ls),
                     _ => {
                         return Err(WkbError::UnexpectedGeometryType {
                             expected: "LineString",
-                            code: 0,
+                            code: sub_code & 0xff,
                         });
                     }
                 }
@@ -286,13 +303,13 @@ fn read_geometry_inner(
             let n = read_u32(buf, pos, le)? as usize;
             let mut polys = Vec::with_capacity(n);
             for _ in 0..n {
-                let (sub, _, _) = read_geometry_inner(buf, pos, extra_coords)?;
+                let (sub, _, _, sub_code) = read_geometry_inner(buf, pos, extra_coords)?;
                 match sub {
                     Geometry::Polygon(p) => polys.push(p),
                     _ => {
                         return Err(WkbError::UnexpectedGeometryType {
                             expected: "Polygon",
-                            code: 0,
+                            code: sub_code & 0xff,
                         });
                     }
                 }
@@ -303,14 +320,14 @@ fn read_geometry_inner(
             let n = read_u32(buf, pos, le)? as usize;
             let mut geoms = Vec::with_capacity(n);
             for _ in 0..n {
-                let (sub, _, _) = read_geometry_inner(buf, pos, extra_coords)?;
+                let (sub, _, _, _) = read_geometry_inner(buf, pos, extra_coords)?;
                 geoms.push(sub);
             }
             Ok(Geometry::GeometryCollection(GeometryCollection(geoms)))
         }
         _ => Err(WkbError::UnknownTypeCode(type_code)),
     };
-    Ok((geom?, srid, dims))
+    Ok((geom?, srid, dims, type_code))
 }
 
 /// Read byte order byte. Returns `true` for little-endian (NDR),
@@ -617,7 +634,11 @@ fn ewkb_size(geom: &Geometry<f64>, dims: EwkbDims, has_srid: bool) -> usize {
             }
             sz
         }
-        _ => header + 4, // Triangle, Rect, etc.
+        // OGC WKB has no Line/Rect/Triangle types; encode them losslessly as
+        // their closest OGC equivalents, matching write_geometry.
+        Line(l) => header + 4 + 2 * coord_bytes,
+        Rect(_) => header + 4 + (4 + 5 * coord_bytes),
+        Triangle(_) => header + 4 + (4 + 4 * coord_bytes),
     }
 }
 
@@ -713,9 +734,33 @@ fn write_geometry(geom: &Geometry<f64>, buf: &mut Vec<u8>, le: bool) {
                 write_geometry(g, buf, le);
             }
         }
-        _ => {
-            write_u32(buf, WKB_GEOMETRYCOLLECTION, le);
-            write_u32(buf, 0, le);
+        // OGC WKB has no Line/Rect/Triangle types; encode them losslessly as
+        // their closest OGC equivalents (coordinate-exact, matching
+        // wkb_size). Reading the bytes back yields the OGC type.
+        Line(l) => {
+            write_u32(buf, WKB_LINESTRING, le);
+            write_u32(buf, 2, le);
+            write_coord(buf, &l.start, le);
+            write_coord(buf, &l.end, le);
+        }
+        Rect(r) => {
+            write_u32(buf, WKB_POLYGON, le);
+            write_u32(buf, 1, le);
+            write_u32(buf, 5, le);
+            write_coord(buf, &Coord { x: r.min().x, y: r.min().y }, le);
+            write_coord(buf, &Coord { x: r.max().x, y: r.min().y }, le);
+            write_coord(buf, &Coord { x: r.max().x, y: r.max().y }, le);
+            write_coord(buf, &Coord { x: r.min().x, y: r.max().y }, le);
+            write_coord(buf, &Coord { x: r.min().x, y: r.min().y }, le);
+        }
+        Triangle(t) => {
+            write_u32(buf, WKB_POLYGON, le);
+            write_u32(buf, 1, le);
+            write_u32(buf, 4, le);
+            write_coord(buf, &t.v1(), le);
+            write_coord(buf, &t.v2(), le);
+            write_coord(buf, &t.v3(), le);
+            write_coord(buf, &t.v1(), le);
         }
     }
 }
@@ -897,13 +942,49 @@ fn write_geometry_ewkb(
                 write_geometry_ewkb(buf, g, dims, None, extra, offset, le);
             }
         }
-        _ => {
-            let tc = type_code_with_flags(WKB_GEOMETRYCOLLECTION, dims, srid.is_some());
+        // OGC WKB has no Line/Rect/Triangle types; encode them losslessly as
+        // their closest OGC equivalents, matching write_geometry.
+        Line(l) => {
+            let tc = type_code_with_flags(WKB_LINESTRING, dims, srid.is_some());
             write_u32(buf, tc, le);
             if let Some(srid) = srid {
                 write_u32(buf, srid as u32, le);
             }
-            write_u32(buf, 0, le);
+            write_u32(buf, 2, le);
+            write_coord_ewkb(buf, &l.start, dims, extra, offset, le);
+            write_coord_ewkb(buf, &l.end, dims, extra, offset, le);
+        }
+        Rect(r) => {
+            let tc = type_code_with_flags(WKB_POLYGON, dims, srid.is_some());
+            write_u32(buf, tc, le);
+            if let Some(srid) = srid {
+                write_u32(buf, srid as u32, le);
+            }
+            write_u32(buf, 1, le);
+            write_u32(buf, 5, le);
+            let corners = [
+                Coord { x: r.min().x, y: r.min().y },
+                Coord { x: r.max().x, y: r.min().y },
+                Coord { x: r.max().x, y: r.max().y },
+                Coord { x: r.min().x, y: r.max().y },
+                Coord { x: r.min().x, y: r.min().y },
+            ];
+            for c in &corners {
+                write_coord_ewkb(buf, c, dims, extra, offset, le);
+            }
+        }
+        Triangle(t) => {
+            let tc = type_code_with_flags(WKB_POLYGON, dims, srid.is_some());
+            write_u32(buf, tc, le);
+            if let Some(srid) = srid {
+                write_u32(buf, srid as u32, le);
+            }
+            write_u32(buf, 1, le);
+            write_u32(buf, 4, le);
+            write_coord_ewkb(buf, &t.v1(), dims, extra, offset, le);
+            write_coord_ewkb(buf, &t.v2(), dims, extra, offset, le);
+            write_coord_ewkb(buf, &t.v3(), dims, extra, offset, le);
+            write_coord_ewkb(buf, &t.v1(), dims, extra, offset, le);
         }
     }
 }
@@ -955,11 +1036,9 @@ pub fn read_wkb_concat(buf: &[u8]) -> Result<Vec<Geometry<f64>>, WkbError> {
     let mut offset = 0;
     let mut geoms = Vec::new();
     while offset < buf.len() {
-        let remaining = &buf[offset..];
-        let geom = read_wkb(remaining)?;
-        let consumed = estimate_wkb_size(remaining)?;
+        let mut extra = Vec::new();
+        let (geom, _, _, _) = read_geometry_inner(buf, &mut offset, &mut extra)?;
         geoms.push(geom);
-        offset += consumed;
     }
     Ok(geoms)
 }
@@ -1763,5 +1842,190 @@ mod tests {
         } else {
             panic!("expected MultiPolygon");
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Production-readiness battery: truncation, garbage, trailing bytes,
+    // non-OGC variants, empty geometries, precise error codes.
+    // -----------------------------------------------------------------------
+
+    /// Every strict prefix of a valid WKB buffer must fail cleanly (no
+    /// panics, no silent truncation acceptance).
+    #[test]
+    fn truncated_wkb_never_panics() {
+        let poly = match make_test_polygon() {
+            Geometry::Polygon(p) => p,
+            other => panic!("expected polygon, got {other:?}"),
+        };
+        let geoms = vec![
+            make_test_geom(),
+            make_test_linestring(),
+            make_test_polygon(),
+            Geometry::MultiPolygon(MultiPolygon(vec![poly.clone(), poly])),
+            Geometry::GeometryCollection(GeometryCollection(vec![
+                make_test_geom(),
+                make_test_linestring(),
+            ])),
+        ];
+        for g in &geoms {
+            let wkb = write_wkb(g);
+            for cut in 0..wkb.len() {
+                let err = read_wkb(&wkb[..cut]).unwrap_err();
+                assert!(
+                    matches!(&err, WkbError::UnexpectedEof | WkbError::UnknownTypeCode(_)),
+                    "prefix {cut} of {} bytes: unexpected success or wrong error {err:?}",
+                    wkb.len()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn garbage_buffers_rejected() {
+        let garbage: Vec<Vec<u8>> = vec![
+            vec![],
+            vec![0xDE, 0xAD, 0xBE, 0xEF],
+            vec![0x01, 0x00, 0x00, 0x00, 0xFF],
+            vec![0x02, 0x00, 0x00, 0x00, 0x01], // invalid byte order
+            vec![0x01, 0x00, 0x00, 0x00, 0x63], // unknown type code 99
+            vec![0x01; 64],
+            vec![0x00; 32],
+        ];
+        for buf in garbage {
+            let _ = read_wkb(&buf); // must not panic
+            assert!(read_wkb(&buf).is_err(), "garbage accepted: {buf:?}");
+        }
+    }
+
+    #[test]
+    fn trailing_bytes_rejected() {
+        let g = make_test_polygon();
+        let wkb = write_wkb(&g);
+
+        // One trailing byte.
+        let mut buf = wkb.clone();
+        buf.push(0x00);
+        let err = read_wkb(&buf).unwrap_err();
+        assert!(
+            matches!(&err, WkbError::TrailingBytes { consumed, total } if *consumed == wkb.len() && *total == wkb.len() + 1),
+            "expected TrailingBytes, got {err:?}"
+        );
+
+        // A second complete geometry behind the first.
+        let mut buf = wkb.clone();
+        buf.extend_from_slice(&write_wkb(&make_test_geom()));
+        let err = read_wkb(&buf).unwrap_err();
+        assert!(
+            matches!(err, WkbError::TrailingBytes { .. }),
+            "expected TrailingBytes for concatenation, got {err:?}"
+        );
+        // ...but the concat API reads both.
+        assert_eq!(read_wkb_concat(&buf).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn non_ogc_variants_roundtrip_wkb() {
+        // Line/Rect/Triangle serialize to their OGC equivalents
+        // (coordinate-exact), never silently to an empty collection.
+        let line = Geometry::Line(geo::Line::new(
+            Coord { x: 1.0, y: 2.0 },
+            Coord { x: 3.0, y: 4.0 },
+        ));
+        let back = read_wkb(&write_wkb(&line)).unwrap();
+        assert_eq!(
+            back,
+            Geometry::LineString(LineString::new(vec![
+                Coord { x: 1.0, y: 2.0 },
+                Coord { x: 3.0, y: 4.0 },
+            ]))
+        );
+
+        let rect = Geometry::Rect(geo::Rect::new(
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 10.0, y: 5.0 },
+        ));
+        let back = read_wkb(&write_wkb(&rect)).unwrap();
+        if let Geometry::Polygon(p) = back {
+            assert_eq!(p.exterior().0.len(), 5);
+            assert_eq!(p.exterior().0[0], Coord { x: 0.0, y: 0.0 });
+            assert_eq!(p.exterior().0[2], Coord { x: 10.0, y: 5.0 });
+        } else {
+            panic!("expected polygon for rect WKB");
+        }
+
+        let tri = Geometry::Triangle(geo::Triangle::new(
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 2.0, y: 0.0 },
+            Coord { x: 1.0, y: 2.0 },
+        ));
+        let back = read_wkb(&write_wkb(&tri)).unwrap();
+        if let Geometry::Polygon(p) = back {
+            assert_eq!(p.exterior().0.len(), 4);
+            assert_eq!(p.exterior().0[3], Coord { x: 0.0, y: 0.0 });
+        } else {
+            panic!("expected polygon for triangle WKB");
+        }
+
+        // Big-endian variants too.
+        let opts = WriteOptions {
+            endianness: Endianness::BigEndian,
+            ..Default::default()
+        };
+        let back = read_wkb(&write_wkb_with_opts(&rect, &opts)).unwrap();
+        assert!(matches!(back, Geometry::Polygon(_)));
+    }
+
+    #[test]
+    fn empty_geometries_roundtrip_wkb() {
+        let geoms = vec![
+            Geometry::Point(Point::new(f64::NAN, f64::NAN)),
+            Geometry::LineString(LineString::new(vec![])),
+            Geometry::Polygon(Polygon::new(LineString::new(vec![]), vec![])),
+            Geometry::MultiPoint(MultiPoint(vec![])),
+            Geometry::MultiLineString(MultiLineString(vec![])),
+            Geometry::MultiPolygon(MultiPolygon(vec![])),
+            Geometry::GeometryCollection(GeometryCollection(vec![])),
+        ];
+        for g in &geoms {
+            let back = read_wkb(&write_wkb(g)).unwrap();
+            match (g, &back) {
+                (Geometry::Point(a), Geometry::Point(b)) => {
+                    assert!(a.0.x.is_nan() && b.0.x.is_nan(), "empty point round trip");
+                }
+                _ => assert_eq!(g, &back, "empty geometry round trip"),
+            }
+        }
+    }
+
+    #[test]
+    fn wrong_subtype_reports_real_code() {
+        // MULTIPOINT containing a LINESTRING sub-geometry: the error must
+        // carry the actual sub type code (2 = LINESTRING), not 0.
+        let mut buf = Vec::new();
+        buf.push(1u8); // NDR
+        buf.extend_from_slice(&WKB_MULTIPOINT.to_le_bytes());
+        buf.extend_from_slice(&1u32.to_le_bytes()); // one element
+        buf.extend_from_slice(&write_wkb(&make_test_linestring()));
+        let err = read_wkb(&buf).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                WkbError::UnexpectedGeometryType {
+                    expected: "Point",
+                    code: WKB_LINESTRING
+                }
+            ),
+            "expected real sub-type code, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn invalid_byte_order_and_unknown_code() {
+        // Byte order byte must be 0 or 1.
+        let err = read_wkb(&[0x02, 0x00, 0x00, 0x00, 0x01]).unwrap_err();
+        assert!(matches!(err, WkbError::InvalidByteOrder(2)));
+        // Unknown type code 99 (0x63).
+        let err = read_wkb(&[0x01, 0x63, 0x00, 0x00, 0x00]).unwrap_err();
+        assert!(matches!(err, WkbError::UnknownTypeCode(99)));
     }
 }
