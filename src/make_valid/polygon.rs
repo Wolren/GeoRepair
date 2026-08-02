@@ -241,27 +241,45 @@ pub(super) fn make_valid_impl(
 /// cloning (zero-copy passthrough for valid input). Arrange rebuilds anyway
 /// and borrows; Auto keeps the borrowed path (its full validation gate
 /// dwarfs the clone cost).
+///
+/// Returns `(geometry, verified)` — `verified == true` means the result is
+/// the fast-path passthrough: provably non-degenerate and NaN-free, so the
+/// caller can skip `strip_degenerate` (and the result already skipped
+/// `has_nan`).
+///
+/// `ext_scale` is the caller's exterior bbox scale from its earlier scan
+/// (see [`fix_polygon_owned`]); `None` recomputes it.
 pub(super) fn make_valid_impl_owned(
     poly: Polygon<f64>,
     config: &MakeValidConfig,
     _first_valid: Coord<f64>,
-) -> Geometry<f64> {
+    ext_scale: Option<f64>,
+) -> (Geometry<f64>, bool) {
     // Same NaN-free guarantee as make_valid_impl's callers.
     debug_assert!(
         !has_nan_or_infinite(&poly),
         "make_valid_impl_owned requires NaN-free input"
     );
-    match config.poly_method {
+    let result = match config.poly_method {
         PolyMethod::Arrange => arrange_or_empty(&poly, config),
-        PolyMethod::Structure => match structure_fix_owned(poly, config) {
-            Ok(g) => g,
-            Err(p) => {
+        PolyMethod::Structure => match structure_fix_owned(poly, config, ext_scale) {
+            // Fast path: input was verified NaN-free by the caller's scan and
+            // non-degenerate by the gates — winding is the only normalization
+            // needed, and it cannot introduce NaNs. Skip has_nan/strip.
+            crate::structure::FixOutcome::Fast(g) => {
+                let g = enforce_ogc_winding(g);
+                return (g, true);
+            }
+            crate::structure::FixOutcome::Repaired(g) => g,
+            crate::structure::FixOutcome::Unconsumed(p) => {
                 warn!("Structure mode: fix failed, retrying with precision reduction");
                 reduce_fallback(&p, config)
             }
         },
         PolyMethod::Auto => make_valid_impl(&poly, &poly, config, _first_valid),
-    }
+    };
+    let result = enforce_ogc_winding(result);
+    if has_nan(&result) { (empty_geom::<f64>(), true) } else { (result, false) }
 }
 
 /// Owned twin of [`Polygon::make_valid_with_config`] for batch pipelines
@@ -301,7 +319,8 @@ pub fn make_valid_owned(poly: Polygon<f64>, config: &MakeValidConfig) -> Geometr
         }
         if !has_nan {
             let first = coords[0];
-            return strip_degenerate(make_valid_impl_owned(poly, config, first));
+            let (g, verified) = make_valid_impl_owned(poly, config, first, Some(scale));
+            return if verified { g } else { strip_degenerate(g) };
         }
         // has_nan: fall through to the NaN path below (mirrors the borrowed version).
     }
@@ -352,7 +371,11 @@ pub fn make_valid_owned(poly: Polygon<f64>, config: &MakeValidConfig) -> Geometr
         LineString::new(c)
     };
     let cleaned = Polygon::new(ext_ring, int_clean);
-    strip_degenerate(make_valid_impl_owned(cleaned, config, first_valid))
+    // `cleaned` shares the exterior bbox with the original ring (NaN filtering
+    // does not change min/max), so recompute the scale cheaply from the
+    // cleaned exterior — same formula as the scan above.
+    let (g, verified) = make_valid_impl_owned(cleaned, config, first_valid, None);
+    if verified { g } else { strip_degenerate(g) }
 }
 
 /// Enforce OGC winding: CCW exterior, CW interior rings.
@@ -450,15 +473,16 @@ pub(super) fn structure_fix(poly: &Polygon<f64>, config: &MakeValidConfig) -> Op
     crate::structure::fix_polygon(poly, config)
 }
 
-/// Owned structure fix: `Ok(geometry)` or `Err(polygon)` for the caller's
-/// precision-reduction fallback. Moves the polygon through the fast path
-/// (zero-copy passthrough for valid input) instead of cloning it.
+/// Owned structure fix: distinguishes the zero-copy fast-path passthrough
+/// (see [`FixOutcome`]) from rebuilt geometry, and returns the polygon
+/// unconsumed when repair produced nothing.
 #[cfg(feature = "structure")]
 pub(super) fn structure_fix_owned(
     poly: Polygon<f64>,
     config: &MakeValidConfig,
-) -> Result<Geometry<f64>, Polygon<f64>> {
-    crate::structure::fix_polygon_owned(poly, config)
+    ext_scale: Option<f64>,
+) -> crate::structure::FixOutcome {
+    crate::structure::fix_polygon_owned(poly, config, ext_scale)
 }
 
 #[cfg(not(feature = "structure"))]
@@ -473,11 +497,12 @@ fn structure_fix(poly: &Polygon<f64>, _config: &MakeValidConfig) -> Option<Geome
 fn structure_fix_owned(
     poly: Polygon<f64>,
     _config: &MakeValidConfig,
-) -> Result<Geometry<f64>, Polygon<f64>> {
+    _ext_scale: Option<f64>,
+) -> crate::structure::FixOutcome {
     if !poly.exterior().0.is_empty() {
         warn!("PolyMethod::Structure selected but 'structure' feature is not enabled. Enable the 'structure' feature in Cargo.toml to use Structure mode.");
     }
-    Err(poly)
+    crate::structure::FixOutcome::Unconsumed(poly)
 }
 
 /// Check OGC validity using our own GeoValidation (Shewchuk-based).
