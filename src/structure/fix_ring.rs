@@ -17,9 +17,35 @@ type SplitPoint = SmallVec<[(f64, Coord<f64>); 2]>;
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn repair_ring(ring: &LineString<f64>) -> Option<Vec<Polygon<f64>>> {
-    let coords = basic_cleanup(ring)?;
+    let mut coords = basic_cleanup(ring)?;
     if coords.len() < 4 {
         return None;
+    }
+    // Barely-closed ring: a vertex within validation tolerance (1e-12 * bbox
+    // scale) of the start vertex is a needle, not a feature - the validator
+    // treats the pair as a touch (PinchPoint/SelfIntersection) and GEOS
+    // resolves it by noding the needle away. Drop the near-duplicate vertex
+    // (second-to-last: basic_cleanup guarantees the LAST vertex is the exact
+    // closure == first). The ring self-touches through a zero-area needle
+    // (measured: 7.3e-11 gap at scale 118, eps 1.18e-10,
+    // invariant_barely_closed_ring). Invalid-only repair path, O(n) scale
+    // scan - hot-path safe.
+    if coords.len() >= 5 {
+        let (mut min_x, mut max_x, mut min_y, mut max_y) =
+            (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+        for c in &coords {
+            min_x = min_x.min(c.x);
+            max_x = max_x.max(c.x);
+            min_y = min_y.min(c.y);
+            max_y = max_y.max(c.y);
+        }
+        let scale = (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
+        let eps = 1e-12 * scale;
+        let first = coords[0];
+        let near_closure = coords[coords.len() - 2];
+        if (near_closure.x - first.x).abs().max((near_closure.y - first.y).abs()) <= eps {
+            coords.remove(coords.len() - 2);
+        }
     }
     if is_collinear_ring(&coords) {
         return None;
@@ -165,13 +191,11 @@ pub(crate) fn collapse_sub_ulp_vertices(coords: &[Coord<f64>], snap_clean: bool)
                 break;
             }
         }
-        if run_len > 1 && i > 0 {
-            if snap_clean {
-                // Arrange CDT: replace the run start (already pushed) with the
-                // cleanest run member (closest to the coordinate origin).
-                if let Some(last) = cleaned.last_mut() {
-                    *last = best;
-                }
+        if run_len > 1 && i > 0 && snap_clean {
+            // Arrange CDT: replace the run start (already pushed) with the
+            // cleanest run member (closest to the coordinate origin).
+            if let Some(last) = cleaned.last_mut() {
+                *last = best;
             }
             // Structure repair: keep the run start as-is (collapse onto the
             // axis-aligned first member — see doc comment).
@@ -637,15 +661,12 @@ pub fn make_valid_poly_symdiff(cut_edges: &[Line<f64>]) -> Vec<Polygon<f64>> {
             let t: f64 = area.iter().map(|p| p.unsigned_area()).sum();
             eprintln!("   area after XOR = {t:.4} ({} polys)", area.len());
         }
-        remaining = remaining
-            .into_iter()
-            .filter(|l| {
-                let key = segment_key(snap(l.start), snap(l.end));
-                // Keep edges NOT on the built boundary: count==0 (unused) or
-                // count==2 (internal edge shared by two faces → next iter).
-                seg_counts.get(&key).copied().unwrap_or(0) != 1
-            })
-            .collect();
+        remaining.retain(|l| {
+            let key = segment_key(snap(l.start), snap(l.end));
+            // Keep edges NOT on the built boundary: count==0 (unused) or
+            // count==2 (internal edge shared by two faces → next iter).
+            seg_counts.get(&key).copied().unwrap_or(0) != 1
+        });
     }
     area
 }
@@ -715,7 +736,7 @@ fn symdiff_polygons(a: &[Polygon<f64>], b: &[Polygon<f64>]) -> Vec<Polygon<f64>>
     let mut out: Vec<Polygon<f64>> = Vec::new();
     for q in a {
         let qf = fp(q);
-        let matched = b_set.iter().any(|bf| *bf == qf);
+        let matched = b_set.contains(&qf);
         #[cfg(any(test, debug_assertions))]
         if std::env::var("DIAG_SYMDIFF").is_ok() {
             eprintln!("     match a fp {:?} -> {}", qf, matched);
@@ -729,17 +750,11 @@ fn symdiff_polygons(a: &[Polygon<f64>], b: &[Polygon<f64>]) -> Vec<Polygon<f64>>
     let a_set: Vec<Vec<(u64, u64)>> = a.iter().map(fp).collect();
     for p in b {
         let pf = fp(p);
-        if !a_set.iter().any(|af| *af == pf) {
+        if !a_set.contains(&pf) {
             out.push(p.clone());
         }
     }
     out
-}
-
-/// Segment equality with orientation and reversed-direction tolerance
-/// (coordinates are exact after noding).
-fn same_segment(a: Line<f64>, b: Line<f64>) -> bool {
-    (a.start == b.start && a.end == b.end) || (a.start == b.end && a.end == b.start)
 }
 
 pub fn edges_from_coords(coords: &[Coord<f64>]) -> Vec<Line<f64>> {

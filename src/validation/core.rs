@@ -388,8 +388,20 @@ pub(crate) fn edges_intersect_general(
         return true;
     }
 
-    // Collinear overlap (excluding endpoint-only touching)
-    let collinear = o1.abs() <= eps && o2.abs() <= eps;
+    // Collinear overlap (excluding endpoint-only touching). The collinearity
+    // tolerance must be RELATIVE to the pair's own edge lengths: orient2d
+    // magnitudes are O(L²) (twice the triangle area), so the threshold is
+    // `1e-12 * la2.max(lb2)` - the same rule as edges_vertex_on_edge. The
+    // caller's eps (1e-12 * bbox scale, floored at 1.0) is an ABSOLUTE
+    // length that exceeds the exact orient of genuinely non-collinear
+    // near-parallel sliver edges at large coordinate magnitude (measured:
+    // coord_wrap_around seed base=-9607183.16, step=5.47e-4, n=7 -> exact
+    // orients 8.2e-13/3.1e-13 vs caller eps 1e-12 flagged a false
+    // SelfIntersection on a MultiPolygon GEOS validates bit-for-bit).
+    let la2 = (a2.x - a1.x).powi(2) + (a2.y - a1.y).powi(2);
+    let lb2 = (b2.x - b1.x).powi(2) + (b2.y - b1.y).powi(2);
+    let collinear_eps = 1e-12 * la2.max(lb2);
+    let collinear = o1.abs() <= collinear_eps && o2.abs() <= collinear_eps;
     if collinear {
         let dx = a2.x - a1.x;
         let dy = a2.y - a1.y;
@@ -1025,13 +1037,12 @@ impl GeoValidation for LineString<f64> {
 ///
 /// GEOS isSimple semantics (verified against geosop on the GEOS XML corpus):
 /// a LineString is simple iff no two segments intersect except at shared
-/// endpoints. This includes:
-///   - proper crossings,
-///   - a vertex of one segment lying on another segment (vertex-on-edge,
-///     including vertex revisits between non-adjacent segments),
-///   - collinear overlap beyond a shared point (out-and-back backtracking).
-/// Adjacent segments may touch ONLY at their shared vertex; a closed line's
-/// first and last segments may touch ONLY at the closure vertex.
+/// endpoints. This includes proper crossings, a vertex of one segment lying
+/// on another segment (vertex-on-edge, including vertex revisits between
+/// non-adjacent segments), and collinear overlap beyond a shared point
+/// (out-and-back backtracking). Adjacent segments may touch ONLY at their
+/// shared vertex; a closed line's first and last segments may touch ONLY at
+/// the closure vertex.
 pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool {
     let n = coords.len() - 1;
     if n < 2 {

@@ -81,8 +81,8 @@ pub fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
         // rect (0.8 0.1, 2 0.1, ...) overlapping square (0 0, 1 1): its
         // first vertex is inside the square, but the shell extends to x=2.
         // GEOS's even-parent filter only drops fully-contained shells.
-        for j in 0..i {
-            if ring_fully_inside(ext_i, &with_area[j].0) {
+        for (j, wa) in with_area.iter().enumerate().take(i) {
+            if ring_fully_inside(ext_i, &wa.0) {
                 parent_count[i] += 1;
                 parent[i] = Some(j);
             }
@@ -237,7 +237,10 @@ fn ring_fully_inside(ring: &[Coord<f64>], poly: &Polygon<f64>) -> bool {
 /// shells cancel: hole==shell must yield empty, duplicate MP components
 /// must not become DuplicatedRings.
 fn cancel_identical_shells(shells: Vec<Polygon<f64>>) -> Vec<Polygon<f64>> {
-    let mut fingerprints: Vec<(Vec<(u64, u64)>, Polygon<f64>)> = shells
+    // (ring fingerprint, polygon) pairs; fingerprints are rotation/order-
+    // insensitive coordinate bit-sets.
+    type ShellFingerprint = (Vec<(u64, u64)>, Polygon<f64>);
+    let mut fingerprints: Vec<ShellFingerprint> = shells
         .into_iter()
         .map(|p| {
             let mut pts: Vec<(u64, u64)> = p

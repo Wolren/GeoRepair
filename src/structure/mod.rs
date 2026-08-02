@@ -170,6 +170,41 @@ pub fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geom
     }
     PROFILE_FP_NS.fetch_add(_t_fp.elapsed().as_nanos() as u64, Ordering::Relaxed);
 
+    // Crossing hole: a hole with a vertex strictly OUTSIDE the shell ring.
+    // Neither the i_overlay difference (returns a single quantized ring with
+    // 1e-9-grid node artifacts; measured: hole vertex split into two nodes
+    // 2.4e-7 apart) nor the polygonizer (mis-assigns the crossing pieces as
+    // holes - HoleOutsideShell) produces valid output for these. Arrange's
+    // pipeline yields the GEOS-identical even-odd decomposition (verified
+    // node-identical to geosop makeValid) - delegate the whole polygon.
+    // Boundary-touching holes (all vertices on the shell, e.g. CGAL
+    // square_hole_rhombus) are NOT crossing and stay on the boolean path.
+    // Hot-path discipline: the per-vertex test is O(hole x shell), so it
+    // runs only when the hole bbox pokes outside the shell bbox (the
+    // common fully-inside case is a pure bbox comparison) and only on
+    // small ring pairs (large rings route through the gates downstream).
+    #[cfg(feature = "arrange")]
+    {
+        let shell_bbox = ring_bbox(poly.exterior().0.as_slice());
+        let crossing = poly.interiors().iter().any(|h| {
+            let hb = ring_bbox(&h.0);
+            if hb.0 >= shell_bbox.0
+                && hb.1 <= shell_bbox.1
+                && hb.2 >= shell_bbox.2
+                && hb.3 <= shell_bbox.3
+            {
+                return false;
+            }
+            if h.0.len() * poly.exterior().0.len() > 4096 {
+                return false;
+            }
+            hole_vertex_strictly_outside(h, poly.exterior())
+        });
+        if crossing {
+            return Some(crate::arrange::fallback_polygon_fix(poly));
+        }
+    }
+
     // Compute shell bbox once (needed for hole Type C bypass)
     let shell_bbox = ring_bbox(poly.exterior().0.as_slice());
 
@@ -448,7 +483,6 @@ pub fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geom
 /// intersection). Shared endpoints (hole touching shell at a vertex — GEOS
 /// makeValid emits them) are legal and do NOT count. Used as a post-fix
 /// filter: only genuine floating-point self-crossings are discarded.
-///
 /// Uses the R-tree sweep for O(n log n) instead of the brute-force O(n²)
 /// pair loop — the quadratic version was fatal on large rings (59k verts →
 /// 9.1s, 181k verts → 143s measured on the real-world dataset).
@@ -461,7 +495,6 @@ pub fn eps_test(coords: &[Coord<f64>]) -> f64 {
     crate::core::EPS * scale
 }
 pub fn has_proper_self_crossing(p: &geo::Polygon<f64>) -> bool {
-    use geo::LinesIter;
     // Flatten exterior + holes into one coord slice, remembering ring starts.
     let mut coords: Vec<Coord<f64>> = Vec::with_capacity(
         p.exterior().0.len() + p.interiors().iter().map(|h| h.0.len()).sum::<usize>(),
@@ -482,23 +515,54 @@ pub fn has_proper_self_crossing(p: &geo::Polygon<f64>) -> bool {
     crate::structure::sweep::has_proper_self_crossing_sweep(&coords, &ring_offsets, eps)
 }
 
-/// Proper crossing: the two segments intersect at a point strictly interior
-/// to BOTH segments (shared endpoints excluded).
-fn segments_properly_cross(a: geo::Line<f64>, b: geo::Line<f64>) -> bool {
-    use crate::orient::orient2d;
-    let o1 = orient2d(a.start, a.end, b.start);
-    let o2 = orient2d(a.start, a.end, b.end);
-    let o3 = orient2d(b.start, b.end, a.start);
-    let o4 = orient2d(b.start, b.end, a.end);
-    // Strict proper crossing: both orientations strictly opposite.
-    (o1 > 0.0 && o2 < 0.0 || o1 < 0.0 && o2 > 0.0)
-        && (o3 > 0.0 && o4 < 0.0 || o3 < 0.0 && o4 > 0.0)
-}
-
 /// Winding-number point-in-ring test (exclusive of boundary).
 /// Delegates to SIMD-accelerated implementation.
 fn point_in_ring_exclusive(pt: Coord<f64>, ring: &[Coord<f64>]) -> bool {
     crate::simd::point_in_ring_exclusive(pt, ring)
+}
+
+/// True if the hole ring has at least one vertex STRICTLY OUTSIDE the shell
+/// ring (neither inside nor on the boundary) - i.e. the hole crosses the
+/// shell boundary. Boundary-touching holes (all vertices exactly on the
+/// shell, e.g. CGAL square_hole_rhombus) return false. Used to route
+/// crossing holes to the arrange fallback (see fix_polygon).
+fn hole_vertex_strictly_outside(hole: &LineString<f64>, shell: &LineString<f64>) -> bool {
+    let ring = shell.0.as_slice();
+    if ring.len() < 4 {
+        return false;
+    }
+    for &pt in &hole.0 {
+        if point_in_ring_exclusive(pt, ring) {
+            continue;
+        }
+        // On the boundary? Exact-vertex touch: distance to the nearest shell
+        // segment within the validation tolerance (1e-12 * L^2 relative).
+        let mut on_boundary = false;
+        for w in ring.windows(2) {
+            if w[0] == w[1] {
+                continue;
+            }
+            let dx = w[1].x - w[0].x;
+            let dy = w[1].y - w[0].y;
+            let len2 = dx * dx + dy * dy;
+            if len2 == 0.0 {
+                continue;
+            }
+            let t = ((pt.x - w[0].x) * dx + (pt.y - w[0].y) * dy) / len2;
+            let t = t.clamp(0.0, 1.0);
+            let px = w[0].x + t * dx;
+            let py = w[0].y + t * dy;
+            let d2 = (pt.x - px) * (pt.x - px) + (pt.y - py) * (pt.y - py);
+            if d2 <= 1e-12 * len2 {
+                on_boundary = true;
+                break;
+            }
+        }
+        if !on_boundary {
+            return true;
+        }
+    }
+    false
 }
 
 /// Compute bounding box of a coordinate ring as (min_x, max_x, min_y, max_y).
@@ -710,53 +774,4 @@ fn handle_collapse_result(
             }
         }
     }
-}
-
-/// O(n)/O(n log n) structural soundness check for Structure strategy output.
-fn structurally_sound(g: &Geometry<f64>) -> bool {
-    match g {
-        Geometry::Polygon(p) => polygon_sound(p),
-        Geometry::MultiPolygon(mp) => {
-            for p in &mp.0 { if !polygon_sound(p) { return false; } }
-            for i in 0..mp.0.len() {
-                let ei = &mp.0[i].exterior().0;
-                if ei.len() < 4 { continue; }
-                for j in 0..mp.0.len() {
-                    if i == j { continue; }
-                    let ej = &mp.0[j].exterior().0;
-                    if ej.len() < 4 { continue; }
-                    if ei.iter().all(|&pt| point_in_ring_exclusive(pt, ej)) {
-                        return false;
-                    }
-                }
-            }
-            true
-        }
-        _ => true,
-    }
-}
-
-fn polygon_sound(p: &Polygon<f64>) -> bool {
-    if !ring_sound(&p.exterior().0) { return false; }
-    for h in p.interiors() { if !ring_sound(&h.0) { return false; } }
-    let lines: Vec<_> = p.lines_iter().collect();
-    crate::arrange::prep::has_no_intersections(&lines)
-}
-
-fn ring_sound(coords: &[Coord<f64>]) -> bool {
-    if coords.len() < 4 { return false; }
-    if coords.iter().any(|c| !c.x.is_finite() || !c.y.is_finite()) { return false; }
-    shoelace_abs_sum(coords) >= 1e-12
-}
-
-fn shoelace_abs_sum(coords: &[Coord<f64>]) -> f64 {
-    let n = coords.len();
-    if n < 3 { return 0.0; }
-    let end = if coords.first() == coords.last() { n - 1 } else { n };
-    let mut sum = 0.0_f64;
-    for i in 0..end - 1 {
-        sum += coords[i].x * coords[i + 1].y - coords[i + 1].x * coords[i].y;
-    }
-    sum += coords[end - 1].x * coords[0].y - coords[0].x * coords[end - 1].y;
-    sum.abs()
 }
