@@ -99,7 +99,7 @@
 //! | `arrange` | CDT-based polygon repair (requires `spade`) | yes |
 //! | `structure` | Structure-based fast-path repair | yes |
 //! | `parallel` | Rayon parallel processing (non-WASM) | yes |
-//! | `simd` | AVX2-accelerated orientation tests (x86_64) | yes |
+//! | `simd` | Retained for compatibility; stable builds use auto-vectorized scalar kernels (hand-written AVX2 measured slower) | yes |
 //! | `simd-portable` | Portable SIMD via `core::simd` (nightly) | no |
 //! | `validate` | OGC validation predicates | yes |
 //! | `memmap` | Memory-mapped binary file loading | no* |
@@ -126,13 +126,14 @@
 //!
 //! | Platform | Core | SIMD | I/O | Parallel | Python |
 //! |----------|------|------|-----|----------|--------|
-//! | x86_64 Windows/Linux/macOS | Yes | Yes (AVX2) | Yes | Yes | Yes |
-//! | aarch64 macOS/Linux | Yes | Scalar | Yes | Yes | Yes |
-//! | WASM32 | Yes | Scalar | In-memory only | No | No |
-//! | no_std (embedded) | Yes | Scalar | No | No | No |
+//! | x86_64 Windows/Linux/macOS | Yes | Auto-vectorized scalar | Yes | Yes | Yes |
+//! | aarch64 macOS/Linux | Yes | Auto-vectorized scalar | Yes | Yes | Yes |
+//! | WASM32 | Yes | Auto-vectorized scalar | In-memory only | No | No |
+//! | no_std (embedded) | Yes | Auto-vectorized scalar | No | No | No |
 //!
-//! AVX2 requires `RUSTFLAGS="-C target-cpu=native"` at build time. Falls
-//! back to scalar on CPUs without AVX2 or non-x86_64 targets.
+//! SIMD is provided by LLVM's auto-vectorizer on all platforms; no special
+//! RUSTFLAGS are required. Hand-written AVX2 intrinsics were measured and
+//! removed (see `simd/mod.rs`).
 //!
 //! # no_std
 //!
@@ -362,11 +363,14 @@ pub mod bindings;
 pub use bindings::ffi;
 #[cfg(feature = "python")]
 pub use bindings::python;
-#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+#[cfg(feature = "parallel")]
 /// Rayon-based parallel batch geometry repair.
 pub mod parallel;
-#[cfg(feature = "simd")]
-/// AVX2-accelerated geometric predicates (x86_64).
+/// Geometric predicates (orientation, point-in-ring, AABB, snapping).
+/// Compiled unconditionally; the `simd` feature is retained for backward
+/// compatibility and gates the nightly `simd-portable` path. Stable builds
+/// use scalar kernels that LLVM auto-vectorizes — hand-written AVX2 was
+/// measured slower and removed (see `simd/mod.rs`).
 pub mod simd;
 
 /// Repair configuration, error types, and polygon method selection.

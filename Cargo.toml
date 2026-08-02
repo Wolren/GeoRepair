@@ -31,7 +31,9 @@ structure = ["simd", "rstar"]
 validate = ["rstar"]
 parallel = ["dep:rayon", "geo/multithreading"]
 # SIMD acceleration
-# - `simd`: x86_64 AVX2 intrinsics on x86_64, scalar fallback elsewhere
+# - `simd`: retained for backward compatibility. Stable builds use scalar
+#   kernels that LLVM auto-vectorizes — hand-written AVX2 intrinsics were
+#   measured slower on AoS coordinate data and removed (see src/simd/mod.rs).
 # - `simd-portable`: `core::simd` on all platforms (requires nightly)
 simd = []
 simd-portable = []
@@ -40,7 +42,7 @@ simd-portable = []
 bench-geos = ["geos/static"]
 bench-geos-system = ["dep:geos"]
 
-python = ["dep:pyo3"]
+python = ["dep:pyo3", "geo/serde"]
 ffi = ["dep:wkb", "dep:geo-traits"]
 
 # WASM browser fetch (synchronous XHR — blocks main thread)

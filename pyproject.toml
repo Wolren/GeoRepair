@@ -1,0 +1,32 @@
+# Maturin build configuration for the geo_repair Python package.
+#
+# Build:   python -m maturin build --release --features python
+# Install: pip install target/wheels/geo_repair-*.whl
+#
+# NOTE: keep `version` in sync with Cargo.toml (maturin cannot read it
+# dynamically under PEP 621).
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "geo-repair"
+version = "0.13.0"
+description = "Validate and repair invalid OGC GIS geometries in Rust (GEOS ST_MakeValid parity)"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "Apache-2.0" }
+keywords = ["gis", "geo", "validation", "repair", "wkb", "wkt", "geojson"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Topic :: Scientific/Engineering :: GIS",
+]
+
+[tool.maturin]
+features = ["python"]
+module-name = "geo_repair"
+bindings = "pyo3"

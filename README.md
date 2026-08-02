@@ -136,7 +136,7 @@ cargo bench --features bench-criterion --bench criterion
 | `arrange` | CDT-based polygon repair (requires `spade`) | yes |
 | `structure` | Structure-based fast path repair | yes |
 | `parallel` | Rayon parallel processing (non-WASM) | yes |
-| `simd` | AVX2-accelerated orientation tests (x86_64) | yes |
+| `simd` | Retained for compatibility; stable builds use auto-vectorized scalar kernels (hand-written AVX2 measured slower) | yes |
 | `validate` | OGC validation predicates | yes |
 | `mimalloc` | Use mimalloc global allocator | yes |
 | `std` | Standard library + file I/O. Disable for no_std builds. | yes |

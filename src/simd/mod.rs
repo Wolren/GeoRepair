@@ -1,14 +1,25 @@
-//! SIMD-accelerated orientation predicates.
+//! SIMD-accelerated geometric predicates.
 //!
 //! Provides packed implementations of orient2d (cross product of three coords)
-//! using either:
-//! - **Portable SIMD** (`std::simd`, nightly) — single code path for all platforms
-//! - **AVX2** (x86_64) — 4-wide SIMD via x86 intrinsics
-//! - **Scalar fallback** — auto-vectorized by the compiler
+//! and related ring predicates.
 //!
-//! The robust functions use a hybrid approach: SIMD fast-path with Shewchuk's
-//! error bound check, falling back to the `robust` crate's exact adaptive-precision
-//! arithmetic only when the fast result is within the error bound.
+//! # Kernel selection history (measured, 2026-08-02, i5-12400F)
+//!
+//! Hand-written x86_64 AVX2/AVX-512 intrinsics were benchmarked head-to-head
+//! against scalar code and **removed**: `is_ring_ccw` was 2.8x slower,
+//! `point_in_ring` 8.4x slower (AoS gathers + per-element robust fallback),
+//! `orient2d_batch_4` a tie, `aabb_minmax` 4.5x faster, `snap_coords` 1.8x
+//! faster — but a whole-crate `-C target-cpu=native` build regressed the full
+//! 1.58M-polygon pass by 25% (3.73s → 4.69s), and even runtime-dispatched
+//! AVX2 for the two winning kernels did not move the full pass. Verdict:
+//! scalar everywhere; LLVM's auto-vectorizer beats hand-written intrinsics on
+//! AoS coordinate data. The `simd-portable` nightly path (`std::simd`)
+//! remains as the forward-looking SIMD route.
+//!
+//! The module is compiled unconditionally (it is pure Rust with no
+//! dependencies), which also fixes the "optional `simd` feature was secretly
+//! required" bug — call sites throughout the crate use `crate::simd::*`
+//! without `#[cfg(feature = "simd")]` guards.
 
 #[cfg(not(feature = "simd-portable"))]
 use geo::{Coord, GeoFloat};
@@ -110,7 +121,7 @@ pub(crate) fn point_in_ring_inclusive(pt: Coord<f64>, coords: &[Coord<f64>]) -> 
     point_in_ring_exclusive(pt, coords)
 }
 // ============================================================================
-// Robust hybrid: SIMD fast path + error-bound check → exact fallback
+// Robust hybrid: fast path + error-bound check → exact fallback
 // ============================================================================
 
 pub(crate) fn orient2d_batch_4_robust(
@@ -142,9 +153,7 @@ pub(crate) fn orient2d_batch_4_robust(
 
 #[cfg(feature = "simd-portable")]
 mod portable;
-#[cfg(all(not(feature = "simd-portable"), target_arch = "x86_64"))]
-mod x86_64;
-#[cfg(all(not(feature = "simd-portable"), not(target_arch = "x86_64")))]
+#[cfg(not(feature = "simd-portable"))]
 mod fallback;
 #[cfg(test)]
 mod tests;
@@ -154,12 +163,7 @@ pub(crate) use portable::{
     aabb_minmax_simd, is_ring_ccw_simd, orient2d_batch_4, point_in_ring_exclusive,
     point_in_ring_inclusive, snap_coords_simd,
 };
-#[cfg(all(not(feature = "simd-portable"), target_arch = "x86_64"))]
-pub(crate) use x86_64::{
-    aabb_minmax_simd, is_ring_ccw_simd, orient2d_batch_4, point_in_ring_exclusive,
-    snap_coords_simd,
-};
-#[cfg(all(not(feature = "simd-portable"), not(target_arch = "x86_64")))]
+#[cfg(not(feature = "simd-portable"))]
 pub(crate) use fallback::{
     aabb_minmax_simd, is_ring_ccw_simd, orient2d_batch_4, point_in_ring_exclusive,
     snap_coords_simd,
