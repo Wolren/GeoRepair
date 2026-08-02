@@ -76,7 +76,7 @@ pub trait MakeValid {
     }
 }
 
-fn empty_geom<T: CoordNum>() -> Geometry<T> {
+pub(crate) fn empty_geom<T: CoordNum>() -> Geometry<T> {
     Geometry::GeometryCollection(GeometryCollection(Vec::new()))
 }
 
@@ -285,6 +285,7 @@ mod strip;
 
 pub use multipolygon::drop_nested_components;
 pub use polygon::is_valid_with_geo;
+pub use polygon::make_valid_owned;
 pub use strip::strip_degenerate_test;
 
 impl MakeValid for GeometryCollection<f64> {

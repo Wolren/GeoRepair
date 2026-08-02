@@ -46,7 +46,7 @@ use geo_repair::dd::{dd_call_count, reset_dd_count};
 use geo_repair::io::load_bin;
 use geo_repair::orient::orient2d;
 #[cfg(feature = "parallel")]
-use geo_repair::parallel::par_fix_polygon_batch;
+use geo_repair::parallel::{par_fix_polygon_batch, par_fix_polygon_batch_owned};
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
 use geos::Geometry as GeosGeometry;
@@ -637,21 +637,6 @@ fn main() {
     let full_n = n_polys;
     eprintln!("\n[5/5] Full dataset: {full_n} polys (parallel Structure vs parallel GEOS)");
 
-    let t0 = Instant::now();
-    let cfg = MakeValidConfig {
-        poly_method: PolyMethod::Structure,
-        ..Default::default()
-    };
-    let all_polys: Vec<&Polygon<f64>> = (0..full_n).map(|i| &polys[i]).collect();
-    #[cfg(feature = "parallel")]
-    let _full_results = par_fix_polygon_batch(&all_polys, &cfg);
-    #[cfg(not(feature = "parallel"))]
-    let _full_results: Vec<Geometry<f64>> = all_polys
-        .iter()
-        .map(|p| p.make_valid_with_config(&cfg))
-        .collect();
-    let full_stru = t0.elapsed().as_secs_f64();
-
     let (geos_setup, full_geos, full_geos_total): (f64, f64, f64);
     #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
     {
@@ -689,6 +674,23 @@ fn main() {
         full_geos = 0.0;
         full_geos_total = 0.0;
     }
+
+    // Structure full pass — runs LAST because it CONSUMES `polys` for the
+    // zero-copy owned batch path (valid polygons move into the output
+    // instead of being cloned, matching GEOS's shared-geometry return).
+    let t0 = Instant::now();
+    let cfg = MakeValidConfig {
+        poly_method: PolyMethod::Structure,
+        ..Default::default()
+    };
+    #[cfg(feature = "parallel")]
+    let _full_results = par_fix_polygon_batch_owned(polys, &cfg);
+    #[cfg(not(feature = "parallel"))]
+    let _full_results: Vec<Geometry<f64>> = polys
+        .into_iter()
+        .map(|p| geo_repair::make_valid::make_valid_owned(p, &cfg))
+        .collect();
+    let full_stru = t0.elapsed().as_secs_f64();
 
     // =========================================================================
     // Summary
