@@ -201,7 +201,7 @@ pub fn validate_polygon(poly: &Polygon<f64>) -> bool {
 }
 
 /// Lightweight check: hole containment + nesting.
-/// Used after [`has_no_intersections`] for the fast path.
+/// Used after `has_no_intersections` for the fast path.
 pub fn holes_are_valid(poly: &Polygon<f64>) -> bool {
     holes_valid_impl(poly, false)
 }
@@ -426,6 +426,24 @@ pub fn poly_has_basic_form(poly: &Polygon<f64>) -> bool {
             }
         }
         let n = coords.len() - 1;
+        // Small rings: O(n²) bit-exact duplicate scan, no allocation.
+        // 95.6% of the 1.58M real-world dataset has ≤ 32 vertices, and the
+        // FxHashSet allocation per polygon dominates this gate there
+        // (measured in the speed_probe fast path). Large rings keep the
+        // hash set. Bit-exact (`to_bits`) comparison matches the hash set
+        // semantics: -0.0 vs +0.0 are distinct, NaN equals NaN.
+        if n <= 32 {
+            for i in 0..n {
+                let xi = coords[i].x.to_bits();
+                let yi = coords[i].y.to_bits();
+                for c in &coords[i + 1..n] {
+                    if c.x.to_bits() == xi && c.y.to_bits() == yi {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
         let mut seen = FxHashSet::with_capacity_and_hasher(n, Default::default());
         for c in &coords[..n] {
             if !seen.insert((c.x.to_bits(), c.y.to_bits())) {

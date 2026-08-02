@@ -30,6 +30,9 @@
 //! GeoRepairResult geo_repair_validate(const uint8_t* wkb_data, size_t wkb_len);
 //! GeoRepairResult geo_repair_validate_reason(const uint8_t* wkb_data, size_t wkb_len);
 //!
+//! // --- Version ---
+//! const char*     geo_repair_version(void);
+//!
 //! // --- Combined validate + fix ---
 //! // Returns fixed WKB on success.  error_msg is null when input was valid,
 //! // or contains validation errors when input was invalid.
@@ -41,7 +44,7 @@
 //! // --- Memory management ---
 //! void            geo_repair_free_result(GeoRepairResult* result);
 //! ```
-use std::ffi::{CString, c_char};
+use std::ffi::{CStr, CString, c_char};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
 
@@ -49,6 +52,17 @@ use crate::core::MakeValidConfig;
 use crate::make_valid::MakeValid;
 use crate::validation::GeoValidation;
 use geo::Geometry;
+
+/// Static NUL-terminated version string, kept in sync with Cargo.toml.
+static VERSION_CSTR: &CStr = c"0.13.0";
+
+/// Return the geo-repair library version as a NUL-terminated string.
+///
+/// The returned pointer is static — the caller must NOT free it.
+#[unsafe(no_mangle)]
+pub extern "C" fn geo_repair_version() -> *const c_char {
+    VERSION_CSTR.as_ptr()
+}
 
 /// Result returned by geo-repair C FFI functions.
 ///

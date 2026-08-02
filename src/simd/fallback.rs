@@ -1,14 +1,13 @@
-//! Scalar fallback (non-x86_64, no portable SIMD).
+//! Scalar fallback (all stable targets).
+//!
+//! The x86_64 module was removed after head-to-head measurement showed the
+//! hand-written AVX2 kernels lose to LLVM's auto-vectorized scalar loops
+//! (see `mod.rs` header). This module serves every stable target; the
+//! nightly `simd-portable` path lives in `portable.rs`.
 
 use super::*;
 
-
-// ============================================================================
-// Scalar fallback (non-x86_64, no portable SIMD)
-// ============================================================================
-
 #[cfg(not(feature = "simd-portable"))]
-#[cfg(not(target_arch = "x86_64"))]
 pub(crate) fn orient2d_batch_4(
     pa: &[Coord<f64>; 4],
     pb: &[Coord<f64>; 4],
@@ -18,13 +17,11 @@ pub(crate) fn orient2d_batch_4(
 }
 
 #[cfg(not(feature = "simd-portable"))]
-#[cfg(not(target_arch = "x86_64"))]
 pub(crate) fn is_ring_ccw_simd(coords: &[Coord<f64>]) -> bool {
     is_ring_ccw_scalar(coords)
 }
 
 #[cfg(not(feature = "simd-portable"))]
-#[cfg(not(target_arch = "x86_64"))]
 pub(crate) fn point_in_ring_exclusive(pt: Coord<f64>, coords: &[Coord<f64>]) -> bool {
     let n = coords.len();
     if n < 3 {
@@ -50,7 +47,6 @@ pub(crate) fn point_in_ring_exclusive(pt: Coord<f64>, coords: &[Coord<f64>]) -> 
 }
 
 #[cfg(not(feature = "simd-portable"))]
-#[cfg(not(target_arch = "x86_64"))]
 pub(crate) fn snap_coords_simd(coords: &mut [Coord<f64>], scale: f64) {
     for c in coords.iter_mut() {
         c.x = (c.x / scale).round() * scale;
@@ -59,9 +55,11 @@ pub(crate) fn snap_coords_simd(coords: &mut [Coord<f64>], scale: f64) {
 }
 
 #[cfg(not(feature = "simd-portable"))]
-#[cfg(not(target_arch = "x86_64"))]
-#[allow(dead_code)]
 pub(crate) fn aabb_minmax_simd(coords: &[Coord<f64>]) -> (f64, f64, f64, f64) {
+    let n = coords.len();
+    if n == 0 {
+        return (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+    }
     let (mut mnx, mut mxx, mut mny, mut mxy) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
     for c in coords {
         mnx = mnx.min(c.x);
