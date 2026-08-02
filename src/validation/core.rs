@@ -390,8 +390,14 @@ pub(crate) fn edges_intersect_general(
 
     // Collinear overlap (excluding endpoint-only touching). The collinearity
     // tolerance must be RELATIVE to the pair's own edge lengths: orient2d
-    // magnitudes are O(L²) (twice the triangle area), so the threshold is
-    // `1e-12 * la2.max(lb2)` - the same rule as edges_vertex_on_edge. The
+    // magnitudes are O(L²) (twice the triangle area). The constant sits at
+    // the f64 noise floor — `32 * EPSILON * L²` covers ~32 ulps of
+    // coordinate rounding — NOT the historical `1e-12 * L²`, which is a
+    // perpendicular-distance tolerance of `1e-12 * L` and swallows genuinely
+    // separated near-parallel edges (measured: invariant_sliver_hole seed
+    // cc 9b38e427, scale=51.29, sliver_width=1e-12 — parallel edges 1e-12
+    // apart gave exact orients 2.05e-11 < 4.2e-10 and were flagged as
+    // overlapping, a false SelfIntersection on input GEOS validates). The
     // caller's eps (1e-12 * bbox scale, floored at 1.0) is an ABSOLUTE
     // length that exceeds the exact orient of genuinely non-collinear
     // near-parallel sliver edges at large coordinate magnitude (measured:
@@ -400,7 +406,7 @@ pub(crate) fn edges_intersect_general(
     // SelfIntersection on a MultiPolygon GEOS validates bit-for-bit).
     let la2 = (a2.x - a1.x).powi(2) + (a2.y - a1.y).powi(2);
     let lb2 = (b2.x - b1.x).powi(2) + (b2.y - b1.y).powi(2);
-    let collinear_eps = 1e-12 * la2.max(lb2);
+    let collinear_eps = 32.0 * f64::EPSILON * la2.max(lb2);
     let collinear = o1.abs() <= collinear_eps && o2.abs() <= collinear_eps;
     if collinear {
         let dx = a2.x - a1.x;
