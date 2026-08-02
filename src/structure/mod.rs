@@ -366,7 +366,7 @@ pub fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geom
         // hole, area 300 = 400-100; our old output was the 20x20 alone, 400).
         for hole in outer_holes {
             let shell_ring = shell_poly.exterior().clone();
-            if shell_ring.0.len() >= 4 && ring_fully_inside(&shell_ring.0, &hole.0) {
+            if shell_ring.0.len() >= 4 && all_vertices_inside_ring(&shell_ring.0, &hole.0) {
                 local.push(Polygon::new(hole, vec![ensure_cw(shell_ring)]));
             } else {
                 local.push(Polygon::new(hole, Vec::new()));
@@ -573,7 +573,7 @@ fn ring_bbox(coords: &[Coord<f64>]) -> (f64, f64, f64, f64) {
 /// True if EVERY vertex of `inner` is strictly inside ring `outer`.
 /// Used for hole-role swap: an outer hole that fully contains the shell
 /// becomes the shell itself (GEOS even-odd semantics).
-fn ring_fully_inside(inner: &[Coord<f64>], outer: &[Coord<f64>]) -> bool {
+fn all_vertices_inside_ring(inner: &[Coord<f64>], outer: &[Coord<f64>]) -> bool {
     if inner.len() < 4 || outer.len() < 4 {
         return false;
     }

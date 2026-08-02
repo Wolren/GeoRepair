@@ -121,7 +121,7 @@ pub fn build_area(lines: &[geo::Line<f64>]) -> Option<MultiPolygon<f64>> {
     let mut owner_of_ring: FxHashMap<Vec<(u64, u64)>, usize> = FxHashMap::default();
     for f in &faces_out {
         if let Some(s) = f.parent {
-            owner_of_ring.insert(ring_fingerprint(&f.ring), s);
+            owner_of_ring.insert(crate::util::ring_fingerprint(&f.ring), s);
         }
     }
     let ancestor_count = |idx: usize| -> usize {
@@ -129,7 +129,7 @@ pub fn build_area(lines: &[geo::Line<f64>]) -> Option<MultiPolygon<f64>> {
         let mut cur = idx;
         let mut guard = 0usize;
         loop {
-            let fp = ring_fingerprint(&faces_out[cur].ring);
+            let fp = crate::util::ring_fingerprint(&faces_out[cur].ring);
             match owner_of_ring.get(&fp) {
                 Some(&p) if p != cur => {
                     count += 1;
@@ -173,15 +173,6 @@ pub fn build_area(lines: &[geo::Line<f64>]) -> Option<MultiPolygon<f64>> {
 
 /// Fingerprint of a ring: sorted coordinate bit pairs, closure removed.
 /// Direction/rotation-insensitive - GEOS ringsEqualAnyDirection equivalent.
-fn ring_fingerprint(ring: &[Coord<f64>]) -> Vec<(u64, u64)> {
-    let mut pts: Vec<(u64, u64)> = ring.iter().map(|c| (c.x.to_bits(), c.y.to_bits())).collect();
-    if pts.first() == pts.last() {
-        pts.pop();
-    }
-    pts.sort_unstable();
-    pts
-}
-
 /// Interior probe point for a ring: midpoint of first edge nudged toward the
 /// ring's interior (right of the directed edge - walker convention).
 fn ring_probe(ring: &[Coord<f64>]) -> Option<Coord<f64>> {

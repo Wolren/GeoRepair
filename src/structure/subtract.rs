@@ -74,7 +74,7 @@ fn needs_build_area_holes(mp: &MultiPolygon<f64>) -> bool {
         // Hole-hole collinear edge share (positive-length overlap) → DIR.
         for i in 0..holes.len() {
             for j in (i + 1)..holes.len() {
-                if rings_share_collinear_edge(holes[i], holes[j]) {
+                if crate::util::rings_share_collinear_edge_quantized(holes[i], holes[j]) {
                     return true;
                 }
             }
@@ -85,7 +85,7 @@ fn needs_build_area_holes(mp: &MultiPolygon<f64>) -> bool {
         let shell = p.exterior().0.as_slice();
         if shell.len() <= 64 {
             for h in &holes {
-                if rings_share_collinear_edge(h, shell) {
+                if crate::util::rings_share_collinear_edge_quantized(h, shell) {
                     return true;
                 }
             }
@@ -97,78 +97,6 @@ fn needs_build_area_holes(mp: &MultiPolygon<f64>) -> bool {
 /// True if two rings share a collinear edge segment with positive-length overlap.
 /// Vertex-only touches (hourglass patterns) return false — boolean difference
 /// handles those correctly by splitting components.
-fn rings_share_collinear_edge(a: &[Coord<f64>], b: &[Coord<f64>]) -> bool {
-    let na = if a.first() == a.last() { a.len() - 1 } else { a.len() };
-    let nb = if b.first() == b.last() { b.len() - 1 } else { b.len() };
-    if na < 2 || nb < 2 {
-        return false;
-    }
-    // Ring bbox prefilter: no overlap → no shared edge.
-    if !rings_bbox_overlap(a, b) {
-        return false;
-    }
-    // Work cap: the precise scan is O(na*nb). Fuzz DIR seeds are all small
-    // rings (4-10 verts); huge real-world rings are handled fine by boolean
-    // difference and the parent shipped without any check here — skip them
-    // rather than paying O(n²) per hole pair.
-    if na * nb > 2048 {
-        return false;
-    }
-    for i in 0..na {
-        let (ax1, ay1) = (a[i].x, a[i].y);
-        let (ax2, ay2) = (a[(i + 1) % na].x, a[(i + 1) % na].y);
-        let (aminx, amaxx) = (ax1.min(ax2), ax1.max(ax2));
-        let (aminy, amaxy) = (ay1.min(ay2), ay1.max(ay2));
-        for j in 0..nb {
-            let (bx1, by1) = (b[j].x, b[j].y);
-            let (bx2, by2) = (b[(j + 1) % nb].x, b[(j + 1) % nb].y);
-            // Edge bbox reject
-            if amaxx < bx1.min(bx2) || aminx > bx1.max(bx2)
-                || amaxy < by1.min(by2) || aminy > by1.max(by2)
-            {
-                continue;
-            }
-            // Collinear directions?
-            let dax = ax2 - ax1;
-            let day = ay2 - ay1;
-            let dbx = bx2 - bx1;
-            let dby = by2 - by1;
-            let scale = dax.abs().max(day.abs()).max(dbx.abs()).max(dby.abs()).max(1.0);
-            let cross = dax * dby - day * dbx;
-            if cross.abs() > 1e-12 * scale * scale {
-                continue;
-            }
-            // a's start point on b's line?
-            let cross2 = (bx2 - bx1) * (ay1 - by1) - (by2 - by1) * (ax1 - bx1);
-            if cross2.abs() > 1e-12 * scale * scale {
-                continue;
-            }
-            // Positive-length overlap on the shared line (project onto dominant axis)
-            let overlap = if dax.abs() >= day.abs() {
-                interval_overlap(aminx, amaxx, bx1.min(bx2), bx1.max(bx2))
-            } else {
-                interval_overlap(aminy, amaxy, by1.min(by2), by1.max(by2))
-            };
-            if overlap > 1e-12 * scale {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-fn rings_bbox_overlap(a: &[Coord<f64>], b: &[Coord<f64>]) -> bool {
-    let ba = crate::simd::aabb_minmax_simd(a);
-    let bb = crate::simd::aabb_minmax_simd(b);
-    ba.0 <= bb.1 && bb.0 <= ba.1 && ba.2 <= bb.3 && bb.2 <= ba.3
-}
-
-fn interval_overlap(a0: f64, a1: f64, b0: f64, b1: f64) -> f64 {
-    let lo = a0.max(b0);
-    let hi = a1.min(b1);
-    if hi > lo { hi - lo } else { 0.0 }
-}
-
 fn build_area_shell_holes(shell: &Polygon<f64>, holes: &[Polygon<f64>]) -> Option<MultiPolygon<f64>> {
     let mut lines: Vec<geo::Line<f64>> = shell.lines_iter().collect();
     for h in holes {
@@ -188,7 +116,7 @@ fn build_area_shell_holes(shell: &Polygon<f64>, holes: &[Polygon<f64>]) -> Optio
             let ext = &p.exterior().0;
             ext.len() >= 4
                 && !ext.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
-                && shoelace_abs_sum(ext) >= 1e-12
+                && crate::util::shoelace_abs_sum(ext) >= 1e-12
         })
         .collect();
     if valid.is_empty() {
@@ -214,7 +142,7 @@ fn polygonize_mp(mp: &MultiPolygon<f64>) -> Option<MultiPolygon<f64>> {
             let ext = &p.exterior().0;
             ext.len() >= 4
                 && !ext.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
-                && shoelace_abs_sum(ext) >= 1e-12
+                && crate::util::shoelace_abs_sum(ext) >= 1e-12
         })
         .collect();
     if valid.is_empty() {
@@ -222,24 +150,6 @@ fn polygonize_mp(mp: &MultiPolygon<f64>) -> Option<MultiPolygon<f64>> {
     } else {
         Some(MultiPolygon::new(valid))
     }
-}
-
-fn shoelace_abs_sum(coords: &[Coord<f64>]) -> f64 {
-    let n = coords.len();
-    if n < 3 {
-        return 0.0;
-    }
-    let end = if coords.first() == coords.last() {
-        n - 1
-    } else {
-        n
-    };
-    let mut sum = 0.0_f64;
-    for i in 0..end - 1 {
-        sum += coords[i].x * coords[i + 1].y - coords[i + 1].x * coords[i].y;
-    }
-    sum += coords[end - 1].x * coords[0].y - coords[0].x * coords[end - 1].y;
-    sum.abs()
 }
 
 #[cfg(test)]
