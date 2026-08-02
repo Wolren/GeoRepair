@@ -57,6 +57,18 @@ pub mod binary;
 pub mod wkb;
 /// OGC Well-Known Text (WKT) parsing and serialization.
 pub mod wkt;
+/// GeoPackage (`.gpkg`) via SQLite (`io-gpkg`).
+#[cfg(feature = "io-gpkg")]
+pub mod gpkg;
+/// CSV with WKT in the first column (`io-csv`).
+#[cfg(feature = "io-csv")]
+pub mod csv_io;
+/// ESRI Shapefile (`.shp`) (`io-shp`).
+#[cfg(feature = "io-shp")]
+pub mod shp;
+/// OGC GML 3.2 geometry subset (`.gml`) (`io-gml`).
+#[cfg(feature = "io-gml")]
+pub mod gml;
 
 /// Load polygons from a custom binary file.
 pub use binary::{load_bin, load_bin_stream, write_bin};
@@ -109,7 +121,7 @@ pub fn load(path: &str) -> Result<Vec<Geometry<f64>>, String> {
         }
         "shp" => {
             #[cfg(feature = "io-shp")]
-            return load_shp(path);
+            return shp::load_shp(path);
             #[cfg(not(feature = "io-shp"))]
             Err(
                 "'.shp' requires feature 'io-shp': cargo add geo-repair --features io-shp"
@@ -119,7 +131,7 @@ pub fn load(path: &str) -> Result<Vec<Geometry<f64>>, String> {
         "wkt" => load_wkt(path),
         "csv" => {
             #[cfg(feature = "io-csv")]
-            return load_csv(path);
+            return csv_io::load_csv(path);
             #[cfg(not(feature = "io-csv"))]
             Err(
                 "'.csv' requires feature 'io-csv': cargo add geo-repair --features io-csv"
@@ -128,7 +140,7 @@ pub fn load(path: &str) -> Result<Vec<Geometry<f64>>, String> {
         }
         "gml" => {
             #[cfg(feature = "io-gml")]
-            return load_gml(path);
+            return gml::load_gml(path);
             #[cfg(not(feature = "io-gml"))]
             Err(
                 "'.gml' requires feature 'io-gml': cargo add geo-repair --features io-gml"
@@ -137,7 +149,7 @@ pub fn load(path: &str) -> Result<Vec<Geometry<f64>>, String> {
         }
         "gpkg" => {
             #[cfg(feature = "io-gpkg")]
-            return load_gpkg(path);
+            return gpkg::load_gpkg(path);
             #[cfg(not(feature = "io-gpkg"))]
             Err(
                 "'.gpkg' requires feature 'io-gpkg': cargo add geo-repair --features io-gpkg"
@@ -169,6 +181,42 @@ pub fn save(path: &str, geom: &Geometry<f64>) -> Result<(), String> {
         "wkt" => {
             let text = write_wkt(geom);
             fs::write(path, &text).map_err(|e| format!("cannot write {path}: {e}"))
+        }
+        "csv" => {
+            #[cfg(feature = "io-csv")]
+            return csv_io::save_csv(path, std::slice::from_ref(geom));
+            #[cfg(not(feature = "io-csv"))]
+            Err(
+                "'.csv' requires feature 'io-csv': cargo add geo-repair --features io-csv"
+                    .to_string(),
+            )
+        }
+        "gml" => {
+            #[cfg(feature = "io-gml")]
+            return gml::save_gml(path, std::slice::from_ref(geom));
+            #[cfg(not(feature = "io-gml"))]
+            Err(
+                "'.gml' requires feature 'io-gml': cargo add geo-repair --features io-gml"
+                    .to_string(),
+            )
+        }
+        "gpkg" => {
+            #[cfg(feature = "io-gpkg")]
+            return gpkg::save_gpkg(path, std::slice::from_ref(geom));
+            #[cfg(not(feature = "io-gpkg"))]
+            Err(
+                "'.gpkg' requires feature 'io-gpkg': cargo add geo-repair --features io-gpkg"
+                    .to_string(),
+            )
+        }
+        "shp" => {
+            #[cfg(feature = "io-shp")]
+            return shp::save_shp(path, std::slice::from_ref(geom));
+            #[cfg(not(feature = "io-shp"))]
+            Err(
+                "'.shp' requires feature 'io-shp': cargo add geo-repair --features io-shp"
+                    .to_string(),
+            )
         }
         other => Err(format!(
             "output format '.{other}' not yet supported for '{path}'"
@@ -231,33 +279,13 @@ pub fn diagnose_file(path: &str) -> Result<Vec<ValidationResult>, String> {
 }
 
 // ---------------------------------------------------------------------------
-// Feature-gated backend stubs (implemented when feature is enabled)
+// Feature-gated backends
 // ---------------------------------------------------------------------------
-
-#[cfg(feature = "io-shp")]
-fn load_shp(_path: &str) -> Result<Vec<Geometry<f64>>, String> {
-    Err("Shapefile backend not yet implemented".into())
-}
 
 fn load_wkt(path: &str) -> Result<Vec<Geometry<f64>>, String> {
     let text = fs::read_to_string(path).map_err(|e| format!("cannot read {path}: {e}"))?;
     let geom = read_wkt(&text).map_err(|e| e.to_string())?;
     Ok(vec![geom])
-}
-
-#[cfg(feature = "io-csv")]
-fn load_csv(_path: &str) -> Result<Vec<Geometry<f64>>, String> {
-    Err("CSV backend not yet implemented".into())
-}
-
-#[cfg(feature = "io-gml")]
-fn load_gml(_path: &str) -> Result<Vec<Geometry<f64>>, String> {
-    Err("GML backend not yet implemented".into())
-}
-
-#[cfg(feature = "io-gpkg")]
-fn load_gpkg(_path: &str) -> Result<Vec<Geometry<f64>>, String> {
-    Err("GeoPackage backend not yet implemented".into())
 }
 
 // ---------------------------------------------------------------------------

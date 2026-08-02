@@ -161,7 +161,7 @@ mod tests;
 #[cfg(feature = "simd-portable")]
 pub(crate) use portable::{
     aabb_minmax_simd, is_ring_ccw_simd, orient2d_batch_4, point_in_ring_exclusive,
-    point_in_ring_inclusive, snap_coords_simd,
+    snap_coords_simd,
 };
 #[cfg(not(feature = "simd-portable"))]
 pub(crate) use fallback::{

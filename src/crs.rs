@@ -230,11 +230,11 @@ pub fn transform_geometry(
         .authority()
         .ok_or_else(|| MakeValidError::CrsError("target CRS has no authority".into()))?;
 
-    let proj = geo::algorithm::proj::Proj::new_from_crs(from_auth, to_auth)
+    let proj = geo::algorithm::proj::Proj::new_known_crs(from_auth, to_auth, None)
         .map_err(|e| MakeValidError::CrsError(format!("PROJ init: {e}")))?;
 
-    geom.transform(&proj)
-        .ok_or_else(|| MakeValidError::CrsError("transform returned None".into()))
+    geom.transformed(&proj)
+        .map_err(|e| MakeValidError::CrsError(format!("PROJ transform: {e}")))
 }
 
 /// Classify an EPSG code as geographic (lon/lat) or projected.

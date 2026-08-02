@@ -115,7 +115,7 @@
 //! | `io-all-native` | All opt-in backends including gpkg | no |
 //! | `ffi` | C-compatible FFI bindings | no |
 //! | `python` | Python bindings via PyO3 | no |
-//! | `proj` | CRS transformation via PROJ | no |
+//! | `proj` | CRS transformation via PROJ (requires the native PROJ library; mutually exclusive with `io-gpkg` on the sqlite3 link) | no |
 //! | `serde` | Geometry serde support | no |
 //! | `bench-geos` | GEOS comparison benchmarks (static — MSVC, no LTO) | no |
 //! | `bench-geos-system` | GEOS comparison benchmarks (system — conda LLVM, full LTO) | no |
@@ -363,7 +363,7 @@ pub mod bindings;
 pub use bindings::ffi;
 #[cfg(feature = "python")]
 pub use bindings::python;
-#[cfg(feature = "parallel")]
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 /// Rayon-based parallel batch geometry repair.
 pub mod parallel;
 /// Geometric predicates (orientation, point-in-ring, AABB, snapping).
