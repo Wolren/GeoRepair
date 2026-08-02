@@ -56,7 +56,7 @@ pub fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
     let mut with_area: Vec<(Polygon<f64>, f64)> = shells
         .into_iter()
         .map(|p| {
-            let area = shoelace_abs_sum(&p.exterior().0);
+            let area = crate::util::shoelace_abs_sum(&p.exterior().0);
             (p, area)
         })
         .collect();
@@ -104,7 +104,7 @@ pub fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
             let hole_fps: Vec<Vec<(u64, u64)>> = poly
                 .interiors()
                 .iter()
-                .map(|h| ring_fingerprint(&h.0))
+                .map(|h| crate::util::ring_fingerprint(&h.0))
                 .collect();
             // Only convert when the parent will not be merged with any other
             // KEPT shell: the conversion happens BEFORE the unary_union, and
@@ -126,7 +126,7 @@ pub fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
                     continue;
                 }
                 if safe_to_convert && parent[k] == Some(i) {
-                    let fp = ring_fingerprint(&with_area[k].0.exterior().0);
+                    let fp = crate::util::ring_fingerprint(&with_area[k].0.exterior().0);
                     if !hole_fps.contains(&fp) {
                         // OGC: holes are CW. The converted ring came from a
                         // CCW-normalized exterior; flip it or the output
@@ -215,7 +215,7 @@ fn ring_fully_inside(ring: &[Coord<f64>], poly: &Polygon<f64>) -> bool {
         && poly
             .interiors()
             .iter()
-            .any(|h| point_in_ring_exclusive(probe, &h.0))
+            .any(|h| crate::util::point_in_ring_exclusive_even_odd(probe, &h.0))
         // But a ring COINCIDENT with one of the parent's holes is that
         // hole itself (role-swap path: hole_larger_than_shell arrives
         // with the shell-as-hole already in place). Converting it is a
@@ -225,7 +225,7 @@ fn ring_fully_inside(ring: &[Coord<f64>], poly: &Polygon<f64>) -> bool {
         && !poly
             .interiors()
             .iter()
-            .any(|h| ring_fingerprint(&h.0) == ring_fingerprint(ring))
+            .any(|h| crate::util::ring_fingerprint(&h.0) == crate::util::ring_fingerprint(ring))
     {
         return false;
     }
@@ -291,69 +291,14 @@ fn shells_are_disjoint(shells: &[Polygon<f64>]) -> bool {
 }
 
 /// Winding/rotation/closure-insensitive ring fingerprint (u64 bits).
-fn ring_fingerprint(ring: &[Coord<f64>]) -> Vec<(u64, u64)> {
-    let mut pts: Vec<(u64, u64)> = ring
-        .iter()
-        .map(|c| (c.x.to_bits(), c.y.to_bits()))
-        .collect();
-    if pts.first() == pts.last() {
-        pts.pop();
-    }
-    pts.sort_unstable();
-    pts
-}
-
-fn shoelace_abs_sum(coords: &[Coord<f64>]) -> f64 {
-    let n = coords.len();
-    if n < 3 { return 0.0; }
-    let end = if coords.first() == coords.last() { n - 1 } else { n };
-    let mut sum = 0.0_f64;
-    for i in 0..end - 1 {
-        sum += coords[i].x * coords[i + 1].y - coords[i + 1].x * coords[i].y;
-    }
-    sum += coords[end - 1].x * coords[0].y - coords[0].x * coords[end - 1].y;
-    sum.abs()
-}
-
-fn point_in_ring_exclusive(pt: Coord<f64>, ring: &[Coord<f64>]) -> bool {
-    if ring.len() < 4 { return false; }
-    let n = ring.len() - 1;
-    // Boundary check (exclusive: on-edge → outside)
-    for i in 0..n {
-        let (xi, yi) = (ring[i].x, ring[i].y);
-        let (xj, yj) = (ring[(i + 1) % n].x, ring[(i + 1) % n].y);
-        let orient = (xi - pt.x) * (yj - pt.y) - (xj - pt.x) * (yi - pt.y);
-        if orient.abs() < 1e-15 {
-            let min_x = xi.min(xj);
-            let max_x = xi.max(xj);
-            let min_y = yi.min(yj);
-            let max_y = yi.max(yj);
-            if pt.x >= min_x - 1e-12 && pt.x <= max_x + 1e-12
-                && pt.y >= min_y - 1e-12 && pt.y <= max_y + 1e-12
-            {
-                return false;
-            }
-        }
-    }
-    let mut inside = false;
-    for i in 0..n {
-        let (xi, yi) = (ring[i].x, ring[i].y);
-        let (xj, yj) = (ring[(i + 1) % n].x, ring[(i + 1) % n].y);
-        let intersect = ((yi > pt.y) != (yj > pt.y))
-            && (pt.x < (xj - xi) * (pt.y - yi) / (yj - yi) + xi);
-        if intersect { inside = !inside; }
-    }
-    inside
-}
-
 /// Point in polygon exclusive of boundary and holes.
 fn point_in_polygon_exclusive(pt: Coord<f64>, poly: &Polygon<f64>) -> bool {
-    if !point_in_ring_exclusive(pt, &poly.exterior().0) {
+    if !crate::util::point_in_ring_exclusive_even_odd(pt, &poly.exterior().0) {
         return false;
     }
     for h in poly.interiors() {
         // Interior of a hole → not inside the polygon fill
-        if point_in_ring_exclusive(pt, &h.0) {
+        if crate::util::point_in_ring_exclusive_even_odd(pt, &h.0) {
             return false;
         }
         // On hole boundary → exclusive outside fill

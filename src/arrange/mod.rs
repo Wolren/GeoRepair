@@ -226,7 +226,7 @@ fn holes_valid_impl(poly: &Polygon<f64>, inclusive: bool) -> bool {
         let inside = if inclusive {
             crate::simd::point_in_ring_inclusive(pt, shell_coords)
         } else {
-            point_in_ring_exclusive(pt, shell_coords)
+            crate::validation::point_in_ring_exclusive(pt, shell_coords)
         };
         if !inside {
             return false;
@@ -280,7 +280,7 @@ fn holes_valid_impl(poly: &Polygon<f64>, inclusive: bool) -> bool {
             let query = AABB::from_corners([pt.x, pt.y], [pt.x, pt.y]);
             let mut overlaps = false;
             let _ = tree.locate_in_envelope_intersecting_int(query, |c| {
-                if c.idx != i && point_in_ring_exclusive(pt, holes[c.idx]) {
+                if c.idx != i && crate::validation::point_in_ring_exclusive(pt, holes[c.idx]) {
                     overlaps = true;
                     std::ops::ControlFlow::Break(())
                 } else {
@@ -298,7 +298,7 @@ fn holes_valid_impl(poly: &Polygon<f64>, inclusive: bool) -> bool {
         // cap keeps this cheap: valid multi-hole polys have no edge sharing.
         for i in 0..holes.len() {
             for j in (i + 1)..holes.len() {
-                if rings_share_collinear_edge(holes[i], holes[j]) {
+                if crate::util::rings_share_collinear_edge_precise(holes[i], holes[j]) {
                     return false;
                 }
             }
@@ -312,68 +312,7 @@ pub fn rings_share_collinear_edge_test(
     a: &[geo::Coord<f64>],
     b: &[geo::Coord<f64>],
 ) -> bool {
-    rings_share_collinear_edge(a, b)
-}
-
-fn rings_share_collinear_edge(a: &[geo::Coord<f64>], b: &[geo::Coord<f64>]) -> bool {
-    let na = if a.first() == a.last() { a.len() - 1 } else { a.len() };
-    let nb = if b.first() == b.last() { b.len() - 1 } else { b.len() };
-    if na < 2 || nb < 2 {
-        return false;
-    }
-    // Work cap: only small rings get the precise scan (fuzz DIR seeds are tiny).
-    if na * nb > 2048 {
-        return false;
-    }
-    for i in 0..na {
-        let (ax1, ay1) = (a[i].x, a[i].y);
-        let (ax2, ay2) = (a[(i + 1) % na].x, a[(i + 1) % na].y);
-        for j in 0..nb {
-            let (bx1, by1) = (b[j].x, b[j].y);
-            let (bx2, by2) = (b[(j + 1) % nb].x, b[(j + 1) % nb].y);
-            let dax = ax2 - ax1;
-            let day = ay2 - ay1;
-            let dbx = bx2 - bx1;
-            let dby = by2 - by1;
-            // Relative collinearity: |cross| / (|da| * |db|) = sin(angle).
-            // The old absolute threshold with a 1.0 floor flagged genuinely
-            // non-collinear tiny edges as collinear (measured: two 1.6e-7
-            // edges with cross 2.8e-14 < 1e-12 → false DIR). Only true
-            // edge-sharing (positive-length overlap) is a real error;
-            // vertex touches are legal (GEOS IsValidOp accepts them).
-            let da_len = (dax * dax + day * day).sqrt().max(1e-300);
-            let db_len = (dbx * dbx + dby * dby).sqrt().max(1e-300);
-            let rel = 1e-12 * da_len * db_len;
-            let cross = dax * dby - day * dbx;
-            if cross.abs() > rel {
-                continue;
-            }
-            let cross2 = (bx2 - bx1) * (ay1 - by1) - (by2 - by1) * (ax1 - bx1);
-            if cross2.abs() > rel {
-                continue;
-            }
-            let aminx = ax1.min(ax2);
-            let amaxx = ax1.max(ax2);
-            let aminy = ay1.min(ay2);
-            let amaxy = ay1.max(ay2);
-            let overlap = if dax.abs() >= day.abs() {
-                interval_overlap(aminx, amaxx, bx1.min(bx2), bx1.max(bx2))
-            } else {
-                interval_overlap(aminy, amaxy, by1.min(by2), by1.max(by2))
-            };
-            // Positive-length overlap only: a shared endpoint is length 0.
-            if overlap > 1e-12 * da_len.max(db_len) {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-fn interval_overlap(a0: f64, a1: f64, b0: f64, b1: f64) -> f64 {
-    let lo = a0.max(b0);
-    let hi = a1.min(b1);
-    if hi > lo { hi - lo } else { 0.0 }
+    crate::util::rings_share_collinear_edge_precise(a, b)
 }
 
 /// True if any ring edge is shorter than EPSILON * bbox_scale.
@@ -423,47 +362,6 @@ pub fn has_sub_ulp_edge(poly: &Polygon<f64>) -> bool {
 }
 
 /// Winding-number point-in-ring test (strict interior, boundary counts as outside).
-fn point_in_ring_exclusive(pt: geo::Coord<f64>, ring: &[geo::Coord<f64>]) -> bool {
-    let n = ring.len();
-    if n < 2 {
-        return false;
-    }
-    // Boundary check (exclusive: on-edge → outside)
-    for i in 0..n - 1 {
-        let p1 = ring[i];
-        let p2 = ring[i + 1];
-        let o = (p2.x - p1.x) * (pt.y - p1.y) - (p2.y - p1.y) * (pt.x - p1.x);
-        if o.abs() < 1e-15 {
-            let min_x = p1.x.min(p2.x);
-            let max_x = p1.x.max(p2.x);
-            let min_y = p1.y.min(p2.y);
-            let max_y = p1.y.max(p2.y);
-            if pt.x >= min_x - 1e-12 && pt.x <= max_x + 1e-12
-                && pt.y >= min_y - 1e-12 && pt.y <= max_y + 1e-12
-            {
-                return false;
-            }
-        }
-    }
-    let mut wn = 0i32;
-    for i in 0..n - 1 {
-        let p1 = ring[i];
-        let p2 = ring[i + 1];
-        if p1.y <= pt.y {
-            if p2.y > pt.y && orient2d(p1, p2, pt) > 0.0 {
-                wn += 1;
-            }
-        } else if p2.y <= pt.y && orient2d(p1, p2, pt) < 0.0 {
-            wn -= 1;
-        }
-    }
-    wn != 0
-}
-
-fn orient2d(p1: geo::Coord<f64>, p2: geo::Coord<f64>, p3: geo::Coord<f64>) -> f64 {
-    (p2.x - p1.x) * (p3.y - p1.y) - (p3.x - p1.x) * (p2.y - p1.y)
-}
-
 /// Timing breakdown for the CDT arrange pipeline.
 /// Only available with `--features bench-geos` or `--features bench-geos-system`.
 #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]

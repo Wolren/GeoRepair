@@ -15,6 +15,7 @@ use geo::{
     Coord, CoordNum, GeoFloat, Geometry, GeometryCollection, Line, LineString,
     MultiLineString, MultiPoint, MultiPolygon, Point, Polygon, Rect, Triangle, Winding,
 };
+use crate::util::{point_in_ring_exclusive_even_odd, shoelace_abs_sum};
 
 use crate::core::MakeValidConfig;
 #[cfg(any(feature = "arrange", feature = "structure"))]
@@ -1086,7 +1087,7 @@ fn shells_have_vertex_inside(mp: &MultiPolygon<f64>) -> bool {
             if ext_j.len() < 4 { continue; }
             let max_check = ext_i.len().min(32);
             for pt in ext_i.iter().take(max_check) {
-                if point_in_ring_exclusive(*pt, ext_j) {
+                if point_in_ring_exclusive_even_odd(*pt, ext_j) {
                     return true;
                 }
             }
@@ -1096,52 +1097,8 @@ fn shells_have_vertex_inside(mp: &MultiPolygon<f64>) -> bool {
 }
 
 /// Ray-casting point-in-ring test (strict interior, not on boundary).
-fn point_in_ring_exclusive(pt: Coord<f64>, ring: &[Coord<f64>]) -> bool {
-    if ring.len() < 4 { return false; }
-    let n = ring.len() - 1;
-    // Boundary check first (exclusive: on-edge → outside). Fixes NestedHoles
-    // false-positives from ray-cast hitting a vertex/edge.
-    for i in 0..n {
-        let (xi, yi) = (ring[i].x, ring[i].y);
-        let (xj, yj) = (ring[(i + 1) % n].x, ring[(i + 1) % n].y);
-        let orient = (xi - pt.x) * (yj - pt.y) - (xj - pt.x) * (yi - pt.y);
-        if orient.abs() < 1e-15 {
-            let min_x = xi.min(xj);
-            let max_x = xi.max(xj);
-            let min_y = yi.min(yj);
-            let max_y = yi.max(yj);
-            if pt.x >= min_x - 1e-12 && pt.x <= max_x + 1e-12
-                && pt.y >= min_y - 1e-12 && pt.y <= max_y + 1e-12
-            {
-                return false;
-            }
-        }
-    }
-    let mut inside = false;
-    for i in 0..n {
-        let (xi, yi) = (ring[i].x, ring[i].y);
-        let (xj, yj) = (ring[(i + 1) % n].x, ring[(i + 1) % n].y);
-        let intersect = ((yi > pt.y) != (yj > pt.y))
-            && (pt.x < (xj - xi) * (pt.y - yi) / (yj - yi) + xi);
-        if intersect { inside = !inside; }
-    }
-    inside
-}
-
 /// Remove components from a MultiPolygon that are inside another component
 /// (fixes NestedHoles from unary_union). Sorts by area, keeps only even-parent.
-fn shoelace_abs_sum(coords: &[Coord<f64>]) -> f64 {
-    let n = coords.len();
-    if n < 3 { return 0.0; }
-    let end = if coords.first() == coords.last() { n - 1 } else { n };
-    let mut sum = 0.0_f64;
-    for i in 0..end - 1 {
-        sum += coords[i].x * coords[i + 1].y - coords[i + 1].x * coords[i].y;
-    }
-    sum += coords[end - 1].x * coords[0].y - coords[0].x * coords[end - 1].y;
-    sum.abs()
-}
-
 pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
     if mp.0.len() <= 1 {
         return if mp.0.is_empty() { empty_geom::<f64>() }
@@ -1198,12 +1155,12 @@ pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
             // to a hole, area lost).
             let in_ext = pt_candidates
                 .iter()
-                .any(|&pt| point_in_ring_exclusive(pt, ext_j));
+                .any(|&pt| point_in_ring_exclusive_even_odd(pt, ext_j));
             in_ext
                 && !p_j
                     .interiors()
                     .iter()
-                    .any(|h| point_in_ring_exclusive(interior_probe, &h.0))
+                    .any(|h| point_in_ring_exclusive_even_odd(interior_probe, &h.0))
         });
         if is_nested { keep[i] = false; }
     }
