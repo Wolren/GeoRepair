@@ -274,7 +274,7 @@ pub(super) fn enforce_ogc_winding(g: Geometry<f64>) -> Geometry<f64> {
 #[cfg_attr(not(feature = "proj"), allow(unused_variables))]
 pub(super) fn apply_target_crs(geom: Geometry<f64>, config: &MakeValidConfig) -> Geometry<f64> {
     #[cfg(feature = "proj")]
-    if let (Some(ref src_crs), Some(ref dst_crs)) = (&config.crs, &config.target_crs) {
+    if let (Some(src_crs), Some(dst_crs)) = (&config.crs, &config.target_crs) {
         if src_crs != dst_crs {
             match crate::crs::transform_geometry(&geom, src_crs, dst_crs) {
                 Ok(g) => return g,

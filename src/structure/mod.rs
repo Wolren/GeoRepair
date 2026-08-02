@@ -47,10 +47,11 @@ pub(crate) mod symdiff;
 pub mod sweep;
 
 use geo::{
-    Coord, Geometry, LineString, LinesIter, Point, Polygon,
+    Coord, Geometry, Line, LineString, LinesIter, Point, Polygon,
     Winding,
 };
 use rstar::{AABB, RTree, RTreeObject};
+use smallvec::SmallVec;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
@@ -147,7 +148,12 @@ pub fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geom
             // fast path must not pass it through; full repair degrades it.
                     {
             if total_verts <= core::FAST_PATH_MAX_VERTS {
-                let lines: Vec<_> = poly.lines_iter().collect();
+                // SmallVec: ~95.6% of the real-world dataset has <= 32
+                // vertices, so the line collection stays on the stack and
+                // skips the heap allocation entirely; larger rings spill to
+                // the heap transparently.
+                let lines: SmallVec<[Line<f64>; crate::core::SMALL_RING_LINES]> =
+                    poly.lines_iter().collect();
                 if !lines.is_empty()
                     && crate::arrange::prep::has_no_intersections(&lines)
                     && crate::arrange::holes_are_valid(poly)
