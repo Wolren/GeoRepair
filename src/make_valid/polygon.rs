@@ -384,7 +384,7 @@ pub fn make_valid_owned(poly: Polygon<f64>, config: &MakeValidConfig) -> Geometr
 /// reversed when their winding is wrong. The previous implementation cloned
 /// every ring unconditionally, which cost two `Vec` allocations per polygon
 /// on the hot path (1.58M polygons in the real-world benchmark).
-pub(super) fn enforce_ogc_winding(g: Geometry<f64>) -> Geometry<f64> {
+pub(crate) fn enforce_ogc_winding(g: Geometry<f64>) -> Geometry<f64> {
     match g {
         Geometry::Polygon(p) => {
             let (ext, mut holes) = p.into_inner();

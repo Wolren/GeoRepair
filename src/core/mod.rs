@@ -44,6 +44,15 @@ pub const SMALL_RING_LINES: usize = 32;
 /// Snap scale factor for integer-keyed graph construction.
 pub(crate) const SNAP_SCALE: f64 = 1e8;
 
+/// Single-pass repair routing threshold: total ring edges above this skip
+/// the single-pass noding+BuildArea path and fall through to the boolean
+/// pipeline. Measured on the real-world dataset (2026-08-02): single-pass
+/// costs 0.03 ms/poly (<64 edges), 1.7 ms/poly (64-4096 edges) but 168 ms
+/// per poly on the 418 giants (>=4096 edges, up to 200k) — the R-tree
+/// noding of all rings together outweighs the boolean pipeline there
+/// (~36 ms). Below the threshold single-pass is both faster and simpler.
+pub(crate) const SP_MAX_EDGES: usize = 4096;
+
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------

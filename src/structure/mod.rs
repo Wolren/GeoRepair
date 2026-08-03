@@ -218,6 +218,27 @@ pub(crate) fn fix_polygon_owned(
     }
     PROFILE_FP_NS.fetch_add(_t_fp.elapsed().as_nanos() as u64, Ordering::Relaxed);
 
+    // Single-pass GEOS MakeValid repair (primary path for invalid input):
+    // node shell + holes together in ONE pass, walk even-odd faces. This
+    // replaces the multi-stage boolean pipeline (per-ring symdiff +
+    // subtract_holes + merge — three noding passes) for the common invalid
+    // classes: self-crossings, crossing holes, hole overlaps, holes outside
+    // the shell. The result is OGC-wound and validated; on failure we fall
+    // through to the boolean pipeline (which remains the safety net).
+    if let Some(mp) = crate::structure::symdiff::single_pass_fix(&poly) {
+        // GEOS type semantics: a single-component result keeps the input
+        // polygon type; multiple components become MultiPolygon.
+        let geom = if mp.0.len() == 1 {
+            Geometry::Polygon(mp.0.into_iter().next().expect("len==1 verified"))
+        } else {
+            Geometry::MultiPolygon(mp)
+        };
+        let g = crate::make_valid::enforce_ogc_winding(geom);
+        if crate::make_valid::is_valid_with_geo(&g) {
+            return FixOutcome::Repaired(g);
+        }
+    }
+
     // Crossing hole: a hole with a vertex strictly OUTSIDE the shell ring.
     // Neither the i_overlay difference (returns a single quantized ring with
     // 1e-9-grid node artifacts; measured: hole vertex split into two nodes
