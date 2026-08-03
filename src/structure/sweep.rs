@@ -191,7 +191,7 @@ pub(crate) fn has_self_intersections(coords: &[Coord<f64>], eps: f64) -> bool {
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     {
         use rayon::prelude::*;
-        return (0..n_edges).into_par_iter().find_any(|&i| {
+        (0..n_edges).into_par_iter().find_any(|&i| {
             let query_env = edge_envelope(coords, i);
             let mut found = false;
             let _ = tree.locate_in_envelope_intersecting_int(query_env, |candidate| {
@@ -232,7 +232,7 @@ pub(crate) fn has_self_intersections(coords: &[Coord<f64>], eps: f64) -> bool {
             });
             found
         })
-        .is_some();
+        .is_some()
     }
     #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
     {
