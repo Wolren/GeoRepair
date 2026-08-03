@@ -18,6 +18,39 @@ jobs:
       - run: cargo check --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,ffi"
         env:
           RUSTFLAGS: -Dwarnings
+      # Version drift gate: the maturin pyproject version must track
+      # Cargo.toml (published wheels and the crate share a version).
+      - run: |
+          cargo_v=$(grep -m1 '^version' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          py_v=$(grep -m1 '^version' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          if [ "$cargo_v" != "$py_v" ]; then
+            echo "version drift: Cargo.toml=$cargo_v pyproject.toml=$py_v"
+            exit 1
+          fi
+
+  # MSRV gate: the crate declares rust-version = 1.88 (the floor set by
+  # geo 0.33.1); this job proves the declared feature set still builds on
+  # it. Deviations from the CI feature list are deliberate: io backends and
+  # ffi pull newer transitive deps.
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.88
+      - run: cargo check --features "arrange,structure,parallel,simd,validate"
+      - run: cargo check --features "arrange,structure,parallel,simd,validate,geo-traits"
+
+  # no_std gate: alloc-only builds (std feature off) must compile. The bare
+  # zero-feature config and a validate-only validator config are both
+  # supported; the repair features imply each other (see Cargo.toml).
+  no-std:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo check --no-default-features
+      - run: cargo check --no-default-features --features validate
+      - run: cargo check --no-default-features --features validate,structure,arrange
 
   test:
     runs-on: ubuntu-latest
@@ -36,8 +69,10 @@ jobs:
       - run: cargo test --no-default-features --features "arrange,structure,parallel,simd,validate"
 
   # Real-GEOS oracle gate: runs geos_compare (geosop makeValid comparisons on
-  # every fixture) and alaska_fixture (GEOS-validity + area-preservation on
-  # the real-world dataset) against the system GEOS install. geosop and the
+  # every fixture), alaska_fixture (GEOS-validity + area-preservation on the
+  # real-world dataset) and geos_differential (random-polygon differential
+  # fuzz: one-directional invariants vs GEOS isValid, repair output must be
+  # GEOS-valid, no panics) against the system GEOS install. geosop and the
   # alaska test data are committed; alaska.bin is regenerable via
   # scripts/convert_shp_to_bin.py.
   test-geos-oracle:
@@ -47,6 +82,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: sudo apt-get update && sudo apt-get install -y libgeos-dev geos-bin
       - run: cargo test --features "arrange,structure,parallel,simd,validate,bench-geos-system" --test geos_compare --test alaska_fixture
+      - name: Differential fuzz vs GEOS (one-directional invariants)
+        run: cargo test --features "arrange,structure,parallel,simd,validate,bench-geos-system" --test geos_differential
+        env:
+          PROPTEST_CASES: 1000
 
   test-serde:
     runs-on: ubuntu-latest

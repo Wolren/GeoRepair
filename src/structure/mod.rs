@@ -225,6 +225,16 @@ pub(crate) fn fix_polygon_owned(
     // classes: self-crossings, crossing holes, hole overlaps, holes outside
     // the shell. The result is OGC-wound and validated; on failure we fall
     // through to the boolean pipeline (which remains the safety net).
+    //
+    // Snap-representability guard: the single-pass snaps to the SNAP_SCALE
+    // grid. Inputs whose coordinates span more than the grid can represent
+    // (sub-grid small end or > 2^53 large end) must not go through it —
+    // the snap destroys micro-features and the boolean fallback can panic
+    // in i_overlay. Route them to the caller's arrange/reduce chain, which
+    // nodes at full f64 precision. Measured: differential fuzz 2026-08-03.
+    if crate::make_valid::snap_cannot_represent(&poly) {
+        return FixOutcome::Unconsumed(poly);
+    }
     if let Some(mp) = crate::structure::symdiff::single_pass_fix(&poly) {
         // GEOS type semantics: a single-component result keeps the input
         // polygon type; multiple components become MultiPolygon.

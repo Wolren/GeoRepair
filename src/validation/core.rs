@@ -252,7 +252,11 @@ pub fn check_ring_validity(
     let mut seen: rustc_hash::FxHashMap<(u64, u64), usize> =
         rustc_hash::FxHashMap::with_capacity_and_hasher(n, Default::default());
     for (idx, c) in ring[..n].iter().enumerate() {
-        let key = (c.x.to_bits(), c.y.to_bits());
+        // Normalize -0.0 to +0.0 before keying: the IEEE bit patterns differ
+        // but the coordinates are equal, and a pinch at the origin must be
+        // detected regardless of zero sign (measured: differential fuzz,
+        // repaired polygon with (0,0) and (-0,0) vertices was accepted).
+        let key = ((c.x + 0.0).to_bits(), (c.y + 0.0).to_bits());
         if let Some(&prev) = seen.get(&key) {
             if prev + 1 == idx {
                 continue;
@@ -318,7 +322,16 @@ pub fn check_ring_validity(
                     if j <= i {
                         return std::ops::ControlFlow::Continue(());
                     }
-                    if i.abs_diff(j) <= 1 || (i == 0 && j == n - 1) {
+                    // Closing-edge pair (0, n-1) is NOT skipped: the two
+                    // edges share vertex 0 but may also overlap collinearly
+                    // beyond it (backtracking closure), which is a genuine
+                    // self-intersection (GEOS flags it). edges_intersect_general
+                    // excludes endpoint-only touches, so valid rings are
+                    // unaffected. Measured: mixed-magnitude repaired output
+                    // whose closing edge overlapped edge 0 at the origin —
+                    // the skip hid it and the validator accepted GEOS-invalid
+                    // geometry (differential fuzz 2026-08-03).
+                    if i.abs_diff(j) <= 1 {
                         return std::ops::ControlFlow::Continue(());
                     }
                     if check_edge_pair_intersection(ring, i, j, eps) {
@@ -335,9 +348,11 @@ pub fn check_ring_validity(
         } else {
             for i in 0..n {
                 for j in i + 2..n {
-                    if i == 0 && j == n - 1 {
-                        continue;
-                    }
+                    // Closing-edge pair (0, n-1) is NOT skipped: the edges
+                    // share vertex 0 but may overlap collinearly beyond it
+                    // (backtracking closure) — a genuine self-intersection.
+                    // edges_intersect_general excludes endpoint-only touches.
+                    // See the rstar branch comment (differential fuzz 2026-08-03).
                     if check_edge_pair_intersection(ring, i, j, eps) {
                         errors.push(GeometryValidationError::SelfIntersection);
                         return errors;
@@ -420,6 +435,25 @@ pub(crate) fn edges_intersect_general(
             if hi - lo > eps {
                 return true;
             }
+        } else if len2 > 0.0 && o1 == 0.0 && o2 == 0.0 {
+            // EXACT collinearity below the length gate. o1/o2 exactly zero
+            // means the endpoints lie bit-exactly on the other edge's line —
+            // real shared topology (e.g. two MultiPolygon components sharing
+            // a sub-grid edge after snap rounding), not near-collinear
+            // rounding noise. The length gate exists for slivers whose
+            // orient is within ulps of zero; exact-zero orientation is a
+            // deliberate touch and must be flagged regardless of scale.
+            // Measured: mixed-magnitude polygon (1e-9..5e6) whose repaired
+            // components shared a 1e-8 edge; the global eps (1e-12 * 5.2e6
+            // ≈ 5.2e-6) swallowed it and GEOS flagged the result as
+            // Self-intersection. Differential fuzz found it.
+            let t1 = ((b1.x - a1.x) * dx + (b1.y - a1.y) * dy) / len2;
+            let t2 = ((b2.x - a1.x) * dx + (b2.y - a1.y) * dy) / len2;
+            let lo = 0.0f64.max(t1.min(t2));
+            let hi = 1.0f64.min(t1.max(t2));
+            if hi - lo > 0.0 {
+                return true;
+            }
         }
     }
 
@@ -457,11 +491,12 @@ pub(crate) fn check_edge_pair_intersection(
 /// per-pair small-ring sweep on the 1.58M-poly hot path (measured: a
 /// non-inlined call cost +25% on the full dataset).
 ///
-/// Tolerance is RELATIVE to the larger edge length: orient2d magnitudes are
-/// O(L²) (twice the triangle area), so the collinearity threshold is
-/// `1e-12 * L²`. An absolute or max(1.0)-scaled eps inflates past tiny rings
-/// (1e-8-scale coords produce 1e-16 orients; a 1e-12 absolute eps flags
-/// every pair as touching - measured: small_ring_equiv seed 85).
+/// Tolerance is segment-local (`1e-12 * len²` of the tested segment, see
+/// [`point_strictly_on_segment`]): orient2d magnitudes are O(L²) of that
+/// segment, and the strict-interior margin must stay tiny relative to it.
+/// A pair-max tolerance inflates past micro segments in mixed-magnitude
+/// rings (measured: differential fuzz 2026-08-03; small_ring_equiv seed 85
+/// documents the same class at the small end).
 #[inline]
 pub(crate) fn edges_vertex_on_edge(
     a1: Coord<f64>,
@@ -476,22 +511,32 @@ pub(crate) fn edges_vertex_on_edge(
     if hi_x < lo_x2 || lo_x > hi_x2 || hi_y < lo_y2 || lo_y > hi_y2 {
         return false;
     }
-    let la2 = (a2.x - a1.x).powi(2) + (a2.y - a1.y).powi(2);
-    let lb2 = (b2.x - b1.x).powi(2) + (b2.y - b1.y).powi(2);
-    let eps = 1e-12 * la2.max(lb2);
-    point_strictly_on_segment(a1, b1, b2, eps)
-        || point_strictly_on_segment(a2, b1, b2, eps)
-        || point_strictly_on_segment(b1, a1, a2, eps)
-        || point_strictly_on_segment(b2, a1, a2, eps)
+    point_strictly_on_segment(a1, b1, b2)
+        || point_strictly_on_segment(a2, b1, b2)
+        || point_strictly_on_segment(b1, a1, a2)
+        || point_strictly_on_segment(b2, a1, a2)
 }
 
 /// True if `p` lies strictly on the interior of segment (a, b): on the
 /// segment's line (robust orient within eps) and strictly between the
 /// endpoints. Endpoint equality returns false.
-fn point_strictly_on_segment(p: Coord<f64>, a: Coord<f64>, b: Coord<f64>, eps: f64) -> bool {
+///
+/// The tolerance is computed from the SEGMENT ITSELF (`1e-12 * len²`), not
+/// the pair: orient2d magnitudes are O(L²) of the tested segment, and the
+/// strict-interior bbox margin must stay tiny relative to that segment.
+/// Using the pair's larger edge inflates the margin past micro segments —
+/// measured: a mixed-magnitude repaired ring whose 3e-8 closing edge was
+/// crossed by a vertex of a 2.3e6-scale edge; the pair-max eps (1e-12 *
+/// 1.8e13 ≈ 18) made the strict-interior test vacuous and GEOS flagged
+/// Ring Self-intersection[1e-08 -1e-08] that we accepted (differential
+/// fuzz 2026-08-03).
+fn point_strictly_on_segment(p: Coord<f64>, a: Coord<f64>, b: Coord<f64>) -> bool {
     if p == a || p == b {
         return false;
     }
+    let dx = b.x - a.x;
+    let dy = b.y - a.y;
+    let eps = 1e-12 * (dx * dx + dy * dy);
     let o = crate::orient::orient2d(a, b, p);
     if o.abs() > eps {
         return false;

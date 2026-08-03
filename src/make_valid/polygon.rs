@@ -4,6 +4,7 @@
 use super::*;
 use super::strip::{enforce_ccw, enforce_cw, has_nan, strip_degenerate};
 
+#[cfg(any(feature = "arrange", feature = "structure"))]
 impl MakeValid for Triangle<f64> {
     type Scalar = f64;
 
@@ -101,8 +102,33 @@ impl MakeValid for Polygon<f64> {
                 }
             }
             if !has_nan {
-                            return strip_degenerate(make_valid_impl(self, self, config, coords[0]));
-                        }
+                // Panic containment: the boolean overlay path (i_overlay via
+                // geo::BooleanOps) can assert on degenerate inputs; a foreign
+                // library panic must degrade to empty, never crash the host.
+                let repaired =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        make_valid_impl(self, self, config, coords[0])
+                    }))
+                    .unwrap_or_else(|_| {
+                        warn!("make_valid panicked on polygon; returning empty geometry");
+                        empty_geom::<f64>()
+                    });
+                let result = strip_degenerate(repaired);
+                if config.keep_collapsed
+                    && matches!(&result, Geometry::GeometryCollection(gc) if gc.0.is_empty())
+                {
+                    // Collapsed geometry with keep_collapsed: preserve it as a
+                    // lower dimension (GEOS keepCollapsed semantics) instead
+                    // of dropping it. Measured: fully-collinear ring (0 0, 5 0,
+                    // 10 0, 0 0) — the closing-edge check flags it as a
+                    // self-intersection and every repair path collapses to
+                    // empty (test_shell_collapse_keep_collapsed).
+                    if let Some(c) = collapse_degenerate(self) {
+                        return c;
+                    }
+                }
+                return result;
+            }
             // has_nan: fall through to NaN path
         }
         // For valid NaN-free polygons, use make_valid_clean fast-path
@@ -156,7 +182,18 @@ impl MakeValid for Polygon<f64> {
             LineString::new(c)
         };
         let cleaned = Polygon::new(ext_ring, int_clean);
-        strip_degenerate(make_valid_impl(self, &cleaned, config, first_valid))
+        let result = strip_degenerate(make_valid_impl(self, &cleaned, config, first_valid));
+        if config.keep_collapsed
+            && matches!(&result, Geometry::GeometryCollection(gc) if gc.0.is_empty())
+        {
+            // Collapse preservation for keep_collapsed (the !keep_collapsed
+            // block above is skipped on this path). Mirrors the panic-
+            // containment branch; see test_shell_collapse_keep_collapsed.
+            if let Some(c) = collapse_degenerate(self) {
+                return c;
+            }
+        }
+        result
     }
 }
 
@@ -166,6 +203,103 @@ pub(super) fn has_nan_or_infinite(p: &Polygon<f64>) -> bool {
         || p.interiors().iter().any(|ring| {
             ring.0.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
         })
+}
+
+/// True when a single snap grid (SNAP_SCALE = 1e8) cannot represent the
+/// polygon's coordinates: sub-grid features at the small end are destroyed
+/// and integer keys lose precision beyond 2^53 at the large end. Zero
+/// coordinates are ignored (a legitimate vertex); NaN is handled earlier.
+///
+/// "Destroyed" is calibrated to round-half-up: a coordinate c maps to
+/// round(c * SNAP_SCALE) / SNAP_SCALE, so values below 0.5 grid units
+/// collapse to zero (topology loss) while values at or above 0.5 survive
+/// (possibly shifted by one grid unit). The guard therefore fires on
+/// `min_abs * SNAP_SCALE < 0.5` — NOT < 1.0 — so borderline cases like a
+/// 5.8e-9 coord in a 6.2e7 shell (0.58 grid units) stay on the snapping
+/// path, which repairs them correctly (measured: fuzz
+/// invariant_mixed_magnitude_polygon seed cc 5cf953d1 — the < 1.0
+/// threshold routed them to arrange, which produced a self-intersecting
+/// MultiPolygon).
+///
+/// Measured on differential fuzz against GEOS (2026-08-03): mixed-magnitude
+/// polygons (1e-9 .. 1e7) repaired via the snapping single-pass produced
+/// self-intersecting output and i_overlay panics on the boolean path. The
+/// full-precision CDT Arrange path nodes at native f64 and handles both
+/// ends. Only REPAIR inputs reach this guard (the fast path passes valid
+/// topology through untouched, so a huge-but-valid polygon like
+/// POLYGON((100 100, 1e15 110, 1e15 100, 100 100)) is unaffected).
+pub(crate) fn snap_cannot_represent(poly: &Polygon<f64>) -> bool {
+    let mut min_abs = f64::MAX;
+    let mut max_abs = 0.0f64;
+    for c in poly
+        .exterior()
+        .0
+        .iter()
+        .chain(poly.interiors().iter().flat_map(|h| h.0.iter()))
+    {
+        let a = c.x.abs().max(c.y.abs());
+        if a > 0.0 {
+            min_abs = min_abs.min(a);
+        }
+        max_abs = max_abs.max(a);
+    }
+    if max_abs == 0.0 || min_abs == f64::MAX {
+        return false;
+    }
+    let scale = crate::core::SNAP_SCALE;
+    min_abs * scale < 0.5 || max_abs * scale > (1u64 << 53) as f64
+}
+
+/// Collapse a degenerate ring to lower-dimensional geometry, used only when
+/// `keep_collapsed` is set and every repair path came back empty. A
+/// fully-collinear ring (shoelace area zero) collapses to the LineString of
+/// its deduplicated coords; a single distinct point collapses to a Point.
+/// Mirrors GEOS MakeValid keepCollapsed semantics: collapsed geometry is
+/// preserved as a lower dimension rather than dropped.
+pub(crate) fn collapse_degenerate(poly: &Polygon<f64>) -> Option<Geometry<f64>> {
+    let coords: Vec<Coord<f64>> = crate::noding::remove_consecutive_duplicates(
+        &poly.exterior().0[..poly.exterior().0.len().saturating_sub(1)],
+    );
+    match coords.len() {
+        0 => None,
+        1 => Some(Geometry::Point(Point(coords[0]))),
+        _ => {
+            let area = crate::util::shoelace_abs_sum(&coords);
+            if area == 0.0 {
+                Some(Geometry::LineString(LineString::new(coords)))
+            } else {
+                None
+            }
+        }
+    }
+}
+
+/// Gated arrange → precision-reduction → empty chain. Every arm of the
+/// strategy dispatch funnels through this so no repair path can ship
+/// geometry our validator rejects: measured on fuzz + differential runs,
+/// the CDT path handles routed extreme-magnitude inputs correctly but can
+/// still emit invalid output for degenerate ones, and the precision ladder
+/// can too. The repair contract is "valid or empty", never broken.
+#[cfg(any(feature = "arrange", feature = "structure"))]
+fn arrange_chain(poly: &Polygon<f64>, config: &MakeValidConfig) -> Geometry<f64> {
+    // Normalize winding BEFORE the validity gate: repair outputs are
+    // OGC-wound at the dispatch exit (enforce_ogc_winding after the match),
+    // and CW shells are valid per GEOS but flagged WrongOrientation by our
+    // validator — gating pre-winding would empty every CW-valid input
+    // (measured: invariant_area_preserved, a valid CW triangle collapsed).
+    let arranged = enforce_ogc_winding(arrange_or_empty(poly, config));
+    if is_valid_with_geo(&arranged) {
+        arranged
+    } else {
+        warn!("arrange output invalid, retrying with precision reduction");
+        let fb = enforce_ogc_winding(reduce_fallback(poly, config));
+        if is_valid_with_geo(&fb) {
+            fb
+        } else {
+            warn!("repair failed all paths, returning empty");
+            empty_geom::<f64>()
+        }
+    }
 }
 
 /// Common strategy dispatch after degeneracy checks.
@@ -186,11 +320,33 @@ pub(super) fn make_valid_impl(
         "make_valid_impl requires NaN-free input"
     );
     let result = match config.poly_method {
-            PolyMethod::Arrange => arrange_or_empty(poly, config),
-            PolyMethod::Structure => structure_fix(poly, config).unwrap_or_else(|| {
-                warn!("Structure mode: fix failed, retrying with precision reduction");
-                reduce_fallback(poly, config)
-            }),
+            PolyMethod::Arrange => arrange_chain(poly, config),
+            PolyMethod::Structure => {
+                let st = structure_fix(poly, config);
+                match st {
+                    Some(g) => {
+                        // Normalize winding BEFORE the validity gate: the fast
+                        // path can pass a wrong-wound (CW) input through and
+                        // CW shells are valid per GEOS but flagged
+                        // WrongOrientation by our validator (measured:
+                        // large valid shell + boundary-touching hole,
+                        // speed_bug_regressions — gating pre-winding sent it
+                        // to arrange, which decomposed the touch into a
+                        // MultiPolygon). The Auto arm already does this.
+                        let g_norm = enforce_ogc_winding(g);
+                        if is_valid_with_geo(&g_norm) {
+                            g_norm
+                        } else {
+                            warn!("Structure mode: fix output invalid, retrying with CDT arrange");
+                            arrange_chain(poly, config)
+                        }
+                    }
+                    None => {
+                        warn!("Structure mode: fix failed, retrying with CDT arrange");
+                        arrange_chain(poly, config)
+                    }
+                }
+            }
             PolyMethod::Auto => {
                 if let Some(r) = structure_fix(poly, config) {
                     // The structure path emits GEOS walker winding (CW shells,
@@ -214,21 +370,11 @@ pub(super) fn make_valid_impl(
                     if is_valid_with_geo(&r_norm) { r_norm }
                     else {
                         warn!("Auto mode: structure_fix invalid, falling back to CDT arrange");
-                        let arranged = arrange_or_empty(poly, config);
-                        if is_valid_with_geo(&arranged) { arranged }
-                        else {
-                            warn!("Auto mode: arrange also invalid, retrying with precision reduction");
-                            reduce_fallback(poly, config)
-                        }
+                        arrange_chain(poly, config)
                     }
                 } else {
                     warn!("Auto mode: structure_fix failed, falling back to CDT arrange");
-                    let arranged = arrange_or_empty(poly, config);
-                    if is_valid_with_geo(&arranged) { arranged }
-                    else {
-                        warn!("Auto mode: arrange also invalid, retrying with precision reduction");
-                        reduce_fallback(poly, config)
-                    }
+                    arrange_chain(poly, config)
                 }
             }
         };
@@ -249,6 +395,7 @@ pub(super) fn make_valid_impl(
 ///
 /// `ext_scale` is the caller's exterior bbox scale from its earlier scan
 /// (see [`fix_polygon_owned`]); `None` recomputes it.
+#[cfg(any(feature = "arrange", feature = "structure"))]
 pub(super) fn make_valid_impl_owned(
     poly: Polygon<f64>,
     config: &MakeValidConfig,
@@ -261,21 +408,31 @@ pub(super) fn make_valid_impl_owned(
         "make_valid_impl_owned requires NaN-free input"
     );
     let result = match config.poly_method {
-        PolyMethod::Arrange => arrange_or_empty(&poly, config),
-        PolyMethod::Structure => match structure_fix_owned(poly, config, ext_scale) {
-            // Fast path: input was verified NaN-free by the caller's scan and
-            // non-degenerate by the gates — winding is the only normalization
-            // needed, and it cannot introduce NaNs. Skip has_nan/strip.
-            crate::structure::FixOutcome::Fast(g) => {
-                let g = enforce_ogc_winding(g);
-                return (g, true);
+        PolyMethod::Arrange => arrange_chain(&poly, config),
+        PolyMethod::Structure => {
+            #[cfg(feature = "structure")]
+            {
+                match structure_fix_owned(poly, config, ext_scale) {
+                    // Fast path: input was verified NaN-free by the caller's scan and
+                    // non-degenerate by the gates — winding is the only normalization
+                    // needed, and it cannot introduce NaNs. Skip has_nan/strip.
+                    crate::structure::FixOutcome::Fast(g) => {
+                        let g = enforce_ogc_winding(g);
+                        return (g, true);
+                    }
+                    crate::structure::FixOutcome::Repaired(g) => g,
+                    crate::structure::FixOutcome::Unconsumed(p) => {
+                        warn!("Structure mode: fix failed, retrying with CDT arrange");
+                        arrange_chain(&p, config)
+                    }
+                }
             }
-            crate::structure::FixOutcome::Repaired(g) => g,
-            crate::structure::FixOutcome::Unconsumed(p) => {
-                warn!("Structure mode: fix failed, retrying with precision reduction");
-                reduce_fallback(&p, config)
+            #[cfg(not(feature = "structure"))]
+            {
+                warn!("PolyMethod::Structure selected but 'structure' feature is not enabled. Enable the 'structure' feature in Cargo.toml to use Structure mode.");
+                arrange_chain(&poly, config)
             }
-        },
+        }
         PolyMethod::Auto => make_valid_impl(&poly, &poly, config, _first_valid),
     };
     let result = enforce_ogc_winding(result);
@@ -286,6 +443,7 @@ pub(super) fn make_valid_impl_owned(
 /// that already own their polygons (e.g. [`crate::parallel::par_fix_polygon_batch_owned`]).
 /// Moves the polygon through the Structure fast path — zero-copy for the
 /// ~99.85% of real-world polygons that are already valid.
+#[cfg(any(feature = "arrange", feature = "structure"))]
 pub fn make_valid_owned(poly: Polygon<f64>, config: &MakeValidConfig) -> Geometry<f64> {
     // Mirrors make_valid_with_config with `poly` owned instead of `&self`.
     // Keep the two bodies in sync.
@@ -319,7 +477,16 @@ pub fn make_valid_owned(poly: Polygon<f64>, config: &MakeValidConfig) -> Geometr
         }
         if !has_nan {
             let first = coords[0];
-            let (g, verified) = make_valid_impl_owned(poly, config, first, Some(scale));
+            // Panic containment (mirrors the borrowed path): i_overlay can
+            // assert on degenerate inputs; degrade to empty, never crash.
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                make_valid_impl_owned(poly, config, first, Some(scale))
+            }))
+            .unwrap_or_else(|_| {
+                warn!("make_valid_owned panicked on polygon; returning empty geometry");
+                (empty_geom::<f64>(), false)
+            });
+            let (g, verified) = result;
             return if verified { g } else { strip_degenerate(g) };
         }
         // has_nan: fall through to the NaN path below (mirrors the borrowed version).
@@ -375,7 +542,17 @@ pub fn make_valid_owned(poly: Polygon<f64>, config: &MakeValidConfig) -> Geometr
     // does not change min/max), so recompute the scale cheaply from the
     // cleaned exterior — same formula as the scan above.
     let (g, verified) = make_valid_impl_owned(cleaned, config, first_valid, None);
-    if verified { g } else { strip_degenerate(g) }
+    let result = if verified { g } else { strip_degenerate(g) };
+    if config.keep_collapsed
+        && matches!(&result, Geometry::GeometryCollection(gc) if gc.0.is_empty())
+    {
+        // Collapse preservation for keep_collapsed — mirrors the borrowed
+        // path (see make_valid_with_config).
+        if let Some(c) = collapse_degenerate(&poly) {
+            return c;
+        }
+    }
+    result
 }
 
 /// Enforce OGC winding: CCW exterior, CW interior rings.
@@ -491,18 +668,6 @@ fn structure_fix(poly: &Polygon<f64>, _config: &MakeValidConfig) -> Option<Geome
         warn!("PolyMethod::Structure selected but 'structure' feature is not enabled. Enable the 'structure' feature in Cargo.toml to use Structure mode.");
     }
     None
-}
-
-#[cfg(not(feature = "structure"))]
-fn structure_fix_owned(
-    poly: Polygon<f64>,
-    _config: &MakeValidConfig,
-    _ext_scale: Option<f64>,
-) -> crate::structure::FixOutcome {
-    if !poly.exterior().0.is_empty() {
-        warn!("PolyMethod::Structure selected but 'structure' feature is not enabled. Enable the 'structure' feature in Cargo.toml to use Structure mode.");
-    }
-    crate::structure::FixOutcome::Unconsumed(poly)
 }
 
 /// Check OGC validity using our own GeoValidation (Shewchuk-based).

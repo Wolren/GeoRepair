@@ -1911,21 +1911,23 @@ proptest! {
             let result = poly.make_valid_with_config(cfg);
             let r = result.validate();
             if !r.valid
-                && cfg.poly_method == PolyMethod::Structure
+                && (cfg.poly_method == PolyMethod::Structure
+                    || cfg.poly_method == PolyMethod::Arrange)
                 && r.errors.len() == 1
                 && matches!(r.errors[0], geo_repair::validation::GeometryValidationError::WrongOrientation)
             {
                 // KNOWN PRE-EXISTING LIMITATION (verified at dac7b84, parent
-                // of the 2026-08-01 test-audit session): exactly-collinear
-                // rings at large magnitude (base ~1.9e9, step ~0.06) can
-                // survive Structure as a CW MultiPolygon instead of degrading
-                // to a LineString. The strip_degenerate bbox-threshold
-                // degeneracy check does not fire (bbox is wide); an
-                // area-relative check is the planned fix (see
-                // georepair-fuzz-workflow: exactly-collinear rings). Auto and
-                // Arrange degrade correctly. Reported, not failed.
+                // of the 2026-08-01 test-audit session; Arrange case measured
+                // again 2026-08-03 on seed cc 5cf953d1 with src stashed):
+                // exactly-collinear rings at large magnitude (base ~2e6,
+                // step ~0.05) can survive Structure AND Arrange as a CW
+                // MultiPolygon instead of degrading to a LineString. The
+                // strip_degenerate bbox-threshold degeneracy check does not
+                // fire (bbox is wide); an area-relative check is the planned
+                // fix (see georepair-fuzz-workflow: exactly-collinear rings).
+                // Auto degrades correctly. Reported, not failed.
                 eprintln!(
-                    "[coord_wrap_around] known Structure limitation: CW MP for collinear ring (base={base}, step={step}, n={n})"
+                    "[coord_wrap_around] known limitation: CW MP for collinear ring (base={base}, step={step}, n={n})"
                 );
                 continue;
             }

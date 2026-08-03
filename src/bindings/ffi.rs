@@ -53,8 +53,11 @@ use crate::make_valid::MakeValid;
 use crate::validation::GeoValidation;
 use geo::Geometry;
 
-/// Static NUL-terminated version string, kept in sync with Cargo.toml.
-static VERSION_CSTR: &CStr = c"0.13.0";
+/// Static NUL-terminated version string, derived from Cargo.toml at compile
+/// time (`CARGO_PKG_VERSION`) so the C API and the crate can never drift.
+static VERSION_CSTR: &CStr = unsafe {
+    CStr::from_bytes_with_nul_unchecked(concat!(env!("CARGO_PKG_VERSION"), "\0").as_bytes())
+};
 
 /// Return the geo-repair library version as a NUL-terminated string.
 ///

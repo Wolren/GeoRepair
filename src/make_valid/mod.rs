@@ -283,12 +283,16 @@ mod multipolygon;
 mod polygon;
 mod strip;
 
-pub use multipolygon::drop_nested_components;
 pub use polygon::is_valid_with_geo;
 pub(crate) use polygon::enforce_ogc_winding;
+pub(crate) use polygon::snap_cannot_represent;
+#[cfg(any(feature = "arrange", feature = "structure"))]
+pub use multipolygon::drop_nested_components;
+#[cfg(any(feature = "arrange", feature = "structure"))]
 pub use polygon::make_valid_owned;
 pub use strip::strip_degenerate_test;
 
+#[cfg(any(feature = "arrange", feature = "structure"))]
 impl MakeValid for GeometryCollection<f64> {
     type Scalar = f64;
 

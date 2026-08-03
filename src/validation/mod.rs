@@ -17,9 +17,14 @@
 //!   coincident and flag a SelfIntersection. This is the only class where
 //!   the validator is deliberately STRICTER than GEOS isValid.
 //! - `1e-12 * L²` vertex-on-edge tolerance (T-junction class): a vertex
-//!   within that band of an edge counts as touching it. This implements
-//!   GEOS's own rule (GEOS flags vertex-on-edge rings, XML Test 22) with a
-//!   noise floor instead of an exact-only test.
+//!   lying on a non-adjacent edge - exactly, or within orient rounding
+//!   noise of the exact collinearity - flags a SelfIntersection. This
+//!   implements GEOS's own rule (GEOS flags vertex-on-edge rings, XML Test
+//!   22) with a noise floor instead of an exact-only test. The check is
+//!   bbox-prefiltered: the vertex's own segment must overlap the edge's
+//!   bounding box, so a vertex that merely approaches an edge within the
+//!   band without touching it (its segment's bbox sits strictly off the
+//!   edge's bbox) is accepted.
 //!
 //! Rationale for the collinear gate: production GIS data comes from
 //! toolchains whose precision is far below f64, so a 32-ulp separation
@@ -81,7 +86,11 @@
 mod complex;
 /// Core validation types, traits, and per-geometry implementations.
 mod core;
+/// Adapter exposing geo_repair's validator through geo's `Validation` trait.
+mod geo_bridge;
 
 /// Re-export all core validation items: [`GeoValidation`], [`GeometryValidationError`],
 /// [`ValidationResult`], [`is_valid`], [`validate`], [`validate_reason`].
 pub use core::*;
+/// geo-trait-compatible adapter and error mapping.
+pub use geo_bridge::{GeoRepairValidation, map_geo_invalid};
