@@ -43,16 +43,14 @@ fn find_geosop() -> Option<PathBuf> {
             return Some(pb);
         }
     }
-    // 3. PATH
+    // 3. PATH (platform-correct splitting — `;` on Windows, `:` on Unix)
     if let Ok(path) = std::env::var("PATH") {
-        for dir in path.split(';') {
-            let pb = PathBuf::from(dir).join("geosop.exe");
-            if pb.exists() {
-                return Some(pb);
-            }
-            let pb = PathBuf::from(dir).join("geosop");
-            if pb.exists() {
-                return Some(pb);
+        for dir in std::env::split_paths(&path) {
+            for name in ["geosop", "geosop.exe"] {
+                let pb = dir.join(name);
+                if pb.exists() {
+                    return Some(pb);
+                }
             }
         }
     }
