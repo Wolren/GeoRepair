@@ -89,6 +89,41 @@ fn main() {
         (t3 - t2).as_secs_f64() * 1e3,
         (t4 - t3).as_secs_f64() * 1e3,
     );
+
+    // AVX vs scalar bbox equivalence check (the AVX kernel feeds eps).
+    let shell = biggest.exterior().0.clone();
+    let scalar = {
+        let (mut mnx, mut mxx, mut mny, mut mxy) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+        for c in &shell {
+            mnx = mnx.min(c.x);
+            mxx = mxx.max(c.x);
+            mny = mny.min(c.y);
+            mxy = mxy.max(c.y);
+        }
+        (mnx, mxx, mny, mxy)
+    };
+    let simd = geo_repair::simd::aabb_minmax_public(&shell);
+    println!(
+        "aabb scalar=({:.6},{:.6},{:.6},{:.6}) simd=({:.6},{:.6},{:.6},{:.6}) EQUAL={}",
+        scalar.0,
+        scalar.1,
+        scalar.2,
+        scalar.3,
+        simd.0,
+        simd.1,
+        simd.2,
+        simd.3,
+        scalar == simd
+    );
+
+    // try_fast_fix timing (the O(n^2) find_second_intersection suspect).
+    let t0 = std::time::Instant::now();
+    let tff = geo_repair::structure::fix_ring::try_fast_fix(&shell);
+    println!(
+        "try_fast_fix: {:.1}ms -> {}",
+        t0.elapsed().as_secs_f64() * 1e3,
+        tff.map_or("None".to_string(), |v| format!("Some({} rings)", v.len()))
+    );
 }
 
 /// OGC winding enforcement for the diag (mirrors make_valid::enforce_ogc_winding).

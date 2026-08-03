@@ -61,24 +61,79 @@ pub fn split_edges(edges: &[Line<f64>]) -> Vec<Line<f64>> {
     }
 
     let eps_param = core::EPS_PARAM;
-    let mut result = Vec::new();
-    for i in 0..n {
-        let e = edges[i];
-        let mut pts = std::mem::take(&mut split_points[i]);
-        pts.sort_by(|(a, _), (b, _)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        pts.dedup_by(|(a, _), (b, _)| (*a - *b).abs() < eps_param);
-        let mut prev_pt = e.start;
-        for &(_, pt) in &pts {
-            if dist2(pt, prev_pt) > eps_param {
-                result.push(Line::new(prev_pt, pt));
+    // Reconstruction is per-edge independent: sort + dedup the split points,
+    // then rebuild the sub-lines. Parallelized for large inputs (the serial
+    // rebuild was ~30ms of the 71ms noding on a 260k-edge shell); below the
+    // threshold the serial loop's lower dispatch overhead wins.
+    if n > 128 {
+        #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+        {
+            use rayon::prelude::*;
+            split_points
+                .par_iter_mut()
+                .enumerate()
+                .flat_map_iter(|(i, pts)| {
+                    let e = edges[i];
+                    pts.sort_by(|(a, _), (b, _)| {
+                        a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    pts.dedup_by(|(a, _), (b, _)| (*a - *b).abs() < eps_param);
+                    let mut out: Vec<Line<f64>> = Vec::new();
+                    let mut prev_pt = e.start;
+                    for &(_, pt) in pts.iter() {
+                        if dist2(pt, prev_pt) > eps_param {
+                            out.push(Line::new(prev_pt, pt));
+                        }
+                        prev_pt = pt;
+                    }
+                    if dist2(e.end, prev_pt) > eps_param {
+                        out.push(Line::new(prev_pt, e.end));
+                    }
+                    out
+                })
+                .collect()
+        }
+        #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
+        {
+            let mut result = Vec::new();
+            for i in 0..n {
+                let e = edges[i];
+                let mut pts = std::mem::take(&mut split_points[i]);
+                pts.sort_by(|(a, _), (b, _)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                pts.dedup_by(|(a, _), (b, _)| (*a - *b).abs() < eps_param);
+                let mut prev_pt = e.start;
+                for &(_, pt) in &pts {
+                    if dist2(pt, prev_pt) > eps_param {
+                        result.push(Line::new(prev_pt, pt));
+                    }
+                    prev_pt = pt;
+                }
+                if dist2(e.end, prev_pt) > eps_param {
+                    result.push(Line::new(prev_pt, e.end));
+                }
             }
-            prev_pt = pt;
+            result
         }
-        if dist2(e.end, prev_pt) > eps_param {
-            result.push(Line::new(prev_pt, e.end));
+    } else {
+        let mut result = Vec::new();
+        for i in 0..n {
+            let e = edges[i];
+            let mut pts = std::mem::take(&mut split_points[i]);
+            pts.sort_by(|(a, _), (b, _)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            pts.dedup_by(|(a, _), (b, _)| (*a - *b).abs() < eps_param);
+            let mut prev_pt = e.start;
+            for &(_, pt) in &pts {
+                if dist2(pt, prev_pt) > eps_param {
+                    result.push(Line::new(prev_pt, pt));
+                }
+                prev_pt = pt;
+            }
+            if dist2(e.end, prev_pt) > eps_param {
+                result.push(Line::new(prev_pt, e.end));
+            }
         }
+        result
     }
-    result
 }
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
