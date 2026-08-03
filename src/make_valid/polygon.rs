@@ -632,10 +632,10 @@ impl<T: NodingFloat> MakeValid for Geometry<T> {
 pub(super) fn arrange_or_empty(poly: &Polygon<f64>, config: &MakeValidConfig) -> Geometry<f64> {
     let result = crate::arrange::fix_polygon(poly, config);
     // Clean NestedHoles from Arrange output (edge-sharing components)
-    if let Geometry::MultiPolygon(mp) = &result {
-        if mp.0.len() > 1 {
-            return drop_nested_components(mp.clone());
-        }
+    if let Geometry::MultiPolygon(mp) = &result
+        && mp.0.len() > 1
+    {
+        return drop_nested_components(mp.clone());
     }
     result
 }

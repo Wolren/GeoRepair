@@ -109,7 +109,7 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, _config: &MakeValidConfig) -> Geo
     if lines.is_empty() {
         return empty();
     }
-    if prep::has_no_intersections(&lines) && holes_are_valid(poly) {
+    if prep::has_no_intersections(&lines) && holes_are_valid(poly) && holes_contained_cheap(poly) {
         return Geometry::Polygon(poly.clone());
     }
     // Fallback: if intersection check false-positives (known fp precision issue
@@ -129,10 +129,10 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, _config: &MakeValidConfig) -> Geo
 /// fallback where the polygon is already known to need repair.
 pub(crate) fn fallback_polygon_fix(poly: &Polygon<f64>) -> Geometry<f64> {
     let lines: Vec<_> = poly.lines_iter().collect();
-    if let Some(mp) = fix_from_lines(lines) {
-        if !mp.0.is_empty() {
-            return Geometry::MultiPolygon(mp);
-        }
+    if let Some(mp) = fix_from_lines(lines)
+        && !mp.0.is_empty()
+    {
+        return Geometry::MultiPolygon(mp);
     }
     if poly.interiors().is_empty() {
         return empty();
@@ -171,6 +171,76 @@ pub(crate) fn boolean_difference_catch(
     .ok()
 }
 
+/// Cheap hole-containment supplement to the first-vertex probe: catches a
+/// hole poking out of the shell (the DisconnectedInteriorRing /
+/// HoleOutsideShell class) without full ring-vs-ring analysis. Soundness:
+/// in a VALID polygon every hole vertex is inside-or-on the shell, hence
+/// the hole bbox is inside the shell bbox: bbox-exceeds proves a poke.
+/// For small polygons also enforce the touch rule (>=2 distinct hole
+/// vertices on the shell disconnect the interior, GEOS Test 22 semantics)
+/// and >=1 hole vertex strictly inside, mirroring the full validator's
+/// containment checks. Large rings skip the touch scan (O(hole x shell)
+/// is prohibitive on giants; the axis-aligned poke class is still caught
+/// by the bbox rule, and edge-crossing pokes are caught by
+/// has_no_intersections).
+///
+/// Measured regression driver (2026-08-03): the zero-safe proper-crossing
+/// fix made the light gate accept a CGAL hole-outside-shell fixture (hole
+/// poking through the shell top via two touch vertices), routing arrange's
+/// passthrough into the gate -> empty. The first-vertex probe alone cannot
+/// see the poke; this closes it.
+pub(crate) fn holes_contained_cheap(poly: &Polygon<f64>) -> bool {
+    let shell = poly.exterior();
+    if shell.0.len() < 3 {
+        return false;
+    }
+    let (mut sx0, mut sy0, mut sx1, mut sy1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+    for c in &shell.0 {
+        sx0 = sx0.min(c.x);
+        sy0 = sy0.min(c.y);
+        sx1 = sx1.max(c.x);
+        sy1 = sy1.max(c.y);
+    }
+    let scale = (sx1 - sx0).abs().max((sy1 - sy0).abs()).max(1.0);
+    // f64 slack so a vertex exactly on the shell bbox does not trip.
+    let eps = 8.0 * f64::EPSILON * scale;
+    let small = shell.0.len() <= crate::core::SMALL_RING_LINES;
+    for hole in poly.interiors() {
+        let (mut hx0, mut hy0, mut hx1, mut hy1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+        for c in &hole.0 {
+            hx0 = hx0.min(c.x);
+            hy0 = hy0.min(c.y);
+            hx1 = hx1.max(c.x);
+            hy1 = hy1.max(c.y);
+        }
+        if hx0 < sx0 - eps || hy0 < sy0 - eps || hx1 > sx1 + eps || hy1 > sy1 + eps {
+            return false;
+        }
+        if small {
+            let mut touches = 0usize;
+            let mut seen: Vec<Coord<f64>> = Vec::new();
+            let mut any_inside = false;
+            let e2 = 1e-12 * scale;
+            for &hp in &hole.0 {
+                if crate::validation::point_in_ring_exclusive(hp, &shell.0) {
+                    any_inside = true;
+                }
+                if crate::validation::point_on_ring(hp, &shell.0, e2) && !seen.contains(&hp) {
+                    touches += 1;
+                    seen.push(hp);
+                }
+            }
+            if touches >= 2 {
+                return false;
+            }
+            if !any_inside {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 /// Validate a polygon against GEOS-compatible validity rules.
 ///
 /// Checks: ring closure & min points, non-finite coords, no self-intersections,
@@ -193,11 +263,16 @@ pub fn validate_polygon(poly: &Polygon<f64>) -> bool {
     if lines.is_empty() || !prep::has_no_intersections(&lines) {
         return false;
     }
-    // Hole containment checks
+    // Hole containment checks (GEOS-aligned inclusive: a hole may touch the
+    // shell at a point — OGC polygon validity — so the first-vertex probe
+    // must not disqualify boundary-touching holes. The exclusive variant
+    // rejects GEOS-valid repaired outputs; measured: --fast gate flagged
+    // 24/300 real-world structure components that the full validator and
+    // GEOS accept, 2026-08-03).
     if poly.interiors().is_empty() {
         return true;
     }
-    holes_are_valid(poly)
+    holes_are_valid_inclusive(poly) && holes_contained_cheap(poly)
 }
 
 /// Lightweight check: hole containment + nesting.

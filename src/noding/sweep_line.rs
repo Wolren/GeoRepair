@@ -352,20 +352,20 @@ fn check_and_schedule(
     seen.insert(key);
     results.push((i, j));
 
-    if let Some((ix, iy)) = edge_intersection_xy(&edges[i], &edges[j]) {
-        if ix > cur_x + f64::EPSILON * 200.0 {
-            let ev = Event {
-                x: ix,
-                y: iy,
-                kind: EventKind::Crossing,
-                edge: i,
-                other: j,
-            };
-            let pos = pending
-                .binary_search_by(|pev| event_cmp(pev, &ev))
-                .unwrap_or_else(|e| e);
-            pending.insert(pos, ev);
-        }
+    if let Some((ix, iy)) = edge_intersection_xy(&edges[i], &edges[j])
+        && ix > cur_x + f64::EPSILON * 200.0
+    {
+        let ev = Event {
+            x: ix,
+            y: iy,
+            kind: EventKind::Crossing,
+            edge: i,
+            other: j,
+        };
+        let pos = pending
+            .binary_search_by(|pev| event_cmp(pev, &ev))
+            .unwrap_or_else(|e| e);
+        pending.insert(pos, ev);
     }
 }
 

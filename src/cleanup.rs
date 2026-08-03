@@ -36,10 +36,10 @@ pub fn remove_repeated_coords(coords: &[Coord<f64>], tolerance: f64) -> Vec<Coor
     let sq = tolerance * tolerance;
     let mut out: Vec<Coord<f64>> = Vec::with_capacity(coords.len());
     for &c in coords {
-        if let Some(&p) = out.last() {
-            if c == p || (c.x - p.x).powi(2) + (c.y - p.y).powi(2) <= sq {
-                continue;
-            }
+        if let Some(&p) = out.last()
+            && (c == p || (c.x - p.x).powi(2) + (c.y - p.y).powi(2) <= sq)
+        {
+            continue;
         }
         out.push(c);
     }

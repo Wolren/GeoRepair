@@ -21,7 +21,15 @@ fn orient4(li: &Line<f64>, lj: &Line<f64>) -> [f64; 4] {
 #[inline(always)]
 fn segments_properly_cross(li: &Line<f64>, lj: &Line<f64>) -> bool {
     let [o1, o2, o3, o4] = orient4(li, lj);
-    (o1 > 0.0) != (o2 > 0.0) && (o3 > 0.0) != (o4 > 0.0)
+    // Zero-safe strict opposite sign. The (o1 > 0) != (o2 > 0) form treats
+    // an EXACT zero orient (a collinear touch — e.g. a snapped vertex
+    // landing on another edge's line) as a crossing when the paired orient
+    // is positive, flagging GEOS-valid structure output. Measured: 276/300
+    // real-world repaired components rejected by the --fast gate while the
+    // full validator and GEOS accept them (2026-08-03). Matches
+    // edges_intersect_general's proper-crossing semantics.
+    (o1 > 0.0 && o2 < 0.0 || o1 < 0.0 && o2 > 0.0)
+        && (o3 > 0.0 && o4 < 0.0 || o3 < 0.0 && o4 > 0.0)
 }
 
 fn quadrant(x: f64, y: f64) -> u8 {
@@ -43,8 +51,6 @@ pub(crate) struct MonoChain {
     max_x: f64,
     max_y: f64,
     ring_id: u32,
-    ring_start: usize,
-    ring_len: usize,
 }
 
 impl MonoChain {
@@ -92,7 +98,7 @@ fn build_mono_chains(lines: &[Line<f64>]) -> Vec<MonoChain> {
     let mut min_y = l0.start.y.min(l0.end.y);
     let mut max_y = l0.start.y.max(l0.end.y);
 
-    let (mut ring_start, mut ring_end) = ring_buf[0];
+    let (_, mut ring_end) = ring_buf[0];
     let mut ring_idx = 0u32;
     let mut chains = Vec::new();
 
@@ -108,7 +114,6 @@ fn build_mono_chains(lines: &[Line<f64>]) -> Vec<MonoChain> {
         let dy = line.end.y - line.start.y;
         let cur_quad = quadrant(dx, dy);
         if at_ring_boundary || cur_quad != prev_quad {
-            let ring_len = ring_end - ring_start;
             chains.push(MonoChain {
                 start,
                 end: i,
@@ -118,8 +123,6 @@ fn build_mono_chains(lines: &[Line<f64>]) -> Vec<MonoChain> {
                 max_x,
                 max_y,
                 ring_id: ring_idx,
-                ring_start,
-                ring_len,
             });
             start = i;
             prev_quad = cur_quad;
@@ -131,12 +134,10 @@ fn build_mono_chains(lines: &[Line<f64>]) -> Vec<MonoChain> {
             if at_ring_boundary {
                 ring_idx += 1;
                 let rb = ring_buf[ring_idx as usize];
-                ring_start = rb.0;
                 ring_end = rb.1;
             }
         }
     }
-    let ring_len = ring_end - ring_start;
     chains.push(MonoChain {
         start,
         end: n,
@@ -146,8 +147,6 @@ fn build_mono_chains(lines: &[Line<f64>]) -> Vec<MonoChain> {
         max_x,
         max_y,
         ring_id: ring_idx,
-        ring_start,
-        ring_len,
     });
     chains
 }
@@ -167,15 +166,11 @@ fn rec_overlaps(
         if i == j {
             return false;
         }
-        if mc1.ring_id == mc2.ring_id {
-            if j == i + 1 || j + 1 == i {
-                return false;
-            }
-            let ring_first = mc1.ring_start;
-            let ring_last = mc1.ring_start + mc1.ring_len - 1;
-            if (i == ring_first && j == ring_last) || (j == ring_first && i == ring_last) {
-                return false;
-            }
+        // Closing pair is NOT skipped: shared vertex 0 aside, the two edges
+        // can overlap collinearly (backtracking closure), a genuine
+        // self-intersection; matches check_ring_validity.
+        if mc1.ring_id == mc2.ring_id && (j == i + 1 || j + 1 == i) {
+            return false;
         }
         let li = &lines[i];
         let lj = &lines[j];
@@ -255,32 +250,24 @@ pub fn has_no_intersections_small(lines: &[Line<f64>]) -> bool {
     // Assign ring ids: a segment whose start != previous segment's end
     // starts a new ring (same rule as build_mono_chains).
     let mut ring_of = [0u32; crate::core::SMALL_RING_LINES + 1];
-    let mut ring_first = [0usize; crate::core::SMALL_RING_LINES + 1];
-    let mut ring_last = [0usize; crate::core::SMALL_RING_LINES + 1];
     let mut nrings = 1u32;
-    ring_first[0] = 0;
     for i in 1..n {
         if lines[i].start != lines[i - 1].end {
-            ring_last[(nrings - 1) as usize] = i - 1;
             nrings += 1;
-            ring_first[(nrings - 1) as usize] = i;
         }
         ring_of[i] = nrings - 1;
     }
-    ring_last[(nrings - 1) as usize] = n - 1;
 
     for i in 0..n {
         let li = &lines[i];
         let ri = ring_of[i];
         for j in (i + 1)..n {
             if ri == ring_of[j] {
-                // Same ring: skip adjacent edges and the closing pair.
+                // Same ring: skip adjacent edges. The closing pair (first
+                // vs last edge) is NOT skipped — the two share vertex 0 but
+                // can overlap collinearly beyond it (backtracking closure),
+                // a genuine self-intersection; matches check_ring_validity.
                 if j == i + 1 || j + 1 == i {
-                    continue;
-                }
-                let f = ring_first[ri as usize];
-                let l = ring_last[ri as usize];
-                if (i == f && j == l) || (j == f && i == l) {
                     continue;
                 }
             }

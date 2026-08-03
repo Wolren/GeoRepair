@@ -398,8 +398,16 @@ pub(crate) fn edges_intersect_general(
     let o3 = crate::orient::orient2d(b1, b2, a1);
     let o4 = crate::orient::orient2d(b1, b2, a2);
 
-    // Proper crossing
-    if o1 * o2 < 0.0 && o3 * o4 < 0.0 {
+    // Proper crossing. Zero-safe strict opposite sign: the product form
+    // (o1 * o2 < 0.0) treats a -0.0 orient as negative, flagging a
+    // collinear touch as a crossing (false SelfIntersection on valid
+    // geometry with -0.0 coordinates; measured: this inflated the
+    // real-world "2,298 invalid" class: with the zero-safe form the
+    // winding-agnostic count is 1). Matches the sweep predicates
+    // (segments_properly_cross / segments_properly_cross_seg).
+    if (o1 > 0.0 && o2 < 0.0 || o1 < 0.0 && o2 > 0.0)
+        && (o3 > 0.0 && o4 < 0.0 || o3 < 0.0 && o4 > 0.0)
+    {
         return true;
     }
 

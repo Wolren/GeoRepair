@@ -46,6 +46,7 @@ use geo_repair::arrange::validate_polygon;
 use geo_repair::dd::{dd_call_count, reset_dd_count};
 use geo_repair::io::load_bin;
 use geo_repair::orient::orient2d;
+use geo_repair::GeoValidation;
 #[cfg(feature = "parallel")]
 use geo_repair::parallel::{par_fix_polygon_batch, par_fix_polygon_batch_owned};
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
@@ -317,18 +318,37 @@ fn main() {
     let n_polys = polys.len();
     eprintln!("[1/5] Loaded {n_polys} polys in {load_time:.3}s");
 
-    // Pre-compute validity and vertex counts in parallel
+    // Pre-compute validity and vertex counts in parallel. The classifier is
+    // the winding-agnostic full-validator verdict (any error other than
+    // WrongOrientation): the real-world dataset is essentially all-CW
+    // (GEOS-valid), so a winding-sensitive count would flag every polygon.
+    // validate_polygon is NOT used here: its zero-orient false positive
+    // inflated the count to 2,298 (fixed 2026-08-03; the true count is 1).
     eprint!("[2/5] Validating {n_polys} polys...");
     let t0 = Instant::now();
     #[cfg(feature = "parallel")]
     let infos: Vec<_> = polys
         .par_iter()
-        .map(|p| (validate_polygon(p), poly_n_vert(p)))
+        .map(|p| {
+            let v = p.validate();
+            let bad = v
+                .errors
+                .iter()
+                .any(|e| !matches!(e, geo_repair::validation::GeometryValidationError::WrongOrientation));
+            (!bad, poly_n_vert(p))
+        })
         .collect();
     #[cfg(not(feature = "parallel"))]
     let infos: Vec<_> = polys
         .iter()
-        .map(|p| (validate_polygon(p), poly_n_vert(p)))
+        .map(|p| {
+            let v = p.validate();
+            let bad = v
+                .errors
+                .iter()
+                .any(|e| !matches!(e, geo_repair::validation::GeometryValidationError::WrongOrientation));
+            (!bad, poly_n_vert(p))
+        })
         .collect();
     let n_valid = infos.iter().filter(|(v, _)| *v).count();
     let n_invalid = n_polys - n_valid;

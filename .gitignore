@@ -9,3 +9,7 @@ benches/real_world/*
 *.py
 *.py[cod]
 patches/
+# cargo-fuzz build artifacts (corpus/ is committed)
+fuzz/target/
+fuzz/artifacts/
+fuzz/coverage/
