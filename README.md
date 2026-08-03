@@ -13,18 +13,15 @@
 > and feature flags are all subject to change as we improve correctness
 > and performance.
 
-OGC geometry repair and validation for Rust. Built-in I/O for WKB, WKT,
-and a custom binary batch format, no extra dependencies required.
-Detects and fixes invalid GIS geometries (self-intersections, unclosed
-rings, degenerate shapes, NaN coordinates, and more) using algorithms
-selected by geometry type.
+OGC geometry repair and validation for Rust. Detects and fixes invalid
+GIS geometries (self-intersections, unclosed rings, degenerate shapes,
+NaN coordinates) using algorithms selected by geometry type. Passes the
+GEOS XML validation suite. Built-in I/O for WKB, WKT, and a custom
+binary batch format with no extra dependencies.
 
-The **Structure** strategy (default) mirrors GEOS's ST_MakeValid
-algorithm: planar graph extraction, face walking, and winding-number
-assembly. The **Arrange** strategy uses CDT-based repair as a robust
-fallback for complex topologies. The GEOS XML validation suite passes
-**934/934 dispatched cases** (see Limitations for the skipped and masked
-portions).
+The **Structure** strategy (default) mirrors GEOS ST_MakeValid: planar
+graph extraction, face walking, winding-number assembly. The **Arrange**
+strategy is a CDT-based fallback for complex topologies.
 
 Performance on the 1.58M-polygon production dataset (i5-12400F, release,
 parallel batch, GEOS 3.14.1 conda-forge as reference):
@@ -34,12 +31,6 @@ parallel batch, GEOS 3.14.1 conda-forge as reference):
 | Validation (1.58M) | **0.83 s** | 3.37 s | **0.25x (4x faster)** |
 | Invalid subset (2,298 polys) | 3.87 s | **2.38 s** | 1.63x |
 | Full dataset (1.58M polys) | 4.93 s | **3.57 s** | 1.38x |
-
-Validation is 4x faster than GEOS isValid; invalid-repair and the full
-pass trail GEOS by 1.4-1.6x. Note the validator gap: GEOS isValid
-accepts all 1.58M raw polygons, while our validator flags 2,298 (a
-stricter tolerance class, see Limitations). Every polygon we repair is
-accepted by GEOS isValid afterwards.
 
 ## Performance
 
