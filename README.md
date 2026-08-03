@@ -245,12 +245,20 @@ biggest giant).
 1. **GEOS comparison is against conda-forge MSVC GEOS** (serial
    per-call, no LTO, no mimalloc). A static LLVM-built GEOS would
    improve the GEOS side of every table.
-2. **Validator strictness gap.** Our validator flags 2,298 of the 1.58M
-   raw polygons that GEOS isValid accepts (the sliver/needle class,
-   ~32-ulp tolerance). After repair, GEOS isValid accepts all 2,298
-   outputs; our stricter validator still flags 29 (crossing-hole
-   class, CDT fallback artifacts). The invalid count is classifier-
-   dependent: 2,298 via `arrange::validate_polygon`
+2. **Validator strictness gap (deliberate policy).** Our validator runs
+   Shewchuk exact predicates (agreeing with GEOS on the OGC definition,
+   934/934 GEOS XML suite pass) plus one relative noise gate: edges
+   whose exact orientation is nonzero but within ~32 ulps of the pair's
+   own length scale are treated as coincident. That gate flags 2,298 of
+   the 1.58M raw polygons that GEOS isValid accepts. The gate exists
+   because production data's precision floor is far below f64 and
+   accepting noise-scale separations destabilizes downstream
+   overlay/buffer geometry; it is the documented strictness policy (see
+   `src/validation/mod.rs`). The repair contract is a superset: after
+   repair, GEOS isValid accepts all 2,298 outputs; our stricter
+   validator still flags 29 (crossing-hole class, CDT fallback
+   artifacts). The invalid count is classifier-dependent: 2,298 via
+   `arrange::validate_polygon`
    (orientation-agnostic), 1,855 under an older GeoValidation-folded
    classifier.
 3. **W/12 pool-saturation floor.** The parallel batch fills all 12

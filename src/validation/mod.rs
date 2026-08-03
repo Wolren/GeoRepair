@@ -4,6 +4,40 @@
 //! Shewchuk adaptive-precision orientation tests (via the `robust` crate)
 //! for reliable results near degeneracies.
 //!
+//! # Strictness policy: exact predicates plus noise-scale gates
+//!
+//! The predicates are exact (Shewchuk), and where GEOS itself is exact they
+//! agree with GEOS's classification - verified by the 934/934 GEOS XML
+//! suite pass. On top of the exact predicates the validator applies two
+//! RELATIVE tolerance gates:
+//!
+//! - `collinear_eps = 32 * EPSILON * L²` (edge-pair proximity, see
+//!   `edge_intersects`): edges whose exact orientation is nonzero but
+//!   within ~32 ulps of the pair's own length scale are treated as
+//!   coincident and flag a SelfIntersection. This is the only class where
+//!   the validator is deliberately STRICTER than GEOS isValid.
+//! - `1e-12 * L²` vertex-on-edge tolerance (T-junction class): a vertex
+//!   within that band of an edge counts as touching it. This implements
+//!   GEOS's own rule (GEOS flags vertex-on-edge rings, XML Test 22) with a
+//!   noise floor instead of an exact-only test.
+//!
+//! Rationale for the collinear gate: production GIS data comes from
+//! toolchains whose precision is far below f64, so a 32-ulp separation
+//! almost certainly means the source intended the edges to coincide.
+//! Accepting noise-scale separations as valid bakes rounding artifacts into
+//! the topology and destabilizes downstream overlay/buffer geometry. The
+//! gates are relative to the pair's own length so the same feature
+//! classifies identically at any coordinate magnitude.
+//!
+//! Conformance note: per the strict OGC definition (exact predicates only)
+//! the collinear gate is non-conformant strictness - GEOS isValid and a
+//! pure exact validator accept the class. The repair contract is a
+//! superset: everything the gates flag is repaired, and the repaired
+//! output satisfies GEOS isValid (measured: 0/2298 flagged parts invalid
+//! per GEOS after repair). The gates are the two epsilons above; they are
+//! the deliberate, documented strictness policy of this crate, not
+//! implementation noise.
+//!
 //! # Rules checked
 //!
 //! | Rule | Applies to |
