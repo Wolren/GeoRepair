@@ -93,7 +93,7 @@ pub fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
         .iter()
         .enumerate()
         .filter_map(|(i, (poly, _))| {
-            if parent_count[i] % 2 != 0 {
+            if !parent_count[i].is_multiple_of(2) {
                 return None; // odd → becomes a hole of its parent
             }
             let mut poly = poly.clone();
@@ -115,14 +115,14 @@ pub fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
             let safe_to_convert = with_area
                 .iter()
                 .enumerate()
-                .filter(|(k, _)| *k != i && parent_count[*k] % 2 == 0)
+                .filter(|(k, _)| *k != i && parent_count[*k].is_multiple_of(2))
                 .all(|(k, _)| {
                     let (m2x, m2x2, m2y, m2y2) = crate::simd::aabb_minmax_simd(&with_area[k].0.exterior().0);
                     let (mnx, mxx, mny, mxy) = parent_bbox;
                     !(mnx <= m2x2 && mxx >= m2x && mny <= m2y2 && mxy >= m2y)
                 });
             for k in 0..n {
-                if k == i || parent_count[k] % 2 == 0 {
+                if k == i || parent_count[k].is_multiple_of(2) {
                     continue;
                 }
                 if safe_to_convert && parent[k] == Some(i) {

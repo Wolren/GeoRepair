@@ -215,10 +215,10 @@ pub fn extract_all_faces_geos(graph: &Graph) -> Option<Vec<Vec<(usize, usize)>>>
                     }
                 }
             }
-            if let Some(pi) = prev_in {
-                if let Some(fo) = first_out {
-                    ccw_next[pi] = fo;
-                }
+            if let Some(pi) = prev_in
+                && let Some(fo) = first_out
+            {
+                ccw_next[pi] = fo;
             }
         }
     }

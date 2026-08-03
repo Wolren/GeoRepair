@@ -68,6 +68,21 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y libgeos-dev geos-bin
       - run: cargo test --no-default-features --features "arrange,structure,parallel,simd,validate"
 
+  # Python bindings gate: build the maturin wheel and run the WKT-surface
+  # test suite (tests/test_python.py) against the real wheel.
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: pip install maturin pytest
+      - run: maturin build --release
+      - run: pip install --force-reinstall target/wheels/*.whl
+      - run: pytest tests/test_python.py -q
+
   # Real-GEOS oracle gate: runs geos_compare (geosop makeValid comparisons on
   # every fixture), alaska_fixture (GEOS-validity + area-preservation on the
   # real-world dataset) and geos_differential (random-polygon differential
@@ -131,3 +146,55 @@ jobs:
       - run: cargo doc --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,ffi,serde"
         env:
           RUSTDOCFLAGS: -D warnings
+
+  # Semver gate: a minor/patch bump must never silently break the public
+  # API. Compares the working tree against the last published release
+  # (pinned so pre-bump PRs stay green: there is nothing to compare until
+  # Cargo.toml moves past the baseline). Bump `baseline` on every release.
+  semver:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: obi1kenobi/cargo-semver-checks-action@v2
+        with:
+          baseline: 0.14.1
+
+  # Supply-chain gate 1: RustSec advisory database (known vulnerabilities
+  # in the dependency graph fail the build).
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: rustsec/actions-github-audit@v2
+
+  # Supply-chain gate 2: license policy + sources + advisories via
+  # cargo-deny (policy in deny.toml at the repo root).
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: embarkstudios/cargo-deny-action@v2
+        with:
+          command: check
+          arguments: licenses advisories sources
+
+  # libFuzzer smoke gate: the repair entry points must build under
+  # cargo-fuzz and survive a bounded run on the committed corpus + fresh
+  # mutations. A crash (panic escaping the containment guards, or invalid
+  # output shipped) fails the job; artifacts land in fuzz/artifacts.
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@nightly
+      - run: cargo install cargo-fuzz --locked
+      - name: Build fuzz targets
+        run: cargo fuzz build
+      - name: Smoke - make_valid (Auto/Arrange/Structure contract)
+        run: cargo fuzz run make_valid -- -runs=3000 -max_len=1024
+      - name: Smoke - validate (panic-free + valid-input preservation)
+        run: cargo fuzz run validate -- -runs=3000 -max_len=1024
+      - name: Smoke - wkt_repair (parse + repair pipeline)
+        run: cargo fuzz run wkt_repair -- -runs=3000 -max_len=2048

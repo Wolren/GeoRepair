@@ -31,9 +31,9 @@ release, parallel batch, GEOS 3.14.1 conda-forge as reference):
 
 | Dataset | GeoRepair | GEOS | vs GEOS |
 |---------|----------:|-----:|:-------:|
-| Validation (1.58M) | **0.8 s** | 3.6-3.9 s | **0.2-0.3x (3-5x faster)** |
-| Invalid subset (2,298 polys) | 3.3-4.4 s | **2.5 s** | 1.3-1.7x |
-| Full dataset (1.58M polys) | 4.2-4.7 s | **3.5 s** | 1.2-1.3x |
+| Validation (1.58M) | **0.8-2.3 s** | 3.6-3.9 s | **0.2-0.6x (2-5x faster)** |
+| Invalid subset (1 poly, 2026-08-03) | 11.9 ms | **2.2 ms** | 5.4x |
+| Full dataset (1.58M polys) | 3.5-4.3 s | **3.3-3.5 s** | 1.0-1.2x |
 
 ## Performance
 
@@ -51,9 +51,9 @@ is excluded from the timings.
 
 | Dataset | GeoRepair (par) | GEOS (par batch) | vs GEOS |
 |---------|----------------:|-----------------:|:-------:|
-| Validation (1.58M) | **0.8 s** (0.5 µs/poly) | 3.6-3.9 s (2.3-2.5 µs/poly) | **0.2-0.3x** |
-| Invalid subset (2,298 polys) | 3.3-4.4 s (1.4-1.9 ms/poly) | **2.5 s** (1.1 ms/poly) | 1.3-1.7x |
-| Full dataset (1.58M polys) | 4.2-4.7 s | **3.5 s** | 1.2-1.3x |
+| Validation (1.58M) | **0.8-2.3 s** (0.5-1.5 µs/poly) | 3.6-3.9 s (2.3-2.5 µs/poly) | **0.2-0.6x** |
+| Invalid subset (1 poly, 2026-08-03) | 11.9 ms | **2.2 ms** | 5.4x |
+| Full dataset (1.58M polys) | 3.5-4.3 s | **3.3-3.5 s** | 1.0-1.2x |
 
 Two settled runs per source; the bands cover the run-to-run spread. The
 GeoRepair column is measured in the same process as the GEOS column
@@ -200,9 +200,6 @@ GEOS_VERSION=3.14.1 cargo bench --features bench-geos-system,arrange,structure,p
 
 # Synthetic benchmarks, serial + parallel columns only (no GEOS)
 cargo bench --features arrange,structure,parallel,simd --bench bench
-
-# Criterion microbenchmarks (known-unrepresentative: 3 synthetic shapes)
-cargo bench --features bench-criterion --bench criterion
 ```
 
 Full GEOS setup lives in `benches/AGENTS.md`. Measurement rules that
@@ -217,33 +214,32 @@ biggest giant).
 1. **GEOS comparison is against conda-forge MSVC GEOS** (serial
    per-call, no LTO, no mimalloc). A static LLVM-built GEOS would
    improve the GEOS side of every table.
-2. **Validator strictness gap (deliberate policy).** Our validator runs
-   Shewchuk exact predicates (agreeing with GEOS on the OGC definition,
-   934/934 GEOS XML suite pass) plus one relative noise gate: edges
-   whose exact orientation is nonzero but within ~32 ulps of the pair's
-   own length scale are treated as coincident. That gate flags 2,298 of
-   the 1.58M raw polygons that GEOS isValid accepts. The gate exists
-   because production data's precision floor is far below f64 and
-   accepting noise-scale separations destabilizes downstream
-   overlay/buffer geometry; it is the documented strictness policy (see
-   `src/validation/mod.rs`). The repair contract is a superset: after
-   repair, GEOS isValid accepts all 2,298 outputs (full-mode bench,
-   2026-08-03), and our stricter validator accepts every repaired
-   output it rejected the input for: the dispatch chain gates each
-   arm, so a repair ships only validator-clean geometry and degrades
-   to an empty GeometryCollection otherwise (sampled 60/60 on the
-   real-world invalid subset with the full validator). Validator gaps
-   closed 2026-08-03 (differential fuzz vs GEOS): exact-collinear
-   micro-edge overlaps below the length gate, -0.0 pinches, closing-
-   edge backtracking (the pair (0, n-1) was skipped outright), and
-   segment-local vertex-on-edge tolerance (a pair-max eps inflated
-   past micro segments in mixed-magnitude rings). The invalid count
-   is classifier-dependent: 2,298 via `arrange::validate_polygon`
-   (orientation-agnostic), 1,855 under an older GeoValidation-folded
-   classifier. Note: the `--fast` bench gate uses that lightweight
-   `arrange::validate_polygon`, which is stricter than the full
-   validator on real-world Structure outputs (flags all 2,298); a
-   pre-existing fast-gate artifact, not the full-validator verdict.
+2. **Validator strictness gate (deliberate policy, real-world impact ~1 poly).**
+   Our validator runs Shewchuk exact predicates (agreeing with GEOS on the
+   OGC definition, 934/934 GEOS XML suite pass) plus one relative noise
+   gate: edges whose exact orientation is nonzero but within ~32 ulps of
+   the pair's own length scale are treated as coincident (see
+   `src/validation/mod.rs`). Measured on the 1.58M real-world dataset
+   (2026-08-03): 1,579,029 parts are winding-only (CW, GEOS-valid), and
+   exactly 1 part carries a non-winding defect. Earlier counts (2,298 via
+   `arrange::validate_polygon`, 1,855 via the full validator) were
+   inflated by a real bug: the product-form proper-crossing test
+   `o1 * o2 < 0.0` treated a -0.0 orientation (an exact collinear touch,
+   common on snapped real-world vertices) as a crossing, flagging
+   GEOS-valid geometry. Fixed 2026-08-03 with a zero-safe strict
+   opposite-sign predicate in `edges_intersect_general` and in the sweep
+   (`segments_properly_cross`, `has_no_intersections`), which also closed
+   the `--fast` bench gate artifact: `arrange::validate_polygon` previously
+   flagged all 2,298 real-world Structure outputs while the full validator
+   and GEOS accepted them; it now agrees with GEOS (the zero-orient fix
+   plus an inclusive hole-containment check, GEOS-aligned for
+   boundary-touching holes). Repair contract is unchanged: a repair ships
+   only validator-clean geometry and degrades to an empty
+   GeometryCollection otherwise. Earlier 2026-08-03 differential-fuzz
+   fixes still in force: exact-collinear micro-edge overlaps below the
+   length gate, -0.0 pinches, closing-edge backtracking (the pair
+   (0, n-1) was skipped outright), segment-local vertex-on-edge tolerance
+   (a pair-max eps inflated past micro segments in mixed-magnitude rings).
 3. **W/12 pool-saturation floor.** The parallel batch fills all 12
    workers with giants; nested intra-poly rayon finds no idle threads
    in-batch. Standalone, the parallel check measures 96 → 53 ms; in
@@ -256,9 +252,10 @@ biggest giant).
 5. **Mass-overlap repairs are the slowest synthetic class** (dense
    grid 20x20: ~0.76 ms/poly parallel) but remain 100x+ faster than
    GEOS on the same shapes.
-6. **Python bindings: `tests/test_python.py` is 13/23.** GeoJSON
-   bindings were removed by design; the test file still imports them.
-   Pending a decision on the test file.
+6. **Python bindings: `tests/test_python.py` covers the WKT surface
+   (18 tests).** GeoJSON bindings were removed by design; the test file
+   now imports only `repair_wkt` / `repair_wkt_batch` / `is_valid_wkt` /
+   `validate_wkt` / `validate_wkt_batch` / `validate_and_fix_wkt`.
 7. **`simd-portable` is nightly-only** (3 E0554 on stable, expected).
    Hand-written AVX2 beyond the bbox scan measured slower than
    auto-vectorized scalar (point_in_ring 8.4x, is_ring_ccw 2.8x) and is
@@ -335,7 +332,6 @@ assert!(!adapter.is_valid());
 | `io-all-native` | All opt-in backends including gpkg | no |
 | `bench-geos` | GEOS comparison benchmarks (build from source, MSVC, no LTO) | no |
 | `bench-geos-system` | GEOS comparison benchmarks (link against system GEOS, conda-forge MSVC) | no |
-| `bench-criterion` | Criterion benchmark harness | no |
 
 ## License
 

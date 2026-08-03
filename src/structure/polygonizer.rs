@@ -171,7 +171,7 @@ fn build_area_filter(polys: Vec<Polygon<f64>>) -> Vec<Polygon<f64>> {
             count += 1;
             cur = faces[pidx].parent;
         }
-        if count % 2 == 0 {
+        if count.is_multiple_of(2) {
             result.push(fi.poly.clone());
         }
     }

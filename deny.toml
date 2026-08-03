@@ -1,0 +1,37 @@
+# License + advisory policy for geo-repair. Enforced by the `deny` CI job
+# (embarkstudios/cargo-deny-action) and `cargo deny check` locally.
+#
+# The dependency tree is permissive-licensed; any copyleft (GPL/AGPL/LGPL)
+# or unknown license fails the gate.
+
+[advisories]
+# RustSec advisory database: deny known-vulnerability advisories by default.
+yanked = "deny"
+ignore = []
+
+[bans]
+multiple-versions = "allow"
+
+[licenses]
+# Allow list is exactly the license set present in the dependency graph
+# (verified 2026-08-03 via `cargo deny list`): any new license from a
+# future dependency fails the gate until it is explicitly added here.
+# Unlisted licenses (including all copyleft) are rejected.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSL-1.0",      # ryu (Boost Software License 1.0)
+    "Unicode-3.0",  # unicode-ident
+    "Unlicense",    # byteorder, memchr
+    "Zlib",         # foldhash
+]
+# Missing license metadata is a hard failure: prefer correct metadata over
+# a guessing game in CI.
+confidence-threshold = 0.8
+
+[sources]
+# The published crate must only come from crates.io; git dependencies are
+# acceptable in the dev/fuzz graph but the release tree stays registry-only.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

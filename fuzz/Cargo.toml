@@ -1,0 +1,37 @@
+[package]
+name = "geo-repair-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+geo = "0.33"
+geo-repair = { path = "..", features = ["arrange", "structure", "parallel", "simd", "validate", "io-wkt"] }
+
+# Prevent this crate from accidentally being used as a normal dependency.
+[workspace]
+
+[[bin]]
+name = "make_valid"
+path = "fuzz_targets/make_valid.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "validate"
+path = "fuzz_targets/validate.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "wkt_repair"
+path = "fuzz_targets/wkt_repair.rs"
+test = false
+doc = false
+bench = false
