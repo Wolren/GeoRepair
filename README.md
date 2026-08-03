@@ -26,43 +26,45 @@ The **Structure** strategy (default) mirrors GEOS ST_MakeValid: planar
 graph extraction, face walking, winding-number assembly. The **Arrange**
 strategy is a CDT-based fallback for complex topologies.
 
-Performance on the 1.58M-polygon production dataset (i5-12400F, release,
-parallel batch, GEOS 3.14.1 conda-forge as reference):
+Performance on the 1,579,030-polygon production dataset (i5-12400F,
+release, parallel batch, GEOS 3.14.1 conda-forge as reference):
 
 | Dataset | GeoRepair | GEOS | vs GEOS |
 |---------|----------:|-----:|:-------:|
-| Validation (1.58M) | **0.83 s** | 3.37 s | **0.25x (4x faster)** |
-| Invalid subset (2,298 polys) | 3.87 s | **2.38 s** | 1.63x |
-| Full dataset (1.58M polys) | 4.93 s | **3.57 s** | 1.38x |
+| Validation (1.58M) | **0.8 s** | 3.6-3.9 s | **0.2-0.3x (3-5x faster)** |
+| Invalid subset (2,298 polys) | 3.3-4.4 s | **2.5 s** | 1.3-1.7x |
+| Full dataset (1.58M polys) | 4.2-4.7 s | **3.5 s** | 1.2-1.3x |
 
 ## Performance
 
-### Real-world dataset (1,578,988 polygons)
+### Real-world dataset (1,579,030 polygons)
 
-Structure batch on a production GIS dataset. i5-12400F (6C/12T), release
-profile (LTO), mimalloc (default feature), Rayon 12-thread batch on both
-sides. GEOS is conda-forge `libgeos` 3.14.1, MSVC, serial per-call, no
-LTO; "par batch" means many GEOS C calls run concurrently via Rayon.
-GEOS geometries are built via CoordSeq direct construction, no WKT
-round-trip; the one-time pre-build of 1.58M GEOS geometries (1.34 s) is
-excluded from the timings.
+Structure batch on a production GIS dataset, read from the original
+GeoPackage (its geometry blobs are WKB; 813 features flattened to
+1,579,030 polygon parts). i5-12400F (6C/12T), release profile (LTO),
+mimalloc (default feature), Rayon 12-thread batch on both sides. GEOS
+is conda-forge `libgeos` 3.14.1, MSVC, serial per-call, no LTO; "par
+batch" means many GEOS C calls run concurrently via Rayon. GEOS
+geometries are built via CoordSeq direct construction, no WKT
+round-trip; the one-time pre-build of 1.58M GEOS geometries (1.4-1.5 s)
+is excluded from the timings.
 
 | Dataset | GeoRepair (par) | GEOS (par batch) | vs GEOS |
 |---------|----------------:|-----------------:|:-------:|
-| Validation (1.58M) | **0.83 s** (0.53 µs/poly) | 3.37 s (2.13 µs/poly) | **0.25x** |
-| Invalid subset (2,298 polys) | 3.87 s (1.68 ms/poly) | **2.38 s** (1.03 ms/poly) | 1.63x |
-| Full dataset (1.58M polys) | 4.93 s | **3.57 s** | 1.38x |
+| Validation (1.58M) | **0.8 s** (0.5 µs/poly) | 3.6-3.9 s (2.3-2.5 µs/poly) | **0.2-0.3x** |
+| Invalid subset (2,298 polys) | 3.3-4.4 s (1.4-1.9 ms/poly) | **2.5 s** (1.1 ms/poly) | 1.3-1.7x |
+| Full dataset (1.58M polys) | 4.2-4.7 s | **3.5 s** | 1.2-1.3x |
 
-Two settled runs; noise bands: validation 0.22-0.25x, invalid subset
-1.59-1.63x, full pass 1.19-1.38x. The GeoRepair column is measured in
-the same process as the GEOS column (co-residency inflates it 5-15%
-vs a standalone run, where the full pass is ~4.1-4.2 s).
+Two settled runs per source; the bands cover the run-to-run spread. The
+GeoRepair column is measured in the same process as the GEOS column
+(co-residency inflates it 5-15% vs a standalone run, where the full
+pass is ~4.1-4.2 s).
 
 Validator comparison on the raw dataset:
 
 | | GeoRepair | GEOS isValid |
 |---|---:|---:|
-| Valid | 1,576,690 | 1,578,988 |
+| Valid | 1,576,732 | 1,579,030 |
 | Invalid | 2,298 | 0 |
 
 Our validator is stricter than GEOS isValid, and every polygon it

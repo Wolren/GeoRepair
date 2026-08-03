@@ -69,7 +69,7 @@ jobs:
       - name: Synthetic bench (serial vs parallel sweep)
         run: cargo bench --bench bench
       - name: Real-world bench (alaska fixture, Structure vs GEOS)
-        run: cargo bench --features "arrange,structure,parallel,simd,bench-geos-system" --bench real_world -- --fast
+        run: cargo bench --features "arrange,structure,parallel,simd,bench-geos-system,io-gpkg" --bench real_world -- --fast
         env:
           BENCH_FILE: benches/real_world/alaska.bin
 
