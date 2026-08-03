@@ -1,23 +1,26 @@
-<p align="center">
-  <h1 align="center">GeoRepair</h1>
+<div align="center">
+
+# GeoRepair
+
+OGC geometry repair and validation for Rust. Passes the GEOS XML validation suite.
 
 [![crate](https://img.shields.io/crates/v/geo-repair.svg)](https://crates.io/crates/geo-repair)
 [![docs](https://docs.rs/geo-repair/badge.svg)](https://docs.rs/geo-repair)
 ![MSRV](https://img.shields.io/badge/rustc-1.85+-ab6000.svg)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://github.com/georust/geo-repair?tab=License-1-ov-file)
 [![Status](https://img.shields.io/badge/status-experimental-orange.svg)]()
-</p>
+
+</div>
 
 > **This crate is experimental.** The API is actively evolving: expect
 > breaking changes between 0.x releases. Core algorithms, I/O backends,
 > and feature flags are all subject to change as we improve correctness
 > and performance.
 
-OGC geometry repair and validation for Rust. Detects and fixes invalid
-GIS geometries (self-intersections, unclosed rings, degenerate shapes,
-NaN coordinates) using algorithms selected by geometry type. Passes the
-GEOS XML validation suite. Built-in I/O for WKB, WKT, and a custom
-binary batch format with no extra dependencies.
+Detects and fixes invalid GIS geometries (self-intersections, unclosed
+rings, degenerate shapes, NaN coordinates) using algorithms selected by
+geometry type. Built-in I/O for WKB, WKT, and a custom binary batch
+format with no extra dependencies.
 
 The **Structure** strategy (default) mirrors GEOS ST_MakeValid: planar
 graph extraction, face walking, winding-number assembly. The **Arrange**
