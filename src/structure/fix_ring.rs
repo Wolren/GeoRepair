@@ -496,7 +496,12 @@ pub fn try_fast_fix(coords: &[Coord<f64>]) -> Option<Vec<LineString<f64>>> {
     // but the area is partitioned wrong (measured: 5609 → 116, 98% loss).
     // Verify no second crossing exists before accepting.
     let (i0, j0, _) = pair;
-    if find_second_intersection(coords, eps, i0, j0).is_some() {
+    let second = if n > core::GRID_THRESHOLD_N {
+        super::sweep::find_second_intersection(coords, eps, i0, j0)
+    } else {
+        find_second_intersection_bruteforce(coords, eps, i0, j0)
+    };
+    if second.is_some() {
         return None;
     }
 
@@ -506,9 +511,9 @@ pub fn try_fast_fix(coords: &[Coord<f64>]) -> Option<Vec<LineString<f64>>> {
 }
 
 /// Find any proper crossing OTHER than the edge pair (i0, j0). O(n²) brute
-/// force with early exit — only called once per fast-path attempt, and the
-/// ring is already known to be small (GRID_THRESHOLD_N bound in callers).
-fn find_second_intersection(
+/// force with early exit — only called for rings within GRID_THRESHOLD_N
+/// (larger rings route to sweep::find_second_intersection, O(n log n)).
+fn find_second_intersection_bruteforce(
     coords: &[Coord<f64>],
     eps: f64,
     i0: usize,

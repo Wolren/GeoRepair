@@ -168,3 +168,6 @@ pub(crate) use fallback::{
     aabb_minmax_simd, is_ring_ccw_simd, orient2d_batch_4, point_in_ring_exclusive,
     snap_coords_simd,
 };
+/// Public aabb for external diagnostics (examples).
+#[cfg(not(feature = "simd-portable"))]
+pub use fallback::aabb_minmax_simd as aabb_minmax_public;
