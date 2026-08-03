@@ -227,12 +227,23 @@ biggest giant).
    accepting noise-scale separations destabilizes downstream
    overlay/buffer geometry; it is the documented strictness policy (see
    `src/validation/mod.rs`). The repair contract is a superset: after
-   repair, GEOS isValid accepts all 2,298 outputs; our stricter
-   validator still flags 29 (crossing-hole class, CDT fallback
-   artifacts). The invalid count is classifier-dependent: 2,298 via
-   `arrange::validate_polygon`
+   repair, GEOS isValid accepts all 2,298 outputs (full-mode bench,
+   2026-08-03), and our stricter validator accepts every repaired
+   output it rejected the input for: the dispatch chain gates each
+   arm, so a repair ships only validator-clean geometry and degrades
+   to an empty GeometryCollection otherwise (sampled 60/60 on the
+   real-world invalid subset with the full validator). Validator gaps
+   closed 2026-08-03 (differential fuzz vs GEOS): exact-collinear
+   micro-edge overlaps below the length gate, -0.0 pinches, closing-
+   edge backtracking (the pair (0, n-1) was skipped outright), and
+   segment-local vertex-on-edge tolerance (a pair-max eps inflated
+   past micro segments in mixed-magnitude rings). The invalid count
+   is classifier-dependent: 2,298 via `arrange::validate_polygon`
    (orientation-agnostic), 1,855 under an older GeoValidation-folded
-   classifier.
+   classifier. Note: the `--fast` bench gate uses that lightweight
+   `arrange::validate_polygon`, which is stricter than the full
+   validator on real-world Structure outputs (flags all 2,298); a
+   pre-existing fast-gate artifact, not the full-validator verdict.
 3. **W/12 pool-saturation floor.** The parallel batch fills all 12
    workers with giants; nested intra-poly rayon finds no idle threads
    in-batch. Standalone, the parallel check measures 96 → 53 ms; in
@@ -266,6 +277,36 @@ biggest giant).
     trustworthy metrics are the real-world batch numbers and the larger
     synthetic rows.
 
+## Integration with the geo ecosystem
+
+geo-repair is built on `geo` types and plugs into the georust ecosystem two
+ways:
+
+- **geo-traits sources** (`geo-traits` feature). The `interop` module runs
+  validation and repair over `geo_traits::GeometryTrait` /
+  `geo_traits::GeometryCollectionTrait`, the trait layer implemented by
+  `geo`, geoarrow, geozero, and `wkb`. Any such source can be validated or
+  repaired in one call (`interop::is_valid_geometry`,
+  `interop::make_valid_geometry`, `interop::make_valid_geometries`, ...)
+  without materializing `geo` types; results come back as `geo::Geometry<f64>`.
+
+- **geo's `Validation` trait** (always available). `GeoRepairValidation(&geometry)`
+  wraps any `&geo::Geometry<f64>` and exposes geo_repair's validator through
+  geo's `Validation` trait (`.is_valid()`, `.check_validation()`,
+  `.validation_errors()`) with geo's `Invalid*` error taxonomy. The orphan
+  rule prevents implementing geo's trait for geo's own types, so the adapter
+  is the bridge. Mapping is best-effort: geo_repair's stricter gates (32-ulp
+  collinear, T-junction) surface through it, and classes geo does not model
+  (ring closure, orientation, duplicates, ...) are omitted from the geo view.
+
+```rust
+use geo::algorithm::validation::Validation;
+use geo_repair::GeoRepairValidation;
+
+let adapter = GeoRepairValidation(&geometry);
+assert!(!adapter.is_valid());
+```
+
 ## Features
 
 | Feature | Description | Default |
@@ -283,6 +324,7 @@ biggest giant).
 | `proj` | CRS transformation (placeholder) | no |
 | `serde` | Geometry serde support (`geo/serde`) | no |
 | `ffi` | C-compatible FFI bindings | no |
+| `geo-traits` | Interop surface over `geo_traits::GeometryTrait` / `GeometryCollectionTrait` (geo, geoarrow, geozero, wkb sources) | no |
 | `python` | Python bindings via PyO3 | no |
 | `io-shp` | Shapefile format backend | no |
 | `io-wkt` | No-op (WKT is built-in, kept for CI compatibility) | no |

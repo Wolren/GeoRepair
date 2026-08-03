@@ -10,7 +10,7 @@ readme = "README.md"
 keywords = ["gis", "geo", "validation", "repair", "no-std"]
 categories = ["science::geo"]
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 exclude = ["tests/*.py", "*.py", ".history/",
     "benches/real_world/*.bin", "benches/real_world/*.shp",
     "benches/real_world/*.shx", "benches/real_world/*.dbf",
@@ -23,7 +23,7 @@ exclude = ["tests/*.py", "*.py", ".history/",
 # surface (defaults + the format backends + serde) instead.
 [package.metadata.docs.rs]
 all-features = false
-features = ["std", "arrange", "structure", "parallel", "simd", "validate", "mimalloc", "io-all", "io-gpkg", "serde"]
+features = ["std", "arrange", "structure", "parallel", "simd", "validate", "mimalloc", "io-all", "io-gpkg", "serde", "geo-traits"]
 
 [features]
 default = ["std", "arrange", "structure", "parallel", "simd", "validate", "mimalloc"]
@@ -33,8 +33,12 @@ default = ["std", "arrange", "structure", "parallel", "simd", "validate", "mimal
 # without std — only file/network I/O requires it.
 std = ["thiserror/std"]
 rstar = ["dep:rstar"]
-arrange = ["dep:spade", "geo/spade", "rstar"]
-structure = ["simd", "rstar"]
+# The two repair strategies are a coupled pair: Structure's boolean
+# subtract uses Arrange's overlap helpers, and Arrange's Auto dispatch
+# falls back to Structure's fast path. Each implies the other; enabling
+# either alone was never a supported configuration.
+arrange = ["dep:spade", "geo/spade", "rstar", "structure"]
+structure = ["simd", "rstar", "arrange"]
 validate = ["rstar"]
 parallel = ["dep:rayon", "geo/multithreading"]
 # SIMD acceleration
@@ -50,7 +54,11 @@ bench-geos = ["geos/static"]
 bench-geos-system = ["dep:geos"]
 
 python = ["dep:pyo3", "geo/serde"]
-ffi = ["dep:wkb", "dep:geo-traits"]
+ffi = ["dep:wkb", "geo-traits"]
+# geo-traits GeometryTrait/GeometryCollectionTrait interop surface. Lets any
+# geometry source that implements geo-traits (geo, geoarrow, geozero, wkb)
+# drive the validation and repair engines without materializing geo types.
+geo-traits = ["dep:geo-traits"]
 
 # WASM browser fetch (synchronous XHR — blocks main thread)
 wasm = ["dep:js-sys", "dep:wasm-bindgen", "dep:web-sys"]

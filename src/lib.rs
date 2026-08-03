@@ -12,7 +12,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! geo-repair = "0.12"
+//! geo-repair = "0.14"
 //! ```
 //!
 //! ```rust
@@ -58,6 +58,93 @@
 //! };
 //! let fixed = geometry.make_valid_with_config(&config);
 //! ```
+//!
+//! ## Integration with the geo ecosystem
+//!
+//! geo-repair is built on `geo` types and participates in the georust
+//! ecosystem through two layers.
+//!
+//! ### geo-traits sources (feature `geo-traits`)
+//!
+//! The [`interop`] module exposes the engines over
+//! `geo_traits::GeometryTrait` / `geo_traits::GeometryCollectionTrait`, the
+//! trait layer implemented by `geo`, geoarrow, geozero, and the `wkb` crate.
+//! Any geometry source that implements those traits can be validated or
+//! repaired in one call; geo types materialize internally, and the result
+//! comes back as `geo::Geometry<f64>`.
+//!
+//! ```rust
+//! # #[cfg(feature = "geo-traits")] {
+//! use geo::{Geometry, LineString, Polygon};
+//! use geo_repair::interop::{is_valid_geometry, make_valid_geometry, validate_geometry};
+//!
+//! // Any geo-traits source works: here a geo Polygon, but a wkb or
+//! // geoarrow geometry would do the same.
+//! let bowtie = Geometry::Polygon(Polygon::new(
+//!     LineString::from(vec![(0.0, 0.0), (10.0, 10.0), (0.0, 10.0), (10.0, 0.0), (0.0, 0.0)]),
+//!     vec![],
+//! ));
+//! assert!(!is_valid_geometry(&bowtie));
+//! let fixed = make_valid_geometry(&bowtie);
+//! assert!(validate_geometry(&fixed).valid);
+//! # }
+//! ```
+//!
+//! Batch repair over a collection (`geo::GeometryCollection`, geoarrow
+//! arrays, or any `GeometryCollectionTrait`):
+//!
+//! ```rust
+//! # #[cfg(feature = "geo-traits")] {
+//! use geo::{Geometry, GeometryCollection, LineString, Polygon};
+//! use geo_repair::interop::make_valid_geometries;
+//!
+//! let collection = GeometryCollection(vec![
+//!     Geometry::Polygon(Polygon::new(
+//!         LineString::from(vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0), (0.0, 0.0)]),
+//!         vec![],
+//!     )),
+//!     Geometry::Polygon(Polygon::new(
+//!         LineString::from(vec![(0.0, 0.0), (10.0, 10.0), (0.0, 10.0), (10.0, 0.0), (0.0, 0.0)]),
+//!         vec![],
+//!     )),
+//! ]);
+//! let repaired = make_valid_geometries(&collection);
+//! assert_eq!(repaired.len(), 2);
+//! # }
+//! ```
+//!
+//! ### geo's `Validation` trait (always available)
+//!
+//! geo's `Validation` trait and `Invalid*` error enums are the ecosystem's
+//! validation vocabulary, but the orphan rule prevents implementing geo's
+//! trait for geo's own types. The [`GeoRepairValidation`] adapter wraps a
+//! `&Geometry<f64>` and exposes geo_repair's stricter engine through geo's
+//! trait: code that calls `.is_valid()`, `.check_validation()`, or
+//! `.validation_errors()` runs geo_repair's validator, including the
+//! deliberate strictness gates that geo's exact-only validator lacks.
+//!
+//! ```rust
+//! # use geo::{Geometry, LineString, Polygon};
+//! use geo::algorithm::validation::Validation;
+//! use geo_repair::GeoRepairValidation;
+//!
+//! let bowtie = Geometry::Polygon(Polygon::new(
+//!     LineString::from(vec![(0.0, 0.0), (10.0, 10.0), (0.0, 10.0), (10.0, 0.0), (0.0, 0.0)]),
+//!     vec![],
+//! ));
+//! let adapter = GeoRepairValidation(&bowtie);
+//! assert!(!adapter.is_valid());
+//! let errors = adapter.validation_errors();
+//! assert_eq!(errors.len(), 1);
+//! # let _ = errors;
+//! ```
+//!
+//! The mapping is best-effort: geo_repair checks 18 OGC rules while geo's
+//! error enums cover a subset, and geo carries ring/index payloads that
+//! geo_repair's errors do not record. Unmappable classes (ring closure,
+//! pinch points, nested holes, orientation, collinearity, duplicates) are
+//! omitted from the geo view; use [`validate`] and [`validate_reason`] for
+//! the complete report.
 //!
 //! ## WKB I/O (built-in, no dependencies)
 //!
@@ -114,6 +201,7 @@
 //! | `io-all` | All opt-in backends except gpkg | no |
 //! | `io-all-native` | All opt-in backends including gpkg | no |
 //! | `ffi` | C-compatible FFI bindings | no |
+//! | `geo-traits` | Interop surface over `geo_traits::GeometryTrait` / `GeometryCollectionTrait` (geo, geoarrow, geozero, wkb sources) | no |
 //! | `python` | Python bindings via PyO3 | no |
 //! | `proj` | CRS transformation via PROJ (requires the native PROJ library; mutually exclusive with `io-gpkg` on the sqlite3 link) | no |
 //! | `serde` | Geometry serde support | no |
@@ -343,6 +431,11 @@ pub mod validation;
 /// Z/M coordinate value preservation through the repair pipeline.
 pub mod zm;
 
+#[cfg(feature = "geo-traits")]
+/// geo-traits interop: validate and repair any `GeometryTrait` /
+/// `GeometryCollectionTrait` source (geo, geoarrow, geozero, wkb).
+pub mod interop;
+
 #[cfg(feature = "arrange")]
 /// CDT-based polygon repair for complex topologies (Arrange strategy).
 pub mod arrange;
@@ -397,7 +490,8 @@ pub use make_valid::ValidateAndFix;
 pub use snap::{DEFAULT_GRID, snap_coord, snap_coord_default, snap_line, snap_lines};
 /// OGC validation predicates and result types.
 pub use validation::{
-    GeoValidation, GeometryValidationError, ValidationResult, is_valid, validate, validate_reason,
+    GeoRepairValidation, GeoValidation, GeometryValidationError, ValidationResult, is_valid,
+    map_geo_invalid, validate, validate_reason,
 };
 
 #[cfg(feature = "mimalloc")]

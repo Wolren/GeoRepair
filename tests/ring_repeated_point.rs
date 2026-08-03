@@ -165,9 +165,13 @@ fn test_collinear_triangle_becomes_line() {
         Vec::new(),
     );
     let result = poly.make_valid_with_config(&cfg_auto());
-    // Collinear triangle → pipeline may produce polygon with opposing winding.
-    // The output is structurally correct (not empty, no panic).
-    assert_not_empty(&result);
+    // Fully-collinear zero-area ring: the closing edge backtracks over edge 0
+    // and is now flagged as a self-intersection (closing-edge pair check,
+    // differential fuzz 2026-08-03). GEOS MakeValid drops collapsed rings, so
+    // the correct output is EMPTY - or a degenerate polygon with opposing
+    // winding on paths that predate the closing-edge check. Either is
+    // structurally sound; the assertion is "valid and not a panic".
+    assert!(result.validate().valid, "output must be valid: {result:?}");
 }
 
 #[test]
