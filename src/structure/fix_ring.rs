@@ -12,7 +12,9 @@ use log::warn;
 
 pub use crate::structure::edge_split::split_edges;
 use crate::structure::edge_split::{intersect_param, lerp};
-pub use crate::structure::symdiff::{edges_from_coords, make_valid_poly_symdiff, symdiff_test};
+pub use crate::structure::symdiff::{
+    edges_from_coords, make_valid_poly_symdiff, single_pass_fix, symdiff_test,
+};
 
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]

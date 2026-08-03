@@ -285,6 +285,7 @@ mod strip;
 
 pub use multipolygon::drop_nested_components;
 pub use polygon::is_valid_with_geo;
+pub(crate) use polygon::enforce_ogc_winding;
 pub use polygon::make_valid_owned;
 pub use strip::strip_degenerate_test;
 

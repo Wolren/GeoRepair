@@ -2,9 +2,86 @@
 //! XOR the new faces into the accumulated area, remove the built boundary,
 //! and repeat until nothing remains (even-odd rule, GEOS MakeValidPoly.cpp).
 
-use geo::{Coord, Line, Polygon};
+use geo::{Coord, Line, MultiPolygon, Polygon};
 
 use log::warn;
+
+use super::fix_ring::{basic_cleanup, collapse_sub_ulp_vertices, is_collinear_ring};
+
+/// Single-pass GEOS MakeValid-style repair: node ALL ring linework (shell +
+/// holes together) in ONE pass, then BuildArea the result with even-odd face
+/// labeling. Holes become holes via the even-parent filter; self-crossings,
+/// crossing holes, hole overlaps, and holes outside the shell are all
+/// resolved by the noding + face walk — no boolean subtraction, no per-ring
+/// symdiff loop.
+///
+/// Returns `None` when the linework cannot be closed into faces (the caller
+/// falls back to the multi-stage boolean pipeline).
+pub fn single_pass_fix(poly: &Polygon<f64>) -> Option<MultiPolygon<f64>> {
+    // Routing gate: count total ring edges first (cheap O(n) scan). Above
+    // SP_MAX_EDGES the all-rings R-tree noding outweighs the boolean
+    // pipeline (measured 168 ms/poly on 200k-edge monsters vs ~36 ms) —
+    // return None so the caller's boolean pipeline handles the giants.
+    let n_edges: usize = poly
+        .exterior()
+        .0
+        .len()
+        .saturating_sub(1)
+        + poly.interiors().iter().map(|h| h.0.len().saturating_sub(1)).sum::<usize>();
+    if n_edges > crate::core::SP_MAX_EDGES {
+        return None;
+    }
+
+    // 1. Collect + clean all ring linework (shell first, then holes).
+    let mut edges: Vec<Line<f64>> = Vec::new();
+    for ring in std::iter::once(poly.exterior()).chain(poly.interiors()) {
+        let Some(coords) = basic_cleanup(ring) else { continue };
+        if coords.len() < 4 {
+            continue;
+        }
+        if is_collinear_ring(&coords) {
+            continue;
+        }
+        let coords = collapse_sub_ulp_vertices(&coords, false);
+        if coords.len() < 4 {
+            continue;
+        }
+        edges.extend(edges_from_coords(&coords));
+    }
+    if edges.is_empty() {
+        return None;
+    }
+
+    // 2. Node everything together (R-tree/sweep-line, parametric splits).
+    let mut noded = crate::structure::edge_split::split_edges(&edges);
+    if noded.is_empty() {
+        return None;
+    }
+
+    // 3. Noding validation with snap-round retry (same as fix_self_intersecting).
+    let mut validator = crate::noding::validator::NodingValidator::new(noded.clone());
+    validator.validate();
+    if validator.has_violations() {
+        warn!(
+            "single_pass_fix: {} noding violation(s) remain, retrying with snap rounding",
+            validator.violations().len()
+        );
+        let snapped = crate::noding::snap_round::snap_round_lines(&edges);
+        if !snapped.is_empty() {
+            noded = snapped;
+        }
+    }
+    if noded.is_empty() {
+        return None;
+    }
+
+    // 4. Even-odd face extraction (GEOS BuildArea port).
+    let mp = crate::structure::build_area::build_area(&noded)?;
+    if mp.0.is_empty() {
+        return None;
+    }
+    Some(mp)
+}
 
 
 /// GEOS MakeValidPoly::buildArea loop: repeatedly BuildArea the remaining

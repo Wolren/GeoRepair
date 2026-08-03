@@ -110,61 +110,137 @@ fn split_edges_rtree(edges: &[Line<f64>], split_points: &mut [SplitPoint], eps: 
         .collect();
     let tree = RTree::bulk_load(envs);
 
-    for i in 0..n {
-        let e = &edges[i];
-        let query = AABB::from_corners(
-            [e.start.x.min(e.end.x), e.start.y.min(e.end.y)],
-            [e.start.x.max(e.end.x), e.start.y.max(e.end.y)],
-        );
-        let _ = tree.locate_in_envelope_intersecting_int(query, |c| {
-            let j = c.idx;
-            if j <= i {
-                return std::ops::ControlFlow::<(), ()>::Continue(());
-            }
+    // Per-edge queries are independent — parallelize the query phase with a
+    // two-phase hit collection (a pair (i,j) may produce hits for BOTH i and
+    // j, so hits are staged flat per thread and appended after, avoiding
+    // aliased writes). Measured: noding a 260k-edge giant shell is ~100ms
+    // serial; the query phase dominates and parallelizes near-linearly.
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    {
+        use rayon::prelude::*;
+        let hits: Vec<(usize, f64, Coord<f64>)> = (0..n)
+            .into_par_iter()
+            .flat_map_iter(|i| {
+                let e = &edges[i];
+                let query = AABB::from_corners(
+                    [e.start.x.min(e.end.x), e.start.y.min(e.end.y)],
+                    [e.start.x.max(e.end.x), e.start.y.max(e.end.y)],
+                );
+                let mut local: Vec<(usize, f64, Coord<f64>)> = Vec::new();
+                let _ = tree.locate_in_envelope_intersecting_int(query, |c| {
+                    let j = c.idx;
+                    if j <= i {
+                        return std::ops::ControlFlow::<(), ()>::Continue(());
+                    }
 
-            if i.abs_diff(j) <= 1 || (i == 0 && j == n - 1) {
-                return std::ops::ControlFlow::<(), ()>::Continue(());
-            }
+                    if i.abs_diff(j) <= 1 || (i == 0 && j == n - 1) {
+                        return std::ops::ControlFlow::<(), ()>::Continue(());
+                    }
 
-            if edges[i].start == edges[j].start
-                && orient2d_fast(edges[i].start, edges[i].end, edges[j].end) != 0.0
-            {
-                return std::ops::ControlFlow::<(), ()>::Continue(());
-            }
-            if edges[i].start == edges[j].end
-                && orient2d_fast(edges[i].start, edges[i].end, edges[j].start) != 0.0
-            {
-                return std::ops::ControlFlow::<(), ()>::Continue(());
-            }
-            if edges[i].end == edges[j].start
-                && orient2d_fast(edges[i].end, edges[i].start, edges[j].end) != 0.0
-            {
-                return std::ops::ControlFlow::<(), ()>::Continue(());
-            }
-            if edges[i].end == edges[j].end
-                && orient2d_fast(edges[i].end, edges[i].start, edges[j].start) != 0.0
-            {
-                return std::ops::ControlFlow::<(), ()>::Continue(());
-            }
+                    if edges[i].start == edges[j].start
+                        && orient2d_fast(edges[i].start, edges[i].end, edges[j].end) != 0.0
+                    {
+                        return std::ops::ControlFlow::<(), ()>::Continue(());
+                    }
+                    if edges[i].start == edges[j].end
+                        && orient2d_fast(edges[i].start, edges[i].end, edges[j].start) != 0.0
+                    {
+                        return std::ops::ControlFlow::<(), ()>::Continue(());
+                    }
+                    if edges[i].end == edges[j].start
+                        && orient2d_fast(edges[i].end, edges[i].start, edges[j].end) != 0.0
+                    {
+                        return std::ops::ControlFlow::<(), ()>::Continue(());
+                    }
+                    if edges[i].end == edges[j].end
+                        && orient2d_fast(edges[i].end, edges[i].start, edges[j].start) != 0.0
+                    {
+                        return std::ops::ControlFlow::<(), ()>::Continue(());
+                    }
 
-            if let Some((ti, tj)) = intersect_param(&edges[i], &edges[j], eps)
-                && ((ti > eps && ti < 1.0 - eps) || (tj > eps && tj < 1.0 - eps))
-            {
-                let pi = lerp(edges[i], ti);
-                let pj = lerp(edges[j], tj);
-                let pt = Coord {
-                    x: (pi.x + pj.x) * 0.5,
-                    y: (pi.y + pj.y) * 0.5,
-                };
-                if ti > eps && ti < 1.0 - eps {
-                    split_points[i].push((ti, pt));
+                    if let Some((ti, tj)) = intersect_param(&edges[i], &edges[j], eps)
+                        && ((ti > eps && ti < 1.0 - eps) || (tj > eps && tj < 1.0 - eps))
+                    {
+                        let pi = lerp(edges[i], ti);
+                        let pj = lerp(edges[j], tj);
+                        let pt = Coord {
+                            x: (pi.x + pj.x) * 0.5,
+                            y: (pi.y + pj.y) * 0.5,
+                        };
+                        if ti > eps && ti < 1.0 - eps {
+                            local.push((i, ti, pt));
+                        }
+                        if tj > eps && tj < 1.0 - eps {
+                            local.push((j, tj, pt));
+                        }
+                    }
+                    std::ops::ControlFlow::<(), ()>::Continue(())
+                });
+                local
+            })
+            .collect();
+        for (idx, t, pt) in hits {
+            split_points[idx].push((t, pt));
+        }
+    }
+    #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
+    {
+        for i in 0..n {
+            let e = &edges[i];
+            let query = AABB::from_corners(
+                [e.start.x.min(e.end.x), e.start.y.min(e.end.y)],
+                [e.start.x.max(e.end.x), e.start.y.max(e.end.y)],
+            );
+            let _ = tree.locate_in_envelope_intersecting_int(query, |c| {
+                let j = c.idx;
+                if j <= i {
+                    return std::ops::ControlFlow::<(), ()>::Continue(());
                 }
-                if tj > eps && tj < 1.0 - eps {
-                    split_points[j].push((tj, pt));
+
+                if i.abs_diff(j) <= 1 || (i == 0 && j == n - 1) {
+                    return std::ops::ControlFlow::<(), ()>::Continue(());
                 }
-            }
-            std::ops::ControlFlow::<(), ()>::Continue(())
-        });
+
+                if edges[i].start == edges[j].start
+                    && orient2d_fast(edges[i].start, edges[i].end, edges[j].end) != 0.0
+                {
+                    return std::ops::ControlFlow::<(), ()>::Continue(());
+                }
+                if edges[i].start == edges[j].end
+                    && orient2d_fast(edges[i].start, edges[i].end, edges[j].start) != 0.0
+                {
+                    return std::ops::ControlFlow::<(), ()>::Continue(());
+                }
+                if edges[i].end == edges[j].start
+                    && orient2d_fast(edges[i].end, edges[i].start, edges[j].end) != 0.0
+                {
+                    return std::ops::ControlFlow::<(), ()>::Continue(());
+                }
+                if edges[i].end == edges[j].end
+                    && orient2d_fast(edges[i].end, edges[i].start, edges[j].start) != 0.0
+                {
+                    return std::ops::ControlFlow::<(), ()>::Continue(());
+                }
+
+                if let Some((ti, tj)) = intersect_param(&edges[i], &edges[j], eps)
+                    && ((ti > eps && ti < 1.0 - eps) || (tj > eps && tj < 1.0 - eps))
+                {
+                    let pi = lerp(edges[i], ti);
+                    let pj = lerp(edges[j], tj);
+                    let pt = Coord {
+                        x: (pi.x + pj.x) * 0.5,
+                        y: (pi.y + pj.y) * 0.5,
+                    };
+                    if ti > eps && ti < 1.0 - eps {
+                        split_points[i].push((ti, pt));
+                    }
+                    if tj > eps && tj < 1.0 - eps {
+                        split_points[j].push((tj, pt));
+                    }
+                }
+                std::ops::ControlFlow::<(), ()>::Continue(())
+            });
+        }
     }
 }
 
