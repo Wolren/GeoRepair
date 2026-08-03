@@ -60,34 +60,6 @@ GeoRepair column is measured in the same process as the GEOS column
 (co-residency inflates it 5-15% vs a standalone run, where the full
 pass is ~4.1-4.2 s).
 
-Validator comparison on the raw dataset:
-
-| | GeoRepair | GEOS isValid |
-|---|---:|---:|
-| Valid | 1,576,732 | 1,579,030 |
-| Invalid | 2,298 | 0 |
-
-Our validator is stricter than GEOS isValid, and every polygon it
-flags is repaired: 0 / 2,298 remain invalid per GEOS isValid, and 29
-per our own validator.
-
-Where the invalid wall goes (biggest giant: 274,729 verts, 990 holes,
-per-giant serial chain ~370 ms):
-
-| Stage | Cost |
-|-------|-----:|
-| Self-intersection check (parallel STR index, `find_any`) | ~17 ms |
-| Fast-path split attempt (find_first + find_second, O(n log n)) | ~31 ms |
-| `split_edges` noding (parallel query phase + parallel rebuild) | ~67 ms |
-| NodingValidator (`build_chains` + own index) + collapse | ~75 ms |
-| Symdiff loop (BuildArea face walk, 2 passes) | ~170 ms (86 ms each) |
-
-For clean-shell giants the check alone is the cost (~80-90 ms serial
-in-batch). The batch sits at the W/12 floor: 12 workers all busy with
-giants, so nested intra-poly rayon finds no idle threads. Intra-poly
-parallel speedups (check 96 → 53 ms standalone) only show outside the
-batch.
-
 ### Synthetic benchmarks
 
 Structure strategy, same machine/profile, CoordSeq direct GEOS
@@ -288,8 +260,8 @@ biggest giant).
    overlay/relate cases are skipped (overlay operations are out of
    scope); 209 masked divergences (documented tolerance gates, e.g.
    even-odd area 1e-6 for island-in-hole). The suite's WKT/WKB readers
-   are our own (external `wkt`/`wkb` crates are disallowed by project
-   rule).
+   are our own: external `wkt`/`wkb` crates are disallowed because they
+   measure slower than the built-in readers.
 10. **Sub-µs synthetic rows are noise** (Rayon dispatch overhead). The
     trustworthy metrics are the real-world batch numbers and the larger
     synthetic rows.
