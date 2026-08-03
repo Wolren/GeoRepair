@@ -1,4 +1,8 @@
-//! TEMP diagnostic: single_pass_fix acceptance + timing buckets by size.
+//! Invalid-subset diagnostic: single_pass_fix acceptance rate + timing.
+//! Loads data_0.bin, classifies with arrange::validate_polygon (the bench's
+//! orientation-agnostic classifier), reports how many of the invalid polys
+//! the single-pass path accepts, and times the boolean path's stages on the
+//! biggest invalid poly. Use: cargo run --release --example sp_diag.
 use geo::Polygon;
 use geo_repair::structure::fix_ring::single_pass_fix;
 
