@@ -65,13 +65,9 @@ Validator comparison on the raw dataset:
 | Valid | 1,576,690 | 1,578,988 |
 | Invalid | 2,298 | 0 |
 
-Agreement is 99.85%. The 2,298 polygons our validator flags and GEOS
-accepts are the sliver/needle class: GEOS's isValid tolerance accepts
-them, our repair pipeline still fixes them (see Limitations).
-
-Output quality after repair: **0 / 2,298 invalid per GEOS isValid**;
-our own stricter validator flags 29 of them (the crossing-hole class
-that routes to the CDT fallback).
+Our validator is stricter than GEOS isValid, and every polygon it
+flags is repaired: 0 / 2,298 remain invalid per GEOS isValid, and 29
+per our own validator.
 
 Where the invalid wall goes (biggest giant: 274,729 verts, 990 holes,
 per-giant serial chain ~370 ms):
