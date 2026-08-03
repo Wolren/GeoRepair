@@ -1,5 +1,5 @@
 use geo::Coord;
-use rstar::{AABB, RTree, RTreeObject};
+use rstar::{RTree, RTreeObject, AABB};
 
 use crate::orient::orient2d_fast;
 
@@ -184,50 +184,103 @@ pub(crate) fn has_self_intersections(coords: &[Coord<f64>], eps: f64) -> bool {
 
     let tree = RTree::bulk_load(edges);
 
-    for i in 0..n_edges {
-        let query_env = edge_envelope(coords, i);
-        let result = tree.locate_in_envelope_intersecting_int(query_env, |candidate| {
-            let j = candidate.index as usize;
-            if j <= i {
-                return std::ops::ControlFlow::Continue(());
-            }
-            if i.abs_diff(j) <= 1 || (i == 0 && j == n_edges - 1) {
-                return std::ops::ControlFlow::Continue(());
-            }
-            if coords[i] == coords[j]
-                && orient2d_fast(coords[i], coords[i + 1], coords[j + 1]) != 0.0
-            {
-                return std::ops::ControlFlow::Continue(());
-            }
-            if coords[i] == coords[j + 1]
-                && orient2d_fast(coords[i], coords[i + 1], coords[j]) != 0.0
-            {
-                return std::ops::ControlFlow::Continue(());
-            }
-            if coords[i + 1] == coords[j]
-                && orient2d_fast(coords[i + 1], coords[i], coords[j + 1]) != 0.0
-            {
-                return std::ops::ControlFlow::Continue(());
-            }
-            if coords[i + 1] == coords[j + 1]
-                && orient2d_fast(coords[i + 1], coords[i], coords[j]) != 0.0
-            {
-                return std::ops::ControlFlow::Continue(());
-            }
+    // Per-edge queries are independent — parallelize with find_any, which
+    // short-circuits the whole search on the first crossing while still
+    // splitting the 260k-edge giant shells across workers. Same pair
+    // semantics as the serial loop below (identical closure body).
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    {
+        use rayon::prelude::*;
+        return (0..n_edges).into_par_iter().find_any(|&i| {
+            let query_env = edge_envelope(coords, i);
+            let mut found = false;
+            let _ = tree.locate_in_envelope_intersecting_int(query_env, |candidate| {
+                let j = candidate.index as usize;
+                if j <= i {
+                    return std::ops::ControlFlow::Continue(());
+                }
+                if i.abs_diff(j) <= 1 || (i == 0 && j == n_edges - 1) {
+                    return std::ops::ControlFlow::Continue(());
+                }
+                if coords[i] == coords[j]
+                    && orient2d_fast(coords[i], coords[i + 1], coords[j + 1]) != 0.0
+                {
+                    return std::ops::ControlFlow::Continue(());
+                }
+                if coords[i] == coords[j + 1]
+                    && orient2d_fast(coords[i], coords[i + 1], coords[j]) != 0.0
+                {
+                    return std::ops::ControlFlow::Continue(());
+                }
+                if coords[i + 1] == coords[j]
+                    && orient2d_fast(coords[i + 1], coords[i], coords[j + 1]) != 0.0
+                {
+                    return std::ops::ControlFlow::Continue(());
+                }
+                if coords[i + 1] == coords[j + 1]
+                    && orient2d_fast(coords[i + 1], coords[i], coords[j]) != 0.0
+                {
+                    return std::ops::ControlFlow::Continue(());
+                }
 
-            if super::fix_ring::check_edge_pair(coords, i, j, eps) {
-                std::ops::ControlFlow::Break(())
-            } else {
-                std::ops::ControlFlow::Continue(())
-            }
-        });
-
-        if result.is_break() {
-            return true;
-        }
+                if super::fix_ring::check_edge_pair(coords, i, j, eps) {
+                    found = true;
+                    std::ops::ControlFlow::Break(())
+                } else {
+                    std::ops::ControlFlow::Continue(())
+                }
+            });
+            found
+        })
+        .is_some();
     }
+    #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
+    {
+        for i in 0..n_edges {
+            let query_env = edge_envelope(coords, i);
+            let result = tree.locate_in_envelope_intersecting_int(query_env, |candidate| {
+                let j = candidate.index as usize;
+                if j <= i {
+                    return std::ops::ControlFlow::Continue(());
+                }
+                if i.abs_diff(j) <= 1 || (i == 0 && j == n_edges - 1) {
+                    return std::ops::ControlFlow::Continue(());
+                }
+                if coords[i] == coords[j]
+                    && orient2d_fast(coords[i], coords[i + 1], coords[j + 1]) != 0.0
+                {
+                    return std::ops::ControlFlow::Continue(());
+                }
+                if coords[i] == coords[j + 1]
+                    && orient2d_fast(coords[i], coords[i + 1], coords[j]) != 0.0
+                {
+                    return std::ops::ControlFlow::Continue(());
+                }
+                if coords[i + 1] == coords[j]
+                    && orient2d_fast(coords[i + 1], coords[i], coords[j + 1]) != 0.0
+                {
+                    return std::ops::ControlFlow::Continue(());
+                }
+                if coords[i + 1] == coords[j + 1]
+                    && orient2d_fast(coords[i + 1], coords[i], coords[j]) != 0.0
+                {
+                    return std::ops::ControlFlow::Continue(());
+                }
 
-    false
+                if super::fix_ring::check_edge_pair(coords, i, j, eps) {
+                    std::ops::ControlFlow::Break(())
+                } else {
+                    std::ops::ControlFlow::Continue(())
+                }
+            });
+
+            if result.is_break() {
+                return true;
+            }
+        }
+
+        false
+    }
 }
 
 /// Find the FIRST proper edge intersection using an R-tree.
