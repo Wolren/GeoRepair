@@ -11,7 +11,7 @@ build-backend = "maturin"
 
 [project]
 name = "geo-repair"
-version = "0.14.0"
+version = "0.14.1"
 description = "Validate and repair invalid OGC GIS geometries in Rust (GEOS ST_MakeValid parity)"
 readme = "README.md"
 requires-python = ">=3.8"
