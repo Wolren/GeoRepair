@@ -126,7 +126,7 @@ pub fn print_profile(n_polys: usize) {
 }
 
 /// Borrowed convenience wrapper: clones the polygon and delegates to
-/// [`fix_polygon_owned`]. The hot batch paths use the owned variant to avoid
+/// `fix_polygon_owned`. The hot batch paths use the owned variant to avoid
 /// the clone (measured: the fast-path clone was ~2 allocs + full ring memcpy
 /// per polygon, the dominant per-poly cost on the 1.58M-poly full pass).
 pub fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geometry<f64>> {
