@@ -1,18 +1,19 @@
 //! Real-world benchmark: Structure method vs GEOS on real dataset.
 //!
-//! Only .bin (custom binary format) is supported natively.
-//! For SHP files, pre-convert:
-//!   python scripts/convert_shp_to_bin.py input.shp output.bin
+//! The default dataset is the original GeoPackage (`data_0.gpkg`), read
+//! through the crate's GeoPackage backend (its geometry blobs are WKB of
+//! the original data). The custom `.bin` transcription of the same data
+//! drops 42 empty parts and is not used for the GEOS comparison.
 //!
 //! You can benchmark any dataset by setting `BENCH_FILE` or passing file as first arg:
 //!
-//!   $env:BENCH_FILE = "benches/real_world/data_0.bin"
+//!   $env:BENCH_FILE = "benches/real_world/data_0.gpkg"
 //!   cargo bench --features bench-geos-system --bench real_world   # system (LLVM-optimized)
 //!   cargo bench --features bench-geos --bench real_world          # static (MSVC)
 //!
 //! Run with:
-//!   cargo bench --features bench-geos-system,arrange,structure,parallel,simd,io-shp --bench real_world   # system GEOS (conda LLVM)
-//!   cargo bench --features bench-geos,arrange,structure,parallel,simd,io-shp --bench real_world          # static GEOS (MSVC)
+//!   cargo bench --features bench-geos-system,arrange,structure,parallel,simd,io-shp,io-gpkg --bench real_world   # system GEOS (conda LLVM)
+//!   cargo bench --features bench-geos,arrange,structure,parallel,simd,io-shp,io-gpkg --bench real_world          # static GEOS (MSVC)
 //!
 //! Prerequisites:
 //!   System GEOS (conda): set GEOS_LIB_DIR, GEOS_INCLUDE_DIR, GEOS_VERSION, and PATH.
@@ -266,9 +267,25 @@ fn load_polys(path: &str) -> Vec<Polygon<f64>> {
         "bin" => load_bin(path).unwrap_or_else(|e| {
             panic!("Failed to load {path}: {e}");
         }),
-        other => panic!(
-            "Unsupported file extension '.{other}'. Use .bin. For SHP files, convert first: python scripts/convert_shp_to_bin.py input.shp output.bin"
-        ),
+        other => {
+            // Original-data sources (.shp/.gpkg/.wkb) go through the crate's
+            // extension-detecting loader instead of the custom .bin
+            // transcription, which flattens MultiPolygons and skips empty
+            // records. The GEOS comparison should measure the original
+            // dataset, not a derived transcription of it.
+            let geoms = geo_repair::io::load(path).unwrap_or_else(|e| {
+                panic!("Failed to load {path} ('.{other}'): {e}");
+            });
+            let mut out = Vec::with_capacity(geoms.len());
+            for g in geoms {
+                match g {
+                    Geometry::Polygon(p) => out.push(p),
+                    Geometry::MultiPolygon(mp) => out.extend(mp.0),
+                    _ => {}
+                }
+            }
+            out
+        }
     }
 }
 
@@ -277,7 +294,7 @@ fn main() {
     let path = env::var("BENCH_FILE")
         .ok()
         .or_else(|| env::args().skip(1).find(|a| !a.starts_with("--")))
-        .unwrap_or_else(|| "benches/real_world/data_0.bin".into());
+        .unwrap_or_else(|| "benches/real_world/data_0.gpkg".into());
     // --fast: skip every GEOS comparison section (see header comment).
     let fast = env::args().any(|a| a == "--fast");
     // BENCH_N: cap the dataset to the first N polys for smoke runs.

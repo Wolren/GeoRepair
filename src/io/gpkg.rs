@@ -43,7 +43,9 @@ pub fn load_gpkg(path: &str) -> Result<Vec<Geometry<f64>>, String> {
                 .map_err(|e| format!("{path}: {e}"))?;
             for blob in blobs {
                 let blob = blob.map_err(|e| format!("{path}: {e}"))?;
-                match read_wkb(&blob) {
+                let wkb = strip_gpkg_header(&blob)
+                    .map_err(|e| format!("{path}: {table}.{col}: {e}"))?;
+                match read_wkb(wkb) {
                     Ok(g) => out.push(g),
                     Err(e) => {
                         return Err(format!(
@@ -55,6 +57,32 @@ pub fn load_gpkg(path: &str) -> Result<Vec<Geometry<f64>>, String> {
         }
     }
     Ok(out)
+}
+
+/// Strip the GeoPackage binary header (OGC 12-128r15, section 6.1) from a
+/// geometry blob, returning the embedded WKB. The header is `GP`, version,
+/// flags (bit 1 = envelope present, bits 2-3 = envelope type), and a 4-byte
+/// SRS id, followed by an optional envelope and then the WKB. Blobs without
+/// the magic (headerless writers, e.g. this crate's own `save_gpkg`) pass
+/// through unchanged.
+fn strip_gpkg_header(blob: &[u8]) -> Result<&[u8], String> {
+    if blob.len() < 8 || blob[0] != b'G' || blob[1] != b'P' {
+        return Ok(blob);
+    }
+    let flags = blob[3];
+    let mut off = 8usize;
+    if flags & 0x02 != 0 {
+        let env_type = (flags >> 2) & 0x03;
+        off += match env_type {
+            0 => 32,     // XY envelope
+            1 | 2 => 48, // XYZ / XYM
+            _ => 64,     // XYZM
+        };
+    }
+    if off > blob.len() {
+        return Err("invalid GeoPackage header: envelope overruns blob".to_string());
+    }
+    Ok(&blob[off..])
 }
 
 /// Write geometries to a new GeoPackage file (EPSG:4326, table `georepair`).
