@@ -1,0 +1,59 @@
+name: fuzz-nightly
+
+# Deep fuzz: nightly multi-minute runs per target, orders of magnitude
+# beyond the ~1-minute per-commit smoke gate in ci.yml. A crash (panic
+# escaping the containment guards, invalid output shipped, sanitizer
+# finding) fails the job; artifacts land in fuzz/artifacts and are
+# uploaded on failure so discoveries can be committed back to the corpus
+# as regression seeds (the pull-back loop). Deliberately separate from
+# ci.yml: long-running jobs belong on a schedule, not on every push.
+#
+# The 2026-08-04 mixed-magnitude deadly signal and the parser truncation
+# panics were all first caught by libFuzzer mutations - the nightly run
+# is the safety net that explores the input space the smoke gate cannot.
+
+on:
+  schedule:
+    - cron: "0 3 * * *"   # 03:00 UTC daily
+  workflow_dispatch: {}    # manual trigger from the Actions tab
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz-nightly:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # nightly
+        with:
+          toolchain: nightly
+      - run: cargo install cargo-fuzz --locked
+      - name: Build fuzz targets
+        run: cargo fuzz build
+      # 10 minutes per target: ~600x the smoke-gate mutation budget.
+      - name: Deep - make_valid (Auto/Arrange/Structure contract)
+        run: cargo fuzz run make_valid -- -max_total_time=600 -max_len=1024
+      - name: Deep - validate (panic-free + valid-input preservation)
+        run: cargo fuzz run validate -- -max_total_time=600 -max_len=1024
+      - name: Deep - wkt_repair (parse + repair pipeline)
+        run: cargo fuzz run wkt_repair -- -max_total_time=600 -max_len=4096
+      - name: Deep - wkb_repair (parse + repair pipeline)
+        run: cargo fuzz run wkb_repair -- -max_total_time=600 -max_len=4096
+      - name: Deep - roundtrip (serialize + repair invariants)
+        run: cargo fuzz run roundtrip -- -max_total_time=600 -max_len=4096
+      # Sanitized pass on the parser-heavy targets: the truncation panic
+      # class and the OOM abort were heap/stack corruption adjacent; ASan
+      # pinpoints them deterministically. cargo-fuzz 0.13 supports
+      # address/leak/memory/thread only (no UBSan in libFuzzer's runner).
+      - name: Sanitized - roundtrip (ASan)
+        run: cargo fuzz run --sanitizer address roundtrip -- -max_total_time=300 -max_len=4096
+      - name: Sanitized - wkb_repair (ASan)
+        run: cargo fuzz run --sanitizer address wkb_repair -- -max_total_time=300 -max_len=4096
+      - name: Upload crash artifacts (pull-back loop)
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v4
+        with:
+          name: fuzz-nightly-crashes
+          path: fuzz/artifacts/**
+          if-no-files-found: ignore
