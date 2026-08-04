@@ -99,7 +99,9 @@ pub(crate) fn read_geometry_inner(
             read_polygon_inner(buf, pos, le, dims as u32, extra_coords).map(Geometry::Polygon)
         }
         WKB_MULTIPOINT => {
-            let n = read_u32(buf, pos, le)? as usize;
+            // Each sub-geometry needs at least a 5-byte header (byte order
+            // + type code); the recursion enforces the rest.
+            let n = read_bounded_count(buf, pos, le, 5)?;
             let mut points = Vec::with_capacity(n);
             for _ in 0..n {
                 let (sub, _, _, sub_code) = read_geometry_inner(buf, pos, extra_coords)?;
@@ -116,7 +118,7 @@ pub(crate) fn read_geometry_inner(
             Ok(Geometry::MultiPoint(MultiPoint(points)))
         }
         WKB_MULTILINESTRING => {
-            let n = read_u32(buf, pos, le)? as usize;
+            let n = read_bounded_count(buf, pos, le, 5)?;
             let mut lines = Vec::with_capacity(n);
             for _ in 0..n {
                 let (sub, _, _, sub_code) = read_geometry_inner(buf, pos, extra_coords)?;
@@ -133,7 +135,7 @@ pub(crate) fn read_geometry_inner(
             Ok(Geometry::MultiLineString(MultiLineString(lines)))
         }
         WKB_MULTIPOLYGON => {
-            let n = read_u32(buf, pos, le)? as usize;
+            let n = read_bounded_count(buf, pos, le, 5)?;
             let mut polys = Vec::with_capacity(n);
             for _ in 0..n {
                 let (sub, _, _, sub_code) = read_geometry_inner(buf, pos, extra_coords)?;
@@ -150,7 +152,7 @@ pub(crate) fn read_geometry_inner(
             Ok(Geometry::MultiPolygon(MultiPolygon(polys)))
         }
         WKB_GEOMETRYCOLLECTION => {
-            let n = read_u32(buf, pos, le)? as usize;
+            let n = read_bounded_count(buf, pos, le, 5)?;
             let mut geoms = Vec::with_capacity(n);
             for _ in 0..n {
                 let (sub, _, _, _) = read_geometry_inner(buf, pos, extra_coords)?;
@@ -176,6 +178,30 @@ fn read_byte_order(buf: &[u8], pos: &mut usize) -> Result<bool, WkbError> {
         1 => Ok(true),  // NDR (little-endian)
         _ => Err(WkbError::InvalidByteOrder(b)),
     }
+}
+
+/// Read a count field bounded by the remaining buffer: `n` elements each
+/// need at least `min_bytes` to be parseable, so `n > remaining/min_bytes`
+/// is a corrupt count, not a huge document. This is what keeps a 4-byte
+/// count field from driving `Vec::with_capacity` into an OOM abort
+/// (measured 2026-08-04: crafted MultiPoint count -> 120 GB allocation).
+#[inline]
+fn read_bounded_count(
+    buf: &[u8],
+    pos: &mut usize,
+    le: bool,
+    min_bytes: usize,
+) -> Result<usize, WkbError> {
+    let n = read_u32(buf, pos, le)? as usize;
+    let remaining = buf.len().saturating_sub(*pos);
+    if n > remaining / min_bytes.max(1) {
+        return Err(WkbError::InconsistentCount {
+            count: n as u64,
+            remaining,
+            min_bytes,
+        });
+    }
+    Ok(n)
 }
 
 #[inline(always)]
@@ -320,7 +346,10 @@ fn read_polygon_inner(
     dims: u32,
     extra_coords: &mut Vec<f64>,
 ) -> Result<Polygon<f64>, WkbError> {
-    let n_rings = read_u32(buf, pos, le)? as usize;
+    // Each ring needs at least its 4-byte count field; an EMPTY ring
+    // (count 0) is legal and consumes nothing more. The per-ring coord
+    // reads enforce the actual coordinate bytes.
+    let n_rings = read_bounded_count(buf, pos, le, 4)?;
     if n_rings == 0 {
         return Ok(Polygon::new(LineString::new(vec![]), vec![]));
     }

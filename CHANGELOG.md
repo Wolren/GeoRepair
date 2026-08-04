@@ -98,6 +98,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   truncated documents return `Err(WktError)`. Regression test covers the
   crash input plus 15 truncation classes; artifact committed to the
   wkt_repair corpus.
+- Fuzz-found WKB OOM abort: a crafted count field (MultiPoint/ring/
+  geometry count) drove `Vec::with_capacity` into a 120 GB allocation
+  that aborted the process - uncatchable by panic containment. All
+  count-driven allocations now go through `read_bounded_count`, which
+  rejects counts that cannot fit the remaining buffer
+  (`WkbError::InconsistentCount`). A new `wkb_repair` fuzz target runs
+  the parse + repair pipeline over arbitrary bytes in CI (OOM-class
+  seeds committed); the parser stress regression runs 200k random
+  buffers plus every truncation of valid documents through both readers
+  under panic containment.
 - Python bindings: tests rewritten to the WKT surface (17 tests green;
   GeoJSON binding references removed with the deleted bindings).
 
