@@ -64,6 +64,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the cargo-audit action name (`rustsec/audit-action`); fixed the
   `is_multiple_of` lint site in the GML reader found by the CI's newer
   clippy (rust 1.97).
+- Fuzz harness profile: the crate's `panic = "abort"` release profile
+  made `catch_unwind` dead in the cargo-fuzz build, so the library's own
+  containment guards (arrange `build_cdt_safe`) never ran and the spade
+  CDT "vertex insertion failed: TooLarge" panic on mixed-magnitude
+  inputs escaped as a libFuzzer deadly signal. The fuzz workspace now
+  overrides `[profile.release] panic = "unwind"`; the smoke + ASan +
+  UBSan passes exercise the real containment path.
 - Python bindings: tests rewritten to the WKT surface (17 tests green;
   GeoJSON binding references removed with the deleted bindings).
 

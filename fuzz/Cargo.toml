@@ -12,6 +12,16 @@ libfuzzer-sys = "0.4"
 geo = "0.33"
 geo-repair = { path = "..", features = ["arrange", "structure", "parallel", "simd", "validate", "io-wkt"] }
 
+# The crate's [profile.release] sets panic = "abort" (perf). The fuzz
+# harness MUST unwind: the targets and the library's own containment
+# guards (arrange::build_cdt_safe) rely on catch_unwind to convert a
+# repair panic into a reported fuzz failure. With abort the panic kills
+# the process as a "deadly signal" (measured 2026-08-04: spade CDT
+# 'vertex insertion failed: TooLarge' on the mixed-magnitude corpus
+# seeds escaped and aborted the smoke).
+[profile.release]
+panic = "unwind"
+
 # Prevent this crate from accidentally being used as a normal dependency.
 [workspace]
 
