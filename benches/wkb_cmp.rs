@@ -9,23 +9,61 @@
 
 use std::time::Instant;
 
-use geo::Geometry;
+use geo::{Coord, Geometry, LineString, Polygon};
 use geo_repair::io::load_bin;
 use geo_traits::to_geo::ToGeoGeometry;
 
 const DATASET: &str = "benches/real_world/data_0.bin";
 const WKT_RT_SUBSET: usize = 10_000;
 
+/// Data chain: BENCH_FILE env -> the full real dataset (local, 748MB) ->
+/// committed alaska subset -> seeded synthetic (deterministic, CI-safe).
+fn load_geoms() -> Vec<Geometry<f64>> {
+    if let Ok(path) = std::env::var("BENCH_FILE") {
+        let polys = geo_repair::io::load_bin(&path).expect("load BENCH_FILE");
+        return polys.into_iter().map(Geometry::Polygon).collect();
+    }
+    if let Ok(polys) = geo_repair::io::load_bin(DATASET) {
+        return polys.into_iter().map(Geometry::Polygon).collect();
+    }
+    if let Ok(polys) = geo_repair::io::load_bin("benches/real_world/alaska.bin") {
+        return polys.into_iter().map(Geometry::Polygon).collect();
+    }
+    // Seeded synthetic: 20k irregular polygons, deterministic.
+    let n = std::env::var("BENCH_N")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(20_000);
+    let mut state: u64 = 0x9e3779b97f4a7c15;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    (0..n)
+        .map(|_| {
+            let cx = (next() % 10_000) as f64;
+            let cy = (next() % 10_000) as f64;
+            let r = 50.0 + (next() % 200) as f64;
+            let mut ring = Vec::with_capacity(16);
+            for k in 0..12 {
+                let a = k as f64 * std::f64::consts::TAU / 12.0;
+                let rr = r * (0.7 + (next() % 100) as f64 / 200.0);
+                ring.push(geo::Coord { x: cx + rr * a.cos(), y: cy + rr * a.sin() });
+            }
+            ring.push(ring[0]);
+            Geometry::Polygon(Polygon::new(LineString::new(ring), vec![]))
+        })
+        .collect()
+}
+
 fn main() {
     let t_start = Instant::now();
 
     // ── Load ──
     let t0 = Instant::now();
-    let polys: Vec<Geometry<f64>> = load_bin(DATASET)
-        .expect("load bin")
-        .into_iter()
-        .map(Geometry::Polygon)
-        .collect();
+    let polys: Vec<Geometry<f64>> = load_geoms();
     let n = polys.len();
 
     eprintln!("╔═══════════════════════════════════════════════╗");

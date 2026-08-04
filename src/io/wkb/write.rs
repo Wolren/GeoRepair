@@ -95,12 +95,17 @@ fn ewkb_size(geom: &Geometry<f64>, dims: EwkbDims, has_srid: bool) -> usize {
         Point(_) => header + coord_bytes,
         LineString(ls) => header + 4 + ls.0.len() * coord_bytes,
         Polygon(poly) => {
-            let mut sz = header + 4;
-            sz += 4 + poly.exterior().0.len() * coord_bytes;
-            for h in poly.interiors() {
-                sz += 4 + h.0.len() * coord_bytes;
+            // Empty polygon = zero rings on the wire (see write_polygon).
+            if poly.exterior().0.is_empty() && poly.interiors().is_empty() {
+                header + 4
+            } else {
+                let mut sz = header + 4;
+                sz += 4 + poly.exterior().0.len() * coord_bytes;
+                for h in poly.interiors() {
+                    sz += 4 + h.0.len() * coord_bytes;
+                }
+                sz
             }
-            sz
         }
         MultiPoint(mp) => {
             let mut sz = header + 4;
@@ -175,6 +180,14 @@ fn write_linestring(buf: &mut Vec<u8>, ls: &LineString<f64>, le: bool) {
 }
 
 fn write_polygon(buf: &mut Vec<u8>, poly: &Polygon<f64>, le: bool) {
+    // GEOS wire convention: an empty polygon has zero rings (an empty
+    // exterior with no holes is written as numRings=0, NOT as one empty
+    // ring - georust/wkb writes the compact form; byte parity verified
+    // 2026-08-04 in tests/wkb_parity.rs).
+    if poly.exterior().0.is_empty() && poly.interiors().is_empty() {
+        write_u32(buf, 0, le);
+        return;
+    }
     let n_holes = poly.interiors().len();
     write_u32(buf, (1 + n_holes) as u32, le);
     write_linestring(buf, poly.exterior(), le);
@@ -336,6 +349,11 @@ fn write_polygon_ewkb(
     offset: &mut usize,
     le: bool,
 ) {
+    if poly.exterior().0.is_empty() && poly.interiors().is_empty() {
+        // GEOS wire convention: empty polygon = zero rings (see write_polygon).
+        write_u32(buf, 0, le);
+        return;
+    }
     let n_holes = poly.interiors().len();
     write_u32(buf, (1 + n_holes) as u32, le);
     write_linestring_ewkb(buf, poly.exterior(), dims, extra, offset, le);
