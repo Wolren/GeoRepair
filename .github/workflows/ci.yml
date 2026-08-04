@@ -167,18 +167,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: rustsec/audit-action@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Audit
+        run: cargo audit
 
   # Supply-chain gate 2: license policy + sources + advisories via
-  # cargo-deny (policy in deny.toml at the repo root).
+  # cargo-deny (policy in deny.toml at the repo root). Explicit install +
+  # invocation: the cargo-deny-action bundle historically shipped an old
+  # cargo-deny whose `check` rejected the multi-check argument form
+  # (measured 2026-08-04: "unrecognized subcommand 'licenses'" with
+  # command=check + arguments="licenses advisories sources").
   deny:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: embarkstudios/cargo-deny-action@v2
-        with:
-          command: check
-          arguments: check licenses advisories sources
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+      - name: Deny checks
+        run: cargo deny check licenses advisories sources
 
   # libFuzzer smoke gate: the repair entry points must build under
   # cargo-fuzz and survive a bounded run on the committed corpus + fresh
