@@ -182,9 +182,13 @@ fn read_byte_order(buf: &[u8], pos: &mut usize) -> Result<bool, WkbError> {
 
 /// Read a count field bounded by the remaining buffer: `n` elements each
 /// need at least `min_bytes` to be parseable, so `n > remaining/min_bytes`
-/// is a corrupt count, not a huge document. This is what keeps a 4-byte
-/// count field from driving `Vec::with_capacity` into an OOM abort
-/// (measured 2026-08-04: crafted MultiPoint count -> 120 GB allocation).
+/// means the document is truncated relative to its own count fields -
+/// same class as a read hitting the buffer end, so it surfaces as
+/// [`WkbError::UnexpectedEof`]. This is what keeps a 4-byte count field
+/// from driving `Vec::with_capacity` into an OOM abort (measured
+/// 2026-08-04: crafted MultiPoint count -> 120 GB allocation). No new
+/// public error variant: WkbError is a published enum and adding one
+/// would be a semver-breaking change at patch level.
 #[inline]
 fn read_bounded_count(
     buf: &[u8],
@@ -195,11 +199,7 @@ fn read_bounded_count(
     let n = read_u32(buf, pos, le)? as usize;
     let remaining = buf.len().saturating_sub(*pos);
     if n > remaining / min_bytes.max(1) {
-        return Err(WkbError::InconsistentCount {
-            count: n as u64,
-            remaining,
-            min_bytes,
-        });
+        return Err(WkbError::UnexpectedEof);
     }
     Ok(n)
 }
