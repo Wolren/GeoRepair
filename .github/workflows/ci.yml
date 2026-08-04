@@ -18,6 +18,8 @@ jobs:
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
+        with:
+          toolchain: stable
       - run: cargo check --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,ffi"
         env:
           RUSTFLAGS: -Dwarnings
@@ -40,6 +42,8 @@ jobs:
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # 1.88
+        with:
+          toolchain: "1.88"
       - run: cargo check --features "arrange,structure,parallel,simd,validate"
       - run: cargo check --features "arrange,structure,parallel,simd,validate,geo-traits"
 
@@ -51,6 +55,8 @@ jobs:
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
+        with:
+          toolchain: stable
       - run: cargo check --no-default-features
       - run: cargo check --no-default-features --features validate
       - run: cargo check --no-default-features --features validate,structure,arrange
@@ -60,6 +66,8 @@ jobs:
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
+        with:
+          toolchain: stable
       - run: sudo apt-get update && sudo apt-get install -y libgeos-dev geos-bin
       - run: cargo test --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,ffi"
 
@@ -68,6 +76,8 @@ jobs:
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
+        with:
+          toolchain: stable
       - run: sudo apt-get update && sudo apt-get install -y libgeos-dev geos-bin
       - run: cargo test --no-default-features --features "arrange,structure,parallel,simd,validate"
 
@@ -78,6 +88,8 @@ jobs:
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
+        with:
+          toolchain: stable
       - uses: actions/setup-python@8549b9f8f590ad24eab7482f36f6e1e24d34597b  # v7
         with:
           python-version: "3.13"
@@ -98,6 +110,8 @@ jobs:
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
+        with:
+          toolchain: stable
       - run: sudo apt-get update && sudo apt-get install -y libgeos-dev geos-bin
       - run: cargo test --features "arrange,structure,parallel,simd,validate,bench-geos-system" --test geos_compare --test alaska_fixture
       - name: Differential fuzz vs GEOS (one-directional invariants)
@@ -110,6 +124,8 @@ jobs:
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
+        with:
+          toolchain: stable
       - run: cargo check --features "serde"
 
   # Regression smoke for the dual-bar benchmarks: the synthetic sweep (all
@@ -124,6 +140,8 @@ jobs:
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
+        with:
+          toolchain: stable
       - run: sudo apt-get update && sudo apt-get install -y libgeos-dev
       - name: Synthetic bench (serial vs parallel sweep)
         run: cargo bench --bench bench
@@ -138,6 +156,7 @@ jobs:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
         with:
+          toolchain: stable
           components: clippy
       - run: cargo clippy --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,ffi"
         env:
@@ -148,6 +167,8 @@ jobs:
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
+        with:
+          toolchain: stable
       - run: cargo doc --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,ffi,serde"
         env:
           RUSTDOCFLAGS: -D warnings
@@ -162,6 +183,8 @@ jobs:
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
+        with:
+          toolchain: stable
       - name: Install cargo-semver-checks
         run: cargo install cargo-semver-checks --locked
       - name: Check release API compatibility
@@ -174,6 +197,8 @@ jobs:
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
+        with:
+          toolchain: stable
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
       - name: Audit
@@ -190,6 +215,8 @@ jobs:
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
+        with:
+          toolchain: stable
       - name: Install cargo-deny
         run: cargo install cargo-deny --locked
       - name: Deny checks
@@ -206,6 +233,8 @@ jobs:
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # nightly
+        with:
+          toolchain: nightly
       - run: cargo install cargo-fuzz --locked
       - name: Build fuzz targets
         run: cargo fuzz build
