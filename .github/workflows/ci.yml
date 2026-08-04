@@ -244,16 +244,15 @@ jobs:
         run: cargo fuzz run validate -- -runs=3000 -max_len=1024
       - name: Smoke - wkt_repair (parse + repair pipeline)
         run: cargo fuzz run wkt_repair -- -runs=3000 -max_len=2048
-      # Sanitized passes: AddressSanitizer on make_valid (the 2026-08-04
+      # Sanitized pass: AddressSanitizer on make_valid (the 2026-08-04
       # mixed-magnitude deadly signal was unreproducible on Windows - the
       # sanitizer pinpoints heap/stack corruption that plain runs only
-      # surface as a late signal) and UndefinedBehaviorSanitizer on
-      # validate. Corpus seeds replay first, so a committed crash seed
-      # deterministically exercises the instrumented build.
+      # surface as a late signal). Corpus seeds replay first, so a
+      # committed crash seed deterministically exercises the instrumented
+      # build. cargo-fuzz 0.13 accepts only address/leak/memory/thread
+      # (no 'undefined' - UBSan is not supported by libFuzzer's runner).
       - name: Sanitized - make_valid (ASan)
         run: cargo fuzz run --sanitizer address make_valid -- -runs=2000 -max_len=1024
-      - name: Sanitized - validate (UBSan)
-        run: cargo fuzz run --sanitizer undefined validate -- -runs=2000 -max_len=1024
       - name: Upload crash artifacts (pull-back loop)
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v4
