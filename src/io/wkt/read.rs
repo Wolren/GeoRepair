@@ -1,5 +1,10 @@
 //! WKT parser: single-pass tokenizer + reader.
 
+/// Maximum GEOMETRYCOLLECTION nesting depth. Each level consumes at least
+/// ~14 bytes of input, so the cap never rejects real data while bounding
+/// recursion (stack overflow is an uncatchable abort).
+const MAX_WKT_NESTING: usize = 256;
+
 use super::*;
 use std::io::Read;
 
@@ -410,7 +415,7 @@ impl<'a> Parser<'a> {
             }
             // EMPTY element (MULTILINESTRING (EMPTY, (1 1, 2 2))) - an
             // empty line component.
-            if self.s[self.i] == b'E' || self.s[self.i] == b'e' {
+            if self.i < self.s.len() && (self.s[self.i] == b'E' || self.s[self.i] == b'e') {
                 let rest = &self.s[self.i..];
                 if rest.starts_with(b"EMPTY") || rest.starts_with(b"empty") {
                     self.i += 5;
@@ -489,7 +494,7 @@ impl<'a> Parser<'a> {
                 }
                 // EMPTY ring element (MULTIPOLYGON ((...), (EMPTY))) - an
                 // empty ring contributes nothing; the polygon stays empty.
-                if self.s[self.i] == b'E' || self.s[self.i] == b'e' {
+                if self.i < self.s.len() && (self.s[self.i] == b'E' || self.s[self.i] == b'e') {
                     let rest = &self.s[self.i..];
                     if rest.starts_with(b"EMPTY") || rest.starts_with(b"empty") {
                         self.i += 5;
@@ -525,7 +530,7 @@ impl<'a> Parser<'a> {
         Ok(Geometry::MultiPolygon(MultiPolygon(polys)))
     }
 
-    fn parse_geometrycollection(&mut self) -> Result<Geometry<f64>, WktError> {
+    fn parse_geometrycollection(&mut self, depth: usize) -> Result<Geometry<f64>, WktError> {
         self.skip_ws();
         if self.i < self.s.len() && (self.s[self.i] == b'E' || self.s[self.i] == b'e') {
             let rest = &self.s[self.i..];
@@ -543,7 +548,7 @@ impl<'a> Parser<'a> {
                 break;
             }
             if !geoms.is_empty() {
-                if self.s[self.i] == b',' {
+                if self.i < self.s.len() && self.s[self.i] == b',' {
                     self.i += 1;
                 }
                 self.skip_ws();
@@ -553,7 +558,7 @@ impl<'a> Parser<'a> {
             }
             // EMPTY element (GEOMETRYCOLLECTION (EMPTY, POINT (1 2))) -
             // an empty point component (geo convention: NaN coords).
-            if self.s[self.i] == b'E' || self.s[self.i] == b'e' {
+            if self.i < self.s.len() && (self.s[self.i] == b'E' || self.s[self.i] == b'e') {
                 let rest = &self.s[self.i..];
                 if rest.starts_with(b"EMPTY") || rest.starts_with(b"empty") {
                     self.i += 5;
@@ -562,7 +567,7 @@ impl<'a> Parser<'a> {
                     continue;
                 }
             }
-            geoms.push(self.parse_any()?);
+            geoms.push(self.parse_any(depth + 1)?);
             saw_any = true;
         }
         self.expect(b')')?;
@@ -573,7 +578,15 @@ impl<'a> Parser<'a> {
         Ok(Geometry::GeometryCollection(GeometryCollection(geoms)))
     }
 
-    fn parse_any(&mut self) -> Result<Geometry<f64>, WktError> {
+    fn parse_any(&mut self, depth: usize) -> Result<Geometry<f64>, WktError> {
+        // GEOMETRYCOLLECTION nests recursively; a crafted document can
+        // nest arbitrarily deep and overflow the stack (uncatchable
+        // abort). GEOS bounds its reader similarly. A flat collection's
+        // members each parse at depth+1, so the cap is on nesting, not
+        // element count.
+        if depth > MAX_WKT_NESTING {
+            return Err(self.err("geometry nesting exceeds limit"));
+        }
         let (kw, dims) = self.peek_keyword()?;
         match kw {
             Keyword::Point => self.parse_point(dims),
@@ -582,7 +595,7 @@ impl<'a> Parser<'a> {
             Keyword::MultiPoint => self.parse_multipoint(dims),
             Keyword::MultiLineString => self.parse_multilinestring(dims),
             Keyword::MultiPolygon => self.parse_multipolygon(dims),
-            Keyword::GeometryCollection => self.parse_geometrycollection(),
+            Keyword::GeometryCollection => self.parse_geometrycollection(depth),
         }
     }
 }
@@ -612,7 +625,7 @@ pub fn read_wkt(input: &str) -> Result<Geometry<f64>, WktError> {
     if p.i >= p.s.len() {
         return Err(WktError::EmptyInput);
     }
-    let geom = p.parse_any()?;
+    let geom = p.parse_any(0)?;
     p.skip_ws();
     if p.i < p.s.len() {
         return Err(WktError::TrailingCharacters { pos: p.i });

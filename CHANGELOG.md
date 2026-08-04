@@ -98,6 +98,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   truncated documents return `Err(WktError)`. Regression test covers the
   crash input plus 15 truncation classes; artifact committed to the
   wkt_repair corpus.
+- Parser hardening follow-up: the element-loop audit found the same
+  comma-then-EOF index bug in three more WKT sites (GEOMETRYCOLLECTION
+  loop, MULTILINESTRING loop, MULTIPOLYGON inner ring loop - a trailing
+  comma advanced `i` past the buffer end before the EMPTY check
+  indexed). All guarded; truncation regression extended with those
+  cases. Both readers also gained a 256-level nesting cap (WKB and WKT
+  recurse per container level; a crafted document could previously
+  overflow the stack - an uncatchable abort). Deep-nesting seeds added
+  to both fuzz corpora.
 - Fuzz-found WKB OOM abort: a crafted count field (MultiPoint/ring/
   geometry count) drove `Vec::with_capacity` into a 120 GB allocation
   that aborted the process - uncatchable by panic containment. All

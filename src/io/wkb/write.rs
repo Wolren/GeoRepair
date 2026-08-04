@@ -498,6 +498,6 @@ fn write_geometry_ewkb(
 pub fn estimate_wkb_size(buf: &[u8]) -> Result<usize, WkbError> {
     let mut pos = 0;
     let mut dummy_extra = Vec::new();
-    let _geom = super::read::read_geometry_inner(buf, &mut pos, &mut dummy_extra)?;
+    let _geom = super::read::read_geometry_inner(buf, &mut pos, &mut dummy_extra, 0)?;
     Ok(pos)
 }
