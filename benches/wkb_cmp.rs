@@ -11,6 +11,7 @@ use std::time::Instant;
 
 use geo::{Coord, Geometry, LineString, Polygon};
 use geo_repair::io::load_bin;
+use geo_traits::GeometryTrait;
 use geo_traits::to_geo::ToGeoGeometry;
 
 const DATASET: &str = "benches/real_world/data_0.bin";
@@ -151,6 +152,16 @@ fn main() {
     let our_rt = bench_ns(&their_wkb, |b| {
         let _ = geo_repair::read_wkb(b).unwrap();
     });
+    // Fair-comparison breakdown for georust/wkb: their read_wkb alone is a
+    // ZERO-COPY borrowed view (no allocation) - it does not produce a
+    // geo::Geometry. The public path to geo::Geometry is read + to_geometry,
+    // which is what the cross-tests above time. Separating the two shows
+    // exactly where the cost sits (the conversion is a second full pass
+    // with per-coordinate trait dispatch).
+    let their_bare = bench_ns(&our_wkb, |b| {
+        let w = wkb::reader::read_wkb(b).unwrap();
+        std::hint::black_box(w.dimension());
+    });
     let their_ro = bench_ns(&our_wkb, |b| {
         let w = wkb::reader::read_wkb(b).unwrap();
         let _: Geometry<f64> = w.to_geometry();
@@ -162,8 +173,9 @@ fn main() {
 
     eprintln!("    our  on our   bytes  {our_ro:>8.0} ns/op");
     eprintln!("    our  on their bytes  {our_rt:>8.0} ns/op");
-    eprintln!("    their on our   bytes  {their_ro:>8.0} ns/op");
-    eprintln!("    their on their bytes  {their_tt:>8.0} ns/op");
+    eprintln!("    their bare parse    {their_bare:>8.0} ns/op  (zero-copy view, no geo conversion)");
+    eprintln!("    their on our   bytes  {their_ro:>8.0} ns/op  (read + to_geometry)");
+    eprintln!("    their on their bytes  {their_tt:>8.0} ns/op  (read + to_geometry)");
     let our_wkb_avg = (our_ro + our_rt) / 2.0;
     let their_wkb_avg = (their_ro + their_tt) / 2.0;
     eprintln!(
