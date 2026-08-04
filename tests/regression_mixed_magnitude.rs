@@ -2,6 +2,35 @@ use geo::{Coord, LineString, Polygon};
 use geo_repair::validation::GeoValidation;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 
+// Fuzz-discovered (crash-eaab5472, CI 2026-08-04): a VALID ring whose
+// 1-unit base sits at 1e15 while one vertex spikes to y=4.9e208. The
+// bbox-scale degeneracy gates (make_valid pre-gate, strip bbox_ok,
+// sub-ULP edge) compared extents against the max spread, so the spike
+// dominated the base: every repair mode collapsed the valid polygon to
+// GEOMETRYCOLLECTION EMPTY (and later to a LINESTRING after the pre-gate
+// fix). GEOS IsValid keeps it; the preservation contract says valid in,
+// polygonal out. All three modes must return the polygon unchanged.
+#[test]
+fn fuzz_valid_spike_ring_preserved() {
+    let ring = vec![
+        Coord { x: 1e15, y: 1e15 },
+        Coord { x: 1e15 + 1.0, y: 1e15 },
+        Coord { x: 1e15 + 1.0, y: 1e15 + 1.0 },
+        Coord { x: 1e15, y: 4.919094327364069e208 },
+    ];
+    let poly = Polygon::new(LineString::new(ring), Vec::new());
+    assert!(poly.validate().valid, "input must be valid per our validator");
+    for method in [PolyMethod::Auto, PolyMethod::Arrange, PolyMethod::Structure] {
+        let cfg = MakeValidConfig { poly_method: method, ..Default::default() };
+        let out = poly.make_valid_with_config(&cfg);
+        assert!(
+            matches!(&out, geo::Geometry::Polygon(_) | geo::Geometry::MultiPolygon(_)),
+            "valid polygon was collapsed to {out:?} in mode {method:?}"
+        );
+        assert!(out.validate().valid, "repair output invalid in mode {method:?}");
+    }
+}
+
 // Fuzz-discovered deadly signal: a ring mixing denormals (7e-321),
 // extreme magnitudes (5.5e+303, 1.9e+289), and normal coordinates.
 // The repair pipeline must not crash (stack overflow / foreign assert)

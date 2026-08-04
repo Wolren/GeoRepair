@@ -71,6 +71,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inputs escaped as a libFuzzer deadly signal. The fuzz workspace now
   overrides `[profile.release] panic = "unwind"`; the smoke + ASan +
   UBSan passes exercise the real containment path.
+- Fuzz-found CDT panic (crash during corpus replay): spade rejects
+  coordinates whose magnitude exceeds its internal grid
+  (`InsertionError::TooLarge`); `cdt::build` previously unwrapped the
+  insertion and panicked. With panic = "abort" builds that panic killed
+  the process. Insert errors now map to
+  `MakeValidError::ConstraintFailure` and the existing `build_cdt_safe`
+  fallback routes to the boolean path, so repair succeeds instead of
+  aborting. Panic containment is a backstop, not the primary mechanism.
+- Fuzz-found valid-polygon destruction (crash-eaab5472): three
+  degeneracy gates compared extents against the ring's MAX BBOX SPREAD,
+  so one distant coordinate dominated the others. A valid ring with a
+  4.9e208 spike and a 1-unit base (8 ULPs at 1e15, fully representable)
+  was emptied by the make_valid bbox pre-gate, then demoted to a
+  LINESTRING by strip_degenerate, in every repair mode - while both our
+  validator and GEOS IsValid keep it. All three gates (make_valid
+  pre-gate, strip bbox_ok, has_sub_ulp_edge) now use per-axis/per-edge
+  LOCAL thresholds (extent vs the coordinate rounding at that axis's own
+  magnitude), and `arrange_chain` passes valid inputs through unchanged.
+  Valid in, polygonal out is now enforced by regression tests for both
+  fuzz-discovered rings.
 - Python bindings: tests rewritten to the WKT surface (17 tests green;
   GeoJSON binding references removed with the deleted bindings).
 

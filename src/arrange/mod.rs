@@ -396,17 +396,13 @@ pub fn rings_share_collinear_edge_test(
 /// such edges and big edges are invisible to proper-crossing detection.
 /// Cheap O(n): single pass over edges, only used in fast-path gates.
 ///
-/// `scale_hint` is a precomputed exterior scale from the caller's earlier
-/// bbox pass (skips recomputing the exterior ring bbox — one less pass on
-/// the hot path). `None` computes it.
-pub fn has_sub_ulp_edge(poly: &Polygon<f64>, scale_hint: Option<f64>) -> bool {
-    fn ring_has_sub_ulp(ring: &[geo::Coord<f64>], scale: f64) -> bool {
+/// The `scale_hint` parameter is accepted for call-site compatibility (the
+/// structure fast path precomputes an exterior scale); the sub-ULP test is
+/// per-edge local now and no longer consumes it.
+pub fn has_sub_ulp_edge(poly: &Polygon<f64>, _scale_hint: Option<f64>) -> bool {
+    fn ring_has_sub_ulp(ring: &[geo::Coord<f64>]) -> bool {
         let n = ring.len();
         if n < 2 {
-            return false;
-        }
-        let eps = f64::EPSILON * scale;
-        if eps <= 0.0 {
             return false;
         }
         let end = if ring.first() == ring.last() { n - 1 } else { n };
@@ -415,6 +411,23 @@ pub fn has_sub_ulp_edge(poly: &Polygon<f64>, scale_hint: Option<f64>) -> bool {
             let b = ring[(i + 1) % n];
             let dx = (b.x - a.x).abs();
             let dy = (b.y - a.y).abs();
+            // Edge-length degeneracy is LOCAL: an edge is sub-ULP when its
+            // length is below the coordinate rounding at its OWN magnitude
+            // (eps = EPSILON * max |coord| of the edge). The old rule used
+            // the ring bbox spread, which a single distant spike dominates:
+            // measured 2026-08-04, a VALID ring with a 4.9e208 spike got
+            // its 1-unit base edge (8 ULPs at 1e15, perfectly representable)
+            // flagged sub-ULP and was collapsed to empty by every repair
+            // mode. Local eps still catches the noise class the gate
+            // exists for (1e-8 spikes at 1e8 magnitude: 1e-8 < 2.2e-8).
+            let eps = f64::EPSILON
+                * a.x.abs()
+                    .max(a.y.abs())
+                    .max(b.x.abs())
+                    .max(b.y.abs());
+            if eps <= 0.0 {
+                continue;
+            }
             // Edge LENGTH below eps: use max component, not either — real GIS
             // data is full of axis-aligned edges (vertical: dx=0, horizontal:
             // dy=0) which are perfectly valid. Only a truly point-like edge
@@ -425,28 +438,11 @@ pub fn has_sub_ulp_edge(poly: &Polygon<f64>, scale_hint: Option<f64>) -> bool {
         }
         false
     }
-    fn ring_scale(ring: &[geo::Coord<f64>]) -> f64 {
-        if ring.len() < 2 {
-            // ring_has_sub_ulp exits on n<2 before touching the ring — the
-            // scale value is irrelevant, keep the floor.
-            return 1.0;
-        }
-        let (mut min_x, mut max_x, mut min_y, mut max_y) =
-            (ring[0].x, ring[0].x, ring[0].y, ring[0].y);
-        for c in &ring[1..] {
-            min_x = min_x.min(c.x);
-            max_x = max_x.max(c.x);
-            min_y = min_y.min(c.y);
-            max_y = max_y.max(c.y);
-        }
-        (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0)
-    }
     let ext = &poly.exterior().0;
-    let ext_scale = scale_hint.unwrap_or_else(|| ring_scale(ext));
-    if ring_has_sub_ulp(ext, ext_scale) {
+    if ring_has_sub_ulp(ext) {
         return true;
     }
-    poly.interiors().iter().any(|h| ring_has_sub_ulp(&h.0, ring_scale(&h.0)))
+    poly.interiors().iter().any(|h| ring_has_sub_ulp(&h.0))
 }
 
 /// Winding-number point-in-ring test (strict interior, boundary counts as outside).

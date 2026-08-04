@@ -84,9 +84,18 @@ impl MakeValid for Polygon<f64> {
                     has_nan = true;
                 }
             }
-            let scale = (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
-            if (max_x - min_x).abs() < f64::EPSILON * scale
-                || (max_y - min_y).abs() < f64::EPSILON * scale
+            // Bbox degeneracy is per-axis LOCAL: an axis is degenerate when
+            // its extent is at or below the coordinate rounding at that
+            // axis's own magnitude (eps = EPSILON * max |coord| on the
+            // axis). The old rule compared both extents against the max
+            // spread, so one distant spike dominated the other axis:
+            // measured 2026-08-04, a VALID ring with a 4.9e208 y-spike and
+            // a 1-unit x-extent (8 ULPs at 1e15) was emptied here in every
+            // repair mode (fuzz crash-eaab5472).
+            let x_scale = max_x.abs().max(min_x.abs());
+            let y_scale = max_y.abs().max(min_y.abs());
+            if (max_x - min_x).abs() <= f64::EPSILON * x_scale
+                || (max_y - min_y).abs() <= f64::EPSILON * y_scale
             {
                 return empty_geom();
             }
@@ -282,6 +291,17 @@ pub(crate) fn collapse_degenerate(poly: &Polygon<f64>) -> Option<Geometry<f64>> 
 /// can too. The repair contract is "valid or empty", never broken.
 #[cfg(any(feature = "arrange", feature = "structure"))]
 fn arrange_chain(poly: &Polygon<f64>, config: &MakeValidConfig) -> Geometry<f64> {
+    // Valid inputs pass through: the repair chain's collapse gates (sub-ULP
+    // demotion, strip degeneracy) can destroy a valid thin polygon at mixed
+    // coordinate magnitude. Measured 2026-08-04: a ring with a 4.9e208 spike
+    // and a 1-unit base validated under both our validator and geo's, yet
+    // every mode collapsed it to GEOMETRYCOLLECTION EMPTY (fuzz target
+    // crash-eaab5472 — the structure fast path passed it, but direct
+    // Arrange mode needs the same guarantee here). GEOS keeps such
+    // polygons; so do we.
+    if is_valid_with_geo(&Geometry::Polygon(poly.clone())) {
+        return enforce_ogc_winding(Geometry::Polygon(poly.clone()));
+    }
     // Normalize winding BEFORE the validity gate: repair outputs are
     // OGC-wound at the dispatch exit (enforce_ogc_winding after the match),
     // and CW shells are valid per GEOS but flagged WrongOrientation by our
@@ -461,9 +481,20 @@ pub fn make_valid_owned(poly: Polygon<f64>, config: &MakeValidConfig) -> Geometr
                 has_nan = true;
             }
         }
-        let scale = (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
-        if (max_x - min_x).abs() < f64::EPSILON * scale
-            || (max_y - min_y).abs() < f64::EPSILON * scale
+        // Bbox degeneracy is per-axis LOCAL: an axis is degenerate when
+        // its extent is at or below the coordinate rounding at that
+        // axis's own magnitude (eps = EPSILON * max |coord| on the
+        // axis). The old rule compared both extents against the max
+        // spread, so one distant spike dominated the other axis:
+        // measured 2026-08-04, a VALID ring with a 4.9e208 y-spike and
+        // a 1-unit x-extent (8 ULPs at 1e15) was emptied here in every
+        // repair mode (fuzz crash-eaab5472). A ring whose extent is
+        // below its own coordinate rounding has no representable area
+        // and is genuinely degenerate.
+        let x_scale = max_x.abs().max(min_x.abs());
+        let y_scale = max_y.abs().max(min_y.abs());
+        if (max_x - min_x).abs() <= f64::EPSILON * x_scale
+            || (max_y - min_y).abs() <= f64::EPSILON * y_scale
         {
             return empty_geom();
         }
@@ -480,7 +511,7 @@ pub fn make_valid_owned(poly: Polygon<f64>, config: &MakeValidConfig) -> Geometr
             // Panic containment (mirrors the borrowed path): i_overlay can
             // assert on degenerate inputs; degrade to empty, never crash.
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                make_valid_impl_owned(poly, config, first, Some(scale))
+                make_valid_impl_owned(poly, config, first, None)
             }))
             .unwrap_or_else(|_| {
                 warn!("make_valid_owned panicked on polygon; returning empty geometry");

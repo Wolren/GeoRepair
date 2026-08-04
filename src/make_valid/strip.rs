@@ -78,28 +78,25 @@ pub(super) fn strip_degenerate(g: Geometry<f64>) -> Geometry<f64> {
                         has_nan = true;
                     }
                 }
-                // Match validator threshold: f64::EPSILON * scale where scale = max(w, h, 1.0)
-                let v_scale = (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
+                // Bbox degeneracy is per-axis LOCAL (same rule as the
+                // make_valid pre-gate): an axis is degenerate when its
+                // extent is at or below the coordinate rounding at that
+                // axis's own magnitude. The old rule compared against the
+                // max spread, so a 4.9e208 spike dominated the 1-unit
+                // x-extent of a valid ring and demoted it to a line.
+                let x_scale = max_x.abs().max(min_x.abs());
+                let y_scale = max_y.abs().max(min_y.abs());
+                let bbox_ok = (max_x - min_x).abs() > f64::EPSILON * x_scale
+                    && (max_y - min_y).abs() > f64::EPSILON * y_scale;
                 // Area degeneracy: a ring is degenerate iff its vertices lie
-                // bit-exactly on one line (robust orient == 0 for every
-                // vertex against the first edge). The historical
-                // magnitude-based noise bound (EPS * m^2 * n * 8, m = max
-                // |coord|) wrongly demoted REAL slivers at large coordinate
-                // magnitude: measured on the fuzz-discovered mixed-magnitude
-                // ring (1e15 scale, genuine area 5e14, width ~1 unit): the
-                // computed shoelace 1e15 sits below the worst-case
-                // cancellation bound 8.9e15, so a valid polygon was demoted
-                // to a line while GEOS IsValid keeps it. Sub-coordinate-ULP
-                // slivers (deviation below the coordinate rounding) are
-                // still caught: their STORED coordinates lie exactly on the
-                // line, so the robust orient is exactly zero.
+                // bit-exactly on one line (robust orient == 0). The
+                // historical magnitude-based noise bound demoted real
+                // slivers at large coordinate magnitude (0.14.2 changelog).
                 let p0 = ext[0];
                 let p1 = ext[1];
                 let exactly_collinear =
                     (2..interior_n).all(|i| crate::orient::orient2d(p0, p1, ext[i]) == 0.0);
                 let area_ok = !exactly_collinear;
-                let bbox_ok = (max_x - min_x).abs() >= f64::EPSILON * v_scale
-                    && (max_y - min_y).abs() >= f64::EPSILON * v_scale;
                 if area_ok && bbox_ok && !has_nan {
                     // Non-degenerate polygon - return as-is after hole cleanup
                     let holes: Vec<LineString<f64>> = p.interiors().iter()
