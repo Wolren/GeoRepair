@@ -335,7 +335,7 @@ fn coords_from_flat(
     if nums.is_empty() {
         return Ok(Vec::new());
     }
-    if nums.len() % dim != 0 {
+    if !nums.len().is_multiple_of(dim) {
         return Err(format!(
             "GML {}: coordinate count {} not divisible by dimension {dim}",
             String::from_utf8_lossy(ctx),

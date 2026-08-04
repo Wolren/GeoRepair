@@ -44,6 +44,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shell, now routes the polygon to repair instead of passing it through.
   Closes the DisconnectedInteriorRing passthrough-to-empty gap exposed by
   the zero-orient fix.
+- Fuzz-found LineString false NotSimple: `check_linestring_self_intersection`
+  used a global bbox eps (1e-12 * scale) that inflates to an absolute
+  length at large coordinate magnitude (measured: 1e15-scale line, eps =
+  1000 units, flagged a vertex 1 unit from another segment as on-edge).
+  Non-adjacent pairs now use the ring path's per-pair predicates
+  (`edges_intersect_general` with the relative collinear gate +
+  segment-local `edges_vertex_on_edge`), plus an explicit vertex-revisit
+  check for shared endpoints (GEOS TestSimple "interior intersection at
+  vertices" cases). Restores 934/934 on the GEOS XML suite.
+- Fuzz-found strip demotion of valid slivers: the magnitude-based noise
+  gate (EPS * m^2 * n * 8, m = max |coord|) demoted genuine slivers at
+  large coordinate magnitude (measured: 1e15-scale ring, real area 5e14,
+  computed shoelace below the worst-case cancellation bound). Replaced
+  with an exact-collinearity test (robust orient == 0): only rings whose
+  stored coordinates lie bit-exactly on one line are demoted, matching
+  GEOS IsValid behavior.
+- CI: corrected the cargo-deny arguments (explicit `check` subcommand)
+  and the cargo-audit action name (`rustsec/audit-action`); fixed the
+  `is_multiple_of` lint site in the GML reader found by the CI's newer
+  clippy (rust 1.97).
 - Python bindings: tests rewritten to the WKT surface (17 tests green;
   GeoJSON binding references removed with the deleted bindings).
 
