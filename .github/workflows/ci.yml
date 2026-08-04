@@ -9,12 +9,15 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+# All actions SHA-pinned (supply-chain gate 3: unpinned refs are mutable
+# supply-chain risk; pins verified against the tagged release HEADs on
+# 2026-08-04). Bump by re-resolving the tag, never by trusting a new tag.
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
       - run: cargo check --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,ffi"
         env:
           RUSTFLAGS: -Dwarnings
@@ -35,8 +38,8 @@ jobs:
   msrv:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.88
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # 1.88
       - run: cargo check --features "arrange,structure,parallel,simd,validate"
       - run: cargo check --features "arrange,structure,parallel,simd,validate,geo-traits"
 
@@ -46,8 +49,8 @@ jobs:
   no-std:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
       - run: cargo check --no-default-features
       - run: cargo check --no-default-features --features validate
       - run: cargo check --no-default-features --features validate,structure,arrange
@@ -55,16 +58,16 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
       - run: sudo apt-get update && sudo apt-get install -y libgeos-dev geos-bin
       - run: cargo test --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,ffi"
 
   test-no-defaults:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
       - run: sudo apt-get update && sudo apt-get install -y libgeos-dev geos-bin
       - run: cargo test --no-default-features --features "arrange,structure,parallel,simd,validate"
 
@@ -73,9 +76,9 @@ jobs:
   python:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
+      - uses: actions/setup-python@8549b9f8f590ad24eab7482f36f6e1e24d34597b  # v7
         with:
           python-version: "3.13"
       - run: pip install maturin pytest
@@ -93,8 +96,8 @@ jobs:
   test-geos-oracle:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
       - run: sudo apt-get update && sudo apt-get install -y libgeos-dev geos-bin
       - run: cargo test --features "arrange,structure,parallel,simd,validate,bench-geos-system" --test geos_compare --test alaska_fixture
       - name: Differential fuzz vs GEOS (one-directional invariants)
@@ -105,24 +108,26 @@ jobs:
   test-serde:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
       - run: cargo check --features "serde"
 
   # Regression smoke for the dual-bar benchmarks: the synthetic sweep (all
-  # shape families, serial vs parallel) and the real-world bench (alaska
-  # fixture, Structure vs GEOS). No hard timing gate - runner noise makes
-  # absolute thresholds meaningless - but compile breakage, panics, or
-  # GEOS-link failures fail the job. Timings are in the log for humans.
+  # shape families, serial vs parallel) and the real-world sample bench
+  # (committed alaska subset, Structure vs GEOS). No hard timing gate -
+  # runner noise makes absolute thresholds meaningless - but compile
+  # breakage, panics, or GEOS-link failures fail the job. The committed
+  # alaska.* set is a SMALL sample (the full 1,579,030-part dataset is
+  # 748 MB and stays local; the bench defaults to data_0.gpkg there).
   bench:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
       - run: sudo apt-get update && sudo apt-get install -y libgeos-dev
       - name: Synthetic bench (serial vs parallel sweep)
         run: cargo bench --bench bench
-      - name: Real-world bench (alaska fixture, Structure vs GEOS)
+      - name: Real-world sample bench (alaska subset, Structure vs GEOS)
         run: cargo bench --features "arrange,structure,parallel,simd,bench-geos-system,io-gpkg" --bench real_world -- --fast
         env:
           BENCH_FILE: benches/real_world/alaska.bin
@@ -130,8 +135,8 @@ jobs:
   clippy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
         with:
           components: clippy
       - run: cargo clippy --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,ffi"
@@ -141,33 +146,34 @@ jobs:
   rustdoc:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
       - run: cargo doc --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,ffi,serde"
         env:
           RUSTDOCFLAGS: -D warnings
 
   # Semver gate: a minor/patch bump must never silently break the public
-  # API. Compares the working tree against the last published release
-  # (pinned so pre-bump PRs stay green: there is nothing to compare until
-  # Cargo.toml moves past the baseline). Bump `baseline` on every release.
+  # API. `check-release` compares the working tree against the latest
+  # crates.io release of geo-repair (self-updating - no per-release
+  # baseline to bump). Runs on push AND pull_request: when the local
+  # version equals the published one the check is a no-op.
   semver:
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: obi1kenobi/cargo-semver-checks-action@v2
-        with:
-          baseline: 0.14.1
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
+      - name: Install cargo-semver-checks
+        run: cargo install cargo-semver-checks --locked
+      - name: Check release API compatibility
+        run: cargo semver-checks check-release
 
   # Supply-chain gate 1: RustSec advisory database (known vulnerabilities
   # in the dependency graph fail the build).
   audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
       - name: Audit
@@ -182,8 +188,8 @@ jobs:
   deny:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
       - name: Install cargo-deny
         run: cargo install cargo-deny --locked
       - name: Deny checks
@@ -192,12 +198,14 @@ jobs:
   # libFuzzer smoke gate: the repair entry points must build under
   # cargo-fuzz and survive a bounded run on the committed corpus + fresh
   # mutations. A crash (panic escaping the containment guards, or invalid
-  # output shipped) fails the job; artifacts land in fuzz/artifacts.
+  # output shipped) fails the job; artifacts land in fuzz/artifacts and are
+  # uploaded on failure so discoveries can be committed back to the corpus
+  # as regression seeds (the pull-back loop).
   fuzz:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # nightly
       - run: cargo install cargo-fuzz --locked
       - name: Build fuzz targets
         run: cargo fuzz build
@@ -207,3 +215,20 @@ jobs:
         run: cargo fuzz run validate -- -runs=3000 -max_len=1024
       - name: Smoke - wkt_repair (parse + repair pipeline)
         run: cargo fuzz run wkt_repair -- -runs=3000 -max_len=2048
+      # Sanitized passes: AddressSanitizer on make_valid (the 2026-08-04
+      # mixed-magnitude deadly signal was unreproducible on Windows - the
+      # sanitizer pinpoints heap/stack corruption that plain runs only
+      # surface as a late signal) and UndefinedBehaviorSanitizer on
+      # validate. Corpus seeds replay first, so a committed crash seed
+      # deterministically exercises the instrumented build.
+      - name: Sanitized - make_valid (ASan)
+        run: cargo fuzz run --sanitizer address make_valid -- -runs=2000 -max_len=1024
+      - name: Sanitized - validate (UBSan)
+        run: cargo fuzz run --sanitizer undefined validate -- -runs=2000 -max_len=1024
+      - name: Upload crash artifacts (pull-back loop)
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v4
+        with:
+          name: fuzz-crashes
+          path: fuzz/artifacts/**
+          if-no-files-found: ignore
