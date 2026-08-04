@@ -91,6 +91,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   magnitude), and `arrange_chain` passes valid inputs through unchanged.
   Valid in, polygonal out is now enforced by regression tests for both
   fuzz-discovered rings.
+- Fuzz-found WKT parser panics (crash-5909cb82): input ending
+  mid-document reached unchecked `self.s[self.i]` sites in the reader
+  (ring loop, multipolygon loop, parse_point peek, EMPTY checks) and
+  panicked with index-out-of-bounds. All sites now guard `i < len`;
+  truncated documents return `Err(WktError)`. Regression test covers the
+  crash input plus 15 truncation classes; artifact committed to the
+  wkt_repair corpus.
 - Python bindings: tests rewritten to the WKT surface (17 tests green;
   GeoJSON binding references removed with the deleted bindings).
 
