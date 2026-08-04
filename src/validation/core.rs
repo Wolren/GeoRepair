@@ -1150,19 +1150,41 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
     }
 
     // Non-adjacent pairs: any intersection (crossing, vertex-on-edge,
-    // vertex revisit, collinear overlap) is non-simple.
+    // vertex revisit, collinear overlap) is non-simple. Uses the ring
+    // path's per-pair predicates (edges_intersect_general with a RELATIVE
+    // collinear gate + segment-local edges_vertex_on_edge). The global
+    // bbox eps (1e-12 * scale) inflates to an absolute length at large
+    // coordinate magnitude (measured: 1e15-scale line, eps = 1000 units,
+    // flagged a vertex 1 unit from another segment as on-edge: a false
+    // NotSimple on the fuzz-discovered mixed-magnitude collapse); the
+    // per-pair form keeps the tolerance at the pair's own edge lengths.
     let pair_intersects = |i: usize, j: usize| -> bool {
         if closed && i == 0 && j == n - 1 {
             return false; // closure pair handled above
         }
-        segments_intersect_any(
+        // Vertex revisit: non-adjacent segments sharing an endpoint are
+        // non-simple ("interior intersection at vertices", GEOS TestSimple
+        // LINESTRING (20 80, 80 20, 80 80, 140 60, 80 20, 160 20)).
+        // edges_vertex_on_edge excludes endpoint equality (correct for
+        // rings, where shared vertices are the normal adjacency), so the
+        // line path must flag revisits explicitly.
+        if coords[i] == coords[j]
+            || coords[i] == coords[j + 1]
+            || coords[i + 1] == coords[j]
+            || coords[i + 1] == coords[j + 1]
+        {
+            return true;
+        }
+        if edges_intersect_general(
             coords[i],
             coords[i + 1],
             coords[j],
             coords[j + 1],
             eps,
-            true,
-        )
+        ) {
+            return true;
+        }
+        edges_vertex_on_edge(coords[i], coords[i + 1], coords[j], coords[j + 1])
     };
     if n <= 128 {
         for i in 0..n {
@@ -1197,7 +1219,17 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
                 if j <= i + 1 || (closed && i == 0 && j == n - 1) {
                     return std::ops::ControlFlow::<(), ()>::Continue(());
                 }
-                if segments_intersect_any(a1, a2, coords[j], coords[j + 1], eps, true) {
+                // Vertex revisit (see the small-path pair check).
+                if a1 == coords[j]
+                    || a1 == coords[j + 1]
+                    || a2 == coords[j]
+                    || a2 == coords[j + 1]
+                {
+                    return std::ops::ControlFlow::Break(());
+                }
+                if edges_intersect_general(a1, a2, coords[j], coords[j + 1], eps)
+                    || edges_vertex_on_edge(a1, a2, coords[j], coords[j + 1])
+                {
                     std::ops::ControlFlow::Break(())
                 } else {
                     std::ops::ControlFlow::<(), ()>::Continue(())

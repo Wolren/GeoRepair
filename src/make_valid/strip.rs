@@ -67,7 +67,6 @@ pub(super) fn strip_degenerate(g: Geometry<f64>) -> Geometry<f64> {
                                 // Fall through to boundary output below.
                             } else {
                             let (mut min_x, mut max_x, mut min_y, mut max_y) = (ext[0].x, ext[0].x, ext[0].y, ext[0].y);
-                let mut sum = 0.0_f64;
                 let mut has_nan = !ext[0].x.is_finite() || !ext[0].y.is_finite();
                 for i in 0..interior_n - 1 {
                     let c = ext[i + 1];
@@ -75,24 +74,30 @@ pub(super) fn strip_degenerate(g: Geometry<f64>) -> Geometry<f64> {
                     max_x = max_x.max(c.x);
                     min_y = min_y.min(c.y);
                     max_y = max_y.max(c.y);
-                    sum += ext[i].x * ext[i + 1].y - ext[i + 1].x * ext[i].y;
                     if !has_nan && (!c.x.is_finite() || !c.y.is_finite()) {
                         has_nan = true;
                     }
                 }
-                sum += ext[interior_n - 1].x * ext[0].y - ext[0].x * ext[interior_n - 1].y;
                 // Match validator threshold: f64::EPSILON * scale where scale = max(w, h, 1.0)
                 let v_scale = (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
-                // Area degeneracy: shoelace rounding noise is bounded by
-                // ~n * eps * M² where M = max coordinate MAGNITUDE (not bbox
-                // width!). A ring whose computed area is below that bound is
-                // collinear (or sub-ULP) in exact arithmetic - winding is
-                // meaningless → demote to LineString.
-                // Absolute threshold (1e-12) misses collinear rings at large
-                // coordinate magnitude (base=3.5e9 → noise ~2e3).
-                let m = max_x.abs().max(min_x.abs()).max(max_y.abs()).max(min_y.abs()).max(1.0);
-                let noise = f64::EPSILON * m * m * (interior_n as f64) * 8.0;
-                let area_ok = sum.abs() >= noise;
+                // Area degeneracy: a ring is degenerate iff its vertices lie
+                // bit-exactly on one line (robust orient == 0 for every
+                // vertex against the first edge). The historical
+                // magnitude-based noise bound (EPS * m^2 * n * 8, m = max
+                // |coord|) wrongly demoted REAL slivers at large coordinate
+                // magnitude: measured on the fuzz-discovered mixed-magnitude
+                // ring (1e15 scale, genuine area 5e14, width ~1 unit): the
+                // computed shoelace 1e15 sits below the worst-case
+                // cancellation bound 8.9e15, so a valid polygon was demoted
+                // to a line while GEOS IsValid keeps it. Sub-coordinate-ULP
+                // slivers (deviation below the coordinate rounding) are
+                // still caught: their STORED coordinates lie exactly on the
+                // line, so the robust orient is exactly zero.
+                let p0 = ext[0];
+                let p1 = ext[1];
+                let exactly_collinear =
+                    (2..interior_n).all(|i| crate::orient::orient2d(p0, p1, ext[i]) == 0.0);
+                let area_ok = !exactly_collinear;
                 let bbox_ok = (max_x - min_x).abs() >= f64::EPSILON * v_scale
                     && (max_y - min_y).abs() >= f64::EPSILON * v_scale;
                 if area_ok && bbox_ok && !has_nan {
