@@ -34,17 +34,6 @@ pub enum WkbError {
     UnexpectedGeometryType { expected: &'static str, code: u32 },
     UnsupportedDimension { actual_dims: u8 },
     TrailingBytes { consumed: usize, total: usize },
-    /// A count field (ring/point/geometry count) that cannot possibly fit
-    /// in the remaining buffer. Guards `Vec::with_capacity` against
-    /// attacker-sized allocations: a 4-byte count field alone must never
-    /// be able to request gigabytes (measured 2026-08-04: a crafted
-    /// MultiPoint count requested a 120 GB allocation and aborted the
-    /// process with OOM - uncatchable by panic containment).
-    InconsistentCount {
-        count: u64,
-        remaining: usize,
-        min_bytes: usize,
-    },
     IoError(std::io::Error),
 }
 
@@ -71,17 +60,9 @@ impl fmt::Display for WkbError {
             WkbError::TrailingBytes { consumed, total } => {
                 write!(
                     f,
-                    "trailing bytes after WKB geometry (consumed {consumed} of {total})"
+                    "trailing bytes after WKB geometry: consumed {consumed} of {total} bytes"
                 )
             }
-            WkbError::InconsistentCount {
-                count,
-                remaining,
-                min_bytes,
-            } => write!(
-                f,
-                "WKB count field {count} cannot fit in {remaining} remaining bytes (min {min_bytes} bytes per element)"
-            ),
             WkbError::IoError(e) => write!(f, "WKB I/O error: {e}"),
         }
     }
