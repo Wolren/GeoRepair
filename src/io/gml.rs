@@ -195,10 +195,9 @@ fn collect_numbers(reader: &mut Reader<&[u8]>, elem: &[u8]) -> Result<Vec<f64>, 
             Event::Text(t) => {
                 let text = t.decode().map_err(|e| e.to_string())?;
                 for tok in text.split_whitespace() {
-                    nums.push(
-                        tok.parse::<f64>()
-                            .map_err(|_| format!("bad coordinate `{tok}` in GML"))?,
-                    );
+                    let v = parse_gml_number(tok)
+                        .map_err(|_| format!("bad coordinate `{tok}` in GML"))?;
+                    nums.push(v);
                 }
             }
             Event::End(e) if local(e.name()) == elem => break,
@@ -444,7 +443,28 @@ fn write_polygon(
 }
 
 fn fmt(v: f64) -> String {
-    format!("{v}")
+    // ryu: shortest round-trip formatting (same as the WKT writer);
+    // std's Display float path is 5-10x slower per number.
+    let mut buf = ryu::Buffer::new();
+    buf.format(v).to_string()
+}
+
+/// GML coordinate tokens: decimal numbers via fast_float (correctly
+/// rounded, strtod-equivalent - same as the WKT reader), with the
+/// NaN/inf keyword forms still routed through std's parser for full
+/// strtod parity (fast_float has no keyword form).
+fn parse_gml_number(tok: &str) -> Result<f64, ()> {
+    let b = tok.as_bytes();
+    let body = if let Some(rest) = b.strip_prefix(b"+").or_else(|| b.strip_prefix(b"-")) {
+        rest
+    } else {
+        b
+    };
+    let kw = |k: &[u8]| body.len() == k.len() && body.eq_ignore_ascii_case(k);
+    if kw(b"nan") || kw(b"inf") || kw(b"infinity") {
+        return tok.parse::<f64>().map_err(|_| ());
+    }
+    fast_float::parse::<f64, _>(b).map_err(|_| ())
 }
 
 fn fmt_list(coords: &[Coord<f64>]) -> String {
