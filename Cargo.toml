@@ -102,6 +102,7 @@ quick-xml = { version = "0.41", optional = true }
 rusqlite = { version = "0.37", features = ["bundled"], optional = true }
 memmap2 = { version = "0.9.11", optional = true }
 geo-traits = { version = "0.3", optional = true }
+fast-float = { version = ">=0.2,<0.4" }
 wkb = { version = "0.9", optional = true }
 ryu = "1.0"
 js-sys = { version = "0.3", optional = true }
