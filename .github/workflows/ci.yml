@@ -149,6 +149,10 @@ jobs:
         run: cargo bench --features "arrange,structure,parallel,simd,bench-geos-system,io-gpkg" --bench real_world -- --fast
         env:
           BENCH_FILE: benches/real_world/alaska.bin
+      - name: WKB/WKT head-to-head bench (ours vs georust/wkb + wkt)
+        run: cargo bench --bench wkb_cmp
+        env:
+          BENCH_FILE: benches/real_world/alaska.bin
 
   clippy:
     runs-on: ubuntu-latest

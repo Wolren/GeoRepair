@@ -121,7 +121,7 @@ hotpath = { version = "0.22", optional = true }
 proptest = "1.11"
 wkt = { version = "0.14", features = ["geo-types"] }
 wkb = { version = "0.9" }
-geo-traits = { version = "0.3" }
+geo-traits = { version = "0.3", features = ["geo-types"] }
 
 [lib]
 name = "geo_repair"
