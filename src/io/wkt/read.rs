@@ -231,7 +231,7 @@ impl<'a> Parser<'a> {
 
     fn parse_point(&mut self, dims: u32) -> Result<Geometry<f64>, WktError> {
         self.skip_ws();
-        if self.peek() == b'E' || self.peek() == b'e' {
+        if self.i < self.s.len() && (self.peek() == b'E' || self.peek() == b'e') {
             let rest = &self.s[self.i..];
             if rest.starts_with(b"EMPTY") || rest.starts_with(b"empty") {
                 self.i += 5;
@@ -283,7 +283,7 @@ impl<'a> Parser<'a> {
                 break;
             }
             if !rings.is_empty() {
-                if self.s[self.i] == b',' {
+                if self.i < self.s.len() && self.s[self.i] == b',' {
                     self.i += 1;
                 }
                 self.skip_ws();
@@ -293,7 +293,7 @@ impl<'a> Parser<'a> {
             }
             // EMPTY ring element (POLYGON ((...), EMPTY) or POLYGON
             // (EMPTY, EMPTY)) - an empty ring contributes nothing.
-            if self.s[self.i] == b'E' || self.s[self.i] == b'e' {
+            if self.i < self.s.len() && (self.s[self.i] == b'E' || self.s[self.i] == b'e') {
                 let rest = &self.s[self.i..];
                 if rest.starts_with(b"EMPTY") || rest.starts_with(b"empty") {
                     self.i += 5;
@@ -451,7 +451,7 @@ impl<'a> Parser<'a> {
                 break;
             }
             if !polys.is_empty() {
-                if self.s[self.i] == b',' {
+                if self.i < self.s.len() && self.s[self.i] == b',' {
                     self.i += 1;
                 }
                 self.skip_ws();
@@ -461,7 +461,7 @@ impl<'a> Parser<'a> {
             }
             // EMPTY element (MULTIPOLYGON (EMPTY, ((0 0, ...)))) - an
             // empty polygon component.
-            if self.s[self.i] == b'E' || self.s[self.i] == b'e' {
+            if self.i < self.s.len() && (self.s[self.i] == b'E' || self.s[self.i] == b'e') {
                 let rest = &self.s[self.i..];
                 if rest.starts_with(b"EMPTY") || rest.starts_with(b"empty") {
                     self.i += 5;
@@ -479,7 +479,7 @@ impl<'a> Parser<'a> {
                     break;
                 }
                 if !rings.is_empty() {
-                    if self.s[self.i] == b',' {
+                    if self.i < self.s.len() && self.s[self.i] == b',' {
                         self.i += 1;
                     }
                     self.skip_ws();
