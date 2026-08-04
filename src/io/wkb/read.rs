@@ -3,6 +3,12 @@
 use super::*;
 use std::io::Read;
 
+/// Maximum container nesting depth (Multi* / GeometryCollection). Each
+/// nesting level consumes at least 9 bytes of input (byte order + type +
+/// count), so the cap never rejects real data while bounding recursion
+/// (stack overflow is an uncatchable abort).
+const MAX_WKB_NESTING: usize = 256;
+
 // Reader
 // ---------------------------------------------------------------------------
 
@@ -14,7 +20,7 @@ use std::io::Read;
 pub fn read_wkb(buf: &[u8]) -> Result<Geometry<f64>, WkbError> {
     let mut pos = 0;
     let mut dummy_extra = Vec::new();
-    let (geom, _, _, _) = read_geometry_inner(buf, &mut pos, &mut dummy_extra)?;
+    let (geom, _, _, _) = read_geometry_inner(buf, &mut pos, &mut dummy_extra, 0)?;
     // Strict single-geometry parse: trailing bytes mean the buffer was
     // truncated, concatenated, or garbage - surface it instead of silently
     // dropping data. Use read_wkb_concat for multi-geometry buffers.
@@ -47,7 +53,7 @@ pub fn read_wkb_from(mut reader: impl Read) -> Result<Geometry<f64>, WkbError> {
 pub fn read_ewkb(buf: &[u8]) -> Result<EwkbGeometry, WkbError> {
     let mut pos = 0;
     let mut extra_coords = Vec::new();
-    let (geometry, srid, raw_dims, _) = read_geometry_inner(buf, &mut pos, &mut extra_coords)?;
+    let (geometry, srid, raw_dims, _) = read_geometry_inner(buf, &mut pos, &mut extra_coords, 0)?;
     let dims = match raw_dims {
         4 => EwkbDims::XYZM,
         3 => EwkbDims::XYZ,
@@ -68,7 +74,13 @@ pub(crate) fn read_geometry_inner(
     buf: &[u8],
     pos: &mut usize,
     extra_coords: &mut Vec<f64>,
+    depth: usize,
 ) -> Result<(Geometry<f64>, Option<i32>, u8, u32), WkbError> {
+    if depth > MAX_WKB_NESTING {
+        // Same class as a count overflowing the buffer: the document is
+        // corrupt/abusive, not deeply meaningful geometry.
+        return Err(WkbError::UnexpectedEof);
+    }
     let le = read_byte_order(buf, pos)?;
     let raw_type = read_u32(buf, pos, le)?;
     let has_z = (raw_type & WKB_Z_FLAG) != 0;
@@ -104,7 +116,7 @@ pub(crate) fn read_geometry_inner(
             let n = read_bounded_count(buf, pos, le, 5)?;
             let mut points = Vec::with_capacity(n);
             for _ in 0..n {
-                let (sub, _, _, sub_code) = read_geometry_inner(buf, pos, extra_coords)?;
+                let (sub, _, _, sub_code) = read_geometry_inner(buf, pos, extra_coords, depth + 1)?;
                 match sub {
                     Geometry::Point(p) => points.push(p),
                     _ => {
@@ -121,7 +133,7 @@ pub(crate) fn read_geometry_inner(
             let n = read_bounded_count(buf, pos, le, 5)?;
             let mut lines = Vec::with_capacity(n);
             for _ in 0..n {
-                let (sub, _, _, sub_code) = read_geometry_inner(buf, pos, extra_coords)?;
+                let (sub, _, _, sub_code) = read_geometry_inner(buf, pos, extra_coords, depth + 1)?;
                 match sub {
                     Geometry::LineString(ls) => lines.push(ls),
                     _ => {
@@ -138,7 +150,7 @@ pub(crate) fn read_geometry_inner(
             let n = read_bounded_count(buf, pos, le, 5)?;
             let mut polys = Vec::with_capacity(n);
             for _ in 0..n {
-                let (sub, _, _, sub_code) = read_geometry_inner(buf, pos, extra_coords)?;
+                let (sub, _, _, sub_code) = read_geometry_inner(buf, pos, extra_coords, depth + 1)?;
                 match sub {
                     Geometry::Polygon(p) => polys.push(p),
                     _ => {
@@ -155,7 +167,7 @@ pub(crate) fn read_geometry_inner(
             let n = read_bounded_count(buf, pos, le, 5)?;
             let mut geoms = Vec::with_capacity(n);
             for _ in 0..n {
-                let (sub, _, _, _) = read_geometry_inner(buf, pos, extra_coords)?;
+                let (sub, _, _, _) = read_geometry_inner(buf, pos, extra_coords, depth + 1)?;
                 geoms.push(sub);
             }
             Ok(Geometry::GeometryCollection(GeometryCollection(geoms)))
@@ -370,7 +382,7 @@ pub fn read_wkb_concat(buf: &[u8]) -> Result<Vec<Geometry<f64>>, WkbError> {
     let mut geoms = Vec::new();
     while offset < buf.len() {
         let mut extra = Vec::new();
-        let (geom, _, _, _) = read_geometry_inner(buf, &mut offset, &mut extra)?;
+        let (geom, _, _, _) = read_geometry_inner(buf, &mut offset, &mut extra, 0)?;
         geoms.push(geom);
     }
     Ok(geoms)
