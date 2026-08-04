@@ -10,7 +10,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 geo = "0.33"
-geo-repair = { path = "..", features = ["arrange", "structure", "parallel", "simd", "validate", "io-wkt"] }
+geo-repair = { path = "..", features = ["arrange", "structure", "parallel", "simd", "validate", "io-wkt", "io-wkb"] }
 
 # The crate's [profile.release] sets panic = "abort" (perf). The fuzz
 # harness MUST unwind: the targets and the library's own containment
@@ -42,6 +42,13 @@ bench = false
 [[bin]]
 name = "wkt_repair"
 path = "fuzz_targets/wkt_repair.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "wkb_repair"
+path = "fuzz_targets/wkb_repair.rs"
 test = false
 doc = false
 bench = false

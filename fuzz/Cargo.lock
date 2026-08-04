@@ -140,7 +140,7 @@ dependencies = [
 
 [[package]]
 name = "geo-repair"
-version = "0.14.1"
+version = "0.14.2"
 dependencies = [
  "geo",
  "log",

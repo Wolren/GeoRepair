@@ -831,7 +831,12 @@ mod tests {
             for cut in 0..wkb.len() {
                 let err = read_wkb(&wkb[..cut]).unwrap_err();
                 assert!(
-                    matches!(&err, WkbError::UnexpectedEof | WkbError::UnknownTypeCode(_)),
+                    matches!(
+                        &err,
+                        WkbError::UnexpectedEof
+                            | WkbError::UnknownTypeCode(_)
+                            | WkbError::InconsistentCount { .. }
+                    ),
                     "prefix {cut} of {} bytes: unexpected success or wrong error {err:?}",
                     wkb.len()
                 );
