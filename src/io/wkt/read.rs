@@ -95,71 +95,57 @@ impl<'a> Parser<'a> {
     }
     fn read_f64(&mut self) -> Result<f64, WktError> {
         self.skip_ws();
+        let start = self.i;
         if self.i >= self.s.len() {
             return Err(self.err("expected number"));
         }
 
-        // NaN / inf / Infinity, strtod-style: optional sign, case-insensitive
-        // (GEOS StringTokenizer parses numbers via strtod, which accepts
-        // "nan", "inf", "infinity" and their signed variants in any case).
-        let negative = match self.s[self.i] {
-            b'-' => {
-                self.i += 1;
-                true
-            }
-            b'+' => {
-                self.i += 1;
-                false
-            }
-            _ => false,
-        };
-
-        if self.i < self.s.len() {
-            let rest = &self.s[self.i..];
-            if rest.len() >= 3 && rest[..3].eq_ignore_ascii_case(b"nan") {
-                self.i += 3;
-                return Ok(f64::NAN);
-            }
-            if rest.len() >= 8 && rest[..8].eq_ignore_ascii_case(b"infinity") {
-                self.i += 8;
-                return Ok(if negative {
-                    f64::NEG_INFINITY
-                } else {
-                    f64::INFINITY
-                });
-            }
-            if rest.len() >= 3 && rest[..3].eq_ignore_ascii_case(b"inf") {
-                self.i += 3;
-                return Ok(if negative {
-                    f64::NEG_INFINITY
-                } else {
-                    f64::INFINITY
-                });
-            }
+        // strtod-style token walk: optional sign, then digits with
+        // optional fraction and exponent, or nan/inf/infinity
+        // (case-insensitive). The token slice is parsed with
+        // std::str::parse, which is CORRECTLY ROUNDED (Eisel-Lemire),
+        // matching strtod/GEOS. The historical hand-rolled u64
+        // accumulator + 10f64.powi(exp) assembly was not: measured
+        // 2026-08-04, "4.919094327364069e208" parsed 1 ULP off the
+        // correctly-rounded value, and the writer's own round-trip
+        // output re-parsed to a DIFFERENT f64 (roundtrip fuzz target).
+        let bytes = &self.s;
+        let n = bytes.len();
+        if self.i < n && (bytes[self.i] == b'-' || bytes[self.i] == b'+') {
+            self.i += 1;
         }
 
-        // Parse integer part digit-by-digit into u64
-        let mut int_val: u64 = 0;
+        // NaN / inf / Infinity, strtod-style: optional sign, case-insensitive.
+        if self.i < n && bytes[self.i].is_ascii_alphabetic() {
+            let rest = &bytes[self.i..];
+            let kw_len = if rest.len() >= 8 && rest[..8].eq_ignore_ascii_case(b"infinity") {
+                8
+            } else if (rest.len() >= 3 && rest[..3].eq_ignore_ascii_case(b"inf"))
+                || (rest.len() >= 3 && rest[..3].eq_ignore_ascii_case(b"nan"))
+            {
+                3
+            } else {
+                return Err(self.err("expected number"));
+            };
+            self.i += kw_len;
+            return std::str::from_utf8(&self.s[start..self.i])
+                .map_err(|_| self.err("expected number"))?
+                .parse::<f64>()
+                .map_err(|_| self.err("expected number"));
+        }
+
+        // Integer part.
         let mut parsed_any = false;
-        while self.i < self.s.len() && self.s[self.i].is_ascii_digit() {
+        while self.i < n && bytes[self.i].is_ascii_digit() {
             parsed_any = true;
-            int_val = int_val
-                .saturating_mul(10)
-                .saturating_add((self.s[self.i] - b'0') as u64);
             self.i += 1;
         }
 
-        // Parse fractional part
-        let mut frac_val: u64 = 0;
-        let mut frac_digits: u32 = 0;
-        if self.i < self.s.len() && self.s[self.i] == b'.' {
+        // Fractional part.
+        if self.i < n && bytes[self.i] == b'.' {
             self.i += 1;
-            while self.i < self.s.len() && self.s[self.i].is_ascii_digit() {
+            while self.i < n && bytes[self.i].is_ascii_digit() {
                 parsed_any = true;
-                frac_val = frac_val
-                    .saturating_mul(10)
-                    .saturating_add((self.s[self.i] - b'0') as u64);
-                frac_digits += 1;
                 self.i += 1;
             }
         }
@@ -168,41 +154,26 @@ impl<'a> Parser<'a> {
             return Err(self.err("expected digit"));
         }
 
-        // Parse exponent
-        let mut exp: i32 = 0;
-        if self.i < self.s.len() && (self.s[self.i] == b'e' || self.s[self.i] == b'E') {
+        // Exponent.
+        if self.i < n && (bytes[self.i] == b'e' || bytes[self.i] == b'E') {
             self.i += 1;
-            let exp_negative = if self.i < self.s.len() && self.s[self.i] == b'-' {
+            if self.i < n && (bytes[self.i] == b'-' || bytes[self.i] == b'+') {
                 self.i += 1;
-                true
-            } else if self.i < self.s.len() && self.s[self.i] == b'+' {
-                self.i += 1;
-                false
-            } else {
-                false
-            };
-            if self.i >= self.s.len() || !self.s[self.i].is_ascii_digit() {
+            }
+            if self.i >= n || !bytes[self.i].is_ascii_digit() {
                 return Err(self.err("expected exponent digit"));
             }
-            while self.i < self.s.len() && self.s[self.i].is_ascii_digit() {
-                exp = exp
-                    .saturating_mul(10)
-                    .saturating_add((self.s[self.i] - b'0') as i32);
+            while self.i < n && bytes[self.i].is_ascii_digit() {
                 self.i += 1;
-            }
-            if exp_negative {
-                exp = -exp;
             }
         }
 
-        // Combine using f64 arithmetic (avoids str::parse<f64>() entirely)
-        let value = if frac_digits > 0 {
-            (int_val as f64 + frac_val as f64 / 10f64.powi(frac_digits as i32)) * 10f64.powi(exp)
-        } else {
-            int_val as f64 * 10f64.powi(exp)
-        };
-
-        Ok(if negative { -value } else { value })
+        // Correctly rounded (strtod-equivalent); overflow -> inf,
+        // underflow -> 0, same as strtod and the old accumulator.
+        std::str::from_utf8(&self.s[start..self.i])
+            .map_err(|_| self.err("expected number"))?
+            .parse::<f64>()
+            .map_err(|_| self.err("expected number"))
     }
     fn read_coord(&mut self, _dims: u32) -> Result<Coord<f64>, WktError> {
         let x = self.read_f64()?;
@@ -297,17 +268,40 @@ impl<'a> Parser<'a> {
                 break;
             }
             // EMPTY ring element (POLYGON ((...), EMPTY) or POLYGON
-            // (EMPTY, EMPTY)) - an empty ring contributes nothing.
+            // (EMPTY, EMPTY)) - preserved as an empty ring, GEOS-style:
+            // POLYGON (EMPTY, (0 0, 1 1, 0 1, 0 0)) is a polygon with an
+            // empty shell and a hole. Dropping EMPTY rings here made
+            // empty-shell polygons unrepresentable and broke the WKT
+            // roundtrip for WKB-parsed degenerate polygons (measured
+            // 2026-08-04, roundtrip fuzz target).
             if self.i < self.s.len() && (self.s[self.i] == b'E' || self.s[self.i] == b'e') {
                 let rest = &self.s[self.i..];
                 if rest.starts_with(b"EMPTY") || rest.starts_with(b"empty") {
                     self.i += 5;
+                    rings.push(LineString::new(vec![]));
                     saw_any = true;
                     self.skip_ws();
                     if self.i < self.s.len() && self.s[self.i] == b',' {
                         self.i += 1;
                     }
                     continue;
+                }
+            }
+            // Parenthesized empty ring "(EMPTY)" - accepted for writers
+            // that wrap the empty ring in its own parens.
+            if self.i < self.s.len() && self.s[self.i] == b'(' {
+                let rest = &self.s[self.i + 1..];
+                if rest.len() >= 5 && rest[..5].eq_ignore_ascii_case(b"EMPTY") {
+                    let mut j = self.i + 6;
+                    while j < self.s.len() && self.s[j].is_ascii_whitespace() {
+                        j += 1;
+                    }
+                    if j < self.s.len() && self.s[j] == b')' {
+                        self.i = j + 1;
+                        rings.push(LineString::new(vec![]));
+                        saw_any = true;
+                        continue;
+                    }
                 }
             }
             self.expect(b'(')?;
@@ -328,7 +322,7 @@ impl<'a> Parser<'a> {
                 vec![],
             )));
         }
-        let exterior = rings.swap_remove(0);
+        let exterior = rings.remove(0);
         Ok(Geometry::Polygon(Polygon::new(exterior, rings)))
     }
 
@@ -492,14 +486,32 @@ impl<'a> Parser<'a> {
                 if self.i < self.s.len() && self.s[self.i] == b')' {
                     break;
                 }
-                // EMPTY ring element (MULTIPOLYGON ((...), (EMPTY))) - an
-                // empty ring contributes nothing; the polygon stays empty.
+                // EMPTY ring element (MULTIPOLYGON ((...), EMPTY)) -
+                // preserved as an empty ring (GEOS keeps empty shells).
                 if self.i < self.s.len() && (self.s[self.i] == b'E' || self.s[self.i] == b'e') {
                     let rest = &self.s[self.i..];
                     if rest.starts_with(b"EMPTY") || rest.starts_with(b"empty") {
                         self.i += 5;
+                        rings.push(LineString::new(vec![]));
                         saw_ring = true;
                         continue;
+                    }
+                }
+                // Parenthesized empty ring "(EMPTY)" - accepted for
+                // writers that wrap the empty ring in its own parens.
+                if self.i < self.s.len() && self.s[self.i] == b'(' {
+                    let rest = &self.s[self.i + 1..];
+                    if rest.len() >= 5 && rest[..5].eq_ignore_ascii_case(b"EMPTY") {
+                        let mut j = self.i + 6;
+                        while j < self.s.len() && self.s[j].is_ascii_whitespace() {
+                            j += 1;
+                        }
+                        if j < self.s.len() && self.s[j] == b')' {
+                            self.i = j + 1;
+                            rings.push(LineString::new(vec![]));
+                            saw_ring = true;
+                            continue;
+                        }
                     }
                 }
                 self.expect(b'(')?;
@@ -517,7 +529,7 @@ impl<'a> Parser<'a> {
             let exterior = if rings.is_empty() {
                 LineString::new(vec![])
             } else {
-                rings.swap_remove(0)
+                rings.remove(0)
             };
             polys.push(Polygon::new(exterior, rings));
             saw_any = true;

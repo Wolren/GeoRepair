@@ -246,6 +246,8 @@ jobs:
         run: cargo fuzz run wkt_repair -- -runs=3000 -max_len=2048
       - name: Smoke - wkb_repair (parse + repair pipeline)
         run: cargo fuzz run wkb_repair -- -runs=3000 -max_len=2048
+      - name: Smoke - roundtrip (serialize + repair invariants)
+        run: cargo fuzz run roundtrip -- -runs=3000 -max_len=2048
       # Sanitized pass: AddressSanitizer on make_valid (the 2026-08-04
       # mixed-magnitude deadly signal was unreproducible on Windows - the
       # sanitizer pinpoints heap/stack corruption that plain runs only

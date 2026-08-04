@@ -188,7 +188,9 @@ enum ValidityOutcome {
     Pass,
     /// GEOS says valid, we reject, but repair restores validity. This is the
     /// documented stricter-validator divergence - counted and drift-checked.
-    MaskedDivergence,
+    /// Carries the first validator error class that caused the divergence
+    /// (triage: bucketed per case 2026-08-04).
+    MaskedDivergence(String),
     /// GEOS says invalid and we accept: a real validator gap (we are too
     /// lenient). Counted as a known gap with its own baseline.
     KnownValidatorGap,
@@ -202,7 +204,7 @@ enum ValidityOutcome {
 static DIVERGENCE_REASONS: std::sync::Mutex<Option<std::collections::BTreeMap<String, usize>>> =
     std::sync::Mutex::new(None);
 
-fn record_divergence_reason(geom: &Geometry<f64>) {
+fn record_divergence_reason(geom: &Geometry<f64>) -> String {
     let errors = geom.validate().errors;
     let key = errors
         .first()
@@ -216,7 +218,8 @@ fn record_divergence_reason(geom: &Geometry<f64>) {
         .unwrap_or_else(|| "unknown".to_string());
     let mut guard = DIVERGENCE_REASONS.lock().expect("divergence tally lock");
     let m = guard.get_or_insert_with(std::collections::BTreeMap::new);
-    *m.entry(key).or_insert(0) += 1;
+    *m.entry(key.clone()).or_insert(0) += 1;
+    key
 }
 
 fn print_divergence_reasons() {
@@ -341,8 +344,7 @@ fn run_validity_test(
             let scale = in_area.abs().max(1.0);
             let area_ok = in_area <= 1e-9 || (fx_area - in_area).abs() <= 1e-6 * scale;
             if area_ok {
-                record_divergence_reason(geom);
-                ValidityOutcome::MaskedDivergence
+                ValidityOutcome::MaskedDivergence(record_divergence_reason(geom))
             } else {
                 ValidityOutcome::Fail
             }
@@ -849,8 +851,18 @@ fn run_all_geos_xml_tests() -> Vec<(String, usize, usize, usize, usize, usize, u
                             });
                         match run_validity_test(geom, exp, as_ring, &cfg) {
                             ValidityOutcome::Pass => true,
-                            ValidityOutcome::MaskedDivergence => {
+                            ValidityOutcome::MaskedDivergence(key) => {
                                 masked += 1;
+                                if std::env::var("DIAG_MASKED").is_ok() {
+                                    // Per-case triage line: file, case, and
+                                    // the first validator error class that
+                                    // made us diverge from GEOS. Bucketed in
+                                    // the triage pass 2026-08-04.
+                                    eprintln!(
+                                        "MASKED\t{fname}\t{}\t{key}",
+                                        case.desc.trim().replace('\t', " ")
+                                    );
+                                }
                                 true
                             }
                             ValidityOutcome::KnownValidatorGap => {
@@ -1002,7 +1014,7 @@ fn run_st_rfh_suite(cfg: &MakeValidConfig) -> (usize, usize, usize, Vec<String>)
         }
         match run_validity_test(&geom, *default_valid, false, cfg) {
             ValidityOutcome::Pass => passed += 1,
-            ValidityOutcome::MaskedDivergence => masked += 1,
+            ValidityOutcome::MaskedDivergence(_) => masked += 1,
             ValidityOutcome::KnownValidatorGap => {
                 failed += 1;
                 failures.push(format!(

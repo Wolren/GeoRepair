@@ -1,5 +1,5 @@
 use geo_repair::io::wkb::read_wkb;
-use geo_repair::io::wkt::read_wkt;
+use geo_repair::io::wkt::{read_wkt, write_wkt};
 
 // Fuzz-discovered (wkt_repair crash-5909cb82, CI 2026-08-04): truncated
 // documents ending mid-polygon panicked with index-out-of-bounds at
@@ -51,6 +51,29 @@ fn truncated_wkt_never_panics() {
     let crash_text = "POLYGON((0 0,nan 0,10 10,0 10,0 0,)";
     let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read_wkt(crash_text)));
     assert!(r.is_ok(), "read_wkt panicked on the fuzz crash input");
+}
+
+// Ring order must survive parse -> write -> parse: two distinct holes
+// keep their order (swap_remove(0) in the polygon assembly previously
+// swapped the LAST ring into the first hole slot, scrambling any 2+ hole
+// polygon - found 2026-08-04 by the roundtrip probe), and empty rings
+// are preserved (GEOS keeps empty shells).
+#[test]
+fn wkt_ring_order_and_empty_rings() {
+    // Two distinct holes: their order is meaningful data.
+    let two_holes =
+        "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (1 1, 1 2, 2 2, 2 1, 1 1), (5 5, 5 7, 7 7, 7 5, 5 5))";
+    for text in [two_holes] {
+        let g = read_wkt(text).expect("parse");
+        let g2 = read_wkt(&write_wkt(&g)).expect("reparse");
+        assert_eq!(format!("{:?}", g), format!("{:?}", g2), "ring order lost for {text}");
+    }
+    // Empty shell + holes: structure must survive (exterior empty, holes
+    // in order, empty holes preserved).
+    let empty_shell = "POLYGON ((EMPTY), EMPTY, (4.243991582e-314 6.3659874475e-314), EMPTY)";
+    let g = read_wkt(empty_shell).expect("parse empty-shell");
+    let g2 = read_wkt(&write_wkt(&g)).expect("reparse empty-shell");
+    assert_eq!(format!("{:?}", g), format!("{:?}", g2), "empty-shell structure lost");
 }
 
 // Recursion depth: both readers recurse per container nesting level. A

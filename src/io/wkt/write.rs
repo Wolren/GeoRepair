@@ -56,12 +56,23 @@ fn write_linestring(s: &mut String, ls: &LineString<f64>) {
 
 fn write_polygon_rings(s: &mut String, poly: &Polygon<f64>) {
     s.push_str("((");
-    write_coord_list(s, &poly.exterior().0);
+    if poly.exterior().0.is_empty() {
+        // Empty rings are written as bare EMPTY (GEOS WKTWriter syntax);
+        // the reader preserves them as empty rings.
+        s.push_str("EMPTY");
+    } else {
+        write_coord_list(s, &poly.exterior().0);
+    }
     s.push(')');
     for h in poly.interiors() {
-        s.push_str(", (");
-        write_coord_list(s, &h.0);
-        s.push(')');
+        s.push_str(", ");
+        if h.0.is_empty() {
+            s.push_str("EMPTY");
+        } else {
+            s.push('(');
+            write_coord_list(s, &h.0);
+            s.push(')');
+        }
     }
     s.push(')');
 }
@@ -87,7 +98,7 @@ fn write_geom(s: &mut String, geom: &Geometry<f64>) {
             }
         }
         Geometry::Polygon(poly) => {
-            if poly.exterior().0.is_empty() {
+            if poly.exterior().0.is_empty() && poly.interiors().is_empty() {
                 s.push_str("POLYGON EMPTY");
             } else {
                 s.push_str("POLYGON ");
