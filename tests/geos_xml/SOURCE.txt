@@ -1,0 +1,3 @@
+GEOS commit: 24ec89dc300e1f403dfb234506bb54a8c9f3e68c
+synced from: D:\Projects\gis\lib\geos\tests\xmltester\tests
+synced at: 2026-08-05T15:29:16Z
