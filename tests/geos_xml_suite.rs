@@ -1,9 +1,11 @@
 //! GEOS XML test suite runner.
 //!
-//! Downloads and runs GEOS's official XML test suite against our pipeline.
+//! Runs GEOS's official XML test suite against our pipeline.
 //! Tests: isValid, makeValid, buildarea, isSimple. Overlay/predicate
 //! operations are skipped and counted as skipped (never as passed).
-//! XML files are cached in tests/geos_xml/.
+//! XML files are cached in tests/geos_xml/, pinned to GEOS commit
+//! 24ec89dc3 (see tests/geos_xml/SOURCE.txt); refresh with
+//! scripts/sync_geos_xml.py and triage any baseline delta before committing.
 //!
 //! isValid semantics: our validator is deliberately STRICTER than GEOS
 //! IsValidOp (WrongOrientation/NotSimple/RepeatedPoint classes - the
@@ -528,9 +530,17 @@ fn run_build_area_compare(geom: &Geometry<f64>, expected_wkt: &str) -> (bool, St
 
 /// GEOS makeValid oracle. Ground truth for area is the INPUT's unary_union
 /// area (the true area-preservation contract); the XML expected WKT is used
-/// for type family + component count. Some GEOS XML expectations are stale
-/// (case 13 comments "not completely sure") - input-union area wins.
-fn run_make_valid_compare(geom: &Geometry<f64>, expected_wkt: &str, cfg: &MakeValidConfig) -> (bool, String) {
+/// for type family + component count + an INDEPENDENT expected-area
+/// cross-check (see (3b) below - the input-union oracle is self-referential
+/// for MultiPolygon/GC inputs, because it pre-fixes components with our own
+/// repair). Some GEOS XML expectations are stale (case 13 comments "not
+/// completely sure") - the exemption list pins our own answer instead.
+fn run_make_valid_compare(
+    geom: &Geometry<f64>,
+    expected_wkt: &str,
+    cfg: &MakeValidConfig,
+    desc: &str,
+) -> (bool, String) {
     let fixed = geom.make_valid_with_config(cfg);
     let v = fixed.validate();
     if !v.valid {
@@ -570,6 +580,48 @@ fn run_make_valid_compare(geom: &Geometry<f64>, expected_wkt: &str, cfg: &MakeVa
             problems.push(format!(
                 "area: got {our_area:.8}, input union {input_union_area:.8} (diff {:.2e})",
                 (our_area - input_union_area).abs()
+            ));
+        }
+    }
+
+    // (3b) Independent expected-area cross-check against the XML expected
+    // WKT (GEOS's own answer). The input-union oracle above is circular for
+    // MultiPolygon/GC inputs (geom_union pre-fixes components with OUR
+    // repair), so a lossy repair would shrink the ground truth along with
+    // the output; the expected WKT is an external anchor. Exemptions are
+    // pinned individually (never blanket), keyed on the case desc:
+    // - makevalid.xml case 13 (multipolygon/second_part_overlapping, XML
+    //   comment "not completely sure"): GEOS emits the even-odd notch split
+    //   (area 1.64), we union overlapping shells per JTS rule 09 (area 1.8).
+    // - makevalid.xml case 14 (first_part_crossing_second_part_overlapping):
+    //   measured three ways 2026-08-05 - XML expected 1.445, GEOS makeValid
+    //   TODAY emits 1.44 (the XML expectation is stale; GEOS moved), we emit
+    //   1.45 which is the EXACT set-theoretic union (bowtie lobes 0.5 + rect
+    //   0.96 - two 0.005 overlap wedges).
+    // Both pins below keep the divergence visible (pattern: pinned
+    // documented-divergence, see geos_compare.rs mp_overlapping).
+    let exp_area = total_poly_area(&expected);
+    let pinned_union: Option<f64> = if desc.contains("first_part_crossing_second_part_overlapping") {
+        // More specific desc first: case 14 contains "second_part_overlapping"
+        // as a substring, so it must be matched before the case-13 branch.
+        Some(1.45)
+    } else if desc.contains("second_part_overlapping") {
+        Some(1.8)
+    } else {
+        None
+    };
+    if let Some(pin) = pinned_union {
+        if (our_area - pin).abs() > 1e-6 {
+            problems.push(format!(
+                "pinned union answer moved: got {our_area:.8}, pinned {pin} (GEOS even-odd expected {exp_area:.8})"
+            ));
+        }
+    } else if !is_empty_geom(&expected) && exp_area > 1e-9 {
+        let scale = exp_area.abs().max(1.0);
+        if (our_area - exp_area).abs() > 1e-6 * scale {
+            problems.push(format!(
+                "expected-area: got {our_area:.8}, GEOS expected {exp_area:.8} (diff {:.2e})",
+                (our_area - exp_area).abs()
             ));
         }
     }
@@ -875,7 +927,7 @@ fn run_all_geos_xml_tests() -> Vec<(String, usize, usize, usize, usize, usize, u
                     "makevalid" => {
                         case_dispatched = true;
                         // GEOS exact-output oracle: type + area + component count
-                        let (ok, why) = run_make_valid_compare(geom, &expected, &cfg);
+                        let (ok, why) = run_make_valid_compare(geom, &expected, &cfg, &case.desc);
                         if !ok {
                             failures.push(format!(
                                 "{} op='{}' {why}",
@@ -1032,18 +1084,20 @@ fn run_st_rfh_suite(cfg: &MakeValidConfig) -> (usize, usize, usize, Vec<String>)
     (passed, masked, failed, failures)
 }
 
-/// Documented validator-strictness divergence baseline (measured 2026-08-02
-/// on the 858+10-case corpus: 211 masked; classes WrongOrientation 192,
-/// RepeatedPoint 8, MultiPointDuplicatePoints 8, RingTooFewPoints 2,
-/// PinchPoint 1 - the suite prints the live class tally on every run).
-/// 210 come from the XML corpus; +1 is the ported ST_RFH case 2
-/// (shell-hole + hole-hole touch at points: GEOS-valid, we reject as
-/// PinchPoint, repair valid + area-preserving).
+/// Documented validator-strictness divergence baseline (measured 2026-08-05
+/// on the 937-case corpus pinned to GEOS commit 24ec89dc3: 213 masked;
+/// classes WrongOrientation 194, RepeatedPoint 8, MultiPointDuplicatePoints
+/// 8, RingTooFewPoints 2, PinchPoint 1 - the suite prints the live class
+/// tally on every run). +2 vs the 2026-08-02 baseline (211) is the
+/// deliberate sync of robust/overlay/TestOverlay-geos-{275,392,599}.xml
+/// (both new masked cases are WrongOrientation class; the 275-geometry
+/// case was verified to repair valid + area-preserving to 5e-13 before
+/// the sync, see georepair-fuzz-workflow session notes 2026-08-05).
 /// The isValid suite counts expected-valid inputs our validator rejects and
 /// repair restores as MASKED-DIVERGENCE. If the count grows beyond this
 /// baseline, the suite fails: validator drift must be triaged, not hidden.
 /// Detail: georepair-fuzz-workflow references/geos-reference-oracle-2026-07-31.md
-const VALIDATOR_DIVERGENCE_BASELINE: usize = 211;
+const VALIDATOR_DIVERGENCE_BASELINE: usize = 213;
 
 // We run everything in a single #[test] to avoid 123 separate test binaries
 #[test]
