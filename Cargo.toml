@@ -26,7 +26,7 @@ all-features = false
 features = ["std", "arrange", "structure", "parallel", "simd", "validate", "mimalloc", "io-all", "io-gpkg", "serde", "geo-traits"]
 
 [features]
-default = ["std", "arrange", "structure", "parallel", "simd", "validate", "mimalloc"]
+default = ["std", "arrange", "structure", "parallel", "simd", "validate", "mimalloc", "io-gpkg"]
 
 # no_std support: disable `std` feature to build without file I/O,
 # alloc-only. WKB parsing, geometry validation, and repair work
@@ -71,9 +71,11 @@ io-shp = ["dep:shapefile"]
 io-wkt = []
 io-csv = ["dep:csv", "io-wkt"]
 io-gml = ["dep:quick-xml"]
+# GeoPackage is a DEFAULT feature (bundled SQLite, target-gated below):
+# `geo_repair::io::load("*.gpkg")` works out of the box. WASM targets skip
+# the module (the dep is in the non-wasm target block).
 io-gpkg = ["dep:rusqlite"]
 io-all = ["io-shp", "io-wkt", "io-csv", "io-gml"]
-# gpkg requires C compilation (bundled SQLite), not available on WASM
 # No-op features: always compiled in, kept for CI compatibility
 io-geojson = []
 io-wkb = []
@@ -99,7 +101,6 @@ serde_json = "1.0"
 shapefile = { version = "0.8", features = ["geo-types"], optional = true }
 csv = { version = "1.3", optional = true }
 quick-xml = { version = "0.41", optional = true }
-rusqlite = { version = "0.37", features = ["bundled"], optional = true }
 memmap2 = { version = "0.9.11", optional = true }
 geo-traits = { version = "0.3", optional = true }
 fast-float = { version = ">=0.2,<0.4" }
@@ -117,6 +118,10 @@ geos = { version = "11.1", optional = true, default-features = false, features =
 mimalloc = { version = "0.1", default-features = false, optional = true }
 pyo3 = { version = "0.29", features = ["extension-module"], optional = true }
 hotpath = { version = "0.22", optional = true }
+# Bundled SQLite compiles C - no WASM toolchain can build it. The io-gpkg
+# feature stays a plain dep: marker; on wasm32 the dep simply does not
+# exist and the module is gated out in src/io/mod.rs.
+rusqlite = { version = "0.37", features = ["bundled"], optional = true }
 
 [dev-dependencies]
 proptest = "1.11"
