@@ -761,7 +761,41 @@ fn main() {
         ..Default::default()
     };
     #[cfg(feature = "parallel")]
-    let _full_results = par_fix_polygon_batch_owned(polys, &cfg);
+    let _full_results = {
+        // Same size-partition + round-robin interleave as the validation
+        // section: the big polys' serial fast-path cost (12.8ms avg for
+        // >4096 verts, measured 2026-08-06) is the repair batch's
+        // imbalance anchor - 1,164 bigs = ~15s summed vs ~1.2s for the
+        // 1.58M smalls. Interleaving stops contiguous chunks from
+        // stacking mega giants (measured 7.2s pathology in [2/5]).
+        // NOTE: sort (size, index) pairs, NOT (size, Polygon) tuples -
+        // the owned-tuple sort moves ~100B per element x log(n) levels
+        // (~3GB of copying, measured 4.47s regression 2026-08-06).
+        let mut idxs: Vec<(usize, usize)> = polys
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (poly_n_vert(p), i))
+            .collect();
+        idxs.sort_unstable_by_key(|(n, _)| *n);
+        let split = idxs.partition_point(|(n, _)| *n <= 4096);
+        let small_idxs: Vec<usize> = idxs[..split].iter().map(|(_, i)| *i).collect();
+        let big_desc: Vec<usize> = idxs[split..].iter().rev().map(|(_, i)| *i).collect();
+        let n_threads = rayon::current_num_threads();
+        let mut interleaved: Vec<usize> = Vec::with_capacity(big_desc.len());
+        for t in 0..n_threads {
+            interleaved.extend(big_desc.iter().skip(t).step_by(n_threads).copied());
+        }
+        let perm: Vec<usize> = small_idxs.into_iter().chain(interleaved).collect();
+        let mut reordered: Vec<Polygon<f64>> = Vec::with_capacity(polys.len());
+        for &i in &perm {
+            // SAFETY: each index appears exactly once in `perm`; the source
+            // slot is never read again, and `polys` is forgotten below so
+            // no double-drop.
+            reordered.push(unsafe { std::ptr::read(&polys[i]) });
+        }
+        std::mem::forget(polys);
+        par_fix_polygon_batch_owned(reordered, &cfg)
+    };
     #[cfg(not(feature = "parallel"))]
     let _full_results: Vec<Geometry<f64>> = polys
         .into_iter()

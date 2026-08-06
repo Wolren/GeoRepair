@@ -170,55 +170,56 @@ pub(crate) fn fix_polygon_owned(
     let _t_fp = Instant::now();
     #[cfg(feature = "arrange")]
     {
-        let total_verts: usize =
-            poly.exterior().0.len() + poly.interiors().iter().map(|h| h.0.len()).sum::<usize>();
-        if total_verts > 0
-            && poly.exterior().0.len() >= 4
-            && crate::arrange::poly_has_basic_form(&poly)
-            // Sub-ULP edge check: an edge shorter than EPSILON * bbox_scale
-            // (mixed-magnitude rings, e.g. 1e8 coords with 1e-8 spikes) makes
-            // proper-crossing detection blind — collinear overlap is invisible.
-            // Such inputs are invalid anyway; route them to the full repair.
-            && !crate::arrange::has_sub_ulp_edge(&poly, ext_scale)
-            // Collinear ring check: a wide-bbox ring can still be exactly
-            // collinear (base=1e10, step=0.09, n=3 — all points on one line).
-            // Winding is then numerically ambiguous → WrongOrientation. The
-            // fast path must not pass it through; full repair degrades it.
-                    {
-            if total_verts <= core::FAST_PATH_MAX_VERTS {
-                // SmallVec: ~95.6% of the real-world dataset has <= 32
-                // vertices, so the line collection stays on the stack and
-                // skips the heap allocation entirely; larger rings spill to
-                // the heap transparently.
-                let lines: SmallVec<[Line<f64>; crate::core::SMALL_RING_LINES]> =
-                    poly.lines_iter().collect();
-                if !lines.is_empty()
-                    && crate::arrange::prep::has_no_intersections(&lines)
-                    && crate::arrange::holes_are_valid(&poly)
-                {
-                    PROFILE_FP_NS.fetch_add(_t_fp.elapsed().as_nanos() as u64, Ordering::Relaxed);
-                    return FixOutcome::Fast(Geometry::Polygon(poly));
-                }
-            } else {
-                // Very large rings: skip the monotone-chain has_no_intersections
-                // (O(n log n) but heavy constant) and use the R-tree proper-
-                // crossing sweep instead. A polygon with no proper crossing and
-                // valid holes IS the final result — the full repair pipeline
-                // (classify → subtract → merge) would only waste time. Measured:
-                // 159k-vert shell with 857 holes took 11.3s in subtract_holes
-                // for a polygon that was already valid.
-                if !crate::structure::has_proper_self_crossing(&poly)
-                    && crate::arrange::holes_are_valid_inclusive(&poly)
-                {
-                    PROFILE_FP_NS.fetch_add(_t_fp.elapsed().as_nanos() as u64, Ordering::Relaxed);
-                    return FixOutcome::Fast(Geometry::Polygon(poly));
-                }
-            }
+        if fast_path_check(&poly, ext_scale) {
+            PROFILE_FP_NS.fetch_add(_t_fp.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            return FixOutcome::Fast(Geometry::Polygon(poly));
         }
     }
     PROFILE_FP_NS.fetch_add(_t_fp.elapsed().as_nanos() as u64, Ordering::Relaxed);
 
-    // Single-pass GEOS MakeValid repair (primary path for invalid input):
+/// Fast-path gate: valid polygons return immediately, zero-copy. The gates
+/// are: basic form, sub-ULP edges, monotone-chain proper-crossing sweep
+/// (SmallVec, no heap for <= 32 lines), hole validity. Large rings swap the
+/// chain sweep for the R-tree proper-crossing sweep (heavy constants for
+/// tiny rings; measured 11.3s wasted subtract on a 159k-vert valid shell
+/// before the large-ring gate existed).
+#[cfg(feature = "arrange")]
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+fn fast_path_check(poly: &Polygon<f64>, ext_scale: Option<f64>) -> bool {
+    let total_verts: usize =
+        poly.exterior().0.len() + poly.interiors().iter().map(|h| h.0.len()).sum::<usize>();
+    if total_verts == 0 || poly.exterior().0.len() < 4 {
+        return false;
+    }
+    if !crate::arrange::poly_has_basic_form(poly)
+        // Sub-ULP edge check: an edge shorter than EPSILON * bbox_scale
+        // (mixed-magnitude rings, e.g. 1e8 coords with 1e-8 spikes) makes
+        // proper-crossing detection blind - collinear overlap is invisible.
+        // Such inputs are invalid anyway; route them to the full repair.
+        || crate::arrange::has_sub_ulp_edge(poly, ext_scale)
+    {
+        return false;
+    }
+    if total_verts <= core::FAST_PATH_MAX_VERTS {
+        // SmallVec: ~95.6% of the real-world dataset has <= 32 vertices, so
+        // the line collection stays on the stack and skips the heap
+        // allocation entirely; larger rings spill to the heap transparently.
+        let lines: SmallVec<[Line<f64>; crate::core::SMALL_RING_LINES]> = poly.lines_iter().collect();
+        !lines.is_empty()
+            && crate::arrange::prep::has_no_intersections(&lines)
+            && crate::arrange::holes_are_valid(poly)
+    } else {
+        // Very large rings: skip the monotone-chain has_no_intersections
+        // (O(n log n) but heavy constant) and use the R-tree proper-crossing
+        // sweep instead. A polygon with no proper crossing and valid holes
+        // IS the final result - the full repair pipeline (classify ->
+        // subtract -> merge) would only waste time.
+        !crate::structure::has_proper_self_crossing(poly)
+            && crate::arrange::holes_are_valid_inclusive(poly)
+    }
+}
+
+// Single-pass GEOS MakeValid repair (primary path for invalid input):
     // node shell + holes together in ONE pass, walk even-odd faces. This
     // replaces the multi-stage boolean pipeline (per-ring symdiff +
     // subtract_holes + merge — three noding passes) for the common invalid
