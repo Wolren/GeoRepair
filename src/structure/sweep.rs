@@ -2,6 +2,7 @@ use geo::Coord;
 use rstar::{RTree, RTreeObject, AABB};
 
 use crate::orient::orient2d_fast;
+use crate::util::ProfileClock;
 
 /// Edge with 2D bounding envelope for R-tree spatial indexing.
 struct EdgeEnvelope {
@@ -399,9 +400,9 @@ pub(crate) fn has_self_intersections(coords: &[Coord<f64>], eps: f64) -> bool {
     let n_edges = n.saturating_sub(1);
 
     let envs: Vec<[f64; 4]> = (0..n_edges).map(|i| edge_env_array(coords, i)).collect();
-    let t_build = std::time::Instant::now();
+    let t_build = ProfileClock::start();
     let tree = StrIndex::build(&envs);
-    let dt_build = t_build.elapsed();
+    let dt_build = std::time::Duration::from_nanos(t_build.ns());
     if std::env::var("DIAG_SI").is_ok() {
         eprintln!(
             "SI n={n_edges} build={:.1}ms levels={} leaves={}",

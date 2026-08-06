@@ -190,14 +190,14 @@
 //! | `simd-portable` | Portable SIMD via `core::simd` (nightly) | no |
 //! | `validate` | OGC validation predicates | yes |
 //! | `memmap` | Memory-mapped binary file loading | no* |
-//! | `wasm` | WASM browser fetch (synchronous XHR) | no |
+//! | `wasm` | WASM browser fetch (synchronous XHR, `wasm::fetch_geometry`) | wasm32 only |
 //! | `mimalloc` | Use mimalloc global allocator | yes |
 //! | `io-shp` | Shapefile format backend | no |
 //! | `io-wkb` | No-op (WKB is always compiled in) | — |
 //! | `io-wkt` | No-op (WKT is always compiled in) | — |
 //! | `io-csv` | CSV format backend | no |
 //! | `io-gml` | GML/XML format backend | no |
-//! | `io-gpkg` | GeoPackage format backend (not WASM) | no |
+//! | `io-gpkg` | GeoPackage format backend (default; not on wasm32) | yes |
 //! | `io-all` | All opt-in backends except gpkg | no |
 //! | `io-all-native` | All opt-in backends including gpkg | no |
 //! | `ffi` | C-compatible FFI bindings | no |
@@ -419,6 +419,9 @@ pub mod dd;
 pub mod feature;
 /// Geometry I/O: WKB, binary format, and format-dispatch helpers.
 pub mod io;
+/// WASM browser fetch (`wasm` feature; wasm32 targets only).
+#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
+pub mod wasm;
 /// Geometry repair implementation via the [`MakeValid`] trait.
 pub mod make_valid;
 /// Ring orientation utilities (CW/CCW winding).
@@ -503,7 +506,9 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 /// Profile each step of the structure fast path on a sample of polygons.
 /// Prints timing breakdown and pass rates to stderr.
-#[cfg(all(feature = "arrange", feature = "structure"))]
+// Native-only: it times with `std::time::Instant`, which is not
+// implemented on wasm32-unknown-unknown (panics on call).
+#[cfg(all(feature = "arrange", feature = "structure", not(target_arch = "wasm32")))]
 pub fn profile_structure_fastpath(polys: &[geo::Polygon<f64>], sample: usize) {
     use geo::LinesIter;
     use std::time::Instant;

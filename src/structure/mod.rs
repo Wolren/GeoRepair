@@ -53,7 +53,6 @@ use geo::{
 use rstar::{AABB, RTree, RTreeObject};
 use smallvec::SmallVec;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
 
 use crate::core;
 use crate::core::MakeValidConfig;
@@ -167,15 +166,15 @@ pub(crate) fn fix_polygon_owned(
 ) -> FixOutcome {
     // Fast path: valid polygons can return immediately. Use a total-verts limit
     // to avoid the monotone-chain has_no_intersections cost on very large rings.
-    let _t_fp = Instant::now();
+    let _t_fp = util::ProfileClock::start();
     #[cfg(feature = "arrange")]
     {
         if fast_path_check(&poly, ext_scale) {
-            PROFILE_FP_NS.fetch_add(_t_fp.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            PROFILE_FP_NS.fetch_add(_t_fp.ns(), Ordering::Relaxed);
             return FixOutcome::Fast(Geometry::Polygon(poly));
         }
     }
-    PROFILE_FP_NS.fetch_add(_t_fp.elapsed().as_nanos() as u64, Ordering::Relaxed);
+    PROFILE_FP_NS.fetch_add(_t_fp.ns(), Ordering::Relaxed);
 
 /// Fast-path gate: valid polygons return immediately, zero-copy. The gates
 /// are: basic form, sub-ULP edges, monotone-chain proper-crossing sweep
@@ -294,7 +293,7 @@ fn fast_path_check(poly: &Polygon<f64>, ext_scale: Option<f64>) -> bool {
         use rayon::prelude::*;
         let (shell_res, holes) = rayon::join(
             || {
-                let _t = Instant::now();
+                let _t = util::ProfileClock::start();
                 let shell_polys = match fix_ring::repair_ring(poly.exterior()) {
                     Some(polys) => polys,
                     None => return None,
@@ -306,11 +305,11 @@ fn fast_path_check(poly: &Polygon<f64>, ext_scale: Option<f64>) -> bool {
                 // lobes) — they must survive into the subtract step.
                 let valid: Vec<Polygon<f64>> =
                     shell_polys.into_iter().filter(|p| p.exterior().0.len() >= 4).collect();
-                PROFILE_SR_NS.fetch_add(_t.elapsed().as_nanos() as u64, Ordering::Relaxed);
+                PROFILE_SR_NS.fetch_add(_t.ns(), Ordering::Relaxed);
                 if valid.is_empty() { None } else { Some(valid) }
             },
             || {
-                let _t = Instant::now();
+                let _t = util::ProfileClock::start();
                 let mut hole_results: Vec<Vec<LineString<f64>>> = poly
                     .interiors()
                     .par_iter()
@@ -327,7 +326,7 @@ fn fast_path_check(poly: &Polygon<f64>, ext_scale: Option<f64>) -> bool {
                         }).unwrap_or_else(|| vec![h.clone()])
                     })
                     .collect();
-                PROFILE_HR_NS.fetch_add(_t.elapsed().as_nanos() as u64, Ordering::Relaxed);
+                PROFILE_HR_NS.fetch_add(_t.ns(), Ordering::Relaxed);
                 hole_results
                     .iter_mut()
                     .flat_map(|rings| rings.drain(..))
@@ -352,7 +351,7 @@ fn fast_path_check(poly: &Polygon<f64>, ext_scale: Option<f64>) -> bool {
     // Serial path: shell repair first, then holes sequentially.
     #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
     let (valid_shells, hole_rings_cw) = {
-        let _t_sr = Instant::now();
+        let _t_sr = util::ProfileClock::start();
         let shell_polys = match fix_ring::repair_ring(poly.exterior()) {
             Some(polys) => polys,
             None => {
@@ -373,10 +372,10 @@ fn fast_path_check(poly: &Polygon<f64>, ext_scale: Option<f64>) -> bool {
         if valid_shells.is_empty() {
             return FixOutcome::Repaired(handle_collapse_result(poly.exterior(), config).unwrap_or_else(crate::make_valid::empty_geom));
         }
-        PROFILE_SR_NS.fetch_add(_t_sr.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        PROFILE_SR_NS.fetch_add(_t_sr.ns(), Ordering::Relaxed);
 
         let hole_rings_cw: Vec<LineString<f64>> = {
-            let _t_hr = Instant::now();
+            let _t_hr = util::ProfileClock::start();
             let mut hole_rings: Vec<LineString<f64>> = Vec::new();
             for h in poly.interiors() {
                 let hole_bbox = ring_bbox(&h.0);
@@ -394,7 +393,7 @@ fn fast_path_check(poly: &Polygon<f64>, ext_scale: Option<f64>) -> bool {
                     hole_rings.push(ensure_cw(h.clone()));
                 }
             }
-            PROFILE_HR_NS.fetch_add(_t_hr.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            PROFILE_HR_NS.fetch_add(_t_hr.ns(), Ordering::Relaxed);
             hole_rings.into_iter().map(ensure_cw).collect()
         };
         (valid_shells, hole_rings_cw)
@@ -416,14 +415,14 @@ fn fast_path_check(poly: &Polygon<f64>, ext_scale: Option<f64>) -> bool {
             .collect();
         shell_poly = Polygon::new(ensure_ccw(shell_poly.exterior().clone()), struct_holes);
 
-        let _t_cl = Instant::now();
+        let _t_cl = util::ProfileClock::start();
         let (inner_holes, outer_holes) =
             classify::classify_holes(shell_poly.exterior(), &hole_rings_cw);
-        PROFILE_CL_NS.fetch_add(_t_cl.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        PROFILE_CL_NS.fetch_add(_t_cl.ns(), Ordering::Relaxed);
 
-        let _t_nest = Instant::now();
+        let _t_nest = util::ProfileClock::start();
         let (to_subtract, islands) = resolve_nesting(&inner_holes);
-        PROFILE_NEST_NS.fetch_add(_t_nest.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        PROFILE_NEST_NS.fetch_add(_t_nest.ns(), Ordering::Relaxed);
 
         let inner_polys: Vec<Polygon<f64>> = to_subtract
             .into_iter()
@@ -431,10 +430,10 @@ fn fast_path_check(poly: &Polygon<f64>, ext_scale: Option<f64>) -> bool {
             .collect();
 
         let mut local = Vec::new();
-        let _t_sub = Instant::now();
+        let _t_sub = util::ProfileClock::start();
         let subtracted = subtract::subtract_holes(&shell_poly, &inner_polys);
         local.extend(subtracted.0);
-        PROFILE_SUB_NS.fetch_add(_t_sub.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        PROFILE_SUB_NS.fetch_add(_t_sub.ns(), Ordering::Relaxed);
 
         local.extend(islands);
 
@@ -456,7 +455,7 @@ fn fast_path_check(poly: &Polygon<f64>, ext_scale: Option<f64>) -> bool {
     };
 
     let mut result_polys: Vec<Polygon<f64>> = {
-        let _t_hn = Instant::now();
+        let _t_hn = util::ProfileClock::start();
         let r = {
             #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
             {
@@ -471,7 +470,7 @@ fn fast_path_check(poly: &Polygon<f64>, ext_scale: Option<f64>) -> bool {
                 valid_shells.into_iter().flat_map(process_shell).collect()
             }
         };
-        PROFILE_HN_NS.fetch_add(_t_hn.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        PROFILE_HN_NS.fetch_add(_t_hn.ns(), Ordering::Relaxed);
         r
     };
 
@@ -508,12 +507,12 @@ fn fast_path_check(poly: &Polygon<f64>, ext_scale: Option<f64>) -> bool {
         #[cfg(not(feature = "arrange"))]
         Geometry::Polygon(p)
     } else {
-        let _t_mg = Instant::now();
+        let _t_mg = util::ProfileClock::start();
         // Even-parent filter: when shells are nested (one fully contains another),
         // unary_union produces NestedHoles. The BuildArea even-parent approach
         // keeps only shells with an even number of containing shells.
         let merged = merge::merge_shells(result_polys);
-        PROFILE_MG_NS.fetch_add(_t_mg.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        PROFILE_MG_NS.fetch_add(_t_mg.ns(), Ordering::Relaxed);
         // Clean NestedHoles from merge output
         #[cfg(feature = "arrange")]
         {

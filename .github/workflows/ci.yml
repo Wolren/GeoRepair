@@ -154,6 +154,32 @@ jobs:
         env:
           BENCH_FILE: benches/real_world/alaska.bin
 
+  # WebAssembly gate: the crate claims wasm32 support (default features
+  # minus C-bound deps; the `wasm` feature adds browser fetch). Both the
+  # full default feature set and the minimal wasm config must compile, and
+  # the runtime suite (tests/wasm.rs) must PASS in Node via
+  # wasm-bindgen-test-runner - compile-only wasm support rots (the
+  # mimalloc E0433 was only found the first time the target was actually
+  # checked, 2026-08-06).
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+      - run: cargo check --target wasm32-unknown-unknown
+      - run: cargo check --target wasm32-unknown-unknown --no-default-features --features "std,arrange,structure,simd,validate,wasm"
+      - name: Install wasm-bindgen-test-runner (version-locked to the lockfile)
+        run: |
+          wb=$(grep -A1 'name = "wasm-bindgen"' Cargo.lock | grep version | head -1 | sed 's/version = "\(.*\)"/\1/')
+          cargo install wasm-bindgen-cli --version "$wb" --locked
+      - name: Runtime wasm tests in Node
+        run: cargo test --target wasm32-unknown-unknown --features "arrange,structure,simd,validate,wasm" --test wasm
+        env:
+          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
+
   clippy:
     runs-on: ubuntu-latest
     steps:
