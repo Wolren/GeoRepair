@@ -327,17 +327,57 @@ fn main() {
     eprint!("[2/5] Validating {n_polys} polys...");
     let t0 = Instant::now();
     #[cfg(feature = "parallel")]
-    let infos: Vec<_> = polys
-        .par_iter()
-        .map(|p| {
-            let v = p.validate();
-            let bad = v
-                .errors
-                .iter()
-                .any(|e| !matches!(e, geo_repair::validation::GeometryValidationError::WrongOrientation));
-            (!bad, poly_n_vert(p))
-        })
-        .collect();
+    let infos: Vec<_> = {
+        // Batch-level size partition: one balanced pass over the small
+        // polys, then the big ones (descending by vertex count so the
+        // giants spread across the pool instead of serializing inside
+        // random chunks). Measured 2026-08-06: interleaved par_iter 3.17s,
+        // two-pass ~2.3-2.6s - the giants' serial per-poly cost is the
+        // imbalance anchor and partitioning is the lever that fixes it.
+        // (Nested per-poly parallelism was measured as a REGRESSION and
+        // reverted - the pool is saturated, see check_holes_valid notes.)
+        let mut by_size: Vec<(usize, &Polygon<f64>)> = polys.iter().map(|p| (poly_n_vert(p), p)).collect();
+        by_size.sort_unstable_by_key(|(n, _)| *n);
+        let split = by_size.partition_point(|(n, _)| *n <= 4096);
+        let (small, big) = by_size.split_at(split);
+        let mut infos = Vec::with_capacity(n_polys);
+        infos.extend(
+            small
+                .par_iter()
+                .map(|(_, p)| {
+                    let v = p.validate();
+                    let bad = v.errors.iter().any(|e| {
+                        !matches!(e, geo_repair::validation::GeometryValidationError::WrongOrientation)
+                    });
+                    (!bad, poly_n_vert(p))
+                })
+                .collect::<Vec<_>>(),
+        );
+        // Big pass: descending, then round-robin interleaved so contiguous
+        // rayon chunks each get a MIX of giant + medium work. A contiguous
+        // descending run puts ~20 mega giants (300-600k verts, ~190ms
+        // serial each) in ONE chunk - measured 7.2s vs 3.17s (2026-08-06).
+        let mut big_items: Vec<&Polygon<f64>> = big.iter().map(|(_, p)| *p).collect();
+        big_items.reverse();
+        let n_threads = rayon::current_num_threads();
+        let mut interleaved: Vec<&Polygon<f64>> = Vec::with_capacity(big_items.len());
+        for t in 0..n_threads {
+            interleaved.extend(big_items.iter().skip(t).step_by(n_threads).copied());
+        }
+        infos.extend(
+            interleaved
+                .par_iter()
+                .map(|p| {
+                    let v = p.validate();
+                    let bad = v.errors.iter().any(|e| {
+                        !matches!(e, geo_repair::validation::GeometryValidationError::WrongOrientation)
+                    });
+                    (!bad, poly_n_vert(p))
+                })
+                .collect::<Vec<_>>(),
+        );
+        infos
+    };
     #[cfg(not(feature = "parallel"))]
     let infos: Vec<_> = polys
         .iter()
