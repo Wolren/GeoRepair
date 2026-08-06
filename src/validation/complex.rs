@@ -143,11 +143,55 @@ impl GeoValidation for MultiPolygon<f64> {
                 .max(1.0);
             let eps = 1e-12 * scale;
 
-            // Cross-ring edge-edge intersection check (must run before nesting
-            // check — partial overlaps can produce false-positive nesting)
-            for i in 0..shells.len() {
-                for j in (i + 1)..shells.len() {
-                    if check_rings_intersect(shells[i], shells[j], eps) {
+            // Cross-component ring intersection check (GEOS
+            // checkAreaIntersections covers ALL ring pairs across
+            // components: shell-shell, shell-hole, hole-hole - a proper
+            // crossing between any two rings of different components is
+            // invalid, eSelfIntersection). Pure vertex touches are NOT
+            // crossings (edges_intersect_general semantics), so MP
+            // touch-at-vertices cases stay valid. Candidate pairs are
+            // bounding-box filtered (R-tree when many rings) - never an
+            // unfiltered O(m^2) pair loop.
+            let mut all_rings: Vec<(usize, bool, &[Coord<f64>])> = Vec::new();
+            let mut comp_holes: Vec<Vec<&[Coord<f64>]>> = Vec::with_capacity(self.0.len());
+            for (ci, p) in self.0.iter().enumerate() {
+                all_rings.push((ci, false, &p.exterior().0[..]));
+                let mut holes: Vec<&[Coord<f64>]> = Vec::new();
+                for h in p.interiors() {
+                    all_rings.push((ci, true, &h.0[..]));
+                    holes.push(&h.0[..]);
+                }
+                comp_holes.push(holes);
+            }
+            let rb: Vec<[f64; 4]> = all_rings.iter().map(|(_, _, r)| ring_bbox(r)).collect();
+            for (a, b) in overlap_pairs(&rb, 0) {
+                if all_rings[a].0 == all_rings[b].0 {
+                    continue;
+                }
+                let ra = all_rings[a].2;
+                let rb2 = all_rings[b].2;
+                if check_rings_intersect(ra, rb2, eps) {
+                    errors.push(GeometryValidationError::SelfIntersection);
+                    return ValidationResult::invalid(errors);
+                }
+                // Interior-overlap probe (GEOS checkAreaIntersections also
+                // flags containment without an edge crossing, e.g. a
+                // component whose shell shares vertices with another
+                // component's hole ring - t21). Only (shell, hole) pairs are
+                // probed, and only the HOLE side's vertices inside the
+                // shell's FILL (holes of the shell's own component are
+                // excised and do not count): a shell entirely inside another
+                // shell's hole is a valid island (Test 616/641 in
+                // general_TestValid2.xml) whose own hole may also sit in the
+                // outer hole - both are valid. Hole-hole edge crossings are
+                // already caught above; nested shells are the nesting
+                // check's job.
+                if all_rings[a].1 != all_rings[b].1 {
+                    if all_rings[a].1 && ring_has_vertex_inside(ra, rb2, rb[b], &comp_holes[all_rings[b].0]) {
+                        errors.push(GeometryValidationError::SelfIntersection);
+                        return ValidationResult::invalid(errors);
+                    }
+                    if all_rings[b].1 && ring_has_vertex_inside(rb2, ra, rb[a], &comp_holes[all_rings[a].0]) {
                         errors.push(GeometryValidationError::SelfIntersection);
                         return ValidationResult::invalid(errors);
                     }
@@ -261,6 +305,39 @@ impl GeoValidation for MultiPolygon<f64> {
 
 trait ValidateDepth {
     fn validate_at_depth(&self, depth: usize, max_depth: usize) -> ValidationResult;
+}
+
+/// Any vertex of `probe` strictly inside `target`'s FILL (bbox-prefiltered;
+/// vertices inside `exclusions` - the target component's own holes - are
+/// excised and do not count). Used by the cross-component interior-overlap
+/// probe: a hole ring with a vertex in another shell's fill means the two
+/// interiors overlap without necessarily crossing edges (t21). Pure boundary
+/// touches (point_in_ring_exclusive semantics) do not count - MP touch cases
+/// stay valid.
+fn ring_has_vertex_inside(
+    probe: &[Coord<f64>],
+    target: &[Coord<f64>],
+    target_bbox: [f64; 4],
+    exclusions: &[&[Coord<f64>]],
+) -> bool {
+    'outer: for &v in probe {
+        if v.x < target_bbox[0]
+            || v.x > target_bbox[2]
+            || v.y < target_bbox[1]
+            || v.y > target_bbox[3]
+        {
+            continue;
+        }
+        for ex in exclusions {
+            if point_in_ring_exclusive(v, ex) {
+                continue 'outer;
+            }
+        }
+        if point_in_ring_exclusive(v, target) {
+            return true;
+        }
+    }
+    false
 }
 
 impl ValidateDepth for Geometry<f64> {

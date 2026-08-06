@@ -38,9 +38,9 @@ use common::*;
 // same gate the XML suite applies). Cases where the ORIGINAL fixture's
 // rings are mis-oriented and our rejection rides entirely on
 // WrongOrientation (the structural class is shadowed) are marked in the
-// table; their OGC-oriented variants are tracked as #[ignore]d known-gap
-// tests below - our validator currently ACCEPTS them (measured 2026-08-05),
-// see the gaps section at the bottom of this file.
+// table; their OGC-oriented variants are tracked as gap tests below -
+// the three structural gaps were FIXED 2026-08-06 (see the gap tests at
+// the bottom of this file).
 
 struct IsValidParityCase {
     name: &'static str,
@@ -70,9 +70,10 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
     // test<5> - valid MP
     IsValidParityCase { name: "t5_valid_mp", wkt: "MULTIPOLYGON(((0 0, 10 0, 10 10, 0 10, 0 0),(2 2, 2 6, 6 4, 2 2)),((60 60, 60 50, 70 40, 60 60)))", geos_valid: true, our_class: None, geos_class: "", note: "" },
     // test<6> - disconnected interior; structural class shadowed by
-    // WrongOrientation on the mis-oriented fixture - oriented variant is a
-    // KNOWN GAP (see geos_isvalidop_t6_disconnected_interior_gap).
-    IsValidParityCase { name: "t6_disconnected_interior", wkt: "POLYGON((40 320,340 320,340 20,40 20,40 320),(100 120,40 20,180 100,100 120),(200 200,180 100,240 160,200 200),(260 260,240 160,300 200,260 260),(300 300,300 200,340 260,300 300))", geos_valid: false, our_class: Some(GeometryValidationError::WrongOrientation), geos_class: "eDisconnectedInterior", note: "orientation-shadowed; oriented variant = KNOWN GAP" },
+    // WrongOrientation on the mis-oriented fixture - oriented variant is
+    // now REJECTED (gap fixed 2026-08-06, see
+    // geos_isvalidop_t6_disconnected_interior_gap).
+    IsValidParityCase { name: "t6_disconnected_interior", wkt: "POLYGON((40 320,340 320,340 20,40 20,40 320),(100 120,40 20,180 100,100 120),(200 200,180 100,240 160,200 200),(260 260,240 160,300 200,260 260),(300 300,300 200,340 260,300 300))", geos_valid: false, our_class: Some(GeometryValidationError::WrongOrientation), geos_class: "eDisconnectedInterior", note: "orientation-shadowed; oriented variant = gap fixed" },
     // test<7> - simple square, CW in the fixture: masked
     IsValidParityCase { name: "t7_simple", wkt: "POLYGON ((10 89, 90 89, 90 10, 10 10, 10 89))", geos_valid: true, our_class: None, geos_class: "", note: "masked: WrongOrientation + repair" },
     // test<8> - bowtie
@@ -86,8 +87,8 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
     // test<11> - hole properly crossing the shell: GEOS eSelfIntersection,
     // ours HoleOutsideShell (the hole genuinely pokes out)
     IsValidParityCase { name: "t11_hole_proper_intersection", wkt: "POLYGON ((10 90, 50 50, 10 10, 10 90), (20 50, 60 70, 60 30, 20 50))", geos_valid: false, our_class: Some(GeometryValidationError::HoleOutsideShell), geos_class: "eSelfIntersection", note: "hole pokes outside thin shell" },
-    // test<12> - disconnected interior; orientation-shadowed, oriented = GAP
-    IsValidParityCase { name: "t12_disconnected_interior", wkt: "POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), (20 80, 30 80, 20 20, 20 80), (80 30, 20 20, 80 20, 80 30), (80 80, 30 80, 80 30, 80 80))", geos_valid: false, our_class: Some(GeometryValidationError::WrongOrientation), geos_class: "eDisconnectedInterior", note: "orientation-shadowed; oriented variant = KNOWN GAP" },
+    // test<12> - disconnected interior; orientation-shadowed, oriented = gap fixed
+    IsValidParityCase { name: "t12_disconnected_interior", wkt: "POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), (20 80, 30 80, 20 20, 20 80), (80 30, 20 20, 80 20, 80 30), (80 80, 30 80, 80 30, 80 80))", geos_valid: false, our_class: Some(GeometryValidationError::WrongOrientation), geos_class: "eDisconnectedInterior", note: "orientation-shadowed; oriented variant = gap fixed" },
     // test<13> - MP touch at vertices, CW fixture: masked
     IsValidParityCase { name: "t13_mp_touch_vertices", wkt: "MULTIPOLYGON (((10 10, 10 90, 90 90, 90 10, 80 80, 50 20, 20 80, 10 10)), ((90 10, 10 10, 50 20, 90 10)))", geos_valid: true, our_class: None, geos_class: "", note: "masked: WrongOrientation + repair" },
     // test<14> - MP touch at segments: valid
@@ -104,10 +105,12 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
     IsValidParityCase { name: "t18_hole_outside_all_touch", wkt: "POLYGON ((10 10, 30 10, 30 50, 70 50, 70 10, 90 10, 90 90, 10 90, 10 10), (50 50, 30 10, 70 10, 50 50))", geos_valid: false, our_class: Some(GeometryValidationError::DisconnectedInteriorRing), geos_class: "eHoleOutsideShell", note: "hole double-touch reads as disconnected interior" },
     // test<19> - hole outside shell double-touch: same delta
     IsValidParityCase { name: "t19_hole_outside_double_touch", wkt: "POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), (20 80, 80 80, 80 20, 20 20, 20 80), (90 70, 150 50, 90 20, 110 40, 90 70))", geos_valid: false, our_class: Some(GeometryValidationError::DisconnectedInteriorRing), geos_class: "eHoleOutsideShell", note: "hole double-touch reads as disconnected interior" },
-    // test<20> - nested holes: orientation-shadowed; oriented variant = KNOWN GAP
-    IsValidParityCase { name: "t20_nested_holes", wkt: "POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), (20 80, 80 80, 80 20, 20 20, 20 80), (50 80, 80 50, 50 20, 20 50, 50 80))", geos_valid: false, our_class: Some(GeometryValidationError::WrongOrientation), geos_class: "eNestedHoles", note: "orientation-shadowed; oriented variant = KNOWN GAP" },
-    // test<21> - MP hole overlap crossing: orientation-shadowed; oriented = GAP
-    IsValidParityCase { name: "t21_mp_hole_overlap", wkt: "MULTIPOLYGON (((20 380, 420 380, 420 20, 20 20, 20 380), (220 340, 180 240, 60 200, 140 100, 340 60, 300 240, 220 340)), ((60 200, 340 60, 220 340, 60 200)))", geos_valid: false, our_class: Some(GeometryValidationError::WrongOrientation), geos_class: "eSelfIntersection", note: "orientation-shadowed; oriented variant = KNOWN GAP" },
+    // test<20> - nested holes: orientation-shadowed; oriented variant now
+    // REJECTED as DisconnectedInteriorRing (touch-cycle fires first; class
+    // delta vs GEOS eNestedHoles, boolean parity)
+    IsValidParityCase { name: "t20_nested_holes", wkt: "POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), (20 80, 80 80, 80 20, 20 20, 20 80), (50 80, 80 50, 50 20, 20 50, 50 80))", geos_valid: false, our_class: Some(GeometryValidationError::WrongOrientation), geos_class: "eNestedHoles", note: "orientation-shadowed; oriented variant = gap fixed" },
+    // test<21> - MP hole overlap crossing: orientation-shadowed; oriented = gap fixed
+    IsValidParityCase { name: "t21_mp_hole_overlap", wkt: "MULTIPOLYGON (((20 380, 420 380, 420 20, 20 20, 20 380), (220 340, 180 240, 60 200, 140 100, 340 60, 300 240, 220 340)), ((60 200, 340 60, 220 340, 60 200)))", geos_valid: false, our_class: Some(GeometryValidationError::WrongOrientation), geos_class: "eSelfIntersection", note: "orientation-shadowed; oriented variant = gap fixed" },
     // test<23> - zero-length line
     IsValidParityCase { name: "t23_zero_length_line", wkt: "LINESTRING(0 0, 0 0)", geos_valid: false, our_class: Some(GeometryValidationError::RepeatedPoint), geos_class: "(no class asserted)", note: "" },
     // test<24> - linear ring triangle: valid
@@ -223,42 +226,46 @@ fn geos_isvalidop_ticket588_reversed() {
 }
 
 // ---------------------------------------------------------------------------
-// KNOWN VALIDATOR GAPS (2026-08-05 audit, measured via the cargo build
-// with features arrange,structure,parallel,simd,validate): with OGC-correct
-// orientation our validator ACCEPTS these structural classes that GEOS
-// rejects. Every corpus fixture for these classes is mis-oriented, so the
-// XML suite masks them via WrongOrientation and the gaps stay invisible
-// (0 known gaps reported while 3 gap classes exist). Root causes in
-// src/validation/core.rs: hole-hole edge checks use check_rings_intersect
-// which misses vertex-only contact (hole chains disconnecting the interior,
-// ~line 923); the hole-nesting check uses point_in_ring_exclusive which
-// rejects boundary points (~line 987) so an inner hole sharing boundary
-// vertices evades it; and there is no cross-component check for an MP
-// component crossing another component's hole. Tracked as #[ignore]d tests
-// asserting GEOS's expectation - when the validator is fixed, un-ignore
-// and they turn green. (The nested-shells-touching class t15 is NOT a gap:
-// the cargo build detects it as NestedHoles - the wheel build does not,
-// see feature divergence note below.)
+// VALIDATOR GAP FIXES (2026-08-05, GEOS-parity, source-verified): with
+// OGC-correct orientation our validator previously ACCEPTED these
+// structural classes that GEOS rejects (every corpus fixture for these
+// classes is mis-oriented, so the XML suite masked them via
+// WrongOrientation and the gaps stayed invisible at "0 known gaps"). The
+// fixes, all bbox-filtered (R-tree, never unfiltered O(n^2)):
+// 1. disconnected interior via hole chains touching at vertices - ring-
+//    touch graph cycle detection (GEOS PolygonRing::findHoleCycleLocation
+//    port; touches at ONE coordinate stay valid, matching GEOS on
+//    IsValidOpTest test<17>);
+// 2. nested holes sharing boundary vertices - incident-segment topology
+//    (GEOS PolygonTopologyAnalyzer::isRingNested + PolygonNodeTopology
+//    port);
+// 3. MP component crossing another component's hole - cross-component
+//    ring intersection check covering shell-shell, shell-hole and
+//    hole-hole pairs (GEOS checkAreaIntersections scope).
+// These tests assert GEOS's expectation and now run GREEN.
 // ---------------------------------------------------------------------------
 #[test]
-#[ignore = "KNOWN GAP: disconnected interior (hole chain touching at vertices) accepted on OGC-oriented input; GEOS eDisconnectedInterior (also t12, same class)"]
 fn geos_isvalidop_t6_disconnected_interior_gap() {
     let g = geom_from_wkt("POLYGON ((40 320, 40 20, 340 20, 340 320, 40 320), (100 120, 180 100, 40 20, 100 120), (200 200, 240 160, 180 100, 200 200), (260 260, 300 200, 240 160, 260 260), (300 300, 340 260, 300 200, 300 300))");
-    assert!(!validate(&g).valid, "GEOS: eDisconnectedInterior; we currently accept");
+    assert!(!validate(&g).valid, "GEOS: eDisconnectedInterior (hole chain to shell)");
 }
 
 #[test]
-#[ignore = "KNOWN GAP: nested holes (inner hole sharing boundary vertices) accepted on OGC-oriented input; GEOS eNestedHoles"]
+fn geos_isvalidop_t12_disconnected_interior_gap() {
+    let g = geom_from_wkt("POLYGON ((10 90, 10 10, 90 10, 90 90, 10 90), (20 80, 30 80, 20 20, 20 80), (80 30, 20 20, 80 20, 80 30), (80 80, 30 80, 80 30, 80 80))");
+    assert!(!validate(&g).valid, "GEOS: eDisconnectedInterior (closed hole chain)");
+}
+
+#[test]
 fn geos_isvalidop_t20_nested_holes_gap() {
     let g = geom_from_wkt("POLYGON ((10 90, 10 10, 90 10, 90 90, 10 90), (20 80, 80 80, 80 20, 20 20, 20 80), (50 80, 80 50, 50 20, 20 50, 50 80))");
-    assert!(!validate(&g).valid, "GEOS: eNestedHoles; we currently accept");
+    assert!(!validate(&g).valid, "GEOS: eNestedHoles (boundary-sharing inner hole)");
 }
 
 #[test]
-#[ignore = "KNOWN GAP: MP component crossing a hole accepted on OGC-oriented input; GEOS eSelfIntersection"]
 fn geos_isvalidop_t21_mp_hole_overlap_gap() {
     let g = geom_from_wkt("MULTIPOLYGON (((20 380, 20 20, 420 20, 420 380, 20 380), (220 340, 300 240, 340 60, 140 100, 60 200, 180 240, 220 340)), ((60 200, 340 60, 220 340, 60 200)))");
-    assert!(!validate(&g).valid, "GEOS: eSelfIntersection; we currently accept");
+    assert!(!validate(&g).valid, "GEOS: eSelfIntersection (component crossing hole)");
 }
 
 /// Parse a line WKT and return its coordinates.
