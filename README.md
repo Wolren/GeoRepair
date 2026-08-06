@@ -31,9 +31,9 @@ release, parallel batch, GEOS 3.14.1 conda-forge as reference):
 
 | Dataset | GeoRepair | GEOS | vs GEOS |
 |---------|----------:|-----:|:-------:|
-| Validation (1.58M) | **0.8-2.3 s** | 3.6-3.9 s | **0.2-0.6x (2-5x faster)** |
-| Invalid subset (1 poly, 2026-08-03) | 11.9 ms | **2.2 ms** | 5.4x |
-| Full dataset (1.58M polys) | 3.5-4.3 s | **3.3-3.5 s** | 1.0-1.2x |
+| Validation (1.58M) | **4.1-4.6 s** | 3.6-3.9 s | **1.0-1.2x** |
+| Invalid subset | 0 polys (2026-08-06) | 0 | - |
+| Full dataset (1.58M polys) | 3.5-4.4 s | **3.3-3.5 s** | 1.0-1.2x |
 
 ## Performance
 
@@ -51,14 +51,27 @@ is excluded from the timings.
 
 | Dataset | GeoRepair (par) | GEOS (par batch) | vs GEOS |
 |---------|----------------:|-----------------:|:-------:|
-| Validation (1.58M) | **0.8-2.3 s** (0.5-1.5 µs/poly) | 3.6-3.9 s (2.3-2.5 µs/poly) | **0.2-0.6x** |
-| Invalid subset (1 poly, 2026-08-03) | 11.9 ms | **2.2 ms** | 5.4x |
-| Full dataset (1.58M polys) | 3.5-4.3 s | **3.3-3.5 s** | 1.0-1.2x |
+| Validation (1.58M) | **4.1-4.6 s** (2.6-2.9 µs/poly) | 3.6-3.9 s (2.3-2.5 µs/poly) | **1.0-1.2x** |
+| Invalid subset | 0 polys (2026-08-06) | 0 | - |
+| Full dataset (1.58M polys) | 3.5-4.4 s | **3.3-3.5 s** | 1.0-1.2x |
 
 Two settled runs per source; the bands cover the run-to-run spread. The
 GeoRepair column is measured in the same process as the GEOS column
 (co-residency inflates it 5-15% vs a standalone run, where the full
 pass is ~4.1-4.2 s).
+
+**Validation endpoint note (2026-08-06):** the validation row measures the
+full OGC validator (`GeoValidation::validate` - 18 rules, sweep-based ring
+validity, indexed hole checks). A 2026-08-03 README edition documented
+0.8-2.3 s for this row; that figure came from the bench's earlier cheap
+structural gate (`arrange::validate_polygon`), which the bench replaced
+with the full validator at commit bd05cbd without re-measuring the row.
+The full-validator cost is the honest number above. Hole checks are
+indexed: one shell edge tree per polygon, per-hole queries are
+O(|hole| log|shell|), vertex-on-edge touches are EXACT (robust orient2d,
+GEOS predicate parity - a tolerance test fabricated near-miss touches on
+real cadastral giants, inflating the invalid count to 35; exact tests
+keep it at 0).
 
 ### Synthetic benchmarks
 
@@ -214,14 +227,16 @@ biggest giant).
 1. **GEOS comparison is against conda-forge MSVC GEOS** (serial
    per-call, no LTO, no mimalloc). A static LLVM-built GEOS would
    improve the GEOS side of every table.
-2. **Validator strictness gate (deliberate policy, real-world impact ~1 poly).**
+2. **Validator strictness gate (deliberate policy, real-world impact 0 polys).**
    Our validator runs Shewchuk exact predicates (agreeing with GEOS on the
-   OGC definition, 934/934 GEOS XML suite pass) plus one relative noise
+   OGC definition, 937/937 GEOS XML suite pass) plus one relative noise
    gate: edges whose exact orientation is nonzero but within ~32 ulps of
    the pair's own length scale are treated as coincident (see
    `src/validation/mod.rs`). Measured on the 1.58M real-world dataset
-   (2026-08-03): 1,579,029 parts are winding-only (CW, GEOS-valid), and
-   exactly 1 part carries a non-winding defect. Earlier counts (2,298 via
+   (2026-08-06): all 1,579,030 parts are winding-only (CW, GEOS-valid);
+   the last non-winding divergence (idx 619410, tolerance-fabricated
+   shell touches) closed 2026-08-06 when the touch test went exact.
+   Earlier counts (2,298 via
    `arrange::validate_polygon`, 1,855 via the full validator) were
    inflated by a real bug: the product-form proper-crossing test
    `o1 * o2 < 0.0` treated a -0.0 orientation (an exact collinear touch,

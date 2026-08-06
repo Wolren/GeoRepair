@@ -901,20 +901,57 @@ pub(crate) fn check_holes_valid(
     let scale = (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
     let eps = 1e-12 * scale;
 
+    // One shell edge tree per polygon (never per hole): the naive per-hole
+    // calls paid O(|shell| x log|hole|) in check_rings_intersect plus
+    // O(|hole| x |shell|) in point_on_ring - measured 18s on the 1.58M
+    // real-world dataset (giants with ~100 holes x 187k-edge shells), vs
+    // 0.8-2.3s for the cheap structural gate the README's validation row
+    // documented. Tree queries per hole are O(|hole| log|shell|).
+    #[cfg(feature = "rstar")]
+    let shell_tree: Option<rstar::RTree<EdgeIdx>> = (shell.len() - 1 > 64)
+        .then(|| build_ring_edge_tree(shell));
+
     for hole in interiors {
         // Check if hole edges cross the shell boundary (hole not fully inside)
-        if check_rings_intersect(&hole.0[..], shell, eps) {
+        #[cfg(feature = "rstar")]
+        let crossing = match &shell_tree {
+            Some(tree) => ring_edges_intersect_tree(&hole.0[..], shell, tree, eps),
+            None => check_rings_intersect(&hole.0[..], shell, eps),
+        };
+        #[cfg(not(feature = "rstar"))]
+        let crossing = check_rings_intersect(&hole.0[..], shell, eps);
+        if crossing {
             errors.push(GeometryValidationError::HoleOutsideShell);
             return errors;
         }
 
-        // A hole touching the shell at ≥ 2 distinct points may disconnect the interior.
-        // Note: the same vertex can be on 2+ edges of the shell (outgoing + incoming),
-        // so we must deduplicate touch points.
+        // A hole touching the shell at >= 2 distinct points may disconnect
+        // the interior. Note: the same vertex can be on 2+ edges of the
+        // shell (outgoing + incoming), so we must deduplicate touch points.
+        // Touch test is EXACT (point_on_segment_exact): tolerance-based
+        // touches fabricated near-miss contacts on real cadastral giants
+        // (GEOS isValid=true; measured 2026-08-06).
         let mut touch_count = 0usize;
         let mut seen_touches: Vec<Coord<f64>> = Vec::new();
-        for &hp in &hole.0 {
-            if point_on_ring(hp, shell, eps) && !seen_touches.contains(&hp) {
+        #[cfg(feature = "rstar")]
+        let hole_touches: Vec<Coord<f64>> = match &shell_tree {
+            Some(tree) => ring_touch_points(&hole.0[..], shell, tree),
+            None => hole
+                .0
+                .iter()
+                .copied()
+                .filter(|&hp| point_on_ring(hp, shell, 0.0))
+                .collect(),
+        };
+        #[cfg(not(feature = "rstar"))]
+        let hole_touches: Vec<Coord<f64>> = hole
+            .0
+            .iter()
+            .copied()
+            .filter(|&hp| point_on_ring(hp, shell, 0.0))
+            .collect();
+        for hp in hole_touches {
+            if !seen_touches.contains(&hp) {
                 touch_count += 1;
                 seen_touches.push(hp);
             }
@@ -924,8 +961,19 @@ pub(crate) fn check_holes_valid(
             return errors;
         }
 
-        // If no hole vertex is strictly inside the shell, the hole is entirely outside.
-        // Single-point tangent touches (touch_count == 1) are valid per OGC.
+        // If no hole vertex is strictly inside the shell, the hole is
+        // entirely outside. Single-point tangent touches (touch_count == 1)
+        // are valid per OGC. Tree-accelerated: the naive per-vertex
+        // point_in_ring_exclusive paid O(|hole| x |shell|) on giant shells.
+        #[cfg(feature = "rstar")]
+        let any_inside = match &shell_tree {
+            Some(tree) => hole
+                .0
+                .iter()
+                .any(|&hp| point_in_ring_exclusive_tree(hp, shell, tree, max_x)),
+            None => hole.0.iter().any(|&hp| point_in_ring_exclusive(hp, shell)),
+        };
+        #[cfg(not(feature = "rstar"))]
         let any_inside = hole.0.iter().any(|&hp| point_in_ring_exclusive(hp, shell));
         if !any_inside {
             errors.push(GeometryValidationError::HoleOutsideShell);
@@ -1075,6 +1123,136 @@ pub(crate) fn overlap_pairs(bboxes: &[[f64; 4]], min_ring: usize) -> Vec<(usize,
         }
         out
     }
+}
+
+/// Tree-accelerated exclusive point-in-ring (winding number, boundary =
+/// outside), same arithmetic as point_in_ring_exclusive but only candidate
+/// edges from the prebuilt shell tree are evaluated. The query box is the
+/// +x ray slab [pt.x, max_x] x [pt.y +/- 1e-12]: every ray-crossing edge
+/// has its x-max >= the crossing x >= pt.x and its y-span containing
+/// pt.y, and every boundary candidate lies within 1e-12 of pt - so the
+/// candidate set is a superset of the edges the original loop evaluates
+/// for this point, and the result is identical.
+#[cfg(feature = "rstar")]
+fn point_in_ring_exclusive_tree(
+    pt: Coord<f64>,
+    shell: &[Coord<f64>],
+    tree: &rstar::RTree<EdgeIdx>,
+    max_x: f64,
+) -> bool {
+    let n = shell.len() - 1;
+    if n < 2 {
+        return false;
+    }
+    let pad = 1e-12;
+    let q = rstar::AABB::from_corners([pt.x - pad, pt.y - pad], [max_x, pt.y + pad]);
+    let mut boundary_hit = false;
+    let mut wn = 0i32;
+    for c in tree.locate_in_envelope_intersecting(q) {
+        let p1 = shell[c.idx];
+        let p2 = shell[(c.idx + 1) % n];
+        let o = (p2.x - p1.x) * (pt.y - p1.y) - (p2.y - p1.y) * (pt.x - p1.x);
+        if o.abs() < 1e-15 {
+            let min_x = p1.x.min(p2.x);
+            let max_x = p1.x.max(p2.x);
+            let min_y = p1.y.min(p2.y);
+            let max_y = p1.y.max(p2.y);
+            if pt.x >= min_x - pad
+                && pt.x <= max_x + pad
+                && pt.y >= min_y - pad
+                && pt.y <= max_y + pad
+            {
+                boundary_hit = true;
+            }
+        }
+        if p1.y <= pt.y {
+            if p2.y > pt.y {
+                if o > 0.0 {
+                    wn += 1;
+                }
+            }
+        } else if p2.y <= pt.y {
+            if o < 0.0 {
+                wn -= 1;
+            }
+        }
+    }
+    if boundary_hit {
+        false
+    } else {
+        wn != 0
+    }
+}
+
+/// Tree-accelerated hole-vs-shell crossing test: query the prebuilt shell
+/// edge tree with each hole edge's envelope (GEOS-style indexed check; the
+/// naive per-hole check_rings_intersect built a tree over the SMALL ring
+/// and paid O(|shell| x log|hole|) per hole on giant shells).
+#[cfg(feature = "rstar")]
+fn ring_edges_intersect_tree(
+    hole: &[Coord<f64>],
+    shell: &[Coord<f64>],
+    tree: &rstar::RTree<EdgeIdx>,
+    eps: f64,
+) -> bool {
+    let n_hole = hole.len() - 1;
+    let n_shell = shell.len() - 1;
+    if n_hole == 0 || n_shell == 0 {
+        return false;
+    }
+    for i in 0..n_hole {
+        let a1 = hole[i];
+        let a2 = hole[(i + 1) % n_hole];
+        let (lo_x, hi_x) = if a1.x < a2.x { (a1.x, a2.x) } else { (a2.x, a1.x) };
+        let (lo_y, hi_y) = if a1.y < a2.y { (a1.y, a2.y) } else { (a2.y, a1.y) };
+        let q = rstar::AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]);
+        let found = tree.locate_in_envelope_intersecting_int(q, |c| {
+            let b1 = shell[c.idx];
+            let b2 = shell[(c.idx + 1) % n_shell];
+            if edges_intersect_general(a1, a2, b1, b2, eps) {
+                std::ops::ControlFlow::Break(())
+            } else {
+                std::ops::ControlFlow::<(), ()>::Continue(())
+            }
+        });
+        if found.is_break() {
+            return true;
+        }
+    }
+    false
+}
+
+/// Hole vertices lying EXACTLY on the shell boundary (vertex-on-edge and
+/// shared vertices), via the prebuilt shell edge tree. Near-miss vertices
+/// do NOT touch (GEOS exact-predicate parity; tolerance-based touches
+/// fabricated contacts on real cadastral giants, measured 2026-08-06).
+#[cfg(feature = "rstar")]
+fn ring_touch_points(
+    hole: &[Coord<f64>],
+    shell: &[Coord<f64>],
+    tree: &rstar::RTree<EdgeIdx>,
+) -> Vec<Coord<f64>> {
+    let n_shell = shell.len() - 1;
+    let mut out = Vec::new();
+    for &v in hole {
+        let q = rstar::AABB::from_corners([v.x, v.y], [v.x, v.y]);
+        let hit = tree
+            .locate_in_envelope_intersecting_int(q, |c| {
+                // Candidate edge bbox contains the vertex; the exact on-edge
+                // test decides (a vertex on the edge's extension beyond its
+                // endpoints is rejected by point_on_segment_exact).
+                if point_on_segment_exact(v, shell[c.idx], shell[(c.idx + 1) % n_shell]) {
+                    std::ops::ControlFlow::Break(())
+                } else {
+                    std::ops::ControlFlow::<(), ()>::Continue(())
+                }
+            })
+            .is_break();
+        if hit {
+            out.push(v);
+        }
+    }
+    out
 }
 
 /// Ring-touch graph cycle detection (GEOS PolygonRing::findHoleCycleLocation
