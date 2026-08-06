@@ -1,4 +1,5 @@
 use geo::{Coord, GeoFloat, Line, LineString, MultiLineString, MultiPoint, Point, Rect, Triangle};
+use std::rc::Rc;
 use thiserror::Error;
 
 /// Errors reported by OGC geometry validation.
@@ -211,7 +212,11 @@ pub fn check_ring_validity(
 
     let n = ring.len() - 1;
 
+    #[cfg(feature = "simd")]
+    let (min_x, max_x, min_y, max_y) = crate::simd::aabb_minmax_simd(&ring[..n]);
+    #[cfg(not(feature = "simd"))]
     let (mut min_x, mut max_x, mut min_y, mut max_y) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+    #[cfg(not(feature = "simd"))]
     for c in &ring[..n] {
         min_x = min_x.min(c.x);
         max_x = max_x.max(c.x);
@@ -268,92 +273,84 @@ pub fn check_ring_validity(
         }
     }
 
-    #[cfg(feature = "rstar")]
-    {
-        struct EdgeEnv {
-            idx: u32,
-            env: rstar::AABB<[f64; 2]>,
-        }
-        impl rstar::RTreeObject for EdgeEnv {
-            type Envelope = rstar::AABB<[f64; 2]>;
-            fn envelope(&self) -> Self::Envelope {
-                self.env
+    if n > 64 {
+        // Sweep fast path: edges sorted by padded min_x (radix sort),
+        // small x-overlap active set, padded-2D-bbox candidate gate, then
+        // the exact pair predicate. Same semantics as the tree path:
+        // adjacent ring-order pairs skipped, closing pair (0, n-1) tested,
+        // each pair tested once. Rings with pathologically dense x-overlap
+        // route to the spatial index (rstar) or brute force (non-rstar) -
+        // exact predicates in all paths, a routing decision, not a
+        // tolerance. Measured (2026-08-06): per-ring rstar bulk_load +
+        // queries cost ~320ms on the 600k-vertex giants vs ~50ms for the
+        // sweep; the biggest giant's active set averages 23 (max 63).
+        match sweep_ring_self_intersects(ring, eps) {
+            Some(true) => {
+                errors.push(GeometryValidationError::SelfIntersection);
+                return errors;
             }
-        }
-        if n > 64 {
-            let mut edges = Vec::with_capacity(n);
-            for i in 0..n {
-                let (lo_x, hi_x) = if ring[i].x < ring[(i + 1) % n].x {
-                    (ring[i].x, ring[(i + 1) % n].x)
-                } else {
-                    (ring[(i + 1) % n].x, ring[i].x)
-                };
-                let (lo_y, hi_y) = if ring[i].y < ring[(i + 1) % n].y {
-                    (ring[i].y, ring[(i + 1) % n].y)
-                } else {
-                    (ring[(i + 1) % n].y, ring[i].y)
-                };
-                let ext = (hi_x - lo_x).abs().max((hi_y - lo_y).abs()).max(1.0) * 1e-10;
-                edges.push(EdgeEnv {
-                    idx: i as u32,
-                    env: rstar::AABB::from_corners(
-                        [lo_x - ext, lo_y - ext],
-                        [hi_x + ext, hi_y + ext],
-                    ),
-                });
-            }
-            let tree = rstar::RTree::bulk_load(edges);
-            for i in 0..n {
-                let (lo_x, hi_x) = if ring[i].x < ring[(i + 1) % n].x {
-                    (ring[i].x, ring[(i + 1) % n].x)
-                } else {
-                    (ring[(i + 1) % n].x, ring[i].x)
-                };
-                let (lo_y, hi_y) = if ring[i].y < ring[(i + 1) % n].y {
-                    (ring[i].y, ring[(i + 1) % n].y)
-                } else {
-                    (ring[(i + 1) % n].y, ring[i].y)
-                };
-                let ext = (hi_x - lo_x).abs().max((hi_y - lo_y).abs()).max(1.0) * 1e-10;
-                let env =
-                    rstar::AABB::from_corners([lo_x - ext, lo_y - ext], [hi_x + ext, hi_y + ext]);
-                let found = tree.locate_in_envelope_intersecting_int(env, |c| {
-                    let j = c.idx as usize;
-                    if j <= i {
-                        return std::ops::ControlFlow::Continue(());
+            Some(false) => {}
+            None => {
+                #[cfg(feature = "rstar")]
+                {
+                    if ring_tree_self_intersects(ring, n, eps) {
+                        errors.push(GeometryValidationError::SelfIntersection);
+                        return errors;
                     }
-                    // Closing-edge pair (0, n-1) is NOT skipped: the two
-                    // edges share vertex 0 but may also overlap collinearly
-                    // beyond it (backtracking closure), which is a genuine
-                    // self-intersection (GEOS flags it). edges_intersect_general
-                    // excludes endpoint-only touches, so valid rings are
-                    // unaffected. Measured: mixed-magnitude repaired output
-                    // whose closing edge overlapped edge 0 at the origin —
-                    // the skip hid it and the validator accepted GEOS-invalid
-                    // geometry (differential fuzz 2026-08-03).
-                    if i.abs_diff(j) <= 1 {
-                        return std::ops::ControlFlow::Continue(());
+                }
+                #[cfg(not(feature = "rstar"))]
+                {
+                    for i in 0..n {
+                        for j in i + 2..n {
+                            if i == 0 && j == n - 1 {
+                                continue;
+                            }
+                            if check_edge_pair_intersection(ring, i, j, eps) {
+                                errors.push(GeometryValidationError::SelfIntersection);
+                                return errors;
+                            }
+                        }
                     }
-                    if check_edge_pair_intersection(ring, i, j, eps) {
-                        std::ops::ControlFlow::Break(())
-                    } else {
-                        std::ops::ControlFlow::<(), ()>::Continue(())
-                    }
-                });
-                if found.is_break() {
-                    errors.push(GeometryValidationError::SelfIntersection);
-                    return errors;
                 }
             }
-        } else {
+        }
+    } else {
+        // Small rings: brute force with a padded-bbox prefilter (the
+        // exact predicates internally require bbox overlap, so rejecting
+        // non-overlapping pairs here never changes results; the tree path
+        // applied the same filter via envelope intersection).
+        #[cfg(feature = "rstar")]
+        {
             for i in 0..n {
+                let a1 = ring[i];
+                let a2 = ring[(i + 1) % n];
                 for j in i + 2..n {
                     // Closing-edge pair (0, n-1) is NOT skipped: the edges
                     // share vertex 0 but may overlap collinearly beyond it
-                    // (backtracking closure) — a genuine self-intersection.
+                    // (backtracking closure) - a genuine self-intersection.
                     // edges_intersect_general excludes endpoint-only touches.
                     // See the rstar branch comment (differential fuzz 2026-08-03).
-                    if check_edge_pair_intersection(ring, i, j, eps) {
+                    if padded_bbox_overlap(a1, a2, ring[j], ring[(j + 1) % n])
+                        && check_edge_pair_intersection(ring, i, j, eps)
+                    {
+                        errors.push(GeometryValidationError::SelfIntersection);
+                        return errors;
+                    }
+                }
+            }
+        }
+        #[cfg(not(feature = "rstar"))]
+        {
+            for i in 0..n {
+                let a1 = ring[i];
+                let a2 = ring[(i + 1) % n];
+                for j in i + 2..n {
+                    if i == 0 && j == n - 1 {
+                        continue;
+                    }
+                    if padded_bbox_overlap(a1, a2, ring[j], ring[(j + 1) % n])
+                        && check_edge_pair_intersection(ring, i, j, eps)
+                    {
                         errors.push(GeometryValidationError::SelfIntersection);
                         return errors;
                     }
@@ -361,22 +358,258 @@ pub fn check_ring_validity(
             }
         }
     }
-    #[cfg(not(feature = "rstar"))]
-    {
-        for i in 0..n {
-            for j in i + 2..n {
-                if i == 0 && j == n - 1 {
-                    continue;
-                }
-                if check_edge_pair_intersection(ring, i, j, eps) {
-                    errors.push(GeometryValidationError::SelfIntersection);
-                    return errors;
-                }
-            }
-        }
-    }
 
     errors
+}
+
+/// Padded 2D bounding-box overlap for an edge pair (the R-tree envelope
+/// filter equivalent: both boxes inflated by 1e-10 x max-dim, floored at
+/// 1e-10). Conservative by construction: any pair the exact predicates
+/// accept has overlapping boxes, so rejecting here never changes results.
+#[inline]
+fn padded_bbox_overlap(a1: Coord<f64>, a2: Coord<f64>, b1: Coord<f64>, b2: Coord<f64>) -> bool {
+    let (lo_x, hi_x) = if a1.x < a2.x { (a1.x, a2.x) } else { (a2.x, a1.x) };
+    let (lo_y, hi_y) = if a1.y < a2.y { (a1.y, a2.y) } else { (a2.y, a1.y) };
+    let (lo_x2, hi_x2) = if b1.x < b2.x { (b1.x, b2.x) } else { (b2.x, b1.x) };
+    let (lo_y2, hi_y2) = if b1.y < b2.y { (b1.y, b2.y) } else { (b2.y, b1.y) };
+    let ext = (hi_x - lo_x).abs().max((hi_y - lo_y).abs()).max(1.0) * 1e-10;
+    let ext2 = (hi_x2 - lo_x2).abs().max((hi_y2 - lo_y2).abs()).max(1.0) * 1e-10;
+    hi_x + ext >= lo_x2 - ext2
+        && lo_x - ext <= hi_x2 + ext2
+        && hi_y + ext >= lo_y2 - ext2
+        && lo_y - ext <= hi_y2 + ext2
+}
+
+/// Order-preserving u64 encoding of an f64 (IEEE bit trick): positives map
+/// above negatives, negatives reverse-magnitude. NaN handled upstream
+/// (finite check in check_ring_validity).
+#[inline]
+fn sortable_u64(x: f64) -> u64 {
+    let bits = x.to_bits();
+    if bits >> 63 == 0 {
+        bits | 0x8000_0000_0000_0000
+    } else {
+        !bits
+    }
+}
+
+thread_local! {
+    static SWEEP_SCRATCH: std::cell::RefCell<SweepScratch> =
+        std::cell::RefCell::new(SweepScratch::default());
+}
+
+struct SweepScratch {
+    keys: Vec<u64>,
+    order: Vec<u32>,
+    tmp_keys: Vec<u64>,
+    tmp_order: Vec<u32>,
+    counts: Box<[u32; 256]>,
+    /// Padded bounds per ring edge: [lo_x, hi_x, lo_y, hi_y].
+    spans: Vec<[f64; 4]>,
+    active: Vec<u32>,
+}
+
+impl Default for SweepScratch {
+    fn default() -> Self {
+        SweepScratch {
+            keys: Vec::new(),
+            order: Vec::new(),
+            tmp_keys: Vec::new(),
+            tmp_order: Vec::new(),
+            counts: Box::new([0u32; 256]),
+            spans: Vec::new(),
+            active: Vec::new(),
+        }
+    }
+}
+
+/// LSD radix sort of (keys, order) pairs, 8 bits x 8 passes. Stable; sorts
+/// by ascending key. Buffers are passed in (the caller already holds the
+/// TLS scratch borrow - re-borrowing would panic).
+fn radix_sort_u64(
+    keys: &mut Vec<u64>,
+    order: &mut Vec<u32>,
+    tmp_keys: &mut Vec<u64>,
+    tmp_order: &mut Vec<u32>,
+    counts: &mut [u32; 256],
+) {
+    let n = keys.len();
+    tmp_keys.resize(n, 0);
+    tmp_order.resize(n, 0);
+    for shift in (0..64).step_by(8) {
+        counts.fill(0);
+        for &k in keys.iter() {
+            counts[((k >> shift) & 0xff) as usize] += 1;
+        }
+        let mut acc = 0u32;
+        for c in counts.iter_mut() {
+            let t = *c;
+            *c = acc;
+            acc += t;
+        }
+        for i in 0..n {
+            let k = keys[i];
+            let b = ((k >> shift) & 0xff) as usize;
+            let pos = counts[b] as usize;
+            tmp_keys[pos] = k;
+            tmp_order[pos] = order[i];
+            counts[b] += 1;
+        }
+        std::mem::swap(tmp_keys, keys);
+        std::mem::swap(tmp_order, order);
+    }
+}
+
+/// Radix sort of (keys, order) using the TLS scratch buffers (no caller
+/// borrow held). Used for the cycle-detection vertex lists.
+fn radix_sort_keys_tls(keys: &mut Vec<u64>, order: &mut Vec<u32>) {
+    SWEEP_SCRATCH.with(|s| {
+        let mut s = s.borrow_mut();
+        let SweepScratch {
+            tmp_keys,
+            tmp_order,
+            counts,
+            ..
+        } = &mut *s;
+        radix_sort_u64(keys, order, tmp_keys, tmp_order, counts);
+    });
+}
+
+/// Rings whose x-overlap active set exceeds this route to the spatial
+/// tree / brute force instead of the linear-active sweep (which would be
+/// O(n^2) on them). Measured worst real-world giant: 63.
+const SWEEP_DENSE_ACTIVE_LIMIT: usize = 256;
+
+/// Self-intersection sweep. Returns Some(true) on intersection, Some(false)
+/// when clean, None when the ring's x-overlap density exceeds the routing
+/// limit (caller falls back to the indexed / brute path).
+fn sweep_ring_self_intersects(ring: &[Coord<f64>], eps: f64) -> Option<bool> {
+    let n = ring.len() - 1;
+    SWEEP_SCRATCH.with(|s| {
+        let mut s = s.borrow_mut();
+        let SweepScratch {
+            keys,
+            order,
+            spans,
+            active,
+            tmp_keys,
+            tmp_order,
+            counts,
+        } = &mut *s;
+        keys.clear();
+        order.clear();
+        spans.clear();
+        keys.reserve(n);
+        order.reserve(n);
+        spans.reserve(n);
+        for i in 0..n {
+            let a = ring[i];
+            let b = ring[(i + 1) % n];
+            let (lo_x, hi_x) = if a.x < b.x { (a.x, b.x) } else { (b.x, a.x) };
+            let (lo_y, hi_y) = if a.y < b.y { (a.y, b.y) } else { (b.y, a.y) };
+            let ext = (hi_x - lo_x).abs().max((hi_y - lo_y).abs()).max(1.0) * 1e-10;
+            keys.push(sortable_u64(lo_x - ext));
+            order.push(i as u32);
+            spans.push([lo_x - ext, hi_x + ext, lo_y - ext, hi_y + ext]);
+        }
+        radix_sort_u64(keys, order, tmp_keys, tmp_order, counts);
+        active.clear();
+        for pos in 0..n {
+            let r_i = order[pos] as usize;
+            let cur = spans[r_i];
+            // Limit check BEFORE the retain: a pathological ring with a
+            // growing active set would otherwise pay O(n x active) in
+            // retains before ever reaching the check.
+            if active.len() > SWEEP_DENSE_ACTIVE_LIMIT {
+                return None;
+            }
+            active.retain(|&p| spans[p as usize][1] >= cur[0]);
+            for &p in &*active {
+                let t = spans[p as usize];
+                // x-overlap is guaranteed by the retain condition; only the
+                // y gate remains (matches the tree's 2D envelope filter).
+                if t[3] < cur[2] || t[2] > cur[3] {
+                    continue;
+                }
+                let r_j = p as usize;
+                if r_i.abs_diff(r_j) <= 1 {
+                    continue;
+                }
+                if check_edge_pair_intersection(ring, r_i, r_j, eps) {
+                    return Some(true);
+                }
+            }
+            active.push(r_i as u32);
+        }
+        Some(false)
+    })
+}
+
+/// R-tree self-intersection check (the dense-ring fallback; kept exact -
+/// same predicate and pair rules as the sweep).
+#[cfg(feature = "rstar")]
+fn ring_tree_self_intersects(ring: &[Coord<f64>], n: usize, eps: f64) -> bool {
+    struct EdgeEnv {
+        idx: u32,
+        env: rstar::AABB<[f64; 2]>,
+    }
+    impl rstar::RTreeObject for EdgeEnv {
+        type Envelope = rstar::AABB<[f64; 2]>;
+        fn envelope(&self) -> Self::Envelope {
+            self.env
+        }
+    }
+    let mut edges = Vec::with_capacity(n);
+    for i in 0..n {
+        let (lo_x, hi_x) = if ring[i].x < ring[(i + 1) % n].x {
+            (ring[i].x, ring[(i + 1) % n].x)
+        } else {
+            (ring[(i + 1) % n].x, ring[i].x)
+        };
+        let (lo_y, hi_y) = if ring[i].y < ring[(i + 1) % n].y {
+            (ring[i].y, ring[(i + 1) % n].y)
+        } else {
+            (ring[(i + 1) % n].y, ring[i].y)
+        };
+        let ext = (hi_x - lo_x).abs().max((hi_y - lo_y).abs()).max(1.0) * 1e-10;
+        edges.push(EdgeEnv {
+            idx: i as u32,
+            env: rstar::AABB::from_corners([lo_x - ext, lo_y - ext], [hi_x + ext, hi_y + ext]),
+        });
+    }
+    let tree = rstar::RTree::bulk_load(edges);
+    for i in 0..n {
+        let (lo_x, hi_x) = if ring[i].x < ring[(i + 1) % n].x {
+            (ring[i].x, ring[(i + 1) % n].x)
+        } else {
+            (ring[(i + 1) % n].x, ring[i].x)
+        };
+        let (lo_y, hi_y) = if ring[i].y < ring[(i + 1) % n].y {
+            (ring[i].y, ring[(i + 1) % n].y)
+        } else {
+            (ring[(i + 1) % n].y, ring[i].y)
+        };
+        let ext = (hi_x - lo_x).abs().max((hi_y - lo_y).abs()).max(1.0) * 1e-10;
+        let env = rstar::AABB::from_corners([lo_x - ext, lo_y - ext], [hi_x + ext, hi_y + ext]);
+        let found = tree.locate_in_envelope_intersecting_int(env, |c| {
+            let j = c.idx as usize;
+            if j <= i {
+                return std::ops::ControlFlow::Continue(());
+            }
+            if i.abs_diff(j) <= 1 {
+                return std::ops::ControlFlow::Continue(());
+            }
+            if check_edge_pair_intersection(ring, i, j, eps) {
+                std::ops::ControlFlow::Break(())
+            } else {
+                std::ops::ControlFlow::<(), ()>::Continue(())
+            }
+        });
+        if found.is_break() {
+            return true;
+        }
+    }
+    false
 }
 
 pub(crate) fn edges_intersect_general(
@@ -886,6 +1119,14 @@ pub(crate) fn check_holes_valid(
 ) -> Vec<GeometryValidationError> {
     let mut errors = Vec::new();
 
+    // Hole-less polygons (the vast majority of real-world data) skip all
+    // boundary work: the aabb/eps and shell tree below exist only for the
+    // per-hole checks. Measured: 1.58M hole-less polys paid a SIMD aabb
+    // + eps for nothing (2026-08-06).
+    if interiors.is_empty() {
+        return errors;
+    }
+
     // Compute scale-relative epsilon for boundary checks
     #[cfg(feature = "simd")]
     let (min_x, max_x, min_y, max_y) = crate::simd::aabb_minmax_simd(shell);
@@ -908,8 +1149,8 @@ pub(crate) fn check_holes_valid(
     // 0.8-2.3s for the cheap structural gate the README's validation row
     // documented. Tree queries per hole are O(|hole| log|shell|).
     #[cfg(feature = "rstar")]
-    let shell_tree: Option<rstar::RTree<EdgeIdx>> = (shell.len() - 1 > 64)
-        .then(|| build_ring_edge_tree(shell));
+    let shell_tree: Option<Rc<rstar::RTree<EdgeIdx>>> = (shell.len() - 1 > 64)
+        .then(|| Rc::new(build_ring_edge_tree(shell)));
 
     for hole in interiors {
         // Check if hole edges cross the shell boundary (hole not fully inside)
@@ -1003,7 +1244,11 @@ pub(crate) fn check_holes_valid(
         // the interior. Rings touching at a single coordinate (three holes
         // meeting at one point) stay valid (GEOS isValid=true) - the
         // same-coordinate skip inside detect_hole_cycle implements that.
-        if detect_hole_cycle(&rings, &bboxes, eps) {
+        #[cfg(feature = "rstar")]
+        let cycle = detect_hole_cycle(&rings, &bboxes, eps, shell_tree.as_ref());
+        #[cfg(not(feature = "rstar"))]
+        let cycle = detect_hole_cycle(&rings, &bboxes, eps);
+        if cycle {
             errors.push(GeometryValidationError::DisconnectedInteriorRing);
             return errors;
         }
@@ -1267,37 +1512,60 @@ fn ring_touch_points(
 /// re-indexed per pair (the naive version cost 170x on the real-world
 /// giants, measured 2026-08-06).
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
-fn detect_hole_cycle(rings: &[&[Coord<f64>]], bboxes: &[[f64; 4]], eps: f64) -> bool {
+fn detect_hole_cycle(
+    rings: &[&[Coord<f64>]],
+    bboxes: &[[f64; 4]],
+    eps: f64,
+    #[cfg(feature = "rstar")] shell_tree: Option<&Rc<rstar::RTree<EdgeIdx>>>,
+) -> bool {
     let n = rings.len();
     // Per-ring structures built ONCE (never per pair): a sorted unique
-    // vertex list (shared-vertex lookup + x-range probing) and an edge tree
-    // for large rings.
-    let sorted: Vec<Vec<Coord<f64>>> = rings
-        .iter()
-        .map(|r| {
-            let mut v = r.to_vec();
-            v.sort_by(|x, y| x.x.total_cmp(&y.x).then(x.y.total_cmp(&y.y)));
-            v.dedup();
-            v
-        })
-        .collect();
+    // vertex list (x-range probing only - shared vertices come from the
+    // by_coord pass below; the shell's shared vertices are additionally
+    // covered by ring_touch_points in check_holes_valid) and an edge tree
+    // for large rings. The shell's tree is REUSED from check_holes_valid
+    // (rings[0] is the shell) - building a second rstar bulk_load of a
+    // 600k-edge shell cost ~100ms per giant (measured 2026-08-06). The
+    // vertex lists are radix-sorted by x (std sort cost ~50ms on the
+    // giant shells; measured 2026-08-06).
+    let mut sorted: Vec<Vec<Coord<f64>>> = Vec::with_capacity(n);
+    for r in rings {
+        let mut v = r.to_vec();
+        let mut keys: Vec<u64> = v.iter().map(|c| sortable_u64(c.x)).collect();
+        let mut order: Vec<u32> = (0..v.len() as u32).collect();
+        radix_sort_keys_tls(&mut keys, &mut order);
+        let mut perm: Vec<Coord<f64>> = Vec::with_capacity(v.len());
+        for &i in &order {
+            perm.push(v[i as usize]);
+        }
+        v = perm;
+        sorted.push(v);
+    }
     #[cfg(feature = "rstar")]
-    let edge_trees: Vec<Option<rstar::RTree<EdgeIdx>>> = rings
+    let edge_trees: Vec<Option<Rc<rstar::RTree<EdgeIdx>>>> = rings
         .iter()
-        .map(|r| {
-            if r.len() - 1 > 64 {
-                Some(build_ring_edge_tree(r))
+        .enumerate()
+        .map(|(i, r)| {
+            if i == 0 {
+                shell_tree.cloned()
+            } else if r.len() - 1 > 64 {
+                Some(Rc::new(build_ring_edge_tree(r)))
             } else {
                 None
             }
         })
         .collect();
     let mut touches: Vec<Vec<(usize, Coord<f64>)>> = vec![Vec::new(); n];
-    // Exact shared vertices: one global pass (vertex -> containing rings),
-    // O(total vertices); -0.0 normalizes to 0.0 so both spellings match.
+    // Exact shared vertices among the HOLES: one global pass (vertex ->
+    // containing rings), O(total vertices); -0.0 normalizes to 0.0 so both
+    // spellings match. The shell (ring 0) is skipped: its shared vertices
+    // are hole vertices lying on shell edges, already collected exactly by
+    // ring_touch_points in check_holes_valid (the shell's vertex-on-edge
+    // probes below are kept for shell vertices on hole edges). Skipping the
+    // shell removes ~600k hash inserts per giant (measured 2026-08-06).
     let mut by_coord: rustc_hash::FxHashMap<(u64, u64), Vec<usize>> =
         rustc_hash::FxHashMap::with_capacity_and_hasher(64, Default::default());
-    for (ri, ring) in rings.iter().enumerate() {
+    for (ri, ring) in rings.iter().enumerate().skip(1) {
         for &v in *ring {
             let k = (
                 if v.x == 0.0 { 0u64 } else { v.x.to_bits() },
@@ -1447,7 +1715,7 @@ fn collect_on_edge_tree(
     tgt_ring: &[Coord<f64>],
     bboxes: &[[f64; 4]],
     eps: f64,
-    edge_trees: &[Option<rstar::RTree<EdgeIdx>>],
+    edge_trees: &[Option<Rc<rstar::RTree<EdgeIdx>>>],
     touches: &mut [Vec<(usize, Coord<f64>)>],
 ) {
     let tb = bboxes[tgt];

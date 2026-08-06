@@ -31,7 +31,7 @@ release, parallel batch, GEOS 3.14.1 conda-forge as reference):
 
 | Dataset | GeoRepair | GEOS | vs GEOS |
 |---------|----------:|-----:|:-------:|
-| Validation (1.58M) | **4.1-4.6 s** | 3.6-3.9 s | **1.0-1.2x** |
+| Validation (1.58M) | **3.2-3.5 s** | 3.6-3.9 s | **0.8-1.0x** |
 | Invalid subset | 0 polys (2026-08-06) | 0 | - |
 | Full dataset (1.58M polys) | 3.5-4.4 s | **3.3-3.5 s** | 1.0-1.2x |
 
@@ -51,7 +51,7 @@ is excluded from the timings.
 
 | Dataset | GeoRepair (par) | GEOS (par batch) | vs GEOS |
 |---------|----------------:|-----------------:|:-------:|
-| Validation (1.58M) | **4.1-4.6 s** (2.6-2.9 µs/poly) | 3.6-3.9 s (2.3-2.5 µs/poly) | **1.0-1.2x** |
+| Validation (1.58M) | **3.2-3.5 s** (2.0-2.2 µs/poly) | 3.6-3.9 s (2.3-2.5 µs/poly) | **0.8-1.0x** |
 | Invalid subset | 0 polys (2026-08-06) | 0 | - |
 | Full dataset (1.58M polys) | 3.5-4.4 s | **3.3-3.5 s** | 1.0-1.2x |
 
