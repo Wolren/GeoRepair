@@ -794,7 +794,23 @@ fn main() {
             reordered.push(unsafe { std::ptr::read(&polys[i]) });
         }
         std::mem::forget(polys);
-        par_fix_polygon_batch_owned(reordered, &cfg)
+        let results = par_fix_polygon_batch_owned(reordered, &cfg);
+        // BENCH_OUTPUT=<path.gpkg>: export the repaired geometries in the
+        // ORIGINAL input order (the interleave scrambled the batch order)
+        // so the file lines up feature-for-feature with data_0.gpkg in QGIS.
+        if let Ok(out_path) = env::var("BENCH_OUTPUT") {
+            let mut ordered: Vec<Option<Geometry<f64>>> = vec![None; results.len()];
+            for (k, g) in results.into_iter().enumerate() {
+                ordered[perm[k]] = Some(g);
+            }
+            let ordered: Vec<Geometry<f64>> = ordered.into_iter().map(|g| g.unwrap()).collect();
+            geo_repair::io::gpkg::save_gpkg(&out_path, &ordered)
+                .unwrap_or_else(|e| panic!("BENCH_OUTPUT write failed: {e}"));
+            eprintln!("Wrote repaired output ({n} features) to {out_path}", n = ordered.len());
+            ordered
+        } else {
+            results
+        }
     };
     #[cfg(not(feature = "parallel"))]
     let _full_results: Vec<Geometry<f64>> = polys
