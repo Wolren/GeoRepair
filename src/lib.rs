@@ -494,7 +494,10 @@ pub use validation::{
     map_geo_invalid, validate, validate_reason,
 };
 
-#[cfg(feature = "mimalloc")]
+// mimalloc is a non-wasm target-gated dependency (bundled C allocator):
+// the feature is in the defaults, so the use site must be gated too or a
+// default-features wasm build fails with E0433 (measured 2026-08-06).
+#[cfg(all(feature = "mimalloc", not(target_arch = "wasm32")))]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
