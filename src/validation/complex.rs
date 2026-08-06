@@ -19,6 +19,13 @@ impl GeoValidation for Polygon<f64> {
             return ValidationResult::valid();
         }
 
+        // Giant shells: the shell's own checks and the hole checks are
+        // independent validity conditions. NOTE (2026-08-06): running them
+        // in parallel (rayon::join + per-hole par_iter) was MEASURED as a
+        // regression (3.83s vs 3.17s on the 1.58M dataset) - the batch's
+        // pool is already saturated, so nested parallelism only adds join
+        // and split overhead. The batch-level size partition (bench) is the
+        // parallelism lever that works; per-poly stays serial.
         let ext_errors = check_ring_validity(&self.exterior().0, true);
         if !ext_errors.is_empty() {
             errors.extend(ext_errors);
