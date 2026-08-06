@@ -63,8 +63,7 @@ pub fn load_gpkg(path: &str) -> Result<Vec<Geometry<f64>>, String> {
 /// geometry blob, returning the embedded WKB. The header is `GP`, version,
 /// flags (bit 1 = envelope present, bits 2-3 = envelope type), and a 4-byte
 /// SRS id, followed by an optional envelope and then the WKB. Blobs without
-/// the magic (headerless writers, e.g. this crate's own `save_gpkg`) pass
-/// through unchanged.
+/// the magic (older headerless writers) pass through unchanged.
 fn strip_gpkg_header(blob: &[u8]) -> Result<&[u8], String> {
     if blob.len() < 8 || blob[0] != b'G' || blob[1] != b'P' {
         return Ok(blob);
@@ -91,7 +90,7 @@ pub fn save_gpkg(path: &str, geoms: &[Geometry<f64>]) -> Result<(), String> {
         return Err(format!("{path}: no geometries to write"));
     }
     let _ = fs::remove_file(path);
-    let conn = rusqlite::Connection::open(path).map_err(|e| format!("{path}: {e}"))?;
+    let mut conn = rusqlite::Connection::open(path).map_err(|e| format!("{path}: {e}"))?;
     conn.pragma_update(None, "application_id", APPLICATION_ID)
         .map_err(|e| format!("{path}: {e}"))?;
     conn.execute_batch(
@@ -162,14 +161,29 @@ pub fn save_gpkg(path: &str, geoms: &[Geometry<f64>]) -> Result<(), String> {
     .map_err(|e| format!("{path}: geom cols: {e}"))?;
 
     {
-        let mut ins = conn
-            .prepare("INSERT INTO \"georepair\" (geom) VALUES (?1)")
-            .map_err(|e| format!("{path}: {e}"))?;
-        for g in geoms {
-            let blob = write_wkb(g);
-            ins.execute(rusqlite::params![blob])
-                .map_err(|e| format!("{path}: insert: {e}"))?;
+        // One transaction for the whole batch: autocommit per insert does a
+        // journal commit + fsync PER FEATURE - 1.58M rows measured at
+        // minutes instead of seconds (2026-08-06, QGIS-export run).
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("{path}: begin tx: {e}"))?;
+        {
+            let mut ins = tx
+                .prepare("INSERT INTO \"georepair\" (geom) VALUES (?1)")
+                .map_err(|e| format!("{path}: {e}"))?;
+            for g in geoms {
+                // GeoPackage binary header (OGC 12-128r15 6.1): 'GP',
+                // version 0, flags 0x01 (little-endian, no envelope),
+                // SRS id 4326 LE. GDAL/QGIS reject headerless blobs.
+                let mut blob = Vec::with_capacity(8 + 64);
+                blob.extend_from_slice(&[0x47, 0x50, 0x00, 0x01]);
+                blob.extend_from_slice(&4326i32.to_le_bytes());
+                blob.extend_from_slice(&write_wkb(g));
+                ins.execute(rusqlite::params![blob])
+                    .map_err(|e| format!("{path}: insert: {e}"))?;
+            }
         }
+        tx.commit().map_err(|e| format!("{path}: commit: {e}"))?;
     }
     Ok(())
 }
