@@ -33,7 +33,7 @@ release, parallel batch, GEOS 3.14.1 conda-forge as reference):
 |---------|----------:|-----:|:-------:|
 | Validation (1.58M) | **3.0-3.2 s** | 3.6-3.9 s | **0.75-0.9x** |
 | Invalid subset | 0 polys (2026-08-06) | 0 | - |
-| Full dataset (1.58M polys) | 3.5-4.4 s | **3.3-3.5 s** | 1.0-1.2x |
+| Full dataset (1.58M polys) | 3.8-4.0 s | **3.3-3.5 s** | 1.1-1.2x |
 
 ## Performance
 
@@ -53,7 +53,7 @@ is excluded from the timings.
 |---------|----------------:|-----------------:|:-------:|
 | Validation (1.58M) | **3.0-3.2 s** (1.9-2.0 µs/poly) | 3.6-3.9 s (2.3-2.5 µs/poly) | **0.75-0.9x** |
 | Invalid subset | 0 polys (2026-08-06) | 0 | - |
-| Full dataset (1.58M polys) | 3.5-4.4 s | **3.3-3.5 s** | 1.0-1.2x |
+| Full dataset (1.58M polys) | 3.8-4.0 s | **3.3-3.5 s** | 1.1-1.2x |
 
 Two settled runs per source; the bands cover the run-to-run spread. The
 GeoRepair column is measured in the same process as the GEOS column
