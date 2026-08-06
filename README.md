@@ -344,11 +344,57 @@ assert!(!adapter.is_valid());
 | `io-wkt` | No-op (WKT is built-in, kept for CI compatibility) | no |
 | `io-csv` | CSV format backend | no |
 | `io-gml` | GML/XML format backend | no |
-| `io-gpkg` | GeoPackage format backend (not WASM) | no |
+| `io-gpkg` | GeoPackage format backend (default; gated out on wasm32) | yes |
 | `io-all` | All opt-in backends except gpkg | no |
 | `io-all-native` | All opt-in backends including gpkg | no |
 | `bench-geos` | GEOS comparison benchmarks (build from source, MSVC, no LTO) | no |
 | `bench-geos-system` | GEOS comparison benchmarks (link against system GEOS, conda-forge MSVC) | no |
+
+## WebAssembly
+
+The core engine is pure Rust and runs on `wasm32-unknown-unknown`
+out of the box with the default features: WKB/WKT parsing and writing,
+OGC validation, and both repair strategies all work, with the `parallel`
+feature degrading to the serial paths (rayon is a non-wasm dependency and
+every parallel use site has a serial fallback). The `no_std` alloc-only
+mode is also available on wasm.
+
+The `wasm` feature adds browser HTTP access - synchronous
+XMLHttpRequest, matching the feature contract:
+
+```rust
+// browser (wasm32-unknown-unknown)
+let g = geo_repair::wasm::fetch_geometry("https://example.com/polygon.wkb")
+    .expect("fetch + WKB parse");
+let repaired = geo_repair::make_valid::make_valid_owned(
+    polygon, &Default::default());
+```
+
+`fetch_bytes(url)` returns raw bytes (binary-safe, `responseType =
+"arraybuffer"`); `fetch_geometry(url)` sniffs WKB vs WKT from the first
+byte. Files written by `io::save` round-trip through both.
+
+Not available on wasm: `io-gpkg` (bundled SQLite compiles C; the module
+and the `io::load`/`io::save` dispatch arms are gated out on wasm32) and
+`mimalloc` (C allocator).
+
+Runtime-tested in CI: the `wasm` workflow job compiles both the full
+default feature set and the minimal config, then runs `tests/wasm.rs`
+(WKT/WKB round-trips, validator, repair) in Node via
+wasm-bindgen-test-runner. The XHR fetch test exercises the browser path
+and self-skips in the Node harness, which has no `window`.
+
+Build and test locally:
+
+```bash
+rustup target add wasm32-unknown-unknown
+cargo check --target wasm32-unknown-unknown
+# runtime tests (needs the wasm-bindgen-test-runner matching Cargo.lock):
+cargo install wasm-bindgen-cli --version "$(grep -A1 'name = \"wasm-bindgen\"' Cargo.lock | grep version | head -1 | sed 's/version = \"\\(.*\\)\"/\\1/')" --locked
+CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
+  cargo test --target wasm32-unknown-unknown \
+  --features "arrange,structure,simd,validate,wasm" --test wasm
+```
 
 ## License
 

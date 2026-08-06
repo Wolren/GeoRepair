@@ -109,7 +109,7 @@ ryu = "1.0"
 js-sys = { version = "0.3", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 web-sys = { version = "0.3", optional = true, features = [
-    "XmlHttpRequest", "Window", "ProgressEvent", "console",
+    "XmlHttpRequest", "XmlHttpRequestResponseType", "Window", "ProgressEvent", "console",
 ] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -124,10 +124,25 @@ hotpath = { version = "0.22", optional = true }
 rusqlite = { version = "0.37", features = ["bundled"], optional = true }
 
 [dev-dependencies]
-proptest = "1.11"
 wkt = { version = "0.14", features = ["geo-types"] }
 wkb = { version = "0.9" }
 geo-traits = { version = "0.3", features = ["geo-types"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+# proptest is native-only: its rusty-fork -> wait-timeout chain does not
+# compile on wasm32-unknown-unknown (no `imp` module), and the wasm suite
+# does not use it. Native test suites keep it.
+proptest = "1.11"
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+# wasm-bindgen-test harness: `cargo test --target wasm32-unknown-unknown`
+# runs the tests/wasm.rs suite in Node via the wasm-bindgen-test-runner
+# (installed from the matching wasm-bindgen-cli release).
+wasm-bindgen-test = "0.3"
+# getrandom 0.3 rejects wasm32-unknown-unknown unless the js backend is
+# enabled; proptest/rand pull it transitively as dev-deps and cargo builds
+# every declared dev-dependency for a test target, even unused ones.
+getrandom = { version = "0.3", features = ["wasm_js"] }
 
 [lib]
 name = "geo_repair"

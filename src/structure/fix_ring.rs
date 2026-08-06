@@ -1,12 +1,12 @@
 use geo::{Coord, Line, LineString, Polygon};
 use rustc_hash::FxHashSet;
 use std::sync::atomic::Ordering;
-use std::time::Instant;
 
 use crate::core;
 use crate::noding;
 use crate::orient::{orient2d, orient2d_fast};
 use crate::structure::PROFILE_FSI_NS;
+use crate::util::ProfileClock;
 
 use log::warn;
 
@@ -559,7 +559,7 @@ fn find_first_intersection_bruteforce(
 /// ---------------------------------------------------------------------------
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn fix_self_intersecting(coords: &[Coord<f64>]) -> Option<Vec<Polygon<f64>>> {
-    let _t = Instant::now();
+    let _t = ProfileClock::start();
     let coords = collapse_sub_ulp_vertices(coords, false);
     let edges = edges_from_coords(&coords);
     let mut noded = split_edges(&edges);
@@ -590,7 +590,7 @@ pub fn fix_self_intersecting(coords: &[Coord<f64>]) -> Option<Vec<Polygon<f64>>>
     // removes inner lobes (even-winding faces) — verified: seed2 = 9931.89
     // (10943.98 outer − 1012.09 inner), bit-identical to GEOS.
     let result = make_valid_poly_symdiff(&noded);
-    PROFILE_FSI_NS.fetch_add(_t.elapsed().as_nanos() as u64, Ordering::Relaxed);
+    PROFILE_FSI_NS.fetch_add(_t.ns(), Ordering::Relaxed);
     if result.is_empty() {
         None
     } else {

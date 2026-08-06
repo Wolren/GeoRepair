@@ -385,3 +385,37 @@ pub(crate) fn point_in_ring_exclusive_even_odd(pt: Coord<f64>, ring: &[Coord<f64
     }
     inside
 }
+
+/// Wall clock for the `PROFILE_*` counters and DIAG_* diagnostics.
+///
+/// `std::time::Instant` is not implemented on wasm32-unknown-unknown -
+/// every call panics with "time not implemented on this platform". The
+/// clock degrades to a no-op on wasm (0 ns) so the profiling surface stays
+/// valid API there while the repair path keeps running. (Found 2026-08-06
+/// by the first wasm runtime test: the repair test panicked in
+/// fix_polygon_owned's PROFILE_FP_NS timing.)
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) struct ProfileClock(std::time::Instant);
+
+#[cfg(not(target_arch = "wasm32"))]
+impl ProfileClock {
+    pub(crate) fn start() -> Self {
+        Self(std::time::Instant::now())
+    }
+    pub(crate) fn ns(&self) -> u64 {
+        self.0.elapsed().as_nanos() as u64
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) struct ProfileClock;
+
+#[cfg(target_arch = "wasm32")]
+impl ProfileClock {
+    pub(crate) fn start() -> Self {
+        Self
+    }
+    pub(crate) fn ns(&self) -> u64 {
+        0
+    }
+}
