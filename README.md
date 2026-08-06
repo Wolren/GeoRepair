@@ -277,8 +277,10 @@ biggest giant).
    intentionally absent; `-C target-cpu=native` regresses the full pass
    ~25%. The one AVX2 kernel kept is the bbox scan, runtime-dispatched
    via `is_x86_feature_detected!`, bit-exact vs scalar.
-8. **`proj` requires native PROJ; `io-gpkg` + `proj` are mutually
-   exclusive** (sqlite3 link conflict).
+8. **`proj` requires native PROJ and is mutually exclusive with `io-gpkg`**
+   (sqlite3 link conflict). `io-gpkg` is a DEFAULT feature (bundled
+   SQLite), so `proj` users must build with `--no-default-features
+   --features proj,...`.
 9. **GEOS XML suite coverage:** 934/934 dispatched cases pass; 1,565
    overlay/relate cases are skipped (overlay operations are out of
    scope); 209 masked divergences (documented tolerance gates, e.g.

@@ -57,8 +57,9 @@ pub mod binary;
 pub mod wkb;
 /// OGC Well-Known Text (WKT) parsing and serialization.
 pub mod wkt;
-/// GeoPackage (`.gpkg`) via SQLite (`io-gpkg`).
-#[cfg(feature = "io-gpkg")]
+/// GeoPackage (`.gpkg`) via SQLite (`io-gpkg`; default feature, gated out
+/// on wasm32 - bundled SQLite compiles C).
+#[cfg(all(feature = "io-gpkg", not(target_arch = "wasm32")))]
 pub mod gpkg;
 /// CSV with WKT in the first column (`io-csv`).
 #[cfg(feature = "io-csv")]
@@ -148,11 +149,11 @@ pub fn load(path: &str) -> Result<Vec<Geometry<f64>>, String> {
             )
         }
         "gpkg" => {
-            #[cfg(feature = "io-gpkg")]
+            #[cfg(all(feature = "io-gpkg", not(target_arch = "wasm32")))]
             return gpkg::load_gpkg(path);
-            #[cfg(not(feature = "io-gpkg"))]
+            #[cfg(not(all(feature = "io-gpkg", not(target_arch = "wasm32"))))]
             Err(
-                "'.gpkg' requires feature 'io-gpkg': cargo add geo-repair --features io-gpkg"
+                "'.gpkg' requires feature 'io-gpkg' (unavailable on wasm32): cargo add geo-repair --features io-gpkg"
                     .to_string(),
             )
         }
@@ -201,11 +202,11 @@ pub fn save(path: &str, geom: &Geometry<f64>) -> Result<(), String> {
             )
         }
         "gpkg" => {
-            #[cfg(feature = "io-gpkg")]
+            #[cfg(all(feature = "io-gpkg", not(target_arch = "wasm32")))]
             return gpkg::save_gpkg(path, std::slice::from_ref(geom));
-            #[cfg(not(feature = "io-gpkg"))]
+            #[cfg(not(all(feature = "io-gpkg", not(target_arch = "wasm32"))))]
             Err(
-                "'.gpkg' requires feature 'io-gpkg': cargo add geo-repair --features io-gpkg"
+                "'.gpkg' requires feature 'io-gpkg' (unavailable on wasm32): cargo add geo-repair --features io-gpkg"
                     .to_string(),
             )
         }
