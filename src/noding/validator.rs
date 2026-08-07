@@ -7,6 +7,8 @@
 //! has no remaining intersections. If this check fails, a different noding
 //! algorithm or tolerance should be used.
 
+
+use alloc::vec::Vec;
 use crate::orient::orient2d;
 use geo::{Coord, Line};
 #[cfg(feature = "rstar")]
@@ -358,7 +360,7 @@ impl NodingValidator {
                 let _ = tree.locate_in_envelope_intersecting_int(q, |c| {
                     let j = c.idx;
                     if j <= i {
-                        return std::ops::ControlFlow::<(), ()>::Continue(());
+                        return core::ops::ControlFlow::<(), ()>::Continue(());
                     }
                     check_chain_pair(
                         &self.edges,
@@ -368,7 +370,7 @@ impl NodingValidator {
                         &mut self.violations,
                         &mut checked,
                     );
-                    std::ops::ControlFlow::<(), ()>::Continue(())
+                    core::ops::ControlFlow::<(), ()>::Continue(())
                 });
                 if mc1.end - mc1.start > 1 {
                     let mid = (mc1.start + mc1.end) / 2;

@@ -1,6 +1,8 @@
 //! Edge splitting at intersection points: R-tree / sweep-line / brute-force
 //! strategies chosen by topology, with parametric intersection math.
 
+
+use alloc::vec::Vec;
 use geo::{Coord, Line};
 use smallvec::SmallVec;
 
@@ -75,7 +77,7 @@ pub fn split_edges(edges: &[Line<f64>]) -> Vec<Line<f64>> {
                 .flat_map_iter(|(i, pts)| {
                     let e = edges[i];
                     pts.sort_by(|(a, _), (b, _)| {
-                        a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+                        a.partial_cmp(b).unwrap_or(::core::cmp::Ordering::Equal)
                     });
                     pts.dedup_by(|(a, _), (b, _)| (*a - *b).abs() < eps_param);
                     let mut out: Vec<Line<f64>> = Vec::new();
@@ -98,8 +100,8 @@ pub fn split_edges(edges: &[Line<f64>]) -> Vec<Line<f64>> {
             let mut result = Vec::new();
             for i in 0..n {
                 let e = edges[i];
-                let mut pts = std::mem::take(&mut split_points[i]);
-                pts.sort_by(|(a, _), (b, _)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                let mut pts = ::core::mem::take(&mut split_points[i]);
+                pts.sort_by(|(a, _), (b, _)| a.partial_cmp(b).unwrap_or(::core::cmp::Ordering::Equal));
                 pts.dedup_by(|(a, _), (b, _)| (*a - *b).abs() < eps_param);
                 let mut prev_pt = e.start;
                 for &(_, pt) in &pts {
@@ -118,8 +120,8 @@ pub fn split_edges(edges: &[Line<f64>]) -> Vec<Line<f64>> {
         let mut result = Vec::new();
         for i in 0..n {
             let e = edges[i];
-            let mut pts = std::mem::take(&mut split_points[i]);
-            pts.sort_by(|(a, _), (b, _)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let mut pts = ::core::mem::take(&mut split_points[i]);
+            pts.sort_by(|(a, _), (b, _)| a.partial_cmp(b).unwrap_or(::core::cmp::Ordering::Equal));
             pts.dedup_by(|(a, _), (b, _)| (*a - *b).abs() < eps_param);
             let mut prev_pt = e.start;
             for &(_, pt) in &pts {
@@ -185,32 +187,32 @@ fn split_edges_rtree(edges: &[Line<f64>], split_points: &mut [SplitPoint], eps: 
                 let _ = tree.locate_in_envelope_intersecting_int(query, |c| {
                     let j = c.idx;
                     if j <= i {
-                        return std::ops::ControlFlow::<(), ()>::Continue(());
+                        return ::core::ops::ControlFlow::<(), ()>::Continue(());
                     }
 
                     if i.abs_diff(j) <= 1 || (i == 0 && j == n - 1) {
-                        return std::ops::ControlFlow::<(), ()>::Continue(());
+                        return ::core::ops::ControlFlow::<(), ()>::Continue(());
                     }
 
                     if edges[i].start == edges[j].start
                         && orient2d_fast(edges[i].start, edges[i].end, edges[j].end) != 0.0
                     {
-                        return std::ops::ControlFlow::<(), ()>::Continue(());
+                        return ::core::ops::ControlFlow::<(), ()>::Continue(());
                     }
                     if edges[i].start == edges[j].end
                         && orient2d_fast(edges[i].start, edges[i].end, edges[j].start) != 0.0
                     {
-                        return std::ops::ControlFlow::<(), ()>::Continue(());
+                        return ::core::ops::ControlFlow::<(), ()>::Continue(());
                     }
                     if edges[i].end == edges[j].start
                         && orient2d_fast(edges[i].end, edges[i].start, edges[j].end) != 0.0
                     {
-                        return std::ops::ControlFlow::<(), ()>::Continue(());
+                        return ::core::ops::ControlFlow::<(), ()>::Continue(());
                     }
                     if edges[i].end == edges[j].end
                         && orient2d_fast(edges[i].end, edges[i].start, edges[j].start) != 0.0
                     {
-                        return std::ops::ControlFlow::<(), ()>::Continue(());
+                        return ::core::ops::ControlFlow::<(), ()>::Continue(());
                     }
 
                     if let Some((ti, tj)) = intersect_param(&edges[i], &edges[j], eps)
@@ -229,7 +231,7 @@ fn split_edges_rtree(edges: &[Line<f64>], split_points: &mut [SplitPoint], eps: 
                             local.push((j, tj, pt));
                         }
                     }
-                    std::ops::ControlFlow::<(), ()>::Continue(())
+                    ::core::ops::ControlFlow::<(), ()>::Continue(())
                 });
                 local
             })
@@ -249,32 +251,32 @@ fn split_edges_rtree(edges: &[Line<f64>], split_points: &mut [SplitPoint], eps: 
             let _ = tree.locate_in_envelope_intersecting_int(query, |c| {
                 let j = c.idx;
                 if j <= i {
-                    return std::ops::ControlFlow::<(), ()>::Continue(());
+                    return ::core::ops::ControlFlow::<(), ()>::Continue(());
                 }
 
                 if i.abs_diff(j) <= 1 || (i == 0 && j == n - 1) {
-                    return std::ops::ControlFlow::<(), ()>::Continue(());
+                    return ::core::ops::ControlFlow::<(), ()>::Continue(());
                 }
 
                 if edges[i].start == edges[j].start
                     && orient2d_fast(edges[i].start, edges[i].end, edges[j].end) != 0.0
                 {
-                    return std::ops::ControlFlow::<(), ()>::Continue(());
+                    return ::core::ops::ControlFlow::<(), ()>::Continue(());
                 }
                 if edges[i].start == edges[j].end
                     && orient2d_fast(edges[i].start, edges[i].end, edges[j].start) != 0.0
                 {
-                    return std::ops::ControlFlow::<(), ()>::Continue(());
+                    return ::core::ops::ControlFlow::<(), ()>::Continue(());
                 }
                 if edges[i].end == edges[j].start
                     && orient2d_fast(edges[i].end, edges[i].start, edges[j].end) != 0.0
                 {
-                    return std::ops::ControlFlow::<(), ()>::Continue(());
+                    return ::core::ops::ControlFlow::<(), ()>::Continue(());
                 }
                 if edges[i].end == edges[j].end
                     && orient2d_fast(edges[i].end, edges[i].start, edges[j].start) != 0.0
                 {
-                    return std::ops::ControlFlow::<(), ()>::Continue(());
+                    return ::core::ops::ControlFlow::<(), ()>::Continue(());
                 }
 
                 if let Some((ti, tj)) = intersect_param(&edges[i], &edges[j], eps)
@@ -293,7 +295,7 @@ fn split_edges_rtree(edges: &[Line<f64>], split_points: &mut [SplitPoint], eps: 
                         split_points[j].push((tj, pt));
                     }
                 }
-                std::ops::ControlFlow::<(), ()>::Continue(())
+                ::core::ops::ControlFlow::<(), ()>::Continue(())
             });
         }
     }

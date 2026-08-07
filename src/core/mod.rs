@@ -9,6 +9,7 @@
 //! epsilon comparisons, grid thresholds, and snap scaling.
 
 use geo::algorithm::bool_ops::FillRule;
+use alloc::string::String;
 use thiserror::Error;
 
 use crate::crs::Crs;

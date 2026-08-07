@@ -6,6 +6,8 @@
 //! future event so that crossing segments are swapped in the active set,
 //! ensuring all subsequent intersections are found.
 
+
+use alloc::vec::Vec;
 use rustc_hash::FxHashSet;
 
 use geo::Line;
@@ -68,7 +70,7 @@ impl<'a> ActiveSet<'a> {
             .binary_search_by(|&oi| {
                 self.y_at_x(oi)
                     .partial_cmp(&y)
-                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .unwrap_or(core::cmp::Ordering::Equal)
             })
             .unwrap_or_else(|e| e);
         self.order.insert(pos, idx);
@@ -151,10 +153,10 @@ fn edge_intersection_xy(e1: &Line<f64>, e2: &Line<f64>) -> Option<(f64, f64)> {
 
 // ── Event ordering ──────────────────────────────────────────────────────
 
-fn event_cmp(a: &Event, b: &Event) -> std::cmp::Ordering {
+fn event_cmp(a: &Event, b: &Event) -> core::cmp::Ordering {
     a.x.partial_cmp(&b.x)
-        .unwrap_or(std::cmp::Ordering::Equal)
-        .then_with(|| a.y.partial_cmp(&b.y).unwrap_or(std::cmp::Ordering::Equal))
+        .unwrap_or(core::cmp::Ordering::Equal)
+        .then_with(|| a.y.partial_cmp(&b.y).unwrap_or(core::cmp::Ordering::Equal))
         .then_with(|| {
             let ak: u8 = match a.kind {
                 EventKind::Left => 0,
@@ -225,7 +227,7 @@ pub(crate) fn find_intersecting_pairs(edges: &[Line<f64>], eps: f64) -> Vec<(usi
     while event_idx < events.len() || !pending.is_empty() {
         let ev = if event_idx < events.len() {
             if !pending.is_empty()
-                && event_cmp(&pending[0], &events[event_idx]) == std::cmp::Ordering::Less
+                && event_cmp(&pending[0], &events[event_idx]) == core::cmp::Ordering::Less
             {
                 pending.remove(0)
             } else {

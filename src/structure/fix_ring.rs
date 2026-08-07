@@ -1,6 +1,8 @@
+
+use alloc::vec::Vec;
 use geo::{Coord, Line, LineString, Polygon};
 use rustc_hash::FxHashSet;
-use std::sync::atomic::Ordering;
+use ::core::sync::atomic::Ordering;
 
 use crate::core;
 use crate::noding;

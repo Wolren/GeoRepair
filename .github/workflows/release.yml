@@ -1,0 +1,185 @@
+name: release
+
+# Tag-triggered publish: builds the Python wheels (abi3, all OSes) and
+# publishes them to PyPI, and builds the C libraries (shared + static +
+# header) for Windows/Linux/macOS and attaches them to the GitHub
+# release. The C FFI harness (tests/c/test_geo_repair.c) is compiled and
+# run against each built library before anything ships.
+#
+# PyPI auth: prefers the PYPI_TOKEN secret; when it is unset, falls back
+# to trusted publishing (OIDC) - create the geo-repair project on PyPI
+# and grant "GitHub Actions" publisher for repo Wolren/GeoRepair,
+# workflow "release.yml".
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  python-wheels:
+    name: wheel (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-latest
+          - name: linux-aarch64
+            os: ubuntu-24.04-arm
+          - name: windows-x86_64
+            os: windows-latest
+          - name: macos-x86_64
+            os: macos-13
+          - name: macos-arm64
+            os: macos-latest
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
+        with:
+          toolchain: stable
+      - uses: actions/setup-python@8549b9f8f590ad24eab7482f36f6e1e24d34597b  # v7
+        with:
+          python-version: "3.13"
+      - run: pip install "maturin>=1.7,<2" pytest
+      - name: Build wheel
+        run: maturin build --release --features python
+      - name: Test wheel
+        run: |
+          pip install --force-reinstall target/wheels/*.whl
+          pytest tests/test_python.py -q
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v4
+        with:
+          name: wheel-${{ matrix.name }}
+          path: target/wheels/*.whl
+          if-no-files-found: error
+
+  python-sdist:
+    name: sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
+        with:
+          toolchain: stable
+      - uses: actions/setup-python@8549b9f8f590ad24eab7482f36f6e1e24d34597b  # v7
+        with:
+          python-version: "3.13"
+      - run: pip install "maturin>=1.7,<2"
+      - run: maturin sdist
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v4
+        with:
+          name: wheel-sdist
+          path: target/wheels/*.tar.gz
+          if-no-files-found: error
+
+  publish-pypi:
+    name: publish to PyPI
+    needs: [python-wheels, python-sdist]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish wheels + sdist
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2
+        with:
+          password: ${{ secrets.PYPI_TOKEN }}
+          attestations: false
+
+  c-libs:
+    name: C lib (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-latest
+            ext: so
+            static_ext: a
+            pkg: tar.gz
+          - name: windows-x86_64
+            os: windows-latest
+            ext: dll
+            static_ext: lib
+            pkg: zip
+          - name: macos-x86_64
+            os: macos-13
+            ext: dylib
+            static_ext: a
+            pkg: tar.gz
+          - name: macos-arm64
+            os: macos-latest
+            ext: dylib
+            static_ext: a
+            pkg: tar.gz
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
+        with:
+          toolchain: stable
+      - name: Build shared + static libs
+        run: cargo build --release --features ffi
+      - name: Compile + run C harness (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          gcc -std=c99 -Wall -Wextra -I include tests/c/test_geo_repair.c \
+            -L target/release -l geo_repair -o target/release/gr_test
+          LD_LIBRARY_PATH=target/release target/release/gr_test
+      - name: Compile + run C harness (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: tests\c\build_test_windows.bat
+      - name: Package artifacts
+        shell: bash
+        run: |
+          set -e
+          ver="${GITHUB_REF_NAME#v}"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            mkdir -p dist
+            cp target/release/geo_repair.dll dist/
+            cp target/release/geo_repair.dll.lib dist/
+            cp target/release/geo_repair.lib dist/
+            cp include/geo_repair.h dist/
+            (cd dist && 7z a "../geo-repair-$ver-windows-x86_64.zip" .)
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            mkdir -p dist
+            cp target/release/libgeo_repair.dylib dist/
+            cp target/release/libgeo_repair.a dist/
+            cp include/geo_repair.h dist/
+            (cd dist && tar czf "../geo-repair-$ver-macos-${{ matrix.name == 'macos-arm64' && 'arm64' || 'x86_64' }}.tar.gz" .)
+          else
+            mkdir -p dist
+            cp target/release/libgeo_repair.so dist/
+            cp target/release/libgeo_repair.a dist/
+            cp include/geo_repair.h dist/
+            (cd dist && tar czf "../geo-repair-$ver-linux-x86_64.tar.gz" .)
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v4
+        with:
+          name: c-lib-${{ matrix.name }}
+          path: geo-repair-*.tar.gz
+          if-no-files-found: error
+
+  github-release:
+    name: GitHub release with C artifacts
+    needs: [c-libs]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        with:
+          path: artifacts
+      - name: Attach C libraries to release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2
+        with:
+          files: artifacts/**/geo-repair-*
+          generate_release_notes: true

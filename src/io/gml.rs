@@ -5,6 +5,10 @@
 //! `pos`/`posList` coordinates (2D; extra ordinates are ignored). Writes a
 //! minimal GML 3.2 feature collection of the same element set. The
 //! `srsDimension`/`srsName` attributes are accepted and ignored on read.
+
+use alloc::vec::Vec;
+use alloc::string::String;
+use alloc::string::ToString;
 use std::fs;
 use std::io::Write;
 
@@ -464,7 +468,7 @@ fn parse_gml_number(tok: &str) -> Result<f64, ()> {
     if kw(b"nan") || kw(b"inf") || kw(b"infinity") {
         return tok.parse::<f64>().map_err(|_| ());
     }
-    fast_float::parse::<f64, _>(b).map_err(|_| ())
+    fast_float2::parse::<f64, _>(b).map_err(|_| ())
 }
 
 fn fmt_list(coords: &[Coord<f64>]) -> String {

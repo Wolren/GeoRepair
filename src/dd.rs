@@ -10,7 +10,7 @@
 //! `dd_call_count` and `reset_dd_count` track total invocations of
 //! `segment_intersection_dd` across the repair pipeline.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::{AtomicU64, Ordering};
 
 pub(crate) static DD_CALL_COUNT: AtomicU64 = AtomicU64::new(0);
 

@@ -1,3 +1,5 @@
+
+use alloc::vec::Vec;
 #[cfg_attr(not(test), allow(unused_imports))]
 use geo::{
     Coord, Geometry, GeometryCollection, Line, LineString, MultiLineString, MultiPoint,
@@ -260,10 +262,10 @@ impl GeoValidation for MultiPolygon<f64> {
                                 .any(|h| point_in_ring_exclusive(probe, &h.0));
                             if !in_hole {
                                 overlaps = true;
-                                return std::ops::ControlFlow::Break(());
+                                return core::ops::ControlFlow::Break(());
                             }
                         }
-                        std::ops::ControlFlow::<(), ()>::Continue(())
+                        core::ops::ControlFlow::<(), ()>::Continue(())
                     });
                     if overlaps {
                         errors.push(GeometryValidationError::NestedHoles);

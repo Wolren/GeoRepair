@@ -2,6 +2,8 @@
 //! XOR the new faces into the accumulated area, remove the built boundary,
 //! and repeat until nothing remains (even-odd rule, GEOS MakeValidPoly.cpp).
 
+
+use alloc::vec::Vec;
 use geo::{Coord, Line, MultiPolygon, Polygon};
 
 use log::warn;
@@ -34,7 +36,7 @@ pub fn single_pass_fix(poly: &Polygon<f64>) -> Option<MultiPolygon<f64>> {
 
     // 1. Collect + clean all ring linework (shell first, then holes).
     let mut edges: Vec<Line<f64>> = Vec::new();
-    for ring in std::iter::once(poly.exterior()).chain(poly.interiors()) {
+    for ring in core::iter::once(poly.exterior()).chain(poly.interiors()) {
         let Some(coords) = basic_cleanup(ring) else { continue };
         if coords.len() < 4 {
             continue;
@@ -123,7 +125,7 @@ pub fn make_valid_poly_symdiff(cut_edges: &[Line<f64>]) -> Vec<Polygon<f64>> {
         let mut seg_counts: rustc_hash::FxHashMap<(u64, u64, u64, u64), usize> =
             rustc_hash::FxHashMap::default();
         for p in &new_area.0 {
-            for ring in std::iter::once(p.exterior()).chain(p.interiors()) {
+            for ring in core::iter::once(p.exterior()).chain(p.interiors()) {
                 for w in ring.0.windows(2) {
                     if w[0] != w[1] {
                         let key = segment_key(w[0], w[1]);
@@ -132,7 +134,7 @@ pub fn make_valid_poly_symdiff(cut_edges: &[Line<f64>]) -> Vec<Polygon<f64>> {
                 }
             }
         }
-        #[cfg(any(test, debug_assertions))]
+        #[cfg(all(any(test, debug_assertions), feature = "std"))]
         if std::env::var("DIAG_SYMDIFF").is_ok() {
             use geo::Area;
             eprintln!(
@@ -148,7 +150,7 @@ pub fn make_valid_poly_symdiff(cut_edges: &[Line<f64>]) -> Vec<Polygon<f64>> {
             }
             eprintln!("   new_area total = {total:.4}");
         }
-        #[cfg(any(test, debug_assertions))]
+        #[cfg(all(any(test, debug_assertions), feature = "std"))]
         if std::env::var("DIAG_SYMDIFF").is_ok() {
             use geo::Area;
             let t: f64 = area.iter().map(|p| p.unsigned_area()).sum();
@@ -206,7 +208,7 @@ fn symdiff_polygons(a: &[Polygon<f64>], b: &[Polygon<f64>]) -> Vec<Polygon<f64>>
         pts.sort_unstable();
         pts
     };
-    #[cfg(any(test, debug_assertions))]
+    #[cfg(all(any(test, debug_assertions), feature = "std"))]
     if std::env::var("DIAG_SYMDIFF").is_ok() {
         use geo::Area;
         eprintln!("   XOR: a={} polys, b={} polys", a.len(), b.len());
@@ -230,7 +232,7 @@ fn symdiff_polygons(a: &[Polygon<f64>], b: &[Polygon<f64>]) -> Vec<Polygon<f64>>
     for q in a {
         let qf = fp(q);
         let matched = b_set.contains(&qf);
-        #[cfg(any(test, debug_assertions))]
+        #[cfg(all(any(test, debug_assertions), feature = "std"))]
         if std::env::var("DIAG_SYMDIFF").is_ok() {
             eprintln!("     match a fp {:?} -> {}", qf, matched);
         }

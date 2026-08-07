@@ -1,3 +1,5 @@
+
+use alloc::vec::Vec;
 use geo::{Coord, Line};
 use rustc_hash::FxHashMap;
 #[cfg(feature = "rstar")]
@@ -212,10 +214,10 @@ fn collect_intersections_mcindex(
         let _ = chain_tree.locate_in_envelope_intersecting_int(q, |c| {
             let j = c.idx;
             if j <= i {
-                return std::ops::ControlFlow::<(), ()>::Continue(());
+                return core::ops::ControlFlow::<(), ()>::Continue(());
             }
             check_chain_pair(segments, mc1, &chains[j], coords, checked);
-            std::ops::ControlFlow::<(), ()>::Continue(())
+            core::ops::ControlFlow::<(), ()>::Continue(())
         });
     }
 }
@@ -455,7 +457,7 @@ impl SnapRoundingNoder {
                     if hp.touches(seg) {
                         params.push(hp.closest_param(seg));
                     }
-                    std::ops::ControlFlow::<(), ()>::Continue(())
+                    core::ops::ControlFlow::<(), ()>::Continue(())
                 });
 
                 params.sort_by_key(|a| a.to_bits());

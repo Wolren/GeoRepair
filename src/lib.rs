@@ -4,9 +4,10 @@
 //! degenerate shapes, NaN coordinates, and more — using algorithms selected
 //! by geometry type. The **Structure** strategy (default) mirrors GEOS's
 //! ST_MakeValid algorithm; the **Arrange** strategy uses CDT-based repair
-//! as a robust fallback for complex topologies. Passes 2490/2490 GEOS XML
-//! validation tests, with parallel batch performance **0.30× GEOS** (3.3×
-//! faster) on 1.58M data set polygons.
+//! as a robust fallback for complex topologies. Passes 937/937 dispatched
+//! GEOS XML validation cases (213 documented masked divergences), with
+//! parallel batch performance **1.16× GEOS** wall time on the 1.58M
+//! polygon real-world dataset (measured 2026-08-06).
 //!
 //! # Quick start
 //!
@@ -384,7 +385,7 @@
 //!   exterior rings, coordinates near f64::MAX). This is a known limitation
 //!   of `spade`.
 //! - **OGC compliance** is a key goal but not yet formally certified. The
-//!   validation module checks 18 OGC predicates and passes 2490/2490 GEOS XML
+//!   validation module checks 18 OGC predicates and passes 937/937 dispatched GEOS XML
 //!   tests.
 //! - **GeometryCollection cross-component intersection** is not validated.
 //! - **Z/M coordinate consistency** is not validated.
@@ -393,6 +394,17 @@
 //!
 //! Apache-2.0
 #![cfg_attr(feature = "simd-portable", feature(portable_simd))]
+//! # no_std
+//!
+//! Disable the default `std` feature for an alloc-only build. WKB/WKT
+//! parsing, validation, and repair work without `std`; only file I/O
+//! (`.gpkg`/`.csv`/`.shp`/`.gml` loaders, binary file helpers) requires
+//! it. The crate itself is std-free: the `geo` dependency still links
+//! `std` on hosted targets, so embedded (bare-metal) targets are not yet
+//! supported — see geo-types for a fully embedded geometry type layer.
+#![cfg_attr(not(feature = "std"), no_std)]
+#[macro_use]
+extern crate alloc;
 
 /// Compile-time guard: ensures `cfg(feature = "rstar")` is active when any
 /// rstar-dependent feature is enabled. Prevents silent O(n²) regression when
@@ -476,11 +488,12 @@ pub use crs::Crs;
 /// A feature combining geometry with optional attributes and CRS.
 pub use feature::Feature;
 pub use io::{
-    Endianness, EwkbDims, EwkbGeometry, WkbError, WktError, WriteOptions, diagnose_file,
-    infer_wkt_type, load, load_bin, load_bin_stream, read_ewkb, read_wkb, read_wkb_concat,
-    read_wkb_from, read_wkt, read_wkt_from, repair_file, save, write_ewkb, write_wkb, write_wkb_to,
-    write_wkb_with_opts, write_wkt, write_wkt_to,
+    Endianness, EwkbDims, EwkbGeometry, WkbError, WktError, WriteOptions, infer_wkt_type,
+    read_ewkb, read_wkb, read_wkb_concat, read_wkt, write_ewkb, write_wkb, write_wkb_with_opts,
+    write_wkt,
 };
+#[cfg(feature = "std")]
+pub use io::{diagnose_file, load, load_bin, load_bin_stream, read_wkb_from, read_wkt_from, repair_file, save, write_wkb_to, write_wkt_to};
 /// Tolerance-based repeated-point removal.
 pub use cleanup::{remove_repeated_coords, remove_repeated_points};
 /// Trait for repairing invalid geometries.
@@ -508,7 +521,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 /// Prints timing breakdown and pass rates to stderr.
 // Native-only: it times with `std::time::Instant`, which is not
 // implemented on wasm32-unknown-unknown (panics on call).
-#[cfg(all(feature = "arrange", feature = "structure", not(target_arch = "wasm32")))]
+#[cfg(all(feature = "arrange", feature = "structure", feature = "std", not(target_arch = "wasm32")))]
 pub fn profile_structure_fastpath(polys: &[geo::Polygon<f64>], sample: usize) {
     use geo::LinesIter;
     use std::time::Instant;

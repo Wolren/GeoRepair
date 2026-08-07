@@ -8,6 +8,9 @@ benches/real_world/*
 !benches/real_world/alaska.bin
 *.py
 *.py[cod]
+# The wheel's package init (re-exports the extension module) must be
+# committed and shipped despite the *.py rule above.
+!python/geo_repair/__init__.py
 patches/
 # cargo-fuzz build artifacts (corpus/ is committed)
 fuzz/target/

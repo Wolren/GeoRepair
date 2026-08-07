@@ -1,10 +1,14 @@
 //! GIS feature container with attribute, CRS, and Z/M preservation.
+
 //!
 //! The [`Feature`] struct bundles a geometry with optional JSON attributes,
 //! CRS metadata, and per-coordinate Z/M values. It is the primary data
 //! container for I/O operations — the repair pipeline modifies only the
 //! geometry while preserving all other fields.
 
+
+use alloc::string::String;
+use alloc::vec::Vec;
 use geo::{Coord, Geometry};
 use serde_json::{Map, Value};
 

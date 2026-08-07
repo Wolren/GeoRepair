@@ -10,6 +10,9 @@
 //! Writes polygons/multipolygons as single `Polygon` records with multiple
 //! rings, producing `.shp` + `.shx` (no `.dbf` — geometry only; add an
 //! attribute table with a GIS tool if attributes are needed).
+
+use alloc::vec::Vec;
+use alloc::string::String;
 use geo::{Coord, Geometry, LineString, MultiLineString, MultiPoint, Point, Polygon};
 
 use shapefile::{PolygonRing, Shape, ShapeWriter};

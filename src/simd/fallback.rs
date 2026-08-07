@@ -68,7 +68,7 @@ pub fn aabb_minmax_simd(coords: &[Coord<f64>]) -> (f64, f64, f64, f64) {
     // (is_x86_feature_detected) so the binary runs on any x86_64; the
     // old compile-time cfg never activated because builds don't set
     // target features.
-    #[cfg(all(not(feature = "simd-portable"), target_arch = "x86_64"))]
+    #[cfg(all(not(feature = "simd-portable"), target_arch = "x86_64", feature = "std"))]
     {
         if std::arch::is_x86_feature_detected!("avx") {
             // SAFETY: dispatch verified the avx feature.
@@ -90,7 +90,7 @@ pub fn aabb_minmax_simd(coords: &[Coord<f64>]) -> (f64, f64, f64, f64) {
 #[cfg(all(not(feature = "simd-portable"), target_arch = "x86_64"))]
 #[target_feature(enable = "avx")]
 unsafe fn aabb_minmax_avx(coords: &[Coord<f64>]) -> (f64, f64, f64, f64) {
-    use std::arch::x86_64::*;
+    use core::arch::x86_64::*;
     let n = coords.len();
     let mut min_xv = _mm256_set1_pd(f64::MAX);
     let mut max_xv = _mm256_set1_pd(f64::MIN);

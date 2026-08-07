@@ -18,7 +18,9 @@
 //! - [`read_wkb_from`] — reads WKB from any `io::Read` source
 //! - [`read_wkb_concat`] — parses concatenated WKB sequence
 
-use std::fmt;
+
+use alloc::vec::Vec;
+use core::fmt;
 
 use geo::{
     Coord, Geometry, GeometryCollection, LineString, MultiLineString, MultiPoint, MultiPolygon,
@@ -34,6 +36,7 @@ pub enum WkbError {
     UnexpectedGeometryType { expected: &'static str, code: u32 },
     UnsupportedDimension { actual_dims: u8 },
     TrailingBytes { consumed: usize, total: usize },
+    #[cfg(feature = "std")]
     IoError(std::io::Error),
 }
 
@@ -63,6 +66,7 @@ impl fmt::Display for WkbError {
                     "trailing bytes after WKB geometry: consumed {consumed} of {total} bytes"
                 )
             }
+            #[cfg(feature = "std")]
             WkbError::IoError(e) => write!(f, "WKB I/O error: {e}"),
         }
     }
@@ -176,7 +180,12 @@ mod write;
 #[cfg(test)]
 mod tests;
 
-pub use read::{read_ewkb, read_wkb, read_wkb_concat, read_wkb_from};
+pub use read::{read_ewkb, read_wkb, read_wkb_concat};
+#[cfg(feature = "std")]
+#[cfg(feature = "std")]
+pub use read::read_wkb_from;
 pub use write::{
-    estimate_wkb_size, write_ewkb, write_wkb, write_wkb_to, write_wkb_with_opts,
+    estimate_wkb_size, write_ewkb, write_wkb, write_wkb_with_opts,
 };
+#[cfg(feature = "std")]
+pub use write::write_wkb_to;

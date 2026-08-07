@@ -1,6 +1,9 @@
 //! WKT writer: geometry serializer + type inference.
 
+
+use alloc::string::String;
 use super::*;
+#[cfg(feature = "std")]
 use std::io::{self, Write};
 
 
@@ -9,6 +12,7 @@ use std::io::{self, Write};
 /// Formats the geometry using [`write_wkt`] and writes the resulting
 /// string to `writer`. Returns `io::Result<()>` so callers can handle
 /// write errors (e.g. broken pipe, disk full).
+#[cfg(feature = "std")]
 pub fn write_wkt_to(geom: &Geometry<f64>, writer: &mut impl Write) -> io::Result<()> {
     let s = write_wkt(geom);
     writer.write_all(s.as_bytes())

@@ -1,3 +1,5 @@
+
+use alloc::vec::Vec;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::core::MakeValidError;
@@ -84,7 +86,7 @@ pub(crate) use super::prep_intersect::has_no_intersections;
 pub(crate) fn odd_even_filter(lines: &mut Vec<Line<f64>>) {
     for line in lines.iter_mut() {
         if coord_greater(line.start, line.end) {
-            std::mem::swap(&mut line.start, &mut line.end);
+            core::mem::swap(&mut line.start, &mut line.end);
         }
     }
     lines.sort_by(|a, b| coord_cmp(a.start, b.start).then(coord_cmp(a.end, b.end)));
@@ -106,10 +108,10 @@ fn coord_greater(a: Coord<f64>, b: Coord<f64>) -> bool {
     a.x > b.x || (a.x == b.x && a.y > b.y)
 }
 
-fn coord_cmp(a: Coord<f64>, b: Coord<f64>) -> std::cmp::Ordering {
+fn coord_cmp(a: Coord<f64>, b: Coord<f64>) -> core::cmp::Ordering {
     a.x.partial_cmp(&b.x)
-        .unwrap_or(std::cmp::Ordering::Equal)
-        .then(a.y.partial_cmp(&b.y).unwrap_or(std::cmp::Ordering::Equal))
+        .unwrap_or(core::cmp::Ordering::Equal)
+        .then(a.y.partial_cmp(&b.y).unwrap_or(core::cmp::Ordering::Equal))
 }
 
 fn on_segment(a: Coord<f64>, b: Coord<f64>, c: Coord<f64>, eps: f64) -> bool {
@@ -232,7 +234,7 @@ fn split_segments(lines: Vec<Line<f64>>) -> Result<Vec<Line<f64>>, MakeValidErro
         .collect();
     let tree = RTree::bulk_load(envs);
     let mut seen = FxHashSet::default();
-    use std::ops::ControlFlow;
+    use core::ops::ControlFlow;
 
     for i in 0..n {
         let li = &lines[i];
@@ -277,8 +279,8 @@ fn split_segments(lines: Vec<Line<f64>>) -> Result<Vec<Line<f64>>, MakeValidErro
     let mut result = Vec::new();
     for i in 0..n {
         let line = lines[i];
-        let mut splits: Vec<(f64, Coord<f64>)> = std::mem::take(&mut split_points[i]);
-        splits.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        let mut splits: Vec<(f64, Coord<f64>)> = core::mem::take(&mut split_points[i]);
+        splits.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(core::cmp::Ordering::Equal));
         splits.dedup_by(|a, b| (a.0 - b.0).abs() < eps_param);
 
         let mut prev_t = 0.0f64;

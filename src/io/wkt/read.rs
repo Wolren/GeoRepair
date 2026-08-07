@@ -1,11 +1,16 @@
 //! WKT parser: single-pass tokenizer + reader.
 
+
+use alloc::vec::Vec;
+use alloc::string::String;
+use alloc::string::ToString;
 /// Maximum GEOMETRYCOLLECTION nesting depth. Each level consumes at least
 /// ~14 bytes of input, so the cap never rejects real data while bounding
 /// recursion (stack overflow is an uncatchable abort).
 const MAX_WKT_NESTING: usize = 256;
 
 use super::*;
+#[cfg(feature = "std")]
 use std::io::Read;
 
 pub(crate) struct Parser<'a> {
@@ -128,7 +133,7 @@ impl<'a> Parser<'a> {
                 return Err(self.err("expected number"));
             };
             self.i += kw_len;
-            return std::str::from_utf8(&self.s[start..self.i])
+            return core::str::from_utf8(&self.s[start..self.i])
                 .map_err(|_| self.err("expected number"))?
                 .parse::<f64>()
                 .map_err(|_| self.err("expected number"));
@@ -176,7 +181,7 @@ impl<'a> Parser<'a> {
         // well-formed decimal token, so the parser only sees digits,
         // '.', exponent, and sign. Note: hex floats ("0x1p3") are
         // rejected - WKT has no hex form and GEOS never emits one.
-        fast_float::parse::<f64, _>(&self.s[start..self.i])
+        fast_float2::parse::<f64, _>(&self.s[start..self.i])
             .map_err(|_| self.err("expected number"))
     }
     fn read_coord(&mut self, _dims: u32) -> Result<Coord<f64>, WktError> {
@@ -653,6 +658,7 @@ pub fn read_wkt(input: &str) -> Result<Geometry<f64>, WktError> {
 ///
 /// Reads the entire input to a string, then delegates to [`read_wkt`].
 /// Supports the same geometry types and rejects Z/M/ZM modifiers.
+#[cfg(feature = "std")]
 pub fn read_wkt_from(mut reader: impl Read) -> Result<Geometry<f64>, WktError> {
     let mut s = String::new();
     reader.read_to_string(&mut s).map_err(WktError::IoError)?;

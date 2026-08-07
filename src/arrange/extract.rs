@@ -1,3 +1,5 @@
+
+use alloc::vec::Vec;
 use rustc_hash::FxHashSet;
 
 use geo::Coord;

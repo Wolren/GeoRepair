@@ -17,6 +17,8 @@
 //!   too small (fluff) or when it was stripped (last-point repair), but
 //!   never when the original end was invalid.
 
+
+use alloc::vec::Vec;
 use geo::{Coord, Geometry, HasDimensions, LineString, MultiLineString, MultiPolygon, Polygon};
 
 /// Minimum ring size GEOS accepts (2 distinct + closure).

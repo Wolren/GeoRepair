@@ -1,5 +1,7 @@
 //! Shared utility functions used across the crate.
 
+
+use alloc::vec::Vec;
 use geo::Coord;
 
 pub(crate) fn shoelace_sum(ring: &[Coord<f64>]) -> f64 {
@@ -394,10 +396,10 @@ pub(crate) fn point_in_ring_exclusive_even_odd(pt: Coord<f64>, ring: &[Coord<f64
 /// valid API there while the repair path keeps running. (Found 2026-08-06
 /// by the first wasm runtime test: the repair test panicked in
 /// fix_polygon_owned's PROFILE_FP_NS timing.)
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "std"))]
 pub(crate) struct ProfileClock(std::time::Instant);
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "std"))]
 impl ProfileClock {
     pub(crate) fn start() -> Self {
         Self(std::time::Instant::now())
@@ -407,10 +409,10 @@ impl ProfileClock {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", not(feature = "std")))]
 pub(crate) struct ProfileClock;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", not(feature = "std")))]
 impl ProfileClock {
     pub(crate) fn start() -> Self {
         Self

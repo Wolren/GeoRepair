@@ -1,4 +1,5 @@
 //! Coordinate Reference System (CRS) metadata and transformation.
+
 //!
 //! Stores CRS information (authority, geographic vs projected) and provides
 //! tolerance heuristics per CRS type. When the `proj` feature is enabled,
@@ -8,6 +9,10 @@
 //! round-tripping and in [`MakeValidConfig`](crate::MakeValidConfig) for
 //! CRS-aware tolerance adjustment.
 
+
+
+use alloc::string::ToString;
+use alloc::string::String;
 #[cfg(feature = "proj")]
 use crate::core::MakeValidError;
 #[cfg(feature = "proj")]

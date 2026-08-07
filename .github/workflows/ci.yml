@@ -180,6 +180,33 @@ jobs:
         env:
           CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
 
+  # C FFI gate: build the cdylib/staticlib and compile + run the C
+  # harness (tests/c/test_geo_repair.c) against it on Linux and Windows
+  # on every push. This catches ABI/layout drift at commit time, not at
+  # release time (the release workflow re-runs the harness on macOS too).
+  c-ffi:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
+        with:
+          toolchain: stable
+      - run: cargo build --release --features ffi
+      - name: Compile + run C harness (Linux)
+        if: runner.os != 'Windows'
+        run: |
+          gcc -std=c99 -Wall -Wextra -I include tests/c/test_geo_repair.c \
+            -L target/release -l geo_repair -o target/release/gr_test
+          LD_LIBRARY_PATH=target/release target/release/gr_test
+      - name: Compile + run C harness (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: tests\c\build_test_windows.bat
+
   clippy:
     runs-on: ubuntu-latest
     steps:

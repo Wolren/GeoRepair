@@ -1,10 +1,10 @@
-//! Portable SIMD (nightly-only, cross-platform via std::simd).
+//! Portable SIMD (nightly-only, cross-platform via core::simd).
 
 use super::*;
 
 
 // ============================================================================
-// Portable SIMD (nightly-only, cross-platform via std::simd)
+// Portable SIMD (nightly-only, cross-platform via core::simd)
 // ============================================================================
 
 #[cfg(feature = "simd-portable")]
@@ -13,7 +13,7 @@ pub(crate) fn orient2d_batch_4(
     pb: &[Coord<f64>; 4],
     pc: &[Coord<f64>; 4],
 ) -> [f64; 4] {
-    use std::simd::f64x4;
+    use core::simd::f64x4;
 
     let pax = f64x4::from_array([pa[0].x, pa[1].x, pa[2].x, pa[3].x]);
     let pay = f64x4::from_array([pa[0].y, pa[1].y, pa[2].y, pa[3].y]);
@@ -34,8 +34,8 @@ pub(crate) fn is_ring_ccw_simd(coords: &[Coord<f64>]) -> bool {
         return true;
     }
     let mut area = 0.0f64;
-    use std::simd::f64x4;
-    use std::simd::num::SimdFloat;
+    use core::simd::f64x4;
+    use core::simd::num::SimdFloat;
     let mut i = 0usize;
     while i + 4 <= n {
         let xs = f64x4::from_array([
@@ -76,8 +76,8 @@ pub(crate) fn is_ring_ccw_simd(coords: &[Coord<f64>]) -> bool {
 /// Non-finite values pass through unchanged (IEEE 754 semantics).
 #[cfg(feature = "simd-portable")]
 pub(crate) fn snap_coords_simd(coords: &mut [Coord<f64>], scale: f64) {
-    use std::simd::f64x4;
-    use std::simd::num::SimdFloat;
+    use core::simd::f64x4;
+    use core::simd::num::SimdFloat;
     let scale_v = f64x4::splat(scale);
     let inv_scale_v = f64x4::splat(1.0 / scale);
     let n = coords.len();
@@ -116,8 +116,8 @@ pub(crate) fn snap_coords_simd(coords: &mut [Coord<f64>], scale: f64) {
 #[cfg(feature = "simd-portable")]
 #[allow(dead_code)]
 pub(crate) fn aabb_minmax_simd(coords: &[Coord<f64>]) -> (f64, f64, f64, f64) {
-    use std::simd::f64x4;
-    use std::simd::num::SimdFloat;
+    use core::simd::f64x4;
+    use core::simd::num::SimdFloat;
     let n = coords.len();
     if n == 0 {
         return (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
@@ -188,7 +188,7 @@ pub(crate) fn point_in_ring_exclusive(pt: Coord<f64>, coords: &[Coord<f64>]) -> 
         }
     }
     let mut wn = 0i32;
-    use std::simd::f64x4;
+    use core::simd::f64x4;
     let mut i = 0usize;
     while i + 5 <= n {
         let pax = f64x4::splat(pt.x);

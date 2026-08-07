@@ -28,6 +28,8 @@
 //! - `prep`: Input preparation, intersection pre-checks
 //! - `prep_intersect`: Parallel intersection pre-filter
 //! - `assemble`: Ring assembly from labeled faces
+
+use alloc::vec::Vec;
 /// Ring assembly from labeled triangle faces.
 pub mod assemble;
 /// Constrained Delaunay triangulation wrapper around spade.
@@ -49,14 +51,24 @@ use rustc_hash::FxHashSet;
 use spade::{ConstrainedDelaunayTriangulation, Triangulation};
 
 /// Wrap CDT construction in panic catch — spade can panic on degenerate
-/// input (all-collinear rings, coords near f64::MAX).
+/// input (all-collinear rings, coords near f64::MAX). Without `std` there
+/// is no unwind machinery, so the catch is disabled and a panicking spade
+/// propagates (arrange is a std-gated strategy in practice: spade is a
+/// std crate).
 fn build_cdt_safe(
     prepared: &prep::PreparedLines,
 ) -> Option<ConstrainedDelaunayTriangulation<Coord<f64>>> {
-    use std::panic::{self, AssertUnwindSafe};
-    match panic::catch_unwind(AssertUnwindSafe(|| cdt::build(prepared))) {
-        Ok(Ok(cdt)) => Some(cdt),
-        _ => None,
+    #[cfg(feature = "std")]
+    {
+        use std::panic::{self, AssertUnwindSafe};
+        match panic::catch_unwind(AssertUnwindSafe(|| cdt::build(prepared))) {
+            Ok(Ok(cdt)) => Some(cdt),
+            _ => None,
+        }
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        cdt::build(prepared).ok()
     }
 }
 
@@ -79,7 +91,8 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, _config: &MakeValidConfig) -> Geo
                 )
             })
             .collect();
-        #[cfg(any(test, debug_assertions))]
+        #[cfg(all(any(test, debug_assertions), feature = "std"))]
+        #[cfg(feature = "std")]
         if std::env::var("DIAG_COLLAPSE").is_ok() {
             eprintln!(
                 "DIAG_COLLAPSE: {} coords -> {} coords",
@@ -159,7 +172,8 @@ pub(crate) fn boolean_difference_catch(
     shell: &Polygon<f64>,
     holes: &[Polygon<f64>],
 ) -> Option<MultiPolygon<f64>> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    #[cfg(feature = "std")]
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         if holes.len() == 1 {
             shell.boolean_op(&holes[0], geo::OpType::Difference)
         } else {
@@ -168,7 +182,16 @@ pub(crate) fn boolean_difference_catch(
             shell_mp.boolean_op(&holes_mp, geo::OpType::Difference)
         }
     }))
-    .ok()
+    .ok();
+    #[cfg(not(feature = "std"))]
+    let result = Some(if holes.len() == 1 {
+        shell.boolean_op(&holes[0], geo::OpType::Difference)
+    } else {
+        let shell_mp = MultiPolygon::new(vec![shell.clone()]);
+        let holes_mp = MultiPolygon::new(holes.to_vec());
+        shell_mp.boolean_op(&holes_mp, geo::OpType::Difference)
+    });
+    result
 }
 
 /// Cheap hole-containment supplement to the first-vertex probe: catches a
@@ -252,7 +275,7 @@ pub fn validate_polygon(poly: &Polygon<f64>) -> bool {
         return false;
     }
     // Check for NaN/inf coordinates
-    let rings = std::iter::once(poly.exterior()).chain(poly.interiors().iter());
+    let rings = core::iter::once(poly.exterior()).chain(poly.interiors().iter());
     for ring in rings {
         if ring.0.iter().any(|c| !c.x.is_finite() || !c.y.is_finite()) {
             return false;
@@ -357,9 +380,9 @@ fn holes_valid_impl(poly: &Polygon<f64>, inclusive: bool) -> bool {
             let _ = tree.locate_in_envelope_intersecting_int(query, |c| {
                 if c.idx != i && crate::validation::point_in_ring_exclusive(pt, holes[c.idx]) {
                     overlaps = true;
-                    std::ops::ControlFlow::Break(())
+                    core::ops::ControlFlow::Break(())
                 } else {
-                    std::ops::ControlFlow::<(), ()>::Continue(())
+                    core::ops::ControlFlow::<(), ()>::Continue(())
                 }
             });
             if overlaps {

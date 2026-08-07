@@ -11,12 +11,14 @@
 //! The main entry points are:
 //! - [`MakeValid::make_valid`] - repair with default config
 //! - [`MakeValid::make_valid_with_config`] - repair with custom config
+
 use geo::{
     Coord, CoordNum, GeoFloat, Geometry, GeometryCollection, Line, LineString,
     MultiLineString, MultiPoint, MultiPolygon, Point, Polygon, Rect, Triangle, Winding,
 };
 use crate::util::{point_in_ring_exclusive_even_odd, shoelace_abs_sum};
 
+use alloc::vec::Vec;
 use crate::core::MakeValidConfig;
 #[cfg(any(feature = "arrange", feature = "structure"))]
 use crate::core::PolyMethod;

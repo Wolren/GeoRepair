@@ -1,7 +1,10 @@
+
+use alloc::vec::Vec;
 use geo::Coord;
 use rstar::{RTree, RTreeObject, AABB};
 
 use crate::orient::orient2d_fast;
+#[cfg(feature = "std")]
 use crate::util::ProfileClock;
 
 /// Edge with 2D bounding envelope for R-tree spatial indexing.
@@ -65,11 +68,11 @@ pub(crate) fn has_proper_self_crossing_sweep(
         let result = tree.locate_in_envelope_intersecting_int(query_env, |candidate| {
             let j = candidate.index as usize;
             if j <= i {
-                return std::ops::ControlFlow::Continue(());
+                return ::core::ops::ControlFlow::Continue(());
             }
             // Same-ring adjacent segments share an endpoint by construction.
             if segments_adjacent_in_ring(i, j, ring_offsets) {
-                return std::ops::ControlFlow::Continue(());
+                return ::core::ops::ControlFlow::Continue(());
             }
             if super::fix_ring::segments_properly_cross_seg(
                 coords[i],
@@ -77,6 +80,7 @@ pub(crate) fn has_proper_self_crossing_sweep(
                 coords[j],
                 coords[j + 1],
             ) {
+                #[cfg(feature = "std")]
                 if std::env::var("DIAG_SWEEP_CROSS").is_ok() {
                     eprintln!(
                         "SWEEP CROSS i={i} j={j} a=({:.6},{:.6})-({:.6},{:.6}) b=({:.6},{:.6})-({:.6},{:.6})",
@@ -84,7 +88,7 @@ pub(crate) fn has_proper_self_crossing_sweep(
                         coords[j].x, coords[j].y, coords[j + 1].x, coords[j + 1].y
                     );
                 }
-                std::ops::ControlFlow::Break(())
+                ::core::ops::ControlFlow::Break(())
             } else if ring_of_segment(i, ring_offsets) == ring_of_segment(j, ring_offsets)
                 && crate::validation::edges_vertex_on_edge(
                     coords[i],
@@ -97,9 +101,9 @@ pub(crate) fn has_proper_self_crossing_sweep(
                 // rejects a ring vertex on a non-adjacent edge (Test 22).
                 // Cross-ring pairs stay untouched (hole vertex on shell
                 // edge is a VALID OGC touch).
-                std::ops::ControlFlow::Break(())
+                ::core::ops::ControlFlow::Break(())
             } else {
-                std::ops::ControlFlow::Continue(())
+                ::core::ops::ControlFlow::Continue(())
             }
         });
         if result.is_break() {
@@ -221,15 +225,15 @@ impl StrIndex {
             } else {
                 (cy[*a as usize], cy[*b as usize])
             };
-            ca.partial_cmp(&cb).unwrap_or(std::cmp::Ordering::Equal)
+            ca.partial_cmp(&cb).unwrap_or(::core::cmp::Ordering::Equal)
         };
 
         // Pass 1 (top-down): sort each level's ranges by the level's axis,
         // then split every range into sqrt(leaves-below) children. Record
         // each range's parent node index for the child-pointer pass.
-        let mut level_ranges: Vec<Vec<std::ops::Range<usize>>> = Vec::new();
+        let mut level_ranges: Vec<Vec<::core::ops::Range<usize>>> = Vec::new();
         let mut level_parents: Vec<Vec<u32>> = Vec::new();
-        let mut ranges: Vec<std::ops::Range<usize>> = std::iter::once(0..n).collect();
+        let mut ranges: Vec<::core::ops::Range<usize>> = ::core::iter::once(0..n).collect();
         let mut parents: Vec<u32> = vec![u32::MAX];
         let mut axis = 0usize;
         while ranges.iter().any(|r| r.len() > STR_LEAF_CAP) {
@@ -257,7 +261,7 @@ impl StrIndex {
                     order[r.clone()].sort_unstable_by(|a, b| by_axis(axis, a, b));
                 }
             }
-            let mut next: Vec<std::ops::Range<usize>> = Vec::new();
+            let mut next: Vec<::core::ops::Range<usize>> = Vec::new();
             let mut next_parents: Vec<u32> = Vec::new();
             for (pi, r) in ranges.iter().enumerate() {
                 let leaves_below = r.len().div_ceil(STR_LEAF_CAP).max(1);
@@ -271,8 +275,8 @@ impl StrIndex {
                     c = e;
                 }
             }
-            level_ranges.push(std::mem::take(&mut ranges));
-            level_parents.push(std::mem::take(&mut parents));
+            level_ranges.push(::core::mem::take(&mut ranges));
+            level_parents.push(::core::mem::take(&mut parents));
             ranges = next;
             parents = next_parents;
             axis ^= 1;
@@ -400,9 +404,12 @@ pub(crate) fn has_self_intersections(coords: &[Coord<f64>], eps: f64) -> bool {
     let n_edges = n.saturating_sub(1);
 
     let envs: Vec<[f64; 4]> = (0..n_edges).map(|i| edge_env_array(coords, i)).collect();
+    #[cfg(feature = "std")]
     let t_build = ProfileClock::start();
     let tree = StrIndex::build(&envs);
-    let dt_build = std::time::Duration::from_nanos(t_build.ns());
+    #[cfg(feature = "std")]
+    let dt_build = core::time::Duration::from_nanos(t_build.ns());
+    #[cfg(feature = "std")]
     if std::env::var("DIAG_SI").is_ok() {
         eprintln!(
             "SI n={n_edges} build={:.1}ms levels={} leaves={}",
@@ -453,6 +460,7 @@ pub(crate) fn has_self_intersections(coords: &[Coord<f64>], eps: f64) -> bool {
             })
         })
         .is_some();
+        #[cfg(feature = "std")]
         if std::env::var("DIAG_SI").is_ok() {
             eprintln!(
                 "SI query={:.1}ms found={found}",

@@ -14,6 +14,10 @@
 //! `XMLHttpRequest` is unavailable (e.g. the Node wasm-bindgen-test
 //! harness, which has no browser globals).
 
+
+use alloc::vec::Vec;
+use alloc::string::String;
+use alloc::string::ToString;
 use geo::Geometry;
 
 /// Fetch a URL as raw bytes with a synchronous XMLHttpRequest.

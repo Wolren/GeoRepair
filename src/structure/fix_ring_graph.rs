@@ -1,3 +1,5 @@
+
+use alloc::vec::Vec;
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 
@@ -74,7 +76,7 @@ pub fn build_graph(lines: &[Line<f64>]) -> Graph {
             neighbors.sort_by(|(a_idx, _), (b_idx, _)| {
                 let aa = (verts[*a_idx].y - cy).atan2(verts[*a_idx].x - cx);
                 let ba = (verts[*b_idx].y - cy).atan2(verts[*b_idx].x - cx);
-                aa.partial_cmp(&ba).unwrap_or(std::cmp::Ordering::Equal)
+                aa.partial_cmp(&ba).unwrap_or(::core::cmp::Ordering::Equal)
             });
             neighbors
         })
@@ -414,7 +416,7 @@ fn find_next_edge(
             if turn > -1e-10 {
                 turn = 0.0;
             } else {
-                turn += 2.0 * std::f64::consts::PI;
+                turn += 2.0 * ::core::f64::consts::PI;
             }
         }
 
