@@ -498,6 +498,8 @@ mod strip;
 
 pub use polygon::is_valid_with_geo;
 pub(crate) use polygon::enforce_ogc_winding;
+#[cfg(test)]
+pub(crate) use polygon::ogc_orientation_ok;
 pub(crate) use polygon::snap_cannot_represent;
 #[cfg(any(feature = "arrange", feature = "structure"))]
 pub use multipolygon::drop_nested_components;

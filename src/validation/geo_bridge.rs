@@ -159,11 +159,15 @@ mod tests {
     #[test]
     fn stricter_than_geo_collinear_sliver() {
         // A 5e-14-tall sliver over a length-10 base: the two long edges lie
-        // within the 32 * EPSILON * L^2 collinear gate (orient 5e-13 vs
-        // gate ~7.1e-13). geo_repair flags the near-coincident edges as a
-        // SelfIntersection; geo's exact-predicate validator accepts the
-        // polygon. This is the deliberate strictness policy documented in
-        // the validation module.
+        // 5e-14 apart (about 28 ulps at this scale) - genuinely separated,
+        // geometrically VALID, and GEOS accepts it. The old
+        // `32 * EPSILON * L^2` collinear gate swallowed near-parallel pairs
+        // (orient 5e-13 vs gate ~7.1e-13) and flagged a false
+        // SelfIntersection; with the adaptive per-orient error bound
+        // (2026-08-07) the orient 5e-13 is ~26 orders of magnitude above
+        // its rounding bound, so the sliver is correctly accepted - the
+        // strictness differential vs geo is the T-junction and exact-
+        // collinear classes, not length-inflated margins.
         let poly = Polygon::new(
             LineString::from(vec![
                 (0.0, 0.0),
@@ -180,13 +184,32 @@ mod tests {
         use geo::algorithm::validation::Validation as GeoValidation;
         assert!(geometry.is_valid(), "geo exact validator accepts this input");
 
-        // geo_repair engine through the bridge: flags it.
+        // geo_repair engine through the bridge: accepts too (adaptive bound).
         let adapter = GeoRepairValidation(&geometry);
-        assert!(!adapter.is_valid());
-        let errors = adapter.validation_errors();
+        assert!(adapter.is_valid(), "near-parallel separated edges are valid");
+    }
+
+    #[test]
+    fn flags_true_t_junction_that_geo_accepts() {
+        // The strictness differential: a ring vertex lying EXACTLY on a
+        // non-adjacent edge (T-junction). geo's exact validator passes it
+        // (no area test), geo_repair flags SelfIntersection (GEOS
+        // IsValidOp Test 22 also rejects it).
+        let poly = Polygon::new(
+            LineString::from(vec![
+                (0.0, 0.0),
+                (10.0, 0.0),
+                (10.0, 10.0),
+                (5.0, 0.0), // exactly on edge (0,0)-(10,0)
+                (0.0, 10.0),
+            ]),
+            vec![],
+        );
+        let geometry = Geometry::Polygon(poly);
+        let adapter = GeoRepairValidation(&geometry);
         assert!(
-            !errors.is_empty(),
-            "geo_repair must flag the near-coincident sliver edges"
+            !adapter.is_valid(),
+            "geo_repair must flag the exact T-junction"
         );
     }
 

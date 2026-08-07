@@ -111,12 +111,17 @@ pub(crate) fn fix_polygon_owned(
     }
     PROFILE_FP_NS.fetch_add(_t_fp.ns(), Ordering::Relaxed);
 
-/// Fast-path gate: valid polygons return immediately, zero-copy. The gates
-/// are: basic form, sub-ULP edges, monotone-chain proper-crossing sweep
-/// (SmallVec, no heap for <= 32 lines), hole validity. Large rings swap the
-/// chain sweep for the R-tree proper-crossing sweep (heavy constants for
-/// tiny rings; measured 11.3s wasted subtract on a 159k-vert valid shell
-/// before the large-ring gate existed).
+/// Fast-path gate: valid polygons return immediately, zero-copy. The gate
+/// is a COMPLETE certifier: it must accept exactly what the exit validator
+/// accepts (the Fast path skips that validator - 2026-08-07), minus
+/// orientation, which the caller's re-winding normalizes afterwards. Gates:
+/// basic form, sub-ULP edges, per-ring full pair predicate (proper
+/// crossing + eps-collinear overlap + vertex-on-edge T-junction, ring-
+/// local eps - SmallVec, no heap for <= 32 lines), duplicated rings, and
+/// the validator's own hole validation. Large rings swap the chain sweep
+/// for the validator itself (one radix pass) - the R-tree proper-crossing
+/// sweep was cheaper only in constants and missed the collinear/T-junction
+/// classes.
 #[cfg(feature = "arrange")]
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn fast_path_check(poly: &Polygon<f64>, ext_scale: Option<f64>) -> bool {
@@ -134,6 +139,40 @@ fn fast_path_check(poly: &Polygon<f64>, ext_scale: Option<f64>) -> bool {
     {
         return false;
     }
+    // Absolute envelope degeneracy - the validator's own rule: a geometry
+    // whose bbox is thinner than f64::EPSILON on either axis is rejected
+    // as DegenerateExterior. The basic-form gate uses a LOCAL relative
+    // rule (correct for mixed magnitudes - a 5e-305-thick sliver is valid
+    // at its own scale), so this class needs its own check or the Fast
+    // path ships a polygon the validator rejects (fuzz_inprocess_loop
+    // micro-sliver, 2026-08-07).
+    {
+        let mut min_x = f64::MAX;
+        let mut max_x = f64::MIN;
+        let mut min_y = f64::MAX;
+        let mut max_y = f64::MIN;
+        for c in poly
+            .exterior()
+            .0
+            .iter()
+            .chain(poly.interiors().iter().flat_map(|h| h.0.iter()))
+        {
+            min_x = min_x.min(c.x);
+            max_x = max_x.max(c.x);
+            min_y = min_y.min(c.y);
+            max_y = max_y.max(c.y);
+        }
+        if (max_x - min_x).abs() < f64::EPSILON || (max_y - min_y).abs() < f64::EPSILON {
+            return false;
+        }
+    }
+    // Duplicated rings (hole == shell, hole == hole): the pair sweeps
+    // cannot see identical rings (no proper crossings, no touches that
+    // the inclusive hole checks would flag). Validator's own check.
+    let interiors: Vec<&[geo::Coord<f64>]> = poly.interiors().iter().map(|h| &h.0[..]).collect();
+    if crate::validation::has_duplicate_rings(&interiors, poly.exterior().0.as_slice()) {
+        return false;
+    }
     if total_verts <= core::FAST_PATH_MAX_VERTS {
         // SmallVec: ~95.6% of the real-world dataset has <= 32 vertices, so
         // the line collection stays on the stack and skips the heap
@@ -141,15 +180,24 @@ fn fast_path_check(poly: &Polygon<f64>, ext_scale: Option<f64>) -> bool {
         let lines: SmallVec<[Line<f64>; crate::core::SMALL_RING_LINES]> = poly.lines_iter().collect();
         !lines.is_empty()
             && crate::arrange::prep::has_no_intersections(&lines)
-            && crate::arrange::holes_are_valid(poly)
+            && crate::validation::holes::check_holes_valid(
+                poly.exterior().0.as_slice(),
+                poly.interiors(),
+            )
+            .is_empty()
     } else {
-        // Very large rings: skip the monotone-chain has_no_intersections
-        // (O(n log n) but heavy constant) and use the R-tree proper-crossing
-        // sweep instead. A polygon with no proper crossing and valid holes
-        // IS the final result - the full repair pipeline (classify ->
-        // subtract -> merge) would only waste time.
-        !crate::structure::has_proper_self_crossing(poly)
-            && crate::arrange::holes_are_valid_inclusive(poly)
+        // Very large rings: the validator IS the gate - one radix sweep
+        // that covers every class the exit validator would re-check
+        // (ring simplicity incl. eps-collinear + T-junctions, hole ring
+        // validity, hole containment/nesting, duplicates). Orientation
+        // errors are filtered: the fast path re-winds after the gate, and
+        // winding is the only normalization a simple polygon needs.
+        use crate::validation::{GeoValidation, GeometryValidationError};
+        let r = poly.validate();
+        r.valid
+            || r.errors
+                .iter()
+                .all(|e| matches!(e, GeometryValidationError::WrongOrientation))
     }
 }
 
@@ -501,3 +549,6 @@ mod profile;
 
 pub use crate::structure::nesting::*;
 pub use crate::structure::profile::*;
+
+#[cfg(all(test, feature = "arrange"))]
+mod gate_tests;

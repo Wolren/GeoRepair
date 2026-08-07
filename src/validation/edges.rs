@@ -58,17 +58,36 @@ pub(crate) fn edges_intersect_general(
     // (2026-08-07): the exact chain cost ~120 ns/pair; the fast path is
     // ~5 ns, and clean synthetic data pays it for ~99% of pairs (lines:
     // 269 us -> 10-15 us at 500 vertices).
-    let la2 = (a2.x - a1.x).powi(2) + (a2.y - a1.y).powi(2);
-    let lb2 = (b2.x - b1.x).powi(2) + (b2.y - b1.y).powi(2);
-    let collinear_eps = 32.0 * f64::EPSILON * la2.max(lb2);
-    let f1 = (a2.x - a1.x) * (b1.y - a1.y) - (a2.y - a1.y) * (b1.x - a1.x);
-    let f2 = (a2.x - a1.x) * (b2.y - a1.y) - (a2.y - a1.y) * (b2.x - a1.x);
-    let f3 = (b2.x - b1.x) * (a1.y - b1.y) - (b2.y - b1.y) * (a1.x - b1.x);
-    let f4 = (b2.x - b1.x) * (a2.y - b1.y) - (b2.y - b1.y) * (a2.x - b1.x);
-    if f1.abs() > 2.0 * collinear_eps
-        && f2.abs() > 2.0 * collinear_eps
-        && f3.abs() > 2.0 * collinear_eps
-        && f4.abs() > 2.0 * collinear_eps
+    let dx_a = a2.x - a1.x;
+    let dy_a = a2.y - a1.y;
+    let dx_b = b2.x - b1.x;
+    let dy_b = b2.y - b1.y;
+    let f1 = dx_a * (b1.y - a1.y) - dy_a * (b1.x - a1.x);
+    let f2 = dx_a * (b2.y - a1.y) - dy_a * (b2.x - a1.x);
+    let f3 = dx_b * (a1.y - b1.y) - dy_b * (a1.x - b1.x);
+    let f4 = dx_b * (a2.y - b1.y) - dy_b * (a2.x - b1.x);
+    // Adaptive per-orient error bound (Shewchuk's): the fast orient's
+    // rounding error is bounded by a small constant times EPS times the
+    // SUM of the absolute products that make up the orient. The old
+    // `32 * EPSILON * max(la2, lb2)` margin used the EDGE LENGTHS, which a
+    // long edge inflates far past the orient of nearly-parallel pairs:
+    // measured 2026-08-07, a 1.6e7-edge vs 219-edge pair separated by
+    // 1.8e-8 gave orient 3.9e-6 against margin ~1.8 -> false collinear
+    // overlap (fuzz_inprocess_loop divergence, Fast path shipped a
+    // polygon the validator rejected). The product-sum bound for the same
+    // pair is ~1e-20 - the orient is definitively not collinear.
+    #[inline(always)]
+    fn orient_err(t1: f64, t2: f64) -> f64 {
+        32.0 * f64::EPSILON * (t1.abs() + t2.abs())
+    }
+    let e1 = orient_err(dx_a * (b1.y - a1.y), dy_a * (b1.x - a1.x));
+    let e2 = orient_err(dx_a * (b2.y - a1.y), dy_a * (b2.x - a1.x));
+    let e3 = orient_err(dx_b * (a1.y - b1.y), dy_b * (a1.x - b1.x));
+    let e4 = orient_err(dx_b * (a2.y - b1.y), dy_b * (a2.x - b1.x));
+    if f1.abs() > 2.0 * e1
+        && f2.abs() > 2.0 * e2
+        && f3.abs() > 2.0 * e3
+        && f4.abs() > 2.0 * e4
     {
         // Zero-safe strict opposite sign (matches the exact path below).
         if (f1 > 0.0 && f2 < 0.0 || f1 < 0.0 && f2 > 0.0)
@@ -112,10 +131,10 @@ pub(crate) fn edges_intersect_general(
     // coord_wrap_around seed base=-9607183.16, step=5.47e-4, n=7 -> exact
     // orients 8.2e-13/3.1e-13 vs caller eps 1e-12 flagged a false
     // SelfIntersection on a MultiPolygon GEOS validates bit-for-bit).
-    let la2 = (a2.x - a1.x).powi(2) + (a2.y - a1.y).powi(2);
-    let lb2 = (b2.x - b1.x).powi(2) + (b2.y - b1.y).powi(2);
-    let collinear_eps = 32.0 * f64::EPSILON * la2.max(lb2);
-    let collinear = o1.abs() <= collinear_eps && o2.abs() <= collinear_eps;
+    // Exact-path collinearity gate: adaptive per-orient error bound
+    // (same rationale as the fast-first gate above - the L2-based margin
+    // inflates past nearly-parallel pairs when one edge is long).
+    let collinear = o1.abs() <= e1 && o2.abs() <= e2;
     if collinear {
         let dx = a2.x - a1.x;
         let dy = a2.y - a1.y;
