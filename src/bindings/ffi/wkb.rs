@@ -18,7 +18,7 @@ use crate::validation::GeoValidation;
 ///
 /// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes.
 /// The returned [`GeoRepairResult`] must be freed with
-/// [`geo_repair_free_result`].
+/// [`super::geo_repair_free_result`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_make_valid(
     wkb_data: *const u8,
@@ -48,7 +48,7 @@ pub unsafe extern "C" fn geo_repair_make_valid(
 ///
 /// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes.
 /// The returned [`GeoRepairResult`] must be freed with
-/// [`geo_repair_free_result`].
+/// [`super::geo_repair_free_result`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_make_valid_with_config(
     wkb_data: *const u8,
@@ -82,7 +82,7 @@ pub unsafe extern "C" fn geo_repair_make_valid_with_config(
 ///
 /// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes.
 /// The returned [`GeoRepairResult`] must be freed with
-/// [`geo_repair_free_result`].
+/// [`super::geo_repair_free_result`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_make_valid_with_config_full(
     wkb_data: *const u8,
@@ -142,7 +142,7 @@ pub unsafe extern "C" fn geo_repair_is_valid(wkb_data: *const u8, wkb_len: usize
 ///
 /// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes.
 /// The returned [`GeoRepairResult`] must be freed with
-/// [`geo_repair_free_result`].
+/// [`super::geo_repair_free_result`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_validate(
     wkb_data: *const u8,
@@ -173,7 +173,7 @@ pub unsafe extern "C" fn geo_repair_validate(
 ///
 /// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes.
 /// The returned [`GeoRepairResult`] must be freed with
-/// [`geo_repair_free_result`].
+/// [`super::geo_repair_free_result`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_validate_reason(
     wkb_data: *const u8,
@@ -199,7 +199,7 @@ pub unsafe extern "C" fn geo_repair_validate_reason(
 ///
 /// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes.
 /// The returned [`GeoRepairResult`] must be freed with
-/// [`geo_repair_free_result`].
+/// [`super::geo_repair_free_result`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_validate_and_fix(
     wkb_data: *const u8,
@@ -249,7 +249,7 @@ pub unsafe extern "C" fn geo_repair_validate_and_fix(
 ///
 /// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes.
 /// The returned [`GeoRepairResult`] must be freed with
-/// [`geo_repair_free_result`].
+/// [`super::geo_repair_free_result`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_validate_and_fix_with_config(
     wkb_data: *const u8,

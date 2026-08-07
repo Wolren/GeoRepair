@@ -23,7 +23,7 @@ use crate::make_valid::MakeValid;
 /// `inputs` must point to an array of `count` valid
 /// [`GeoRepairWkbBuffer`]s (or be null when `count` is 0). The returned
 /// [`GeoRepairBatchResult`] must be freed with
-/// [`geo_repair_free_batch_result`].
+/// [`super::geo_repair_free_batch_result`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_make_valid_batch(
     inputs: *const GeoRepairWkbBuffer,
