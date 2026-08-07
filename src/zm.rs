@@ -11,6 +11,8 @@
 //! - \[`preserve_zm`\]: match Z/M from original to repaired geometry
 //! - \[`zm_pairs`\]: iterate coords with their Z/M values
 //! - \[`count_coords`\]: count vertices in a geometry
+
+use alloc::vec::Vec;
 use geo::{Coord, Geometry};
 
 /// A single Z (elevation) and M (measure) value associated with a coordinate.
@@ -171,7 +173,7 @@ pub fn preserve_zm(
 }
 
 fn topology_unchanged(a: &Geometry<f64>, b: &Geometry<f64>) -> bool {
-    std::mem::discriminant(a) == std::mem::discriminant(b)
+    core::mem::discriminant(a) == core::mem::discriminant(b)
 }
 
 fn match_nearest(
@@ -195,7 +197,7 @@ fn match_nearest(
             .min_by(|(a, _), (b, _)| {
                 let da = (a.x - new_c.x).hypot(a.y - new_c.y);
                 let db = (b.x - new_c.x).hypot(b.y - new_c.y);
-                da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+                da.partial_cmp(&db).unwrap_or(core::cmp::Ordering::Equal)
             })
             .map(|(_, zv)| *zv);
         result.push(best.unwrap_or(ZmValue::NONE));

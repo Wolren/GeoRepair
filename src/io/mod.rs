@@ -42,16 +42,29 @@
 //!
 //! All I/O requires the `std` feature (enabled by default). In no_std mode,
 //! only in-memory WKB parsing is available via `read_wkb` (no file paths).
+
+#[cfg(feature = "std")]
+use alloc::string::String;
+#[cfg(feature = "std")]
+use alloc::string::ToString;
+#[cfg(feature = "std")]
+use alloc::vec::Vec;
+#[cfg(feature = "std")]
 use std::fs;
+#[cfg(feature = "std")]
 use std::io::Read;
-
-use geo::{Coord, Geometry, GeometryCollection, Polygon};
-
+use geo::{Coord, Geometry, Polygon};
+#[cfg(feature = "std")]
+use geo::GeometryCollection;
+#[cfg(feature = "std")]
 use crate::MakeValid;
+#[cfg(feature = "std")]
 use crate::core::MakeValidConfig;
+#[cfg(feature = "std")]
 use crate::validation::{ValidationResult, validate};
 
 /// Custom binary format for bulk polygon storage (`.bin`).
+#[cfg(feature = "std")]
 pub mod binary;
 /// OGC Well-Known Binary (WKB) parsing and serialization.
 pub mod wkb;
@@ -72,20 +85,26 @@ pub mod shp;
 pub mod gml;
 
 /// Load polygons from a custom binary file.
+#[cfg(feature = "std")]
 pub use binary::{load_bin, load_bin_stream, write_bin};
 /// Read/write OGC WKB geometry format.
 pub use wkb::{
     Endianness, EwkbDims, EwkbGeometry, WkbError, WriteOptions, estimate_wkb_size, read_ewkb,
-    read_wkb, read_wkb_concat, read_wkb_from, write_ewkb, write_wkb, write_wkb_to,
+    read_wkb, read_wkb_concat, write_ewkb, write_wkb,
     write_wkb_with_opts,
 };
+#[cfg(feature = "std")]
+pub use wkb::{read_wkb_from, write_wkb_to};
 /// Read/write OGC WKT text format.
-pub use wkt::{WktError, infer_wkt_type, read_wkt, read_wkt_from, write_wkt, write_wkt_to};
+pub use wkt::{WktError, infer_wkt_type, read_wkt, write_wkt};
+#[cfg(feature = "std")]
+pub use wkt::{read_wkt_from, write_wkt_to};
 
 // ---------------------------------------------------------------------------
 // File-format dispatch by extension
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "std")]
 fn extension(path: &str) -> &str {
     std::path::Path::new(path)
         .extension()
@@ -104,6 +123,7 @@ fn extension(path: &str) -> &str {
 /// | `.csv` | CSV with WKT geometry | `csv` + `wkt` crates | `io-csv` |
 /// | `.gml` | GML | `quick-xml` crate | `io-gml` |
 /// | `.gpkg` | GeoPackage (SQLite) | `rusqlite` crate | `io-gpkg` |
+#[cfg(feature = "std")]
 pub fn load(path: &str) -> Result<Vec<Geometry<f64>>, String> {
     let ext = extension(path).to_lowercase();
     match ext.as_str() {
@@ -168,6 +188,7 @@ pub fn load(path: &str) -> Result<Vec<Geometry<f64>>, String> {
 /// | `.bin` | Custom binary (polygons only) |
 /// | `.wkb` / `.wks` | OGC Well-Known Binary |
 /// | `.wkt` | OGC Well-Known Text |
+#[cfg(feature = "std")]
 pub fn save(path: &str, geom: &Geometry<f64>) -> Result<(), String> {
     let ext = extension(path).to_lowercase();
     match ext.as_str() {
@@ -226,6 +247,7 @@ pub fn save(path: &str, geom: &Geometry<f64>) -> Result<(), String> {
 }
 
 /// Extract all polygons from a geometry for batch binary output.
+#[cfg(feature = "std")]
 fn extract_polygons(geom: &Geometry<f64>) -> Vec<Polygon<f64>> {
     match geom {
         Geometry::Polygon(p) => vec![p.clone()],
@@ -246,6 +268,7 @@ fn extract_polygons(geom: &Geometry<f64>) -> Vec<Polygon<f64>> {
 /// let cfg = MakeValidConfig { poly_method: PolyMethod::Structure, ..Default::default() };
 /// repair_file("invalid.wkb", "fixed.wkb", &cfg).unwrap();
 /// ```
+#[cfg(feature = "std")]
 pub fn repair_file(input: &str, output: &str, config: &MakeValidConfig) -> Result<(), String> {
     let geoms = load(input)?;
     let mut results = Vec::with_capacity(geoms.len());
@@ -274,6 +297,7 @@ pub fn repair_file(input: &str, output: &str, config: &MakeValidConfig) -> Resul
 ///     println!("Geometry {i}: {} — {}", if r.valid { "valid" } else { "INVALID" }, r.reason());
 /// }
 /// ```
+#[cfg(feature = "std")]
 pub fn diagnose_file(path: &str) -> Result<Vec<ValidationResult>, String> {
     let geoms = load(path)?;
     Ok(geoms.iter().map(validate).collect())
@@ -283,6 +307,7 @@ pub fn diagnose_file(path: &str) -> Result<Vec<ValidationResult>, String> {
 // Feature-gated backends
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "std")]
 fn load_wkt(path: &str) -> Result<Vec<Geometry<f64>>, String> {
     let text = fs::read_to_string(path).map_err(|e| format!("cannot read {path}: {e}"))?;
     let geom = read_wkt(&text).map_err(|e| e.to_string())?;

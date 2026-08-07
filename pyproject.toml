@@ -1,10 +1,11 @@
 # Maturin build configuration for the geo_repair Python package.
 #
 # Build:   python -m maturin build --release --features python
-# Install: pip install target/wheels/geo_repair-*.whl
+# Install: pip install geo-repair  (published on PyPI)
+# Publish: maturin publish (or the release.yml workflow on tags)
 #
-# NOTE: keep `version` in sync with Cargo.toml (maturin cannot read it
-# dynamically under PEP 621).
+# NOTE: keep `version` in sync with Cargo.toml (the CI version-drift gate
+# enforces this; scripts/bump_version.sh updates both).
 [build-system]
 requires = ["maturin>=1.7,<2"]
 build-backend = "maturin"
@@ -15,10 +16,10 @@ version = "0.14.2"
 description = "Validate and repair invalid OGC GIS geometries in Rust (GEOS ST_MakeValid parity)"
 readme = "README.md"
 requires-python = ">=3.8"
-license = { text = "Apache-2.0" }
-keywords = ["gis", "geo", "validation", "repair", "wkb", "wkt", "geojson"]
+license = "Apache-2.0"
+keywords = ["gis", "geo", "validation", "repair", "wkb", "wkt"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
@@ -26,7 +27,17 @@ classifiers = [
     "Topic :: Scientific/Engineering :: GIS",
 ]
 
+[project.urls]
+Homepage = "https://github.com/Wolren/GeoRepair"
+Repository = "https://github.com/Wolren/GeoRepair"
+Documentation = "https://docs.rs/geo-repair"
+Changelog = "https://github.com/Wolren/GeoRepair/blob/master/CHANGELOG.md"
+
 [tool.maturin]
 features = ["python"]
 module-name = "geo_repair"
 bindings = "pyo3"
+# Ship typing stubs + the typed marker from python/geo_repair/ so type
+# checkers resolve the full API surface (the extension module itself is
+# untyped).
+python-source = "python"

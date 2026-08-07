@@ -81,10 +81,25 @@
 //! let ok2: bool = geom.is_valid();
 //! ```
 //!
-//! Passes **2490/2490** tests from the GEOS XML validation test suite.
+//! Passes **937/937 dispatched** cases from the GEOS XML validation test suite
+//! (213 documented masked divergences, 0 known gaps; measured 2026-08-07).
 /// Complex validation rules (polygon nesting, multi-geometry checks).
 mod complex;
-/// Core validation types, traits, and per-geometry implementations.
+/// Edge-pair intersection predicates and ring edge trees.
+mod edges;
+/// GeometryValidationError and its impls.
+mod errors;
+/// Hole validation, nesting, and cycle detection.
+mod holes;
+/// Per-geometry GeoValidation impls and free validate functions.
+mod impls;
+/// ValidationResult and its helper methods.
+mod result;
+/// Ring validity: closure, self-intersection, orientation, points, duplicates.
+mod ring;
+/// Sweep-line machinery for ring self-intersection.
+mod sweep;
+/// Core validation types, traits, and per-geometry implementations (facade).
 mod core;
 /// Adapter exposing geo_repair's validator through geo's `Validation` trait.
 mod geo_bridge;

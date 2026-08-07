@@ -1,3 +1,5 @@
+
+use alloc::vec::Vec;
 use geo::{Area, Coord, LinesIter, MultiPolygon, Polygon};
 
 /// Subtract holes from a shell, producing OGC-valid polygon components.

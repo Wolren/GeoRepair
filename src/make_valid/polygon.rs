@@ -1,6 +1,7 @@
 //! Polygon repair: Triangle/Polygon MakeValid impls, strategy dispatch,
 //! OGC winding enforcement, and reduction fallbacks.
 
+
 use super::*;
 use super::strip::{enforce_ccw, enforce_cw, has_nan, strip_degenerate};
 
@@ -114,6 +115,7 @@ impl MakeValid for Polygon<f64> {
                 // Panic containment: the boolean overlay path (i_overlay via
                 // geo::BooleanOps) can assert on degenerate inputs; a foreign
                 // library panic must degrade to empty, never crash the host.
+                #[cfg(feature = "std")]
                 let repaired =
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         make_valid_impl(self, self, config, coords[0])
@@ -122,6 +124,8 @@ impl MakeValid for Polygon<f64> {
                         warn!("make_valid panicked on polygon; returning empty geometry");
                         empty_geom::<f64>()
                     });
+                #[cfg(not(feature = "std"))]
+                let repaired = make_valid_impl(self, self, config, coords[0]);
                 let result = strip_degenerate(repaired);
                 if config.keep_collapsed
                     && matches!(&result, Geometry::GeometryCollection(gc) if gc.0.is_empty())
@@ -373,7 +377,7 @@ pub(super) fn make_valid_impl(
                     // CCW holes - GEOS polygonizer convention). OGC validity
                     // requires CCW shells; normalize before the gate.
                     let r_norm = enforce_ogc_winding(r);
-                    #[cfg(any(test, debug_assertions))]
+                    #[cfg(all(any(test, debug_assertions), feature = "std"))]
                     if std::env::var("DIAG_MV").is_ok() {
                         use geo::Area;
                         let ra = match &r_norm {
@@ -510,6 +514,7 @@ pub fn make_valid_owned(poly: Polygon<f64>, config: &MakeValidConfig) -> Geometr
             let first = coords[0];
             // Panic containment (mirrors the borrowed path): i_overlay can
             // assert on degenerate inputs; degrade to empty, never crash.
+            #[cfg(feature = "std")]
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 make_valid_impl_owned(poly, config, first, None)
             }))
@@ -517,6 +522,8 @@ pub fn make_valid_owned(poly: Polygon<f64>, config: &MakeValidConfig) -> Geometr
                 warn!("make_valid_owned panicked on polygon; returning empty geometry");
                 (empty_geom::<f64>(), false)
             });
+            #[cfg(not(feature = "std"))]
+            let result = make_valid_impl_owned(poly, config, first, None);
             let (g, verified) = result;
             return if verified { g } else { strip_degenerate(g) };
         }
@@ -598,7 +605,7 @@ pub(crate) fn enforce_ogc_winding(g: Geometry<f64>) -> Geometry<f64> {
             let (ext, mut holes) = p.into_inner();
             let ext = enforce_ccw(ext);
             for h in holes.iter_mut() {
-                let owned = std::mem::replace(h, geo::LineString::new(Vec::new()));
+                let owned = core::mem::replace(h, geo::LineString::new(Vec::new()));
                 *h = enforce_cw(owned);
             }
             Geometry::Polygon(Polygon::new(ext, holes))
@@ -609,7 +616,7 @@ pub(crate) fn enforce_ogc_winding(g: Geometry<f64>) -> Geometry<f64> {
                     let (ext, mut holes) = p.into_inner();
                     let ext = enforce_ccw(ext);
                     for h in holes.iter_mut() {
-                        let owned = std::mem::replace(h, geo::LineString::new(Vec::new()));
+                        let owned = core::mem::replace(h, geo::LineString::new(Vec::new()));
                         *h = enforce_cw(owned);
                     }
                     Polygon::new(ext, holes)

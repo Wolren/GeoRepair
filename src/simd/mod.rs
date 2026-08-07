@@ -63,7 +63,7 @@ fn is_ring_ccw_scalar(coords: &[Coord<f64>]) -> bool {
 fn point_in_ring_scalar_loop(
     pt: Coord<f64>,
     coords: &[Coord<f64>],
-    range: std::ops::Range<usize>,
+    range: core::ops::Range<usize>,
 ) -> i32 {
     let mut wn = 0i32;
     for j in range {

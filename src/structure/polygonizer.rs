@@ -8,6 +8,8 @@
 //! 5. Even-parent filter (BuildArea findFaceHoles + collectWithEvenAncestors)
 //! 6. Union kept faces to dissolve shared edges
 
+
+use alloc::vec::Vec;
 use geo::{Coord, Line, LineString, MultiPolygon, Polygon, Winding};
 
 use super::fix_ring_graph;
@@ -51,8 +53,8 @@ pub fn polygonize(lines: &[Line<f64>]) -> Vec<Polygon<f64>> {
             hole_rings.push((i, coords.clone(), -area));
         }
     }
-    shell_rings.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
-    hole_rings.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+    shell_rings.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(core::cmp::Ordering::Equal));
+    hole_rings.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(core::cmp::Ordering::Equal));
 
     // Discard universe (largest CW by abs area)
     let holes: Vec<(usize, Vec<Coord<f64>>, f64)> = if hole_rings.len() > 1 {
@@ -79,7 +81,7 @@ pub fn polygonize(lines: &[Line<f64>]) -> Vec<Polygon<f64>> {
     for (si, (_, shell_coords, _)) in shell_rings.iter().enumerate() {
         let mut shell_ls = LineString::new(shell_coords.clone());
         shell_ls.make_ccw_winding();
-        let holes = std::mem::take(&mut shell_holes[si]);
+        let holes = core::mem::take(&mut shell_holes[si]);
         face_polys.push(Polygon::new(shell_ls, holes));
     }
     if face_polys.len() <= 1 { return face_polys; }
@@ -142,7 +144,7 @@ fn build_area_filter(polys: Vec<Polygon<f64>>) -> Vec<Polygon<f64>> {
         FaceInfo { poly: p, env_area: env, parent: None }
     }).collect();
 
-    faces.sort_by(|a, b| b.env_area.partial_cmp(&a.env_area).unwrap_or(std::cmp::Ordering::Equal));
+    faces.sort_by(|a, b| b.env_area.partial_cmp(&a.env_area).unwrap_or(core::cmp::Ordering::Equal));
 
     // findFaceHoles: for each face's hole ring, match to LATER face's exterior
     let n = faces.len();

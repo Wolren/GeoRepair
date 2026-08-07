@@ -4,6 +4,8 @@
 //! processing each component on a separate rayon thread.
 //!
 //! Feature: `parallel` (enabled by default, non-WASM only).
+
+use alloc::vec::Vec;
 use geo::{
     GeoFloat, Geometry, GeometryCollection, LineString, MultiLineString, MultiPoint, MultiPolygon,
     Point, Polygon, Winding,

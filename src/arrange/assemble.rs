@@ -1,3 +1,5 @@
+
+use alloc::vec::Vec;
 use geo::coordinate_position::{CoordPos, coord_pos_relative_to_ring};
 use geo::{LineString, MultiPolygon, Polygon, Winding};
 use rstar::{AABB, RTree, RTreeObject};
@@ -73,9 +75,9 @@ pub(crate) fn assemble_polygons(rings: Vec<geo::LineString<f64>>) -> geo::MultiP
             let _ = ext_tree.locate_in_envelope_intersecting_int(query, |c| {
                 if coord_pos_relative_to_ring(*pt, &polygons[c.idx].0) == CoordPos::Inside {
                     found = Some(c.idx);
-                    std::ops::ControlFlow::Break(())
+                    core::ops::ControlFlow::Break(())
                 } else {
-                    std::ops::ControlFlow::<(), ()>::Continue(())
+                    core::ops::ControlFlow::<(), ()>::Continue(())
                 }
             });
             if let Some(idx) = found {

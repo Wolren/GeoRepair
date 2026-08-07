@@ -1,3 +1,5 @@
+
+use alloc::vec::Vec;
 use geo::Line;
 use rstar::{AABB, RTree, RTreeObject};
 
@@ -360,8 +362,8 @@ pub fn has_no_intersections(lines: &[Line<f64>]) -> bool {
         let do_parallel = nc >= 200;
         if do_parallel {
             use rayon::prelude::*;
-            use std::ops::ControlFlow;
-            use std::sync::atomic::Ordering;
+            use core::ops::ControlFlow;
+            use core::sync::atomic::Ordering;
             let found = std::sync::atomic::AtomicBool::new(false);
             (0..nc).into_par_iter().for_each(|i| {
                 if found.load(Ordering::Acquire) {
@@ -392,7 +394,7 @@ pub fn has_no_intersections(lines: &[Line<f64>]) -> bool {
         }
     }
 
-    use std::ops::ControlFlow;
+    use core::ops::ControlFlow;
     for i in 0..nc {
         let mc1 = &chains[i];
         let q = AABB::from_corners([mc1.min_x, mc1.min_y], [mc1.max_x, mc1.max_y]);

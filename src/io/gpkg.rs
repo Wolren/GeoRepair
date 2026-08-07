@@ -4,6 +4,10 @@
 //! geometry column blobs with the crate's own WKB reader. Writes a minimal
 //! conforming GeoPackage (WGS 84 / EPSG:4326) with a single `georepair`
 //! feature table. All SQLite identifiers are double-quoted and escaped.
+
+use alloc::vec::Vec;
+use alloc::string::String;
+use alloc::string::ToString;
 use std::fs;
 
 use geo::{Coord, Geometry};

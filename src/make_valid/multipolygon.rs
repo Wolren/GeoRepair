@@ -1,6 +1,8 @@
 //! MultiPolygon/Geometry repair: union + even-parent filtering, nested
 //! component dropping, and precision-reduction fallbacks.
 
+
+use alloc::vec::Vec;
 use super::*;
 use super::polygon::{apply_target_crs, enforce_ogc_winding, is_valid_with_geo, shells_have_overlapping_bboxes, shells_have_vertex_inside};
 use super::polygon::has_nan_or_infinite;
@@ -160,7 +162,7 @@ pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
     let mut with_area: Vec<(Polygon<f64>, f64)> = mp.0.into_iter()
         .map(|p| { let a = shoelace_abs_sum(&p.exterior().0); (p, a) })
         .collect();
-    with_area.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    with_area.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(core::cmp::Ordering::Equal));
     let n = with_area.len();
     let mut keep: Vec<bool> = vec![true; n];
     for i in 0..n {
@@ -222,7 +224,7 @@ pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
         .enumerate()
         .filter_map(|(i, (p, _))| if keep[i] { Some(p.clone()) } else { None })
         .collect();
-    #[cfg(any(test, debug_assertions))]
+    #[cfg(all(any(test, debug_assertions), feature = "std"))]
     if std::env::var("DIAG_DN").is_ok() {
         use geo::Area;
         let t: f64 = kept.iter().map(|p| p.unsigned_area()).sum();
@@ -291,7 +293,7 @@ pub(super) fn polygonizer_fallback(mp: &MultiPolygon<f64>) -> Option<Geometry<f6
     // even-parent. (The legacy polygonizer misclassifies multi-shell inputs:
     // measured 1 poly with 6 holes instead of 5 disjoint shells.)
     let area = crate::structure::build_area::build_area(&lines)?;
-    #[cfg(any(test, debug_assertions))]
+    #[cfg(all(any(test, debug_assertions), feature = "std"))]
     if std::env::var("DIAG_PF").is_ok() {
         use geo::Area;
         eprintln!("PF: lines={} build_area -> {} polys", lines.len(), area.0.len());

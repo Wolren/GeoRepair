@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.14.2] - 2026-08-03
+## [0.14.2] - 2026-08-07
 
 ### Added
 
@@ -14,18 +14,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   abstractions, plus a `GeoRepairValidation` newtype implementing the geo
   `validation::Validation` interface.
 - Differential fuzz harness against GEOS (`tests/geos_differential.rs`).
-- Fuzzing targets: `fuzz/` with `make_valid`, `validate`, and `wkt_repair`
-  entry points and a committed corpus; CI smoke run for each target.
+- Fuzzing targets: `fuzz/` with `make_valid`, `validate`, `wkt_repair`,
+  `wkb_repair`, and `roundtrip` entry points and a committed corpus; CI
+  smoke run for each target.
 - CI jobs: `cargo-semver-checks` (API compatibility gate), `cargo-audit`,
   `cargo-deny` (license/advisory/source policy in `deny.toml`), rustdoc with
   `-D warnings`, and a Python bindings job (maturin wheel + pytest).
 - `docs/ARCHITECTURE.md` documenting the repair pipeline, routing rules,
   NaN/Inf policy, `keep_collapsed` semantics, and the error model.
 - CI coverage for MSRV 1.88 and `no_std` builds.
+- wasm32 support with runtime tests: `tests/wasm.rs` runs in Node via
+  wasm-bindgen-test-runner in CI; the `wasm` feature adds browser fetch
+  (synchronous XHR). The mimalloc global-allocator use site is gated to
+  non-wasm targets.
+- `io-gpkg` is now a DEFAULT feature (bundled SQLite, module gated out
+  on wasm32); `geo_repair::io::load("*.gpkg")` works out of the box.
+- `BENCH_OUTPUT=<path.gpkg>`: the real-world bench exports the repaired
+  full pass as a QGIS-ready GPKG (original input order preserved).
+- **C FFI maturity** (`ffi` feature): every result now carries a
+  `GeoRepairErrorCode` (None/Parse/InvalidInput/InvalidGeometry/Encode/
+  Panic) so C callers branch programmatically; WKT entry points
+  (`geo_repair_make_valid_wkt`, `geo_repair_validate_wkt`,
+  `geo_repair_validate_and_fix_wkt`, ...) over a new
+  `GeoRepairStringResult`; a batch API
+  (`geo_repair_make_valid_batch`, parallel flag, per-item error
+  semantics, `GeoRepairWkbBuffer`); `staticlib` added to crate-type for
+  static linking. Struct layouts and error codes are ABI-frozen from
+  this version. New test layers: `tests/ffi.rs` (25 runtime tests
+  exercised in CI on every platform) and `tests/c/test_geo_repair.c` (a
+  dependency-free C harness compiled and run against the built library
+  on Linux, Windows, and macOS).
+- **Python bindings maturity** (`python` feature): complete WKB + WKT
+  surface parity - `repair_*`, `repair_*_batch`, `par_repair_*_batch`
+  (both formats), `repair_validate_*(_batch)`, `is_valid_*(_batch)`,
+  `validate_*(_batch)`, `validate_and_fix_*(_batch)` (WKT batch forms
+  added), `keep_collapsed` on every config-taking function, and
+  `version()`. abi3 wheels (`pyo3 abi3-py38` -> `cp38-abi3`, one wheel
+  per platform serves Python 3.8+); typing stubs shipped in the wheel
+  (`geo_repair/__init__.pyi` + `py.typed` + package `__init__.py` shim);
+  Production/Stable classifier. `tests/test_python.py` expanded from
+  17 WKT-only tests to 41 covering the full surface.
+- `docs/BINDINGS.md`: full API reference for both bindings. README
+  gained Python and C API sections.
 
 ### Changed
 
 - `Cargo.lock`: crossbeam-epoch 0.9.18 -> 0.9.20 (RUSTSEC-2026-0204).
+- `[profile.release]` now uses `panic = "unwind"` (was "abort"): the C
+  FFI's documented panic containment relies on `catch_unwind`, which is
+  dead under abort - a release-built FFI would abort the host process on
+  any internal panic. The bench profile keeps `panic = "abort"`.
+- GEOS XML suite pinned to GEOS 24ec89dc3; the three remaining
+  validator parity gaps closed with index-based checks: disconnected
+  interior via ring-touch graph cycle detection (exact orient2d == 0
+  touches only), nested holes sharing boundary vertices (incident-
+  segment topology port), and a MultiPolygon component crossing
+  another component's hole (cross-component ring pairs with
+  hole-in-shell-FILL probes). Suite now 937/937 dispatched, 3,629
+  overlay cases skipped, 0 unparseable.
+- Validation performance (2026-08-06): per-hole shell checks moved to
+  one shared shell-edge tree with exact touch probes - full-dataset
+  validation 18.06s -> 4.15s (2.6 us/poly, 1.08x GEOS isValid);
+  radix-sorted sweep replaces the per-ring R-tree for giants (320ms ->
+  50ms); size-partitioned two-pass batch with round-robin interleave.
+  Full pass: 3.8-4.0s (1.16x GEOS).
+- Documentation drift fixed: GEOS suite counts in README/RELEASE.md/
+  lib.rs updated to the measured 937/937 + 213 masked + 3,629 skipped
+  (were 934/209/1,565 and a stale "2490/2490" lib.rs claim); RELEASE.md
+  fuzz gate corrected (cargo-fuzz has no UBSan; 5 smokes + ASan).
 
 ### Fixed
 
@@ -52,7 +108,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`edges_intersect_general` with the relative collinear gate +
   segment-local `edges_vertex_on_edge`), plus an explicit vertex-revisit
   check for shared endpoints (GEOS TestSimple "interior intersection at
-  vertices" cases). Restores 934/934 on the GEOS XML suite.
+  vertices" cases).
 - Fuzz-found strip demotion of valid slivers: the magnitude-based noise
   gate (EPS * m^2 * n * 8, m = max |coord|) demoted genuine slivers at
   large coordinate magnitude (measured: 1e15-scale ring, real area 5e14,
@@ -69,8 +125,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   containment guards (arrange `build_cdt_safe`) never ran and the spade
   CDT "vertex insertion failed: TooLarge" panic on mixed-magnitude
   inputs escaped as a libFuzzer deadly signal. The fuzz workspace now
-  overrides `[profile.release] panic = "unwind"`; the smoke + ASan +
-  UBSan passes exercise the real containment path.
+  overrides `[profile.release] panic = "unwind"`; the smoke + ASan
+  passes exercise the real containment path.
 - Fuzz-found CDT panic (crash during corpus replay): spade rejects
   coordinates whose magnitude exceeds its internal grid
   (`InsertionError::TooLarge`); `cdt::build` previously unwrapped the
@@ -118,8 +174,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   arbitrary bytes in CI (OOM-class seeds committed); the parser stress
   regression runs 200k random buffers plus every truncation of valid
   documents through both readers under panic containment.
-- Python bindings: tests rewritten to the WKT surface (17 tests green;
-  GeoJSON binding references removed with the deleted bindings).
+- FFI empty-output contract: `GeoRepairResult::success`/batch success
+  now return null pointers for empty outputs (the previous dangling
+  Vec pointer violated the "non-null iff len > 0" contract).
+- Python wheel packaging: `python/geo_repair/__init__.py` (the
+  extension re-export shim) was excluded from wheels because the repo's
+  `*.py` gitignore rule also drives maturin's source walker. Added a
+  `!python/geo_repair/__init__.py` negation so the shim ships (and is
+  committed).
 
 ## [0.14.1] - 2026-08-03
 

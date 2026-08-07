@@ -1,3 +1,5 @@
+
+use alloc::vec::Vec;
 use geo::{Area, Coord, LineString, MultiPolygon, Polygon, Winding};
 use log::warn;
 
@@ -60,7 +62,7 @@ pub fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
             (p, area)
         })
         .collect();
-    with_area.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    with_area.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(core::cmp::Ordering::Equal));
 
     let n = with_area.len();
     // Even-odd (GEOS BuildArea semantics): parent_count[i] = how many LARGER
@@ -173,7 +175,8 @@ pub fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
     let mp = MultiPolygon::new(kept);
     let before: f64 = mp.0.iter().map(|p| p.unsigned_area()).sum();
     let eps = 1e-9;
-    let unioned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    #[cfg(feature = "std")]
+    let unioned = std::panic::catch_unwind(core::panic::AssertUnwindSafe(|| {
         geo::algorithm::bool_ops::unary_union(&mp)
     }))
     .ok()
@@ -188,6 +191,19 @@ pub fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
             Some(u)
         }
     });
+    #[cfg(not(feature = "std"))]
+    let unioned = {
+        let u = geo::algorithm::bool_ops::unary_union(&mp);
+        let after: f64 = u.0.iter().map(|p| p.unsigned_area()).sum();
+        if after >= before - eps {
+            Some(u)
+        } else if geo::algorithm::Validation::is_valid(&mp) {
+            // Union dropped area but filtered shells are valid - keep them.
+            None
+        } else {
+            Some(u)
+        }
+    };
     unioned.unwrap_or(mp)
 }
 

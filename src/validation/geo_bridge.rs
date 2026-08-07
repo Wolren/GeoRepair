@@ -19,6 +19,9 @@
 //! duplicates) are omitted from the geo view; they remain visible through
 //! the plain [`validate`](crate::validate) API.
 
+
+
+use alloc::boxed::Box;
 use geo::Geometry;
 use geo::algorithm::validation::{
     CoordIndex, InvalidGeometry, InvalidLine, InvalidLineString, InvalidPoint, InvalidPolygon,

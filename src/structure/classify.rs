@@ -1,3 +1,5 @@
+
+use alloc::vec::Vec;
 use geo::{Coord, LineString};
 
 /// Check if a hole ring is entirely outside a shell ring by testing its first point.

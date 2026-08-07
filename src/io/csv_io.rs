@@ -3,6 +3,9 @@
 //! The writer emits a single column of WKT. The reader accepts any CSV with
 //! a WKT geometry in the first column and ignores additional attribute
 //! columns (the `Vec<Geometry>` return type cannot carry attributes).
+
+use alloc::vec::Vec;
+use alloc::string::String;
 use std::fs;
 
 use geo::Geometry;

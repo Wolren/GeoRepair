@@ -1,6 +1,8 @@
 //! Degenerate-strip cleanup: NaN/Inf handling, isSimple checks, and
 //! OGC winding helpers.
 
+
+use alloc::vec::Vec;
 use super::*;
 
 pub(super) fn has_nan(g: &Geometry<f64>) -> bool {

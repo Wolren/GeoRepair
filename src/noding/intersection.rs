@@ -1,7 +1,8 @@
 #![allow(dead_code)]
+use alloc::vec::Vec;
 use crate::orient::orient2d_fast;
 use geo::{Coord, GeoFloat, Line};
-use std::mem;
+use core::mem;
 
 // ── Sealed trait: safe f64 downcast ────────────────────────────────────
 //
@@ -151,38 +152,38 @@ fn check_self_intersections_f64(edges: &[Line<f64>], eps: f64) -> bool {
         let result = tree.locate_in_envelope_intersecting_int(query, |c| {
             let j = c.idx;
             if j <= i {
-                return std::ops::ControlFlow::Continue(());
+                return core::ops::ControlFlow::Continue(());
             }
             if i + 1 == j && edges[i].end == edges[j].start {
-                return std::ops::ControlFlow::Continue(());
+                return core::ops::ControlFlow::Continue(());
             }
             if j + 1 == i && edges[j].end == edges[i].start {
-                return std::ops::ControlFlow::Continue(());
+                return core::ops::ControlFlow::Continue(());
             }
             if edges[i].start == edges[j].start
                 && orient2d_fast(edges[i].start, edges[i].end, edges[j].end) != 0.0
             {
-                return std::ops::ControlFlow::Continue(());
+                return core::ops::ControlFlow::Continue(());
             }
             if edges[i].start == edges[j].end
                 && orient2d_fast(edges[i].start, edges[i].end, edges[j].start) != 0.0
             {
-                return std::ops::ControlFlow::Continue(());
+                return core::ops::ControlFlow::Continue(());
             }
             if edges[i].end == edges[j].start
                 && orient2d_fast(edges[i].end, edges[i].start, edges[j].end) != 0.0
             {
-                return std::ops::ControlFlow::Continue(());
+                return core::ops::ControlFlow::Continue(());
             }
             if edges[i].end == edges[j].end
                 && orient2d_fast(edges[i].end, edges[i].start, edges[j].start) != 0.0
             {
-                return std::ops::ControlFlow::Continue(());
+                return core::ops::ControlFlow::Continue(());
             }
             if edges_intersect(&edges[i], &edges[j], eps) {
-                std::ops::ControlFlow::Break(())
+                core::ops::ControlFlow::Break(())
             } else {
-                std::ops::ControlFlow::Continue(())
+                core::ops::ControlFlow::Continue(())
             }
         });
         if result.is_break() {
@@ -380,7 +381,7 @@ pub(crate) fn compute_intersection_param<T: GeoFloat>(
     eps: T,
 ) -> Option<(T, T, Coord<T>)> {
     // For f64: GEOS-style two-phase — orient2d detection then DD computation.
-    if std::mem::size_of::<T>() == 8 {
+    if core::mem::size_of::<T>() == 8 {
         let ef1 = Line::new(
             Coord {
                 x: e1.start.x.to_f64().expect("to_f64"),

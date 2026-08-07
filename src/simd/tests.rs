@@ -1,5 +1,7 @@
 //! SIMD predicate test battery.
 
+
+use alloc::vec::Vec;
 #[cfg(test)]
 use super::*;
 

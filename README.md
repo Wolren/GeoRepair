@@ -281,9 +281,9 @@ biggest giant).
    (sqlite3 link conflict). `io-gpkg` is a DEFAULT feature (bundled
    SQLite), so `proj` users must build with `--no-default-features
    --features proj,...`.
-9. **GEOS XML suite coverage:** 934/934 dispatched cases pass; 1,565
+9. **GEOS XML suite coverage:** 937/937 dispatched cases pass; 3,629
    overlay/relate cases are skipped (overlay operations are out of
-   scope); 209 masked divergences (documented tolerance gates, e.g.
+   scope); 213 masked divergences (documented tolerance gates, e.g.
    even-odd area 1e-6 for island-in-hole). The suite's WKT/WKB readers
    are our own: external `wkt`/`wkb` crates are disallowed because they
    measure slower than the built-in readers.
@@ -320,6 +320,61 @@ use geo_repair::GeoRepairValidation;
 let adapter = GeoRepairValidation(&geometry);
 assert!(!adapter.is_valid());
 ```
+
+## Python bindings
+
+The `geo-repair` PyPI package exposes the full validation and repair
+surface over WKB bytes and WKT text, single geometry and batch
+(including a rayon-backed parallel batch). abi3 wheels (`cp38-abi3`)
+serve Python 3.8+; typing stubs are shipped in the wheel.
+
+```bash
+pip install geo-repair
+```
+
+```python
+import geo_repair
+
+fixed = geo_repair.repair_wkt("POLYGON((0 0, 5 5, 5 0, 0 5, 0 0))")
+assert geo_repair.is_valid_wkt(fixed)
+
+was_valid, errors, fixed_wkb = geo_repair.validate_and_fix_wkb(wkb_bytes)
+results = geo_repair.par_repair_wkb_batch(list_of_wkb_bytes)
+```
+
+Every function exists for WKB and WKT (`repair_*`, `repair_*_batch`,
+`par_repair_*_batch`, `repair_validate_*`, `is_valid_*`, `validate_*`,
+`validate_and_fix_*`, plus batch forms), with `method`
+(auto/arrange/structure) and `keep_collapsed` parameters. A QGIS
+Processing script (`qgis/qgis_geo_repair.py`) streams features through
+the WKB batch API. Full API reference: `docs/BINDINGS.md`.
+
+## C API
+
+The `ffi` feature exposes a panic-safe C API over WKB and WKT, single
+geometries and parallel batches:
+
+```bash
+cargo build --release --features ffi
+# -> target/release/geo_repair.{dll,so,dylib} + libgeo_repair.a + include/geo_repair.h
+```
+
+```c
+#include "geo_repair.h"
+
+GeoRepairResult r = geo_repair_make_valid(bowtie_wkb, bowtie_wkb_len);
+if (r.success) { /* r.wkb_data / r.wkb_len = fixed WKB */ }
+geo_repair_free_result(&r);
+```
+
+Every result carries a `GeoRepairErrorCode` (None/Parse/InvalidInput/
+InvalidGeometry/Encode/Panic); batches report per-item outcomes without
+failing as a whole. All results must be freed with the matching
+`geo_repair_free_*` (double-free safe). The ABI (struct layouts, error
+codes) is fixed from 0.14.2; panic containment requires the release
+profile's `panic = "unwind"`. Prebuilt libraries for Windows, Linux, and
+macOS are attached to every GitHub release. Full API reference:
+`docs/BINDINGS.md`.
 
 ## Features
 

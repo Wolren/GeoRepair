@@ -3,6 +3,8 @@
 //! Eliminates sliver geometries and near-degenerate artifacts by snapping
 //! coordinates to a fixed-precision grid.
 
+
+use alloc::vec::Vec;
 use geo::{Coord, Line};
 
 /// Default grid resolution for coordinate snapping: 1e-10 (0.1 nm).

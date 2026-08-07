@@ -1,6 +1,9 @@
 //! WKB writer: OGC + EWKB encoders and size estimation.
 
+
+use alloc::vec::Vec;
 use super::*;
+#[cfg(feature = "std")]
 use std::io::{self, Write};
 
 /// Encode a geometry as little-endian WKB bytes (2D, no SRID).
@@ -29,6 +32,7 @@ pub fn write_wkb_with_opts(geom: &Geometry<f64>, opts: &WriteOptions) -> Vec<u8>
 ///
 /// Uses little-endian byte order. For endianness control, use
 /// [`write_wkb_with_opts`] and write the bytes yourself.
+#[cfg(feature = "std")]
 pub fn write_wkb_to(geom: &Geometry<f64>, writer: &mut impl Write) -> io::Result<()> {
     let bytes = write_wkb(geom);
     writer.write_all(&bytes)
@@ -181,20 +185,20 @@ fn write_coord(buf: &mut Vec<u8>, c: &Coord<f64>, le: bool) {
 /// Only the little-endian 2D path uses this; BE and EWKB (interleaved
 /// extra dimensions) keep the per-coordinate writer.
 fn write_coords_le_bulk(buf: &mut Vec<u8>, coords: &[Coord<f64>]) {
-    const _: () = assert!(std::mem::size_of::<Coord<f64>>() == 16);
-    const _: () = assert!(std::mem::align_of::<Coord<f64>>() == 8);
+    const _: () = assert!(core::mem::size_of::<Coord<f64>>() == 16);
+    const _: () = assert!(core::mem::align_of::<Coord<f64>>() == 8);
     if coords.is_empty() {
         return;
     }
     let raw: &[u8] = unsafe {
-        std::slice::from_raw_parts(coords.as_ptr() as *const u8, coords.len() * 16)
+        core::slice::from_raw_parts(coords.as_ptr() as *const u8, coords.len() * 16)
     };
     buf.extend_from_slice(raw);
 }
 
 fn write_point(buf: &mut Vec<u8>, p: &Point<f64>, le: bool) {
     if le {
-        write_coords_le_bulk(buf, std::slice::from_ref(&p.0));
+        write_coords_le_bulk(buf, core::slice::from_ref(&p.0));
     } else {
         write_coord(buf, &p.0, le);
     }

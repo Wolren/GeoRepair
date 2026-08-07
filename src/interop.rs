@@ -26,6 +26,8 @@
 //! }
 //! ```
 
+
+use alloc::vec::Vec;
 use geo::{Geometry, GeometryCollection};
 use geo_traits::to_geo::ToGeoGeometry;
 use geo_traits::{GeometryCollectionTrait, GeometryTrait};

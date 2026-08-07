@@ -39,11 +39,13 @@
 //! assert_eq!(geom, parsed_again);
 //! ```
 
+
+use alloc::string::String;
 use geo::{
     Coord, Geometry, GeometryCollection, LineString, MultiLineString, MultiPoint, MultiPolygon,
     Point, Polygon,
 };
-use std::fmt;
+use core::fmt;
 
 /// Errors that can occur during WKT parsing.
 #[derive(Debug)]
@@ -54,6 +56,7 @@ pub enum WktError {
     TrailingCharacters { pos: usize },
     EmptyInput,
     UnsupportedDimension { pos: usize, modifier: String },
+    #[cfg(feature = "std")]
     IoError(std::io::Error),
 }
 
@@ -79,6 +82,7 @@ impl fmt::Display for WktError {
                     "unsupported dimension modifier '{modifier}' at position {pos} (only 2D is supported)"
                 )
             }
+            #[cfg(feature = "std")]
             WktError::IoError(e) => write!(f, "WKT I/O error: {e}"),
         }
     }
@@ -96,5 +100,9 @@ mod write;
 #[cfg(test)]
 mod tests;
 
-pub use read::{infer_wkt_type, read_wkt, read_wkt_from};
-pub use write::{write_wkt, write_wkt_to};
+pub use read::{infer_wkt_type, read_wkt};
+#[cfg(feature = "std")]
+pub use read::read_wkt_from;
+pub use write::write_wkt;
+#[cfg(feature = "std")]
+pub use write::write_wkt_to;

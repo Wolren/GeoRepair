@@ -1,6 +1,9 @@
 //! WKB reader: single-pass parsing with EWKB flag/SRID/Z-M handling.
 
+
+use alloc::vec::Vec;
 use super::*;
+#[cfg(feature = "std")]
 use std::io::Read;
 
 /// Maximum container nesting depth (Multi* / GeometryCollection). Each
@@ -36,6 +39,7 @@ pub fn read_wkb(buf: &[u8]) -> Result<Geometry<f64>, WkbError> {
 /// Read a WKB geometry from any `io::Read` source.
 ///
 /// Reads all bytes from the reader, then delegates to [`read_wkb`].
+#[cfg(feature = "std")]
 pub fn read_wkb_from(mut reader: impl Read) -> Result<Geometry<f64>, WkbError> {
     let mut buf = Vec::new();
     reader.read_to_end(&mut buf).map_err(WkbError::IoError)?;
@@ -277,7 +281,7 @@ fn read_coords_batch(
         let mut coords = Vec::<Coord<f64>>::with_capacity(n);
         unsafe {
             let dst = coords.spare_capacity_mut().as_mut_ptr() as *mut u8;
-            std::ptr::copy_nonoverlapping(buf.as_ptr().add(start), dst, byte_size);
+            core::ptr::copy_nonoverlapping(buf.as_ptr().add(start), dst, byte_size);
             coords.set_len(n);
         }
         return Ok(coords);

@@ -24,15 +24,22 @@ counts). No "misc" entries.
 
 ```bash
 cargo test --features "arrange,structure,parallel,simd,validate"
+cargo test --features "arrange,structure,parallel,simd,ffi" --test ffi
 cargo clippy --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,ffi" -- -D warnings
 cargo deny check licenses advisories sources
 cargo audit
 cargo semver-checks check-release
 cargo fuzz build   # nightly; Windows cannot link cdylib, do this on CI/linux
-maturin build --release && pip install --force-reinstall target/wheels/*.whl && pytest tests/test_python.py -q
+maturin build --release --features python && pip install --force-reinstall target/wheels/*.whl && pytest tests/test_python.py -q
+# C harness (compiles tests/c/test_geo_repair.c against the built lib):
+cargo build --release --features ffi
+#   Linux/macOS: gcc -std=c99 -Wall -Wextra -I include tests/c/test_geo_repair.c \
+#       -L target/release -l geo_repair -o target/release/gr_test \
+#     && LD_LIBRARY_PATH=target/release target/release/gr_test
+#   Windows:     tests\c\build_test_windows.bat   (vcvars via vswhere)
 ```
 
-Baselines: GEOS XML suite 934/934 dispatched (209 masked divergences
+Baselines: GEOS XML suite 937/937 dispatched (213 masked divergences
 documented, never grow the mask silently), differential fuzz green,
 fuzz invariants green.
 
@@ -52,7 +59,8 @@ small sample and is not the bar.
 
 Push, then watch all 16 jobs to green: check, msrv, no-std, test,
 test-no-defaults, python, test-geos-oracle, test-serde, bench, clippy,
-rustdoc, semver, audit, deny, fuzz (3 smokes + ASan + UBSan), fuzz
+rustdoc, semver, audit, deny, fuzz (5 smokes + ASan; cargo-fuzz has no
+UBSan), fuzz
 artifact upload on failure. A fuzz crash means a corpus seed + a root
 cause before release.
 

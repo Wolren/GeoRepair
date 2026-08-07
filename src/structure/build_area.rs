@@ -1,3 +1,5 @@
+
+use alloc::vec::Vec;
 use geo::{Coord, LineString, MultiPolygon, Polygon};
 use rustc_hash::FxHashMap;
 
@@ -81,7 +83,7 @@ pub fn build_area(lines: &[geo::Line<f64>]) -> Option<MultiPolygon<f64>> {
     faces_out.sort_by(|a, b| {
         b.envelope_area
             .partial_cmp(&a.envelope_area)
-            .unwrap_or(std::cmp::Ordering::Equal)
+            .unwrap_or(core::cmp::Ordering::Equal)
     });
 
     // ---- Step 3: assign holes to smallest containing shell -----------------
