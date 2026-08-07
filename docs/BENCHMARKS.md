@@ -42,10 +42,18 @@ flattened to 1,579,030 polygon parts. Measured 2026-08-07.
 Validity agreement with GEOS: 100% (0/0 disagreements). GEOS setup cost
 (one-time pre-build of 1.58M geometries, 1.35 s) excluded.
 
-Note the real-world verdict asymmetry below the agreement: GeoRepair
-flags 2,298 of the 1.58M raw polygons, GEOS flags 0; GEOS accepts all
-2,298 repaired outputs, GeoRepair still flags 29. The tolerance class is
-deliberately stricter - see "Tolerance class vs GEOS exact-zero".
+The 2,298 "invalid" figure that appeared in earlier notes and READMEs is
+a bug-inflated historical artifact, not current behavior: the
+pre-2026-08-03 product-form proper-crossing test (`o1*o2 < 0`) treated a
+-0.0 orient (an exact collinear touch, common on snapped vertices) as a
+crossing. The zero-safe strict opposite-sign fix dropped the
+winding-agnostic count to 1, and the 2026-08-06 validator-gap fixes
+(ring-touch graph cycles, incident-segment hole nesting, cross-component
+hole probes) closed the last real-world case. Measured 2026-08-07
+evening: **0 invalid both sides**. The winding-sensitive validator still
+flags the ~1.58M clockwise rings as orientation violations - those are
+GEOS-valid; that is the OGC winding contract (see the tolerance section),
+not a validity gap.
 
 ## Synthetic benchmarks (2026-08-07, lean-predicate + gate-fusion pass)
 
@@ -250,11 +258,14 @@ on polygons it nods at noding tolerance while `isValid` checks exact-zero
 - so GEOS can reject its own repaired output. GeoRepair refuses that:
 repair output is certifiable by construction (valid-or-empty).
 
-Measured consequences on the real-world dataset: GeoRepair flags 2,298 of
-1,579,030 raw polygons, GEOS flags 0 - the near-miss collinear-overlap
-class. GEOS accepts all 2,298 repaired outputs; GeoRepair still flags 29
-(the tolerance class is stricter on its own output - a documented,
-tracked residual, not a contract failure).
+Measured consequences on the real-world dataset: the winding-agnostic
+validity agreement with GEOS is 0/0 on 1,579,030 polygons - the eps-class
+does not over-flag the production data. The strictness shows on
+borderline synthetic cases: the XML suite baselines 213 GEOS-valid
+verdicts we reject under the eps-class (the historical 2,298 count was
+bug-inflated; see the real-world section). The repaired-output residual
+("29 still flagged") belongs to the same pre-correction measurement and
+is not reproduced by the current validator.
 
 Costs of the eps-class, beyond performance:
 
@@ -266,8 +277,12 @@ Costs of the eps-class, beyond performance:
 2. **Scale-dependence in mixed-magnitude rings.** The extremal-vertex
    orientation ~0 zone (fuzz invariant_mixed_fp_in_same_ring) is the one
    place a verdict can depend on representation noise.
-3. **The 29/2,298 residual** above - repair artifacts the tolerance class
-   itself creates.
+3. **Repair artifacts.** The tolerance class can create its own edge
+   cases when repairing borderline inputs (a historical "29 of 2,298
+   repaired outputs still flagged" measurement, since corrected with the
+   validator fixes - the residual is not reproduced today). The class of
+   failure remains: a repair at the tolerance boundary can produce
+   output the same tolerance flags.
 
 The architecture is deliberately both: the eps-class is the internal
 repair contract (validator = gate = noder), GEOS parity is the external

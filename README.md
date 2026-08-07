@@ -66,8 +66,10 @@ tolerance; GeoRepair validates at the eps-class (1e-12 x scale, adaptive
 one tolerance so repair output is certifiable by construction, where
 GEOS's own `makeValid` can ship geometry its `isValid` rejects (lines
 pass through non-simple unchanged; noding happens at tolerance while
-checks run exact-zero). The eps-class is what flags the 2,298 near-miss
-real-world polygons GEOS calls valid. The price is the valid-input
+checks run exact-zero). The eps-class is stricter on borderline cases by
+design - the XML suite baselines 213 GEOS-valid verdicts we reject under
+it - while the 1.58M real-world dataset currently agrees with GEOS 0/0
+(winding-agnostic). The price is the valid-input
 constant: exact-zero predicates are cheaper, and our valid-polygon path
 still makes ~6-7 passes over the coords vs GEOS's ~2 (the parallel rows
 are memory-bandwidth-bound, so the throughput gap ~2.8x is wider than the
