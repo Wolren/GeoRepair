@@ -154,6 +154,35 @@ jobs:
         env:
           BENCH_FILE: benches/real_world/alaska.bin
 
+  # Regression gate: the synthetic bench's curated subset must stay within
+  # threshold of the committed baseline (recorded on this runner type).
+  # Added 2026-08-07 after the LineString validity-contract fix shipped a
+  # 35x valid-line regression with a fully green CI - nothing measured the
+  # bench, so nothing caught it. First run on a new baseline records it;
+  # commit the artifact to benches/bench_baseline.json.
+  bench-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
+        with:
+          toolchain: stable
+      - name: Synthetic bench subset (gate)
+        run: cargo bench --features arrange,structure,parallel,simd --bench bench
+        env:
+          BENCH_SUBSET: "valid polygon 1000v,valid polygon 5000v,valid polygon 10000v,invalid bowtie 4v,invalid bowtie 50v,invalid bowtie 100v,invalid bowtie 500v,spaghetti 500v,self-touch poly,valid ls 100v,valid ls 500v,collinear ls 500v,duped ls 100v,dense self ls 500v,lissajous 2000v,mls 50x3v,self-int mls 50x4v,hole hier 50h,overlap mp 50sh,dense grid 10x10=100,dense grid 20x20=400,sliver 500v"
+          BENCH_JSON: target/bench_gate.json
+      - name: Compare against baseline
+        run: python scripts/bench_gate.py --json target/bench_gate.json --baseline benches/bench_baseline.json
+      - name: Upload recorded baseline (when the first run created it)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v4
+        with:
+          name: bench-baseline
+          path: benches/bench_baseline.json
+          if-no-files-found: ignore
+          retention-days: 7
+
   # WebAssembly gate: the crate claims wasm32 support (default features
   # minus C-bound deps; the `wasm` feature adds browser fetch). Both the
   # full default feature set and the minimal wasm config must compile, and

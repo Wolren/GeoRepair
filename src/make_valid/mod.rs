@@ -389,11 +389,36 @@ impl<T: NodingFloat> MakeValid for MultiLineString<T> {
                 .max((gmax_y - gmin_y).abs())
                 .max(1.0);
             let eps = 1e-12 * scale;
+            // Bbox prefilter: most component pairs are disjoint; reject
+            // them before the per-edge checks (measured 2026-08-07: mls
+            // 50x3v went 1.7 -> 18.5 µs when the cross-component filter
+            // ran check_line_components_intersect on every pair).
+            let bboxes: Vec<(f64, f64, f64, f64)> = fd
+                .iter()
+                .map(|ls| {
+                    let mut min_x = f64::MAX;
+                    let mut max_x = f64::MIN;
+                    let mut min_y = f64::MAX;
+                    let mut max_y = f64::MIN;
+                    for c in ls {
+                        min_x = min_x.min(c.x);
+                        max_x = max_x.max(c.x);
+                        min_y = min_y.min(c.y);
+                        max_y = max_y.max(c.y);
+                    }
+                    (min_x, max_x, min_y, max_y)
+                })
+                .collect();
             let mut kept: Vec<usize> = Vec::new();
             for j in 0..fd.len() {
-                let conflict = kept
-                    .iter()
-                    .any(|&i| check_line_components_intersect(&fd[i], &fd[j], eps));
+                let (bx0, bx1, by0, by1) = bboxes[j];
+                let conflict = kept.iter().any(|&i| {
+                    let (ax0, ax1, ay0, ay1) = bboxes[i];
+                    if ax1 < bx0 || bx1 < ax0 || ay1 < by0 || by1 < ay0 {
+                        return false; // disjoint bboxes
+                    }
+                    check_line_components_intersect(&fd[i], &fd[j], eps)
+                });
                 if !conflict {
                     kept.push(j);
                 }

@@ -29,6 +29,14 @@ pub(crate) const EPS_PARAM: f64 = 1e-14;
 /// and edge splitting. At n=2000 the brute-force 2M pair checks completes
 /// in ~5ms for most geometries, well below the cost of grid construction.
 pub(crate) const GRID_THRESHOLD_N: usize = 2000;
+/// Edge-split dispatch: below this, the O(n^2) pair loop is the fastest
+/// option; at or above it the R-tree / sweep-line noding wins. Measured
+/// 2026-08-07: a 500-edge bowtie took 3.29 ms through the bruteforce
+/// (250k exact pair tests) vs ~260 us via the indexed paths; a 100-edge
+/// bowtie was faster bruteforce (173 us vs 337 us rtree bulk_load) - the
+/// crossover sits near 128, so the old 2000-edge gate was a 5-60x
+/// latency tax on mid-size repairs.
+pub(crate) const SPLIT_BRUTEFORCE_MAX_N: usize = 128;
 
 /// Maximum total vertices for the fast-path validity check in fix_polygon.
 /// Larger polygons fall through to the full repair pipeline.

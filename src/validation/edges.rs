@@ -20,6 +20,28 @@ pub(crate) fn edges_intersect_general(
     b2: Coord<f64>,
     eps: f64,
 ) -> bool {
+    // Cheap bbox prefilter before the robust predicates: the vast majority
+    // of pairs are envelope-disjoint, and 4 Shewchuk orient2d calls are
+    // ~100 ns. Measured (2026-08-07): without this gate, the line-simplicity
+    // naive loop ran the full predicate chain on every pair (2.7 ms for a
+    // 500-vertex line); with it, disjoint pairs cost 4 comparisons.
+    // Padded by eps: the collinear-overlap branch flags pairs separated by
+    // up to eps (e.g. a 5e-14-tall sliver over a length-10 base, eps
+    // 1e-11 - raw-disjoint y-ranges, genuinely within the gate; measured:
+    // geo_bridge stricter_than_geo_collinear_sliver).
+    {
+        let (lo_x, hi_x) = if a1.x < a2.x { (a1.x, a2.x) } else { (a2.x, a1.x) };
+        let (lo_y, hi_y) = if a1.y < a2.y { (a1.y, a2.y) } else { (a2.y, a1.y) };
+        let (lo_x2, hi_x2) = if b1.x < b2.x { (b1.x, b2.x) } else { (b2.x, b1.x) };
+        let (lo_y2, hi_y2) = if b1.y < b2.y { (b1.y, b2.y) } else { (b2.y, b1.y) };
+        if hi_x < lo_x2 - eps
+            || lo_x > hi_x2 + eps
+            || hi_y < lo_y2 - eps
+            || lo_y > hi_y2 + eps
+        {
+            return false;
+        }
+    }
     // Robust (Shewchuk adaptive) orient2d. The fast f64 predicate flips
     // signs on mixed-magnitude inputs (e.g. 1e-10-scale edges against an
     // 8.4e7-scale ring: fast orient2d gave -6.25e-2 / +6.25e-2 for two
@@ -27,6 +49,35 @@ pub(crate) fn edges_intersect_general(
     // that GEOS does not report - measured: mixed4 fuzz seed). Shewchuk's
     // adaptive version returns the exact sign for the same cost when the
     // f64 computation is exact (the common case).
+    //
+    // Fast-FP first (GEOS IsValidOp design): when every plain cross-product
+    // orientation lies far above the relative collinear gate, its sign is
+    // exact (the error is ~4 ulps of L2; the gate is 32 ulps), so the
+    // crossing decision is identical to the robust predicates. Escalate to
+    // Shewchuk only when some orientation is near the gate. Measured
+    // (2026-08-07): the exact chain cost ~120 ns/pair; the fast path is
+    // ~5 ns, and clean synthetic data pays it for ~99% of pairs (lines:
+    // 269 us -> 10-15 us at 500 vertices).
+    let la2 = (a2.x - a1.x).powi(2) + (a2.y - a1.y).powi(2);
+    let lb2 = (b2.x - b1.x).powi(2) + (b2.y - b1.y).powi(2);
+    let collinear_eps = 32.0 * f64::EPSILON * la2.max(lb2);
+    let f1 = (a2.x - a1.x) * (b1.y - a1.y) - (a2.y - a1.y) * (b1.x - a1.x);
+    let f2 = (a2.x - a1.x) * (b2.y - a1.y) - (a2.y - a1.y) * (b2.x - a1.x);
+    let f3 = (b2.x - b1.x) * (a1.y - b1.y) - (b2.y - b1.y) * (a1.x - b1.x);
+    let f4 = (b2.x - b1.x) * (a2.y - b1.y) - (b2.y - b1.y) * (a2.x - b1.x);
+    if f1.abs() > 2.0 * collinear_eps
+        && f2.abs() > 2.0 * collinear_eps
+        && f3.abs() > 2.0 * collinear_eps
+        && f4.abs() > 2.0 * collinear_eps
+    {
+        // Zero-safe strict opposite sign (matches the exact path below).
+        if (f1 > 0.0 && f2 < 0.0 || f1 < 0.0 && f2 > 0.0)
+            && (f3 > 0.0 && f4 < 0.0 || f3 < 0.0 && f4 > 0.0)
+        {
+            return true;
+        }
+        return false;
+    }
     let o1 = crate::orient::orient2d(a1, a2, b1);
     let o2 = crate::orient::orient2d(a1, a2, b2);
     let o3 = crate::orient::orient2d(b1, b2, a1);
@@ -110,9 +161,14 @@ pub(crate) fn check_edge_pair_intersection(
 ) -> bool {
     let n = coords.len() - 1;
     let a1 = coords[i];
-    let a2 = coords[(i + 1) % n];
+    // min(n) instead of % n: ring slices close (coords[n] == coords[0]),
+    // so both are identical for rings; OPEN line slices must see the real
+    // last coordinate (the % n wrap turns segment n-1 into a phantom
+    // crossing chord - measured 2026-08-07, sine-wave lines flagged
+    // non-simple).
+    let a2 = coords[(i + 1).min(n)];
     let b1 = coords[j];
-    let b2 = coords[(j + 1) % n];
+    let b2 = coords[(j + 1).min(n)];
     if edges_intersect_general(a1, a2, b1, b2, eps) {
         return true;
     }
