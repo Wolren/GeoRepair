@@ -118,7 +118,7 @@ pub fn check_ring_validity(
         // tolerance. Measured (2026-08-06): per-ring rstar bulk_load +
         // queries cost ~320ms on the 600k-vertex giants vs ~50ms for the
         // sweep; the biggest giant's active set averages 23 (max 63).
-        match sweep_ring_self_intersects(ring, eps) {
+        match sweep_ring_self_intersects(ring, eps, false) {
             Some(true) => {
                 errors.push(GeometryValidationError::SelfIntersection);
                 return errors;

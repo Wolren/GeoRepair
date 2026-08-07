@@ -90,6 +90,12 @@ pub(crate) fn has_proper_self_crossing_sweep(
                 }
                 ::core::ops::ControlFlow::Break(())
             } else if ring_of_segment(i, ring_offsets) == ring_of_segment(j, ring_offsets)
+                && crate::validation::edges::lean_voe_possible(
+                    coords[i],
+                    coords[i + 1],
+                    coords[j],
+                    coords[j + 1],
+                )
                 && crate::validation::edges_vertex_on_edge(
                     coords[i],
                     coords[i + 1],

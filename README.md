@@ -76,8 +76,10 @@ therefore `UnaryUnion` (the operation GEOS users actually call to fix
 linework), not `makeValid`. The check's first implementation was 30-35x
 GEOS isSimple (an rstar bulk_load that costs ~1 µs/item); the sweep cut
 that to ~7x, and the 2026-08-07 pass (single-orient adjacent fast path,
-x-sorted-input radix skip, flat-capacity revisit hash) cut it to ~3x
-(valid ls 500v: 4.3 -> 1.6 µs). Full stage breakdown: `docs/BENCHMARKS.md`.
+x-sorted-input radix skip, lean pair predicate with vertex-on-edge-gated
+escalation, escalated-only revisit checks replacing the flat hash) cut it
+to ~3x (valid ls 500v: 4.3 -> 1.5 µs). Full stage breakdown:
+`docs/BENCHMARKS.md`.
 
 ### Synthetic benchmarks
 
@@ -99,13 +101,14 @@ the bowtie and spaghetti rows:
 | overlap mp 50sh | 44.1 | 7719 | 175x |
 | dense grid 20x20=400 | 564 | 114120 | 202x |
 | hole hier 50h | 37.1 | 33.3 | 0.90x |
-| valid polygon 5000v | 63.6 | 8.99 | 0.14x |
-| valid ls 500v | 1.60 | 0.54 | 0.34x |
-| lissajous 5000v | 568 | 4931 | 8.7x |
-| collinear ov 500seg | 59 | 550 | 9.3x |
-| star-comb 500sp | 130 | 703 | 5.4x |
-| star-burst 500sp | 7.3 | 37396 | 5100x |
-| spoke 500sp | 9.6 | 38065 | 4000x |
+| valid polygon 5000v | 26.8 | 9.4 | 0.35x |
+| valid ls 500v | 1.49 | 0.49 | 0.33x |
+| dense self ls 500v | 1.73 | 135 | 78x |
+| lissajous 5000v | 562 | 5325 | 9.5x |
+| collinear ov 500seg | 59 | 584 | 9.9x |
+| star-comb 500sp | 80 | 763 | 9.6x |
+| star-burst 500sp | 8.5 | 38598 | 4500x |
+| spoke 500sp | 11.3 | 41351 | 3700x |
 | mls 50x3v | 3.09 | 2.82 | 0.91x |
 
 Pattern: GeoRepair wins on invalid repair and MultiPolygon unification
