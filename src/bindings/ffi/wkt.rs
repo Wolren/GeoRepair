@@ -39,7 +39,7 @@ fn repair_to_wkt(geom: Geometry<f64>, config: &MakeValidConfig) -> GeoRepairStri
 ///
 /// `wkt` must be a valid NUL-terminated string. The returned
 /// [`GeoRepairStringResult`] must be freed with
-/// [`geo_repair_free_string_result`].
+/// [`super::geo_repair_free_string_result`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_make_valid_wkt(wkt: *const c_char) -> GeoRepairStringResult {
     wkt_result_from(wkt, |geom| {
@@ -56,7 +56,7 @@ pub unsafe extern "C" fn geo_repair_make_valid_wkt(wkt: *const c_char) -> GeoRep
 ///
 /// `wkt` must be a valid NUL-terminated string. The returned
 /// [`GeoRepairStringResult`] must be freed with
-/// [`geo_repair_free_string_result`].
+/// [`super::geo_repair_free_string_result`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_make_valid_wkt_with_config(
     wkt: *const c_char,
@@ -78,7 +78,7 @@ pub unsafe extern "C" fn geo_repair_make_valid_wkt_with_config(
 ///
 /// `wkt` must be a valid NUL-terminated string. The returned
 /// [`GeoRepairStringResult`] must be freed with
-/// [`geo_repair_free_string_result`].
+/// [`super::geo_repair_free_string_result`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_make_valid_wkt_with_config_full(
     wkt: *const c_char,
@@ -122,7 +122,7 @@ pub unsafe extern "C" fn geo_repair_is_valid_wkt(wkt: *const c_char) -> u8 {
 ///
 /// `wkt` must be a valid NUL-terminated string. The returned
 /// [`GeoRepairStringResult`] must be freed with
-/// [`geo_repair_free_string_result`].
+/// [`super::geo_repair_free_string_result`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_validate_wkt(wkt: *const c_char) -> GeoRepairStringResult {
     wkt_result_from(wkt, |geom| {
@@ -146,7 +146,7 @@ pub unsafe extern "C" fn geo_repair_validate_wkt(wkt: *const c_char) -> GeoRepai
 ///
 /// `wkt` must be a valid NUL-terminated string. The returned
 /// [`GeoRepairStringResult`] must be freed with
-/// [`geo_repair_free_string_result`].
+/// [`super::geo_repair_free_string_result`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_validate_and_fix_wkt(wkt: *const c_char) -> GeoRepairStringResult {
     wkt_result_from(wkt, |geom| {
@@ -179,7 +179,7 @@ pub unsafe extern "C" fn geo_repair_validate_and_fix_wkt(wkt: *const c_char) -> 
 ///
 /// `wkt` must be a valid NUL-terminated string. The returned
 /// [`GeoRepairStringResult`] must be freed with
-/// [`geo_repair_free_string_result`].
+/// [`super::geo_repair_free_string_result`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_validate_and_fix_wkt_with_config(
     wkt: *const c_char,

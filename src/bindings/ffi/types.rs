@@ -108,7 +108,7 @@ impl GeoRepairResult {
 ///
 /// # Safety
 ///
-/// The caller must call [`geo_repair_free_string_result`] when the result
+/// The caller must call [`super::geo_repair_free_string_result`] when the result
 /// is no longer needed.
 #[repr(C)]
 #[derive(Debug)]

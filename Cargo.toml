@@ -96,6 +96,7 @@ log = { version = "0.4", default-features = false }
 robust = "1.2"
 thiserror = { version = "2.0", default-features = false }
 rustc-hash = "2.1"
+num-traits = { version = ">=0.2,<0.3", default-features = false }
 smallvec = { version = "1.15", default-features = false, features = ["union"] }
 serde_json = "1.0"
 shapefile = { version = "0.8", features = ["geo-types"], optional = true }
@@ -188,3 +189,11 @@ panic = "unwind"
 lto = "fat"
 codegen-units = 1
 panic = "abort"
+
+[package.metadata.cargo-semver-checks.lints]
+# 0.14.2: GeoRepairResult (C FFI result struct, ffi feature) gained the
+# error_code field and reordered error_msg. Deliberate ABI evolution - the
+# contract is include/geo_repair.h, consumers recompile against the header,
+# and the struct is only exposed behind the ffi feature. Version stays on
+# the 0.14.2 line per the release plan.
+constructible_struct_adds_field = "allow"

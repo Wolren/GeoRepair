@@ -231,9 +231,11 @@ fn test_linestring_collinear() {
 }
 
 #[test]
-fn test_linestring_self_intersecting_returns_as_is() {
-    // GEOS/OGC: a self-intersecting LineString is still valid
-    // (only NaN/Inf checked). Return unchanged, no noding.
+fn test_linestring_self_intersecting_is_repaired() {
+    // Validity contract (fuzz gate 2026-08-07): make_valid output must be
+    // simple - a self-intersecting line is repaired by dropping the
+    // conflicting segments, never shipped as NotSimple. (GEOS MakeValid
+    // passes such lines through unchanged; our contract is valid-or-empty.)
     let ls = LineString::new(vec![
         Coord { x: 0.0, y: 0.0 },
         Coord { x: 10.0, y: 10.0 },
@@ -246,9 +248,12 @@ fn test_linestring_self_intersecting_returns_as_is() {
         let result = ls.make_valid_with_config(&cfg);
         assert_not_empty(&result);
         assert!(
-            matches!(&result, Geometry::LineString(_)),
-            "expected LineString (unchanged per GEOS compat), got {:?}",
-            result
+            result.validate().valid,
+            "expected valid output, got {result:?}"
+        );
+        assert!(
+            !matches!(&result, Geometry::LineString(l) if l.0.len() == 5),
+            "non-simple line must not pass through unchanged: {result:?}"
         );
     }
 }

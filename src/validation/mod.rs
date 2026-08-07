@@ -86,13 +86,13 @@
 /// Complex validation rules (polygon nesting, multi-geometry checks).
 mod complex;
 /// Edge-pair intersection predicates and ring edge trees.
-mod edges;
+pub(crate) mod edges;
 /// GeometryValidationError and its impls.
 mod errors;
 /// Hole validation, nesting, and cycle detection.
-mod holes;
+pub(crate) mod holes;
 /// Per-geometry GeoValidation impls and free validate functions.
-mod impls;
+pub(crate) mod impls;
 /// ValidationResult and its helper methods.
 mod result;
 /// Ring validity: closure, self-intersection, orientation, points, duplicates.
