@@ -110,6 +110,21 @@ fn run_geos_batch(geoms: &[geos::Geometry]) -> f64 {
     t0.elapsed().as_secs_f64()
 }
 
+/// GEOS line REPAIR reference: `GEOSMakeValid` does not node LineStrings
+/// (verified against GeometryFixer.cpp - it strips repeated points and
+/// clones; a non-simple line passes through non-simple). The operation
+/// GEOS users call to actually fix linework is `UnaryUnion` (noding +
+/// dissolve). Used for the invalid-line bench cases so the comparison is
+/// repair-vs-repair, not repair-vs-passthrough.
+#[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
+fn run_geos_noding_batch(geoms: &[geos::Geometry]) -> f64 {
+    let t0 = Instant::now();
+    geoms.par_iter().for_each(|gg| {
+        let _ = gg.unary_union();
+    });
+    t0.elapsed().as_secs_f64()
+}
+
 fn make_valid_ring(n: usize, r: f64) -> Polygon<f64> {
     let mut coords = Vec::with_capacity(n);
     for i in 0..n - 1 {
@@ -576,7 +591,14 @@ fn bench_line(label: &str, g: &Geometry<f64>, batch: usize, cfg: &MakeValidConfi
     {
         // CoordSeq direct construction — no WKT overhead
         let geos_geoms: Vec<geos::Geometry> = items.iter().filter_map(geometry_to_geos).collect();
-        let geos = run_geos_batch(&geos_geoms);
+        // Valid inputs: GEOS makeValid is the honest check reference (it
+        // returns the valid input unchanged). Invalid lines: makeValid is a
+        // passthrough - the honest repair reference is UnaryUnion.
+        let geos = if label.starts_with("valid") {
+            run_geos_batch(&geos_geoms)
+        } else {
+            run_geos_noding_batch(&geos_geoms)
+        };
         eprintln!(
             "  {:<20} {:>10.3} {:>10.3} µs",
             label,
