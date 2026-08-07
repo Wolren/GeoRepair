@@ -53,6 +53,10 @@ pub(crate) struct MonoChain {
     max_x: f64,
     max_y: f64,
     ring_id: u32,
+    /// 1e-12 * ring bbox scale, computed once per ring in
+    /// build_mono_chains. Used by the same-ring full pair predicate
+    /// (the gate must match check_ring_validity's ring-local eps).
+    ring_eps: f64,
 }
 
 impl MonoChain {
@@ -90,6 +94,23 @@ fn build_mono_chains(lines: &[Line<f64>]) -> Vec<MonoChain> {
     ring_bounds.push((ring_s, n));
     let ring_buf = ring_bounds.as_slice();
 
+    // Per-ring scale-relative eps (same formula as check_ring_validity).
+    let mut ring_eps_of: Vec<f64> = Vec::with_capacity(ring_buf.len());
+    for &(s, e) in ring_buf {
+        let mut rx0 = f64::MAX;
+        let mut rx1 = f64::MIN;
+        let mut ry0 = f64::MAX;
+        let mut ry1 = f64::MIN;
+        for l in &lines[s..e] {
+            rx0 = rx0.min(l.start.x.min(l.end.x));
+            rx1 = rx1.max(l.start.x.max(l.end.x));
+            ry0 = ry0.min(l.start.y.min(l.end.y));
+            ry1 = ry1.max(l.start.y.max(l.end.y));
+        }
+        let scale = (rx1 - rx0).abs().max((ry1 - ry0).abs()).max(1.0);
+        ring_eps_of.push(1e-12 * scale);
+    }
+
     let l0 = &lines[0];
     let dx = l0.end.x - l0.start.x;
     let dy = l0.end.y - l0.start.y;
@@ -125,6 +146,7 @@ fn build_mono_chains(lines: &[Line<f64>]) -> Vec<MonoChain> {
                 max_x,
                 max_y,
                 ring_id: ring_idx,
+                ring_eps: ring_eps_of[ring_idx as usize],
             });
             start = i;
             prev_quad = cur_quad;
@@ -149,6 +171,7 @@ fn build_mono_chains(lines: &[Line<f64>]) -> Vec<MonoChain> {
         max_x,
         max_y,
         ring_id: ring_idx,
+        ring_eps: ring_eps_of[ring_idx as usize],
     });
     chains
 }
@@ -179,18 +202,21 @@ fn rec_overlaps(
         if segments_properly_cross(li, lj) {
             return true;
         }
-        // Same-ring vertex-on-edge self-touch (T-junction): GEOS rejects a
-        // ring vertex on a non-adjacent edge (Test 22). Cross-ring pairs
-        // stay untouched (hole vertex on shell edge is a VALID OGC touch).
-        if mc1.ring_id == mc2.ring_id
-            && crate::validation::edges_vertex_on_edge(
-                li.start,
-                li.end,
-                lj.start,
-                lj.end,
-            )
-        {
-            return true;
+        // Same-ring pairs use the validator's FULL pair predicate (proper
+        // crossing + eps-collinear overlap + vertex-on-edge T-junction) with
+        // the RING's own scale-relative eps - the gate must accept exactly
+        // what check_ring_validity accepts, or the Fast path could ship a
+        // polygon the exit validator would reject (2026-08-07). Cross-ring
+        // pairs stay on proper crossings only (hole vertex on shell edge is
+        // a VALID OGC touch; collinear hole-shell overlaps are caught by the
+        // hole checks in the gate).
+        if mc1.ring_id == mc2.ring_id {
+            let eps = mc1.ring_eps;
+            if crate::validation::edges_intersect_general(li.start, li.end, lj.start, lj.end, eps)
+                || crate::validation::edges_vertex_on_edge(li.start, li.end, lj.start, lj.end)
+            {
+                return true;
+            }
         }
         return false;
     }
@@ -207,7 +233,9 @@ fn rec_overlaps(
 
     if (end0 - start0) >= (end1 - start1) {
         let mid = (start0 + end0) / 2;
-        if start0 < mid && rec_overlaps(lines, mc1, start0, mid, mc2, start1, end1) {
+        if start0 < mid
+            && rec_overlaps(lines, mc1, start0, mid, mc2, start1, end1)
+        {
             return true;
         }
         if mid < end0 {
@@ -215,7 +243,9 @@ fn rec_overlaps(
         }
     } else {
         let mid = (start1 + end1) / 2;
-        if start1 < mid && rec_overlaps(lines, mc1, start0, end0, mc2, start1, mid) {
+        if start1 < mid
+            && rec_overlaps(lines, mc1, start0, end0, mc2, start1, mid)
+        {
             return true;
         }
         if mid < end1 {
@@ -250,7 +280,10 @@ pub fn has_no_intersections_small(lines: &[Line<f64>]) -> bool {
         return true;
     }
     // Assign ring ids: a segment whose start != previous segment's end
-    // starts a new ring (same rule as build_mono_chains).
+    // starts a new ring (same rule as build_mono_chains). Track each
+    // ring's bbox to derive its scale-relative eps (same formula as
+    // check_ring_validity - the gate must not use a poly-global eps,
+    // which would loosen micro-ring tolerances inside big shells).
     let mut ring_of = [0u32; crate::core::SMALL_RING_LINES + 1];
     let mut nrings = 1u32;
     for i in 1..n {
@@ -259,12 +292,28 @@ pub fn has_no_intersections_small(lines: &[Line<f64>]) -> bool {
         }
         ring_of[i] = nrings - 1;
     }
+    let mut min_x = vec![f64::MAX; nrings as usize];
+    let mut max_x = vec![f64::MIN; nrings as usize];
+    let mut min_y = vec![f64::MAX; nrings as usize];
+    let mut max_y = vec![f64::MIN; nrings as usize];
+    for (i, l) in lines.iter().enumerate() {
+        let r = ring_of[i] as usize;
+        min_x[r] = min_x[r].min(l.start.x.min(l.end.x));
+        max_x[r] = max_x[r].max(l.start.x.max(l.end.x));
+        min_y[r] = min_y[r].min(l.start.y.min(l.end.y));
+        max_y[r] = max_y[r].max(l.start.y.max(l.end.y));
+    }
+    let mut eps_by_ring = vec![0.0f64; nrings as usize];
+    for r in 0..nrings as usize {
+        let scale = (max_x[r] - min_x[r]).abs().max((max_y[r] - min_y[r]).abs()).max(1.0);
+        eps_by_ring[r] = 1e-12 * scale;
+    }
 
     for i in 0..n {
         let li = &lines[i];
-        let ri = ring_of[i];
+        let ri = ring_of[i] as usize;
         for j in (i + 1)..n {
-            if ri == ring_of[j] {
+            if ri == ring_of[j] as usize {
                 // Same ring: skip adjacent edges. The closing pair (first
                 // vs last edge) is NOT skipped — the two share vertex 0 but
                 // can overlap collinearly beyond it (backtracking closure),
@@ -277,19 +326,20 @@ pub fn has_no_intersections_small(lines: &[Line<f64>]) -> bool {
             if segments_properly_cross(li, lj) {
                 return false;
             }
-            // Same-ring vertex-on-edge self-touch (T-junction): GEOS rejects
-            // a ring vertex on a non-adjacent edge (Test 22). Cross-ring
-            // pairs stay untouched (hole vertex on shell edge is a VALID
-            // OGC touch). Bbox-gated inside edges_vertex_on_edge.
-            if ri == ring_of[j]
-                && crate::validation::edges_vertex_on_edge(
-                    li.start,
-                    li.end,
-                    lj.start,
-                    lj.end,
-                )
-            {
-                return false;
+            // Same-ring pairs use the validator's FULL pair predicate
+            // (proper crossing + eps-collinear overlap + vertex-on-edge
+            // T-junction) with the ring's own eps - identical to
+            // check_ring_validity's sweep (2026-08-07). Cross-ring pairs
+            // stay on proper crossings only (hole vertex on shell edge is
+            // a VALID OGC touch; collinear hole-shell overlaps are caught
+            // by the hole checks in the gate).
+            if ri == ring_of[j] as usize {
+                let eps = eps_by_ring[ri];
+                if crate::validation::edges_intersect_general(li.start, li.end, lj.start, lj.end, eps)
+                    || crate::validation::edges_vertex_on_edge(li.start, li.end, lj.start, lj.end)
+                {
+                    return false;
+                }
             }
         }
     }
@@ -327,18 +377,14 @@ pub fn has_no_intersections(lines: &[Line<f64>]) -> bool {
     // Vecs and only pays off for large inputs (measured: 95.6% of the
     // 1.58M real-world dataset has <= 32 vertices; the chain path costs
     // 1.295 µs/poly there vs ~0.1 µs for the pairwise sweep). The predicate
-    // is identical to the chain leaf (rec_overlaps): strict proper crossing
-    // via orient2d sign flips, skipping adjacent edges and the closing pair
-    // within each ring.
+    // matches the chain leaf (rec_overlaps): strict proper crossing via
+    // orient2d sign flips plus the full same-ring predicate, skipping
+    // adjacent edges and testing the closing pair within each ring.
     if n <= crate::core::SMALL_RING_LINES {
         return has_no_intersections_small(lines);
     }
 
     let chains = build_mono_chains(lines);
-    let nc = chains.len();
-    if nc <= 1 {
-        return true;
-    }
 
     // Try fast grid path; fall back to R-tree if any cell gets too dense
     let grid_result = has_no_intersections_grid(&chains, lines);
@@ -356,6 +402,7 @@ pub fn has_no_intersections(lines: &[Line<f64>]) -> bool {
         })
         .collect();
     let tree = RTree::bulk_load(envs);
+    let nc = chains.len();
 
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     {

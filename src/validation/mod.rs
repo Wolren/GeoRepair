@@ -107,5 +107,9 @@ mod geo_bridge;
 /// Re-export all core validation items: [`GeoValidation`], [`GeometryValidationError`],
 /// [`ValidationResult`], [`is_valid`], [`validate`], [`validate_reason`].
 pub use core::*;
+/// Shared by the validator and the fast-path gate (duplicated rings).
+pub(crate) use complex::has_duplicate_rings;
+/// Ring winding predicate (extremal-vertex Shewchuk orient2d).
+pub(crate) use ring::check_orientation;
 /// geo-trait-compatible adapter and error mapping.
 pub use geo_bridge::{GeoRepairValidation, map_geo_invalid};

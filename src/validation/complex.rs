@@ -47,36 +47,9 @@ impl GeoValidation for Polygon<f64> {
 
         let interiors: Vec<&[Coord<f64>]> = self.interiors().iter().map(|h| &h.0[..]).collect();
 
-        // Check for duplicate rings (including rotated-start duplicates)
-        // Use fingerprint grouping to avoid O(h²) pairwise checks.
-        if interiors.len() > 1 {
-            let mut groups: rustc_hash::FxHashMap<(usize, u64), Vec<usize>> =
-                rustc_hash::FxHashMap::with_capacity_and_hasher(
-                    interiors.len(),
-                    Default::default(),
-                );
-            for (i, h) in interiors.iter().enumerate() {
-                groups.entry(ring_dup_fingerprint(h)).or_default().push(i);
-            }
-            for (_, indices) in groups {
-                for (ii, &a) in indices.iter().enumerate() {
-                    for &b in indices.iter().skip(ii + 1) {
-                        if is_rotated_duplicate(interiors[a], interiors[b]) {
-                            errors.push(GeometryValidationError::DuplicatedRings);
-                            return ValidationResult::invalid(errors);
-                        }
-                    }
-                }
-            }
-        }
-        // Also check each hole against the shell
-        for h in &interiors {
-            if ring_dup_fingerprint(h) == ring_dup_fingerprint(&self.exterior().0)
-                && is_rotated_duplicate(h, &self.exterior().0)
-            {
-                errors.push(GeometryValidationError::DuplicatedRings);
-                return ValidationResult::invalid(errors);
-            }
+        if has_duplicate_rings(&interiors, &self.exterior().0) {
+            errors.push(GeometryValidationError::DuplicatedRings);
+            return ValidationResult::invalid(errors);
         }
 
         for hole in self.interiors() {
@@ -99,6 +72,45 @@ impl GeoValidation for Polygon<f64> {
             ValidationResult::invalid(errors)
         }
     }
+}
+
+/// True when any hole duplicates another hole or the shell (rotated-start
+/// duplicates included). Fingerprint grouping avoids the O(h²) pairwise
+/// scan. Shared by the validator and the fast-path gate (the gate must
+/// certify exactly what the validator accepts before it may skip the exit
+/// validator - 2026-08-07).
+pub(crate) fn has_duplicate_rings(
+    interiors: &[&[Coord<f64>]],
+    shell: &[Coord<f64>],
+) -> bool {
+    if interiors.len() > 1 {
+        let mut groups: rustc_hash::FxHashMap<(usize, u64), Vec<usize>> =
+            rustc_hash::FxHashMap::with_capacity_and_hasher(
+                interiors.len(),
+                Default::default(),
+            );
+        for (i, h) in interiors.iter().enumerate() {
+            groups.entry(ring_dup_fingerprint(h)).or_default().push(i);
+        }
+        for (_, indices) in groups {
+            for (ii, &a) in indices.iter().enumerate() {
+                for &b in indices.iter().skip(ii + 1) {
+                    if is_rotated_duplicate(interiors[a], interiors[b]) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    // Also check each hole against the shell
+    for h in interiors {
+        if ring_dup_fingerprint(h) == ring_dup_fingerprint(shell)
+            && is_rotated_duplicate(h, shell)
+        {
+            return true;
+        }
+    }
+    false
 }
 
 impl GeoValidation for MultiPolygon<f64> {

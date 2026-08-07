@@ -59,7 +59,11 @@ fn fuzz_inprocess_mutation_loop() {
             }));
             match out {
                 Ok(g) => {
-                    assert!(g.validate().valid, "invalid output: {g:?}");
+                    if !g.validate().valid {
+                        panic!(
+                            "invalid output: {g:?} from input poly {poly:?} method {method:?}"
+                        );
+                    }
                 }
                 Err(_) => {}
             }

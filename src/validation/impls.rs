@@ -365,16 +365,21 @@ pub(crate) fn segments_collinear_overlap(
 ) -> bool {
     // Fast-FP first: escalate to the exact predicates only when an
     // orientation sits within eps + a relative margin of zero (the fast
-    // error is ~4 ulps of L2; the margin covers it, so the shortcut's
-    // "not collinear" decision is exactly the exact path's). Measured
-    // (2026-08-07): the adjacent-pair loop is the hot cost for valid
-    // lines; fast-first cuts it from ~120 ns to ~5 ns per pair.
-    let la2 = (a2.x - a1.x).powi(2) + (a2.y - a1.y).powi(2);
-    let lb2 = (b2.x - b1.x).powi(2) + (b2.y - b1.y).powi(2);
-    let margin = 32.0 * f64::EPSILON * la2.max(lb2);
-    let f1 = (a2.x - a1.x) * (b1.y - a1.y) - (a2.y - a1.y) * (b1.x - a1.x);
-    let f2 = (a2.x - a1.x) * (b2.y - a1.y) - (a2.y - a1.y) * (b2.x - a1.x);
-    if f1.abs() > eps + margin && f2.abs() > eps + margin {
+    // error is bounded by the product-sum of the orient's own terms, not
+    // the edge lengths - the L2-based margin inflated past nearly-parallel
+    // pairs when one edge was long; measured 2026-08-07, fuzz
+    // invariant_mixed_fp_in_same_ring / fuzz_inprocess_loop).
+    let dx = a2.x - a1.x;
+    let dy = a2.y - a1.y;
+    let f1 = dx * (b1.y - a1.y) - dy * (b1.x - a1.x);
+    let f2 = dx * (b2.y - a1.y) - dy * (b2.x - a1.x);
+    #[inline(always)]
+    fn orient_err(t1: f64, t2: f64) -> f64 {
+        32.0 * f64::EPSILON * (t1.abs() + t2.abs())
+    }
+    let margin1 = orient_err(dx * (b1.y - a1.y), dy * (b1.x - a1.x));
+    let margin2 = orient_err(dx * (b2.y - a1.y), dy * (b2.x - a1.x));
+    if f1.abs() > eps + margin1 && f2.abs() > eps + margin2 {
         return false;
     }
     let o1 = crate::orient::orient2d(a1, a2, b1);

@@ -346,17 +346,39 @@ pub(super) fn make_valid_impl(
     let result = match config.poly_method {
             PolyMethod::Arrange => arrange_chain(poly, config),
             PolyMethod::Structure => {
-                let st = structure_fix(poly, config);
+                let st = structure_fix_owned(poly.clone(), config, None);
                 match st {
-                    Some(g) => {
-                        // Normalize winding BEFORE the validity gate: the fast
-                        // path can pass a wrong-wound (CW) input through and
-                        // CW shells are valid per GEOS but flagged
-                        // WrongOrientation by our validator (measured:
-                        // large valid shell + boundary-touching hole,
-                        // speed_bug_regressions — gating pre-winding sent it
-                        // to arrange, which decomposed the touch into a
-                        // MultiPolygon). The Auto arm already does this.
+                    // Fast path: the gate is a COMPLETE certifier (2026-08-07)
+                    // - winding is the only normalization needed, and the
+                    // exit validator would re-run the same sweep. The
+                    // winding-invariant checks survive re-winding, and the
+                    // re-wound orientation is OGC-correct by construction.
+                    crate::structure::FixOutcome::Fast(g) => {
+                        let g_norm = enforce_ogc_winding(g);
+                        // The gate certifies the winding-invariant checks;
+                        // orientation is the only property the re-wind can
+                        // invalidate (extreme-magnitude rings in the
+                        // exact-orient ~0 zone - fuzz
+                        // invariant_mixed_fp_in_same_ring). O(n) verify,
+                        // no sweep; ambiguous orientation routes to arrange.
+                        if ogc_orientation_ok(&g_norm) {
+                            g_norm
+                        } else {
+                            warn!(
+                                "Structure mode: fast-path orientation ambiguous, retrying with CDT arrange"
+                            );
+                            arrange_chain(poly, config)
+                        }
+                    }
+                    crate::structure::FixOutcome::Repaired(g) => {
+                        // Normalize winding BEFORE the validity gate: the
+                        // fast path can pass a wrong-wound (CW) input
+                        // through and CW shells are valid per GEOS but
+                        // flagged WrongOrientation by our validator
+                        // (measured: large valid shell + boundary-touching
+                        // hole, speed_bug_regressions — gating pre-winding
+                        // sent it to arrange, which decomposed the touch
+                        // into a MultiPolygon).
                         let g_norm = enforce_ogc_winding(g);
                         if is_valid_with_geo(&g_norm) {
                             g_norm
@@ -365,40 +387,63 @@ pub(super) fn make_valid_impl(
                             arrange_chain(poly, config)
                         }
                     }
-                    None => {
+                    crate::structure::FixOutcome::Unconsumed(p) => {
                         warn!("Structure mode: fix failed, retrying with CDT arrange");
-                        arrange_chain(poly, config)
+                        arrange_chain(&p, config)
                     }
                 }
             }
             PolyMethod::Auto => {
-                if let Some(r) = structure_fix(poly, config) {
-                    // The structure path emits GEOS walker winding (CW shells,
-                    // CCW holes - GEOS polygonizer convention). OGC validity
-                    // requires CCW shells; normalize before the gate.
-                    let r_norm = enforce_ogc_winding(r);
-                    #[cfg(all(any(test, debug_assertions), feature = "std"))]
-                    if std::env::var("DIAG_MV").is_ok() {
-                        use geo::Area;
-                        let ra = match &r_norm {
-                            Geometry::Polygon(p) => p.unsigned_area(),
-                            Geometry::MultiPolygon(mp) => mp.0.iter().map(|p| p.unsigned_area()).sum(),
-                            Geometry::GeometryCollection(gc) => gc.0.iter().map(|x| match x {
+                match structure_fix_owned(poly.clone(), config, None) {
+                    // Fast: complete-certifier gate (2026-08-07) - same
+                    // argument as the Structure arm above.
+                    crate::structure::FixOutcome::Fast(g) => {
+                        let g_norm = enforce_ogc_winding(g);
+                        if ogc_orientation_ok(&g_norm) {
+                            g_norm
+                        } else {
+                            warn!(
+                                "Auto mode: fast-path orientation ambiguous, falling back to CDT arrange"
+                            );
+                            arrange_chain(poly, config)
+                        }
+                    }
+                    crate::structure::FixOutcome::Repaired(r) => {
+                        // The structure path emits GEOS walker winding (CW
+                        // shells, CCW holes - GEOS polygonizer convention).
+                        // OGC validity requires CCW shells; normalize before
+                        // the gate.
+                        let r_norm = enforce_ogc_winding(r);
+                        #[cfg(all(any(test, debug_assertions), feature = "std"))]
+                        if std::env::var("DIAG_MV").is_ok() {
+                            use geo::Area;
+                            let ra = match &r_norm {
                                 Geometry::Polygon(p) => p.unsigned_area(),
+                                Geometry::MultiPolygon(mp) => {
+                                    mp.0.iter().map(|p| p.unsigned_area()).sum()
+                                }
+                                Geometry::GeometryCollection(gc) => gc.0.iter().map(|x| match x {
+                                    Geometry::Polygon(p) => p.unsigned_area(),
+                                    _ => 0.0,
+                                }).sum(),
                                 _ => 0.0,
-                            }).sum(),
-                            _ => 0.0,
-                        };
-                        eprintln!("DIAG_MV auto: structure r={ra:.4} valid={}", is_valid_with_geo(&r_norm));
+                            };
+                            eprintln!(
+                                "DIAG_MV auto: structure r={ra:.4} valid={}",
+                                is_valid_with_geo(&r_norm)
+                            );
+                        }
+                        if is_valid_with_geo(&r_norm) {
+                            r_norm
+                        } else {
+                            warn!("Auto mode: structure_fix invalid, falling back to CDT arrange");
+                            arrange_chain(poly, config)
+                        }
                     }
-                    if is_valid_with_geo(&r_norm) { r_norm }
-                    else {
-                        warn!("Auto mode: structure_fix invalid, falling back to CDT arrange");
-                        arrange_chain(poly, config)
+                    crate::structure::FixOutcome::Unconsumed(p) => {
+                        warn!("Auto mode: structure_fix failed, falling back to CDT arrange");
+                        arrange_chain(&p, config)
                     }
-                } else {
-                    warn!("Auto mode: structure_fix failed, falling back to CDT arrange");
-                    arrange_chain(poly, config)
                 }
             }
         };
@@ -439,10 +484,25 @@ pub(super) fn make_valid_impl_owned(
                 match structure_fix_owned(poly, config, ext_scale) {
                     // Fast path: input was verified NaN-free by the caller's scan and
                     // non-degenerate by the gates — winding is the only normalization
-                    // needed, and it cannot introduce NaNs. Skip has_nan/strip.
+                    // needed, and it cannot introduce NaNs. Skip has_nan/strip. The
+                    // gate certifies the winding-invariant checks; verify the re-wound
+                    // orientation O(n) (extreme-magnitude rings can sit in the
+                    // exact-orient ~0 zone, fuzz invariant_mixed_fp_in_same_ring).
                     crate::structure::FixOutcome::Fast(g) => {
                         let g = enforce_ogc_winding(g);
-                        return (g, true);
+                        if ogc_orientation_ok(&g) {
+                            return (g, true);
+                        }
+                        // The Fast geometry IS the input polygon (moved into
+                        // the Geometry) - re-extract it for the arrange
+                        // fallback rather than cloning pre-match.
+                        warn!(
+                            "Structure mode: fast-path orientation ambiguous, retrying with CDT arrange"
+                        );
+                        if let Geometry::Polygon(p) = g {
+                            return (arrange_chain(&p, config), false);
+                        }
+                        return (g, false);
                     }
                     crate::structure::FixOutcome::Repaired(g) => g,
                     crate::structure::FixOutcome::Unconsumed(p) => {
@@ -627,6 +687,27 @@ pub(crate) fn enforce_ogc_winding(g: Geometry<f64>) -> Geometry<f64> {
     }
 }
 
+/// True when every shell is CCW and every hole CW - the validator's
+/// orientation contract. O(n) extremal-vertex check (no sweep). The Fast
+/// path needs it AFTER re-winding: extreme-magnitude rings can sit in the
+/// exact-orient ~0 zone where even the robust predicate's collinear
+/// fallback sign is garbage, so the re-wound form is not guaranteed
+/// OGC-oriented (fuzz invariant_mixed_fp_in_same_ring, 2026-08-07).
+pub(crate) fn ogc_orientation_ok(g: &Geometry<f64>) -> bool {
+    use crate::validation::check_orientation;
+    match g {
+        Geometry::Polygon(p) => {
+            check_orientation(p.exterior().0.as_slice())
+                && p.interiors().iter().all(|h| !check_orientation(&h.0))
+        }
+        Geometry::MultiPolygon(mp) => mp.0.iter().all(|p| {
+            check_orientation(p.exterior().0.as_slice())
+                && p.interiors().iter().all(|h| !check_orientation(&h.0))
+        }),
+        _ => true,
+    }
+}
+
 /// Check if a geometry contains NaN coordinates using CoordsIter.
 #[cfg_attr(not(feature = "proj"), allow(unused_variables))]
 pub(super) fn apply_target_crs(geom: Geometry<f64>, config: &MakeValidConfig) -> Geometry<f64> {
@@ -684,10 +765,6 @@ fn arrange_or_empty(_poly: &Polygon<f64>, _config: &MakeValidConfig) -> Geometry
 }
 
 #[cfg(feature = "structure")]
-pub(super) fn structure_fix(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geometry<f64>> {
-    crate::structure::fix_polygon(poly, config)
-}
-
 /// Owned structure fix: distinguishes the zero-copy fast-path passthrough
 /// (see [`FixOutcome`]) from rebuilt geometry, and returns the polygon
 /// unconsumed when repair produced nothing.
@@ -698,14 +775,6 @@ pub(super) fn structure_fix_owned(
     ext_scale: Option<f64>,
 ) -> crate::structure::FixOutcome {
     crate::structure::fix_polygon_owned(poly, config, ext_scale)
-}
-
-#[cfg(not(feature = "structure"))]
-fn structure_fix(poly: &Polygon<f64>, _config: &MakeValidConfig) -> Option<Geometry<f64>> {
-    if !poly.exterior().0.is_empty() {
-        warn!("PolyMethod::Structure selected but 'structure' feature is not enabled. Enable the 'structure' feature in Cargo.toml to use Structure mode.");
-    }
-    None
 }
 
 /// Check OGC validity using our own GeoValidation (Shewchuk-based).
