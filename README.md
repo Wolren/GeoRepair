@@ -68,12 +68,16 @@ from 3.0-3.2 s to 2.5 s.
 
 Lines carry one deliberate extra cost: the valid-or-empty contract.
 `make_valid` never ships a non-simple line - GEOS passes non-simple lines
-through unchanged - so every valid line pays an O(n) simplicity check
-(revisit hash + sweep). That costs 4-6x on long valid lines (valid ls 500v:
-0.76 -> 4.6 µs) and is the price of the contract, not a scaling defect. The
-check's first implementation was 30-35x (an rstar bulk_load that costs ~1
-µs/item); replaced by the sweep on 2026-08-07. Full stage breakdown:
-`docs/BENCHMARKS.md`.
+through unchanged (verified against GeometryFixer.cpp: it strips repeated
+points and clones; its `makeValid` is a no-op for line noding) - so every
+valid line pays an O(n) simplicity check (revisit hash + adjacent
+collinear scan + sweep). The GEOS reference for the invalid-line rows is
+therefore `UnaryUnion` (the operation GEOS users actually call to fix
+linework), not `makeValid`. The check's first implementation was 30-35x
+GEOS isSimple (an rstar bulk_load that costs ~1 µs/item); the sweep cut
+that to ~7x, and the 2026-08-07 pass (single-orient adjacent fast path,
+x-sorted-input radix skip, flat-capacity revisit hash) cut it to ~3x
+(valid ls 500v: 4.3 -> 1.6 µs). Full stage breakdown: `docs/BENCHMARKS.md`.
 
 ### Synthetic benchmarks
 
@@ -96,7 +100,12 @@ the bowtie and spaghetti rows:
 | dense grid 20x20=400 | 564 | 114120 | 202x |
 | hole hier 50h | 37.1 | 33.3 | 0.90x |
 | valid polygon 5000v | 63.6 | 8.99 | 0.14x |
-| valid ls 500v | 4.08 | 0.65 | 0.16x |
+| valid ls 500v | 1.60 | 0.54 | 0.34x |
+| lissajous 5000v | 568 | 4931 | 8.7x |
+| collinear ov 500seg | 59 | 550 | 9.3x |
+| star-comb 500sp | 130 | 703 | 5.4x |
+| star-burst 500sp | 7.3 | 37396 | 5100x |
+| spoke 500sp | 9.6 | 38065 | 4000x |
 | mls 50x3v | 3.09 | 2.82 | 0.91x |
 
 Pattern: GeoRepair wins on invalid repair and MultiPolygon unification

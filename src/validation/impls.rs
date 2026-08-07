@@ -143,14 +143,22 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
 
     // Adjacent pairs (share a vertex): allowed to touch only at the shared
     // vertex - collinear overlap beyond it (out-and-back) is non-simple.
+    // The shared vertex makes the first orientation identically zero, so
+    // the generic collinear gate always escalates to the robust predicate
+    // on clean data; test the single non-trivial orient with the same
+    // eps + adaptive-margin reject first.
     for i in 0..n - 1 {
-        if segments_collinear_overlap(
-            coords[i],
-            coords[i + 1],
-            coords[i + 1],
-            coords[i + 2],
-            eps,
-        ) {
+        let a1 = coords[i];
+        let a2 = coords[i + 1];
+        let c2 = coords[i + 2];
+        let dx = a2.x - a1.x;
+        let dy = a2.y - a1.y;
+        let f = dx * (c2.y - a1.y) - dy * (c2.x - a1.x);
+        let margin = 32.0 * f64::EPSILON * ((dx * (c2.y - a1.y)).abs() + (dy * (c2.x - a1.x)).abs());
+        if f.abs() > eps + margin {
+            continue;
+        }
+        if segments_collinear_overlap(a1, a2, a2, c2, eps) {
             return true;
         }
     }
@@ -215,12 +223,16 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
         return false;
     }
 
-    // Vertex revisits, O(n) hash pass (the sweep below cannot see shared
-    // vertices - check_edge_pair_intersection excludes endpoint equality,
-    // which is correct for rings but not for open chains).
+    // Vertex revisits, O(n) hash pass. The sweep's pair predicates exclude
+    // endpoint equality (correct for rings, where shared vertices are the
+    // normal adjacency), so shared vertices must be caught here. An
+    // in-sweep equality check was tried and rejected (2026-08-07): the
+    // star-comb's ~120k bbox-overlapping pairs each paid 8 compares - the
+    // flat O(n) hash is strictly cheaper on dense-overlap inputs.
     {
         use rustc_hash::FxHashMap;
-        let mut seen: FxHashMap<u64, u32> = FxHashMap::default();
+        let mut seen: FxHashMap<u64, u32> =
+            FxHashMap::with_capacity_and_hasher(n, Default::default());
         let key = |c: Coord<f64>| c.x.to_bits() ^ c.y.to_bits().rotate_left(32);
         for (k, c) in coords.iter().enumerate() {
             let kk = k as u32;
