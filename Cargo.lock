@@ -485,6 +485,7 @@ dependencies = [
  "log",
  "memmap2",
  "mimalloc",
+ "num-traits",
  "proptest",
  "pyo3",
  "quick-xml",

@@ -328,7 +328,7 @@ fn segments_intersect_any(
 
 /// True if both segments are collinear and overlap over a positive-length
 /// interval (endpoint-only touching is NOT an overlap).
-fn segments_collinear_overlap(
+pub(crate) fn segments_collinear_overlap(
     a1: Coord<f64>,
     a2: Coord<f64>,
     b1: Coord<f64>,

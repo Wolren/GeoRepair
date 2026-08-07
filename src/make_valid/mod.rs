@@ -23,6 +23,10 @@ use crate::core::MakeValidConfig;
 #[cfg(any(feature = "arrange", feature = "structure"))]
 use crate::core::PolyMethod;
 use crate::noding::{remove_consecutive_duplicates, NodingFloat};
+use crate::validation::edges::{edges_intersect_general, edges_vertex_on_edge};
+use crate::validation::impls::{
+    check_line_components_intersect, check_linestring_self_intersection, segments_collinear_overlap,
+};
 use crate::validation::{GeoValidation, ValidationResult};
 use log::warn;
 
@@ -194,8 +198,146 @@ impl<T: NodingFloat> MakeValid for LineString<T> {
         if deduped.len() == 1 {
             return Geometry::Point(Point(deduped[0]));
         }
+        if deduped.len() >= 3 {
+            // Validity contract: the output must be simple. The old path
+            // passed any non-simple line through unchanged (GEOS MakeValid
+            // does the same for lines, but our repair contract is
+            // valid-or-empty - the fuzz smoke caught a denormal-scale
+            // self-overlapping LINESTRING shipped as NotSimple). Check with
+            // the validator's own predicate, then repair by dropping the
+            // conflicting segments (f64 space is lossless for f32 too).
+            let fd: Vec<Coord<f64>> = deduped
+                .iter()
+                .map(|c| Coord {
+                    x: c.x.to_f64().unwrap_or(f64::NAN),
+                    y: c.y.to_f64().unwrap_or(f64::NAN),
+                })
+                .collect();
+            if check_linestring_self_intersection(&fd) {
+                let runs = simple_subline(&fd);
+                let out: Vec<LineString<T>> = runs
+                    .into_iter()
+                    .map(|r| {
+                        LineString::new(
+                            r.into_iter()
+                                .map(|c| Coord {
+                                    x: <T as num_traits::NumCast>::from(c.x)
+                                        .expect("f64 coord converts back to T"),
+                                    y: <T as num_traits::NumCast>::from(c.y)
+                                        .expect("f64 coord converts back to T"),
+                                })
+                                .collect(),
+                        )
+                    })
+                    .collect();
+                return match out.len() {
+                    0 => empty_geom(),
+                    1 => Geometry::LineString(out.into_iter().next().expect("len==1 verified")),
+                    _ => Geometry::MultiLineString(MultiLineString::new(out)),
+                };
+            }
+        }
         Geometry::LineString(LineString::new(deduped))
     }
+}
+
+/// Greedy simplification of a non-simple line: walk the segments, keep a
+/// segment unless it conflicts with an already-kept segment, using the same
+/// pairwise tests as [`check_linestring_self_intersection`] (adjacent
+/// segments may touch only at their shared vertex; collinear overlap beyond
+/// it is a conflict; non-adjacent segments conflict on any intersection,
+/// including vertex revisits). Returns the maximal kept runs as coordinate
+/// chains; the result is simple by construction.
+fn simple_subline(coords: &[Coord<f64>]) -> Vec<Vec<Coord<f64>>> {
+    let n = coords.len() - 1;
+    if n < 2 {
+        return vec![coords.to_vec()];
+    }
+    let closed = coords[0] == coords[n];
+    let scale = {
+        let mut min_x = f64::MAX;
+        let mut max_x = f64::MIN;
+        let mut min_y = f64::MAX;
+        let mut max_y = f64::MIN;
+        for c in coords {
+            min_x = min_x.min(c.x);
+            max_x = max_x.max(c.x);
+            min_y = min_y.min(c.y);
+            max_y = max_y.max(c.y);
+        }
+        (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0)
+    };
+    let eps = 1e-12 * scale;
+    // Bbox prefilter: cheap reject before the robust predicates (the
+    // repair path only runs on non-simple lines; keep it O(1) per pair in
+    // the common non-overlapping case).
+    let bboxes: Vec<(f64, f64, f64, f64)> = (0..n)
+        .map(|i| {
+            let a = coords[i];
+            let b = coords[i + 1];
+            (a.x.min(b.x), a.x.max(b.x), a.y.min(b.y), a.y.max(b.y))
+        })
+        .collect();
+    let mut kept: Vec<usize> = Vec::new();
+    'seg: for j in 0..n {
+        let (bx0, bx1, by0, by1) = bboxes[j];
+        for &i in &kept {
+            let (ax0, ax1, ay0, ay1) = bboxes[i];
+            if ax1 < bx0 || bx1 < ax0 || ay1 < by0 || by1 < ay0 {
+                continue; // disjoint bboxes: no intersection possible
+            }
+            let adjacent = (i as isize - j as isize).abs() == 1
+                || (closed && ((i == 0 && j == n - 1) || (i == n - 1 && j == 0)));
+            if adjacent {
+                if segments_collinear_overlap(
+                    coords[i],
+                    coords[i + 1],
+                    coords[j],
+                    coords[j + 1],
+                    eps,
+                ) {
+                    continue 'seg;
+                }
+            } else {
+                let shared = coords[i] == coords[j]
+                    || coords[i] == coords[j + 1]
+                    || coords[i + 1] == coords[j]
+                    || coords[i + 1] == coords[j + 1];
+                if shared
+                    || edges_intersect_general(
+                        coords[i],
+                        coords[i + 1],
+                        coords[j],
+                        coords[j + 1],
+                        eps,
+                    )
+                    || edges_vertex_on_edge(coords[i], coords[i + 1], coords[j], coords[j + 1])
+                {
+                    continue 'seg;
+                }
+            }
+        }
+        kept.push(j);
+    }
+    // Group consecutive kept segment indices into coordinate runs.
+    let mut runs: Vec<Vec<Coord<f64>>> = Vec::new();
+    let mut run: Vec<Coord<f64>> = Vec::new();
+    for (idx, &s) in kept.iter().enumerate() {
+        if idx == 0 {
+            run.push(coords[s]);
+            run.push(coords[s + 1]);
+        } else if s == kept[idx - 1] + 1 {
+            run.push(coords[s + 1]);
+        } else {
+            runs.push(core::mem::take(&mut run));
+            run.push(coords[s]);
+            run.push(coords[s + 1]);
+        }
+    }
+    if !run.is_empty() {
+        runs.push(run);
+    }
+    runs
 }
 
 // ---------------------------------------------------------------------------
@@ -214,6 +356,50 @@ impl<T: NodingFloat> MakeValid for MultiLineString<T> {
                 Geometry::LineString(l) => lines.push(l),
                 Geometry::MultiLineString(mls) => lines.extend(mls.0),
                 _ => {}
+            }
+        }
+        // Validity contract: components must not intersect each other
+        // except at boundary points (mirror of the validator's
+        // check_line_components_intersect rule). Greedy keep: drop a
+        // component that conflicts with an already-kept one.
+        if lines.len() > 1 {
+            let fd: Vec<Vec<Coord<f64>>> = lines
+                .iter()
+                .map(|ls| {
+                    ls.0.iter()
+                        .map(|c| Coord {
+                            x: c.x.to_f64().unwrap_or(f64::NAN),
+                            y: c.y.to_f64().unwrap_or(f64::NAN),
+                        })
+                        .collect()
+                })
+                .collect();
+            let (mut gmin_x, mut gmax_x, mut gmin_y, mut gmax_y) =
+                (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+            for ls in &fd {
+                for c in ls {
+                    gmin_x = gmin_x.min(c.x);
+                    gmax_x = gmax_x.max(c.x);
+                    gmin_y = gmin_y.min(c.y);
+                    gmax_y = gmax_y.max(c.y);
+                }
+            }
+            let scale = (gmax_x - gmin_x)
+                .abs()
+                .max((gmax_y - gmin_y).abs())
+                .max(1.0);
+            let eps = 1e-12 * scale;
+            let mut kept: Vec<usize> = Vec::new();
+            for j in 0..fd.len() {
+                let conflict = kept
+                    .iter()
+                    .any(|&i| check_line_components_intersect(&fd[i], &fd[j], eps));
+                if !conflict {
+                    kept.push(j);
+                }
+            }
+            if kept.len() != fd.len() {
+                lines = kept.into_iter().map(|i| lines[i].clone()).collect();
             }
         }
         match (points.len(), lines.len()) {
