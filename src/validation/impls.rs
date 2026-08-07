@@ -306,7 +306,7 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
 /// sharing an endpoint is a vertex revisit (non-simple); between MultiLine-
 /// String components, endpoint-to-endpoint touching is allowed (OGC Simple
 /// Features, verified vs geosop).
-fn segments_intersect_any(
+pub(crate) fn segments_intersect_any(
     a1: Coord<f64>,
     a2: Coord<f64>,
     b1: Coord<f64>,
