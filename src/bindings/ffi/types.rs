@@ -39,7 +39,7 @@ pub enum GeoRepairErrorCode {
 ///
 /// # Safety
 ///
-/// The caller must call [`geo_repair_free_result`] to release the
+/// The caller must call [`super::geo_repair_free_result`] to release the
 /// allocated memory when the result is no longer needed.
 #[repr(C)]
 #[derive(Debug)]
@@ -176,7 +176,7 @@ pub struct GeoRepairWkbBuffer {
 ///
 /// # Safety
 ///
-/// The caller must call [`geo_repair_free_batch_result`] when the result
+/// The caller must call [`super::geo_repair_free_batch_result`] when the result
 /// is no longer needed.
 #[repr(C)]
 #[derive(Debug)]
