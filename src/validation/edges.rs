@@ -247,7 +247,7 @@ pub(crate) fn edges_vertex_on_edge(
 /// 1.8e13 ≈ 18) made the strict-interior test vacuous and GEOS flagged
 /// Ring Self-intersection[1e-08 -1e-08] that we accepted (differential
 /// fuzz 2026-08-03).
-fn point_strictly_on_segment(p: Coord<f64>, a: Coord<f64>, b: Coord<f64>) -> bool {
+pub(crate) fn point_strictly_on_segment(p: Coord<f64>, a: Coord<f64>, b: Coord<f64>) -> bool {
     if p == a || p == b {
         return false;
     }

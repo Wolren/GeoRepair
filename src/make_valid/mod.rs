@@ -214,7 +214,17 @@ impl<T: NodingFloat> MakeValid for LineString<T> {
                 })
                 .collect();
             if check_linestring_self_intersection(&fd) {
-                let runs = simple_subline(&fd);
+                // Noding repair first: split at every self-intersection
+                // instead of dropping segments (preserves the full
+                // traversal; the lean noder is also an order of magnitude
+                // faster than the greedy filter on dense crossings). The
+                // noder validates its own output and returns None when it
+                // cannot guarantee a valid result - the greedy filter is
+                // the fallback.
+                let runs = match crate::noding::line::node_line(&fd) {
+                    Some(runs) => runs,
+                    None => simple_subline(&fd),
+                };
                 let out: Vec<LineString<T>> = runs
                     .into_iter()
                     .map(|r| {

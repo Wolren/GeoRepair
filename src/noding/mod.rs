@@ -7,6 +7,7 @@
 
 use alloc::vec::Vec;
 pub(crate) mod intersection;
+pub(crate) mod line;
 pub(crate) mod snap_round;
 pub(crate) mod sweep_line;
 pub(crate) mod validator;

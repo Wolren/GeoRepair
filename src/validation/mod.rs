@@ -98,7 +98,7 @@ mod result;
 /// Ring validity: closure, self-intersection, orientation, points, duplicates.
 mod ring;
 /// Sweep-line machinery for ring self-intersection.
-mod sweep;
+pub(crate) mod sweep;
 /// Core validation types, traits, and per-geometry implementations (facade).
 mod core;
 /// Adapter exposing geo_repair's validator through geo's `Validation` trait.
