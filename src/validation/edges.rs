@@ -172,6 +172,82 @@ pub(crate) fn edges_intersect_general(
     false
 }
 
+/// Lean pair intersection, decision-equivalent to
+/// `edges_intersect_general || edges_vertex_on_edge`, skipping the
+/// vertex-on-edge chain for fast-FP-strong pairs.
+///
+/// The fast-FP head decides properly when every fast orient sits beyond the
+/// larger of its adaptive margin and the vertex-on-edge gate (`1e-12` x the
+/// TESTED segment's len2), plus the margin again for the error bound. The
+/// VOE gate is ~140x the margin at equal edge lengths, so an endpoint
+/// within VOE range of another segment's line can sit far outside the
+/// fast-FP ambiguity zone (measured 2026-08-07: VOE flagged pairs whose
+/// fast orients were ~70x beyond the margin) - the strong test MUST cover
+/// both bounds or the lean path misses vertex-on-edge.
+///
+/// Pairs outside the strong zone set `ambiguous = true` and fall through
+/// to the exact predicates (same cost as the old chain). Callers that need
+/// the line-path vertex-revisit class run their equality checks only when
+/// `ambiguous` is set - every revisit pair has an orient exactly zero, so
+/// it always escalates (the star-comb's ~120k dense bbox pairs are all
+/// strong and never pay the compares; measured 2026-08-07).
+#[inline]
+pub(crate) fn lean_pair_intersects(
+    a1: Coord<f64>,
+    a2: Coord<f64>,
+    b1: Coord<f64>,
+    b2: Coord<f64>,
+    eps: f64,
+    ambiguous: &mut bool,
+) -> bool {
+    *ambiguous = false;
+    // Bbox prefilter (identical to edges_intersect_general's - padded by
+    // eps for the same sliver class).
+    {
+        let (lo_x, hi_x) = if a1.x < a2.x { (a1.x, a2.x) } else { (a2.x, a1.x) };
+        let (lo_y, hi_y) = if a1.y < a2.y { (a1.y, a2.y) } else { (a2.y, a1.y) };
+        let (lo_x2, hi_x2) = if b1.x < b2.x { (b1.x, b2.x) } else { (b2.x, b1.x) };
+        let (lo_y2, hi_y2) = if b1.y < b2.y { (b1.y, b2.y) } else { (b2.y, b1.y) };
+        if hi_x < lo_x2 - eps
+            || lo_x > hi_x2 + eps
+            || hi_y < lo_y2 - eps
+            || lo_y > hi_y2 + eps
+        {
+            return false;
+        }
+    }
+    let dx_a = a2.x - a1.x;
+    let dy_a = a2.y - a1.y;
+    let dx_b = b2.x - b1.x;
+    let dy_b = b2.y - b1.y;
+    let f1 = dx_a * (b1.y - a1.y) - dy_a * (b1.x - a1.x);
+    let f2 = dx_a * (b2.y - a1.y) - dy_a * (b2.x - a1.x);
+    let f3 = dx_b * (a1.y - b1.y) - dy_b * (a1.x - b1.x);
+    let f4 = dx_b * (a2.y - b1.y) - dy_b * (a2.x - b1.x);
+    #[inline(always)]
+    fn orient_err(t1: f64, t2: f64) -> f64 {
+        32.0 * f64::EPSILON * (t1.abs() + t2.abs())
+    }
+    let e1 = orient_err(dx_a * (b1.y - a1.y), dy_a * (b1.x - a1.x));
+    let e2 = orient_err(dx_a * (b2.y - a1.y), dy_a * (b2.x - a1.x));
+    let e3 = orient_err(dx_b * (a1.y - b1.y), dy_b * (a1.x - b1.x));
+    let e4 = orient_err(dx_b * (a2.y - b1.y), dy_b * (a2.x - b1.x));
+    // Vertex-on-edge gates: |orient| <= 1e-12 * (tested segment len2).
+    let voe_a = 1e-12 * (dx_a * dx_a + dy_a * dy_a);
+    let voe_b = 1e-12 * (dx_b * dx_b + dy_b * dy_b);
+    if f1.abs() > e1.max(voe_a) + e1
+        && f2.abs() > e2.max(voe_a) + e2
+        && f3.abs() > e3.max(voe_b) + e3
+        && f4.abs() > e4.max(voe_b) + e4
+    {
+        // Zero-safe strict opposite sign (matches the exact path).
+        return (f1 > 0.0 && f2 < 0.0 || f1 < 0.0 && f2 > 0.0)
+            && (f3 > 0.0 && f4 < 0.0 || f3 < 0.0 && f4 > 0.0);
+    }
+    *ambiguous = true;
+    edges_intersect_general(a1, a2, b1, b2, eps) || edges_vertex_on_edge(a1, a2, b1, b2)
+}
+
 pub(crate) fn check_edge_pair_intersection(
     coords: &[Coord<f64>],
     i: usize,
@@ -188,16 +264,49 @@ pub(crate) fn check_edge_pair_intersection(
     let a2 = coords[(i + 1).min(n)];
     let b1 = coords[j];
     let b2 = coords[(j + 1).min(n)];
-    if edges_intersect_general(a1, a2, b1, b2, eps) {
-        return true;
-    }
-    // Ring self-touch at a vertex lying on a non-adjacent edge (T-junction):
-    // proper-crossing and collinear-overlap miss it, GEOS IsValidOp rejects
-    // it (Test 22: closing vertex (110 140) on edge (60 90)-(160 190)).
-    // Same-ring pairs only - this function is only called from
-    // check_ring_validity. Cross-ring T-junctions (hole vertex on shell
-    // edge) are VALID OGC touches and must never be flagged.
-    edges_vertex_on_edge(a1, a2, b1, b2)
+    // Ring path: the lean predicate. No vertex-revisit class here - shared
+    // vertices between non-adjacent ring edges are the pinch class, owned
+    // by the caller's classification (check_ring_validity), and must not
+    // short-circuit the pair test. The T-junction class (vertex strictly on
+    // a non-adjacent edge, GEOS Test 22) escalates through the lean's
+    // vertex-on-edge gate.
+    let mut ambiguous = false;
+    lean_pair_intersects(a1, a2, b1, b2, eps, &mut ambiguous)
+}
+
+/// Lean vertex-on-edge prefilter: true only when some endpoint's fast
+/// orient sits within the VOE threshold of the tested segment
+/// (`1e-12 * len2` + the orient error bound). Decision-equivalent to
+/// `edges_vertex_on_edge` - a pair with every orient beyond the bound
+/// cannot have a vertex on the other segment. The structure gate's pair
+/// sweep pays 4 crosses + 4 compares instead of the full
+/// point_strictly_on_segment chain per same-ring pair (measured
+/// 2026-08-07: the chain is ~40-80 ns/pair on clean data).
+#[inline]
+pub(crate) fn lean_voe_possible(
+    a1: Coord<f64>,
+    a2: Coord<f64>,
+    b1: Coord<f64>,
+    b2: Coord<f64>,
+) -> bool {
+    let dx_a = a2.x - a1.x;
+    let dy_a = a2.y - a1.y;
+    let dx_b = b2.x - b1.x;
+    let dy_b = b2.y - b1.y;
+    let f1 = dx_a * (b1.y - a1.y) - dy_a * (b1.x - a1.x);
+    let f2 = dx_a * (b2.y - a1.y) - dy_a * (b2.x - a1.x);
+    let f3 = dx_b * (a1.y - b1.y) - dy_b * (a1.x - b1.x);
+    let f4 = dx_b * (a2.y - b1.y) - dy_b * (a2.x - b1.x);
+    let voe_a = 1e-12 * (dx_a * dx_a + dy_a * dy_a);
+    let voe_b = 1e-12 * (dx_b * dx_b + dy_b * dy_b);
+    let e1 = 32.0 * f64::EPSILON * ((dx_a * (b1.y - a1.y)).abs() + (dy_a * (b1.x - a1.x)).abs());
+    let e2 = 32.0 * f64::EPSILON * ((dx_a * (b2.y - a1.y)).abs() + (dy_a * (b2.x - a1.x)).abs());
+    let e3 = 32.0 * f64::EPSILON * ((dx_b * (a1.y - b1.y)).abs() + (dy_b * (a1.x - b1.x)).abs());
+    let e4 = 32.0 * f64::EPSILON * ((dx_b * (a2.y - b1.y)).abs() + (dy_b * (a2.x - b1.x)).abs());
+    f1.abs() <= voe_a + e1
+        || f2.abs() <= voe_a + e2
+        || f3.abs() <= voe_b + e3
+        || f4.abs() <= voe_b + e4
 }
 
 /// Strict-interior vertex-on-edge touch between two segments: an endpoint

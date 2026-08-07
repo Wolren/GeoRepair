@@ -188,29 +188,26 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
         if closed && i == 0 && j == n - 1 {
             return false; // closure pair handled above
         }
-        // Vertex revisit: non-adjacent segments sharing an endpoint are
-        // non-simple ("interior intersection at vertices", GEOS TestSimple
-        // LINESTRING (20 80, 80 20, 80 80, 140 60, 80 20, 160 20)).
-        // edges_vertex_on_edge excludes endpoint equality (correct for
-        // rings, where shared vertices are the normal adjacency), so the
-        // line path must flag revisits explicitly.
-        if coords[i] == coords[j]
-            || coords[i] == coords[j + 1]
-            || coords[i + 1] == coords[j]
-            || coords[i + 1] == coords[j + 1]
-        {
+        let a1 = coords[i];
+        let a2 = coords[i + 1];
+        let b1 = coords[j];
+        let b2 = coords[j + 1];
+        let mut ambiguous = false;
+        if crate::validation::edges::lean_pair_intersects(a1, a2, b1, b2, eps, &mut ambiguous) {
             return true;
         }
-        if edges_intersect_general(
-            coords[i],
-            coords[i + 1],
-            coords[j],
-            coords[j + 1],
-            eps,
-        ) {
-            return true;
+        if ambiguous {
+            // Vertex revisit: non-adjacent segments sharing an endpoint are
+            // non-simple ("interior intersection at vertices", GEOS
+            // TestSimple LINESTRING (20 80, 80 20, 80 80, 140 60, 80 20,
+            // 160 20)). A shared endpoint makes two fast orients exactly
+            // zero, so every revisit pair escalates - the compares run only
+            // on escalated pairs (the sweep path does the same).
+            if a1 == b1 || a1 == b2 || a2 == b1 || a2 == b2 {
+                return true;
+            }
         }
-        edges_vertex_on_edge(coords[i], coords[i + 1], coords[j], coords[j + 1])
+        false
     };
     if n <= 32 {
         for i in 0..n {
@@ -223,33 +220,14 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
         return false;
     }
 
-    // Vertex revisits, O(n) hash pass. The sweep's pair predicates exclude
-    // endpoint equality (correct for rings, where shared vertices are the
-    // normal adjacency), so shared vertices must be caught here. An
-    // in-sweep equality check was tried and rejected (2026-08-07): the
-    // star-comb's ~120k bbox-overlapping pairs each paid 8 compares - the
-    // flat O(n) hash is strictly cheaper on dense-overlap inputs.
-    {
-        use rustc_hash::FxHashMap;
-        let mut seen: FxHashMap<u64, u32> =
-            FxHashMap::with_capacity_and_hasher(n, Default::default());
-        let key = |c: Coord<f64>| c.x.to_bits() ^ c.y.to_bits().rotate_left(32);
-        for (k, c) in coords.iter().enumerate() {
-            let kk = k as u32;
-            let keyv = key(*c);
-            match seen.get(&keyv) {
-                Some(&p) => {
-                    let pp = p as usize;
-                    if !(closed && pp == 0 && k == n) && pp.abs_diff(k) > 1 {
-                        return true; // revisit: same vertex, non-adjacent positions
-                    }
-                }
-                None => {
-                    seen.insert(keyv, kk);
-                }
-            }
-        }
-    }
+    // Vertex revisits: detected inside the sweep's pair test on
+    // lean-escalated pairs (check_revisit = true). A revisit pair shares an
+    // endpoint, which makes two fast orients exactly zero - it always
+    // escalates past the lean fast-FP head and pays the equality compares
+    // there. The former flat O(n) hash pass cost 5-9 us on every 500-vertex
+    // line (2026-08-07); escalated-only compares cost ~nothing on clean
+    // data. The dense fallbacks below keep their own revisit checks (the
+    // sweep may route to them when the x-overlap active set explodes).
 
     // Radix-sort sweep with the ring path's exact predicates. The rstar
     // tree is NOT the primary path: bulk_load costs ~1 us/item (measured
@@ -257,7 +235,7 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
     // sweep is the proven fast path (50 ms on 600k-vertex giants). Dense
     // x-overlap falls back to the tree (rstar) or the naive pair loop
     // (non-rstar) - same predicates, routing only.
-    match crate::validation::sweep::sweep_ring_self_intersects(coords, eps) {
+    match crate::validation::sweep::sweep_ring_self_intersects(coords, eps, true) {
         Some(true) => true,
         Some(false) => false,
         None => {

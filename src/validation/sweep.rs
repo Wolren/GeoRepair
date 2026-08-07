@@ -148,8 +148,21 @@ const SWEEP_DENSE_ACTIVE_LIMIT: usize = 256;
 /// Self-intersection sweep. Returns Some(true) on intersection, Some(false)
 /// when clean, None when the ring's x-overlap density exceeds the routing
 /// limit (caller falls back to the indexed / brute path).
-pub(crate) fn sweep_ring_self_intersects(ring: &[Coord<f64>], eps: f64) -> Option<bool> {
+///
+/// `check_revisit`: the LINE path's vertex-revisit class (a non-adjacent
+/// pair sharing an endpoint is non-simple). The equality compares run ONLY
+/// on lean-escalated pairs - every revisit pair has an orient exactly zero,
+/// so it always escalates, and fast-FP-strong dense pairs never pay the
+/// compares (the star-comb's ~120k bbox-overlapping pairs measured clean;
+/// 2026-08-07). The ring path passes false - shared vertices there are the
+/// pinch class, classified by check_ring_validity.
+pub(crate) fn sweep_ring_self_intersects(
+    ring: &[Coord<f64>],
+    eps: f64,
+    check_revisit: bool,
+) -> Option<bool> {
     let n = ring.len() - 1;
+    let closed = ring[0] == ring[n];
     with_scratch(|s| {
         let SweepScratch {
             keys,
@@ -217,7 +230,21 @@ pub(crate) fn sweep_ring_self_intersects(ring: &[Coord<f64>], eps: f64) -> Optio
                 if r_i.abs_diff(r_j) <= 1 {
                     continue;
                 }
-                if check_edge_pair_intersection(ring, r_i, r_j, eps) {
+                let a1 = ring[r_i];
+                let a2 = ring[(r_i + 1).min(n)];
+                let b1 = ring[r_j];
+                let b2 = ring[(r_j + 1).min(n)];
+                let mut ambiguous = false;
+                if crate::validation::edges::lean_pair_intersects(
+                    a1, a2, b1, b2, eps, &mut ambiguous,
+                ) {
+                    return Some(true);
+                }
+                if ambiguous
+                    && check_revisit
+                    && !(closed && (r_i == 0 && r_j == n - 1 || r_i == n - 1 && r_j == 0))
+                    && (a1 == b1 || a1 == b2 || a2 == b1 || a2 == b2)
+                {
                     return Some(true);
                 }
             }
