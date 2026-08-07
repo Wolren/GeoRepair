@@ -9,7 +9,11 @@ name: release
 # PyPI auth: prefers the PYPI_TOKEN secret; when it is unset, falls back
 # to trusted publishing (OIDC) - create the geo-repair project on PyPI
 # and grant "GitHub Actions" publisher for repo Wolren/GeoRepair,
-# workflow "release.yml".
+# workflow "release.yml". The publish-pypi job is gated on the repo
+# variable PYPI_PUBLISH == "true": without it the wheels/sdist are built
+# and tested but NOT uploaded, so a tag push never fails on a missing
+# PyPI project. Enable later: gh variable set PYPI_PUBLISH -b true (and
+# configure the publisher/token), then push a new tag.
 on:
   push:
     tags: ["v*"]
@@ -78,6 +82,7 @@ jobs:
   publish-pypi:
     name: publish to PyPI
     needs: [python-wheels, python-sdist]
+    if: vars.PYPI_PUBLISH == 'true'
     runs-on: ubuntu-latest
     environment: release
     permissions:
