@@ -135,6 +135,60 @@ fn make_bowtie() -> Polygon<f64> {
     )
 }
 
+/// Bowtie at `n` vertices: the 4v bowtie's four edges, each subdivided
+/// into n/4 collinear segments. Same single proper crossing at the
+/// diagonal midpoints, but the shell carries n vertices - the repair
+/// must strip the collinear runs and node the crossing at scale.
+fn make_bowtie_n(n: usize) -> Polygon<f64> {
+    let k = (n / 4).max(1);
+    let edges: [(f64, f64); 4] = [(0.0, 0.0), (10.0, 10.0), (10.0, 0.0), (0.0, 10.0)];
+    let mut coords = Vec::with_capacity(n + 1);
+    for e in 0..4 {
+        let (ax, ay) = edges[e];
+        let (bx, by) = edges[(e + 1) % 4];
+        for i in 0..k {
+            let t = i as f64 / k as f64;
+            coords.push(Coord {
+                x: ax + (bx - ax) * t,
+                y: ay + (by - ay) * t,
+            });
+        }
+    }
+    coords.push(coords[0]);
+    Polygon::new(LineString::new(coords), Vec::new())
+}
+
+/// Deterministic "spaghetti" ring: a torus-wrapped random walk that
+/// crosses itself many times. LCG-seeded, no external rand dependency.
+/// Invalid by construction (multiple proper crossings).
+fn make_spaghetti_ring(n: usize) -> Polygon<f64> {
+    let span = (n as f64).sqrt().ceil() as i64;
+    let mut x = 0i64;
+    let mut y = 0i64;
+    let mut seed = 0x9E3779B97F4A7C15u64;
+    let mut next = move || {
+        seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        (seed >> 33) as u32
+    };
+    let mut coords = Vec::with_capacity(n + 1);
+    coords.push(Coord { x: x as f64, y: y as f64 });
+    for _ in 1..n {
+        match next() % 4 {
+            0 => x += 1,
+            1 => x -= 1,
+            2 => y += 1,
+            _ => y -= 1,
+        }
+        x = x.rem_euclid(span);
+        y = y.rem_euclid(span);
+        coords.push(Coord { x: x as f64, y: y as f64 });
+    }
+    coords.push(coords[0]);
+    Polygon::new(LineString::new(coords), Vec::new())
+}
+
 fn run_ser(polys: &[Polygon<f64>], cfg: &MakeValidConfig) -> f64 {
     let t0 = Instant::now();
     for p in polys {
@@ -513,6 +567,9 @@ fn make_sliver_polygon(segments: usize, gap: f64) -> Polygon<f64> {
 }
 
 fn bench_line(label: &str, g: &Geometry<f64>, batch: usize, cfg: &MakeValidConfig) {
+    if !gate_filtered(label) {
+        return;
+    }
     let items: Vec<Geometry<f64>> = (0..batch).map(|_| g.clone()).collect();
     let par = run_line_par(&items, cfg);
     #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
@@ -526,20 +583,59 @@ fn bench_line(label: &str, g: &Geometry<f64>, batch: usize, cfg: &MakeValidConfi
             par * 1_000_000.0 / batch as f64,
             geos * 1_000_000.0 / batch as f64,
         );
+        gate_emit(
+            label,
+            None,
+            par * 1_000_000.0 / batch as f64,
+            Some(geos * 1_000_000.0 / batch as f64),
+        );
     }
     #[cfg(not(any(feature = "bench-geos", feature = "bench-geos-system")))]
     {
         let ser = run_line_ser(&items, cfg);
-        eprintln!(
-            "  {:<20} {:>10.3} {:>10.3} µs",
-            label,
-            ser * 1_000_000.0 / batch as f64,
-            par * 1_000_000.0 / batch as f64,
+        let ser_us = ser * 1_000_000.0 / batch as f64;
+        let par_us = par * 1_000_000.0 / batch as f64;
+        eprintln!("  {:<20} {:>10.3} {:>10.3} µs", label, ser_us, par_us);
+        gate_emit(label, Some(ser_us), par_us, None);
+    }
+}
+
+/// CI bench-gate support: BENCH_SUBSET (comma-separated label prefixes,
+/// empty = all) keeps the gate run short; BENCH_JSON (path) appends one
+/// JSON row per measured case so scripts/bench_gate.py can compare against
+/// a committed baseline.
+fn gate_filtered(label: &str) -> bool {
+    match std::env::var("BENCH_SUBSET") {
+        Ok(sub) => sub
+            .split(',')
+            .map(str::trim)
+            .any(|p| !p.is_empty() && label.starts_with(p)),
+        Err(_) => true,
+    }
+}
+
+fn gate_emit(label: &str, ser_us: Option<f64>, par_us: f64, geos_us: Option<f64>) {
+    if let Ok(path) = std::env::var("BENCH_JSON") {
+        let ser = ser_us
+            .map(|v| format!("{v}"))
+            .unwrap_or_else(|| "null".to_string());
+        let geos = geos_us
+            .map(|v| format!("{v}"))
+            .unwrap_or_else(|| "null".to_string());
+        let row = format!(
+            "{{\"label\": {label:?}, \"ser_us\": {ser}, \"par_us\": {par_us}, \"geos_us\": {geos}}}\n"
         );
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+            use std::io::Write;
+            let _ = f.write_all(row.as_bytes());
+        }
     }
 }
 
 fn bench_polygons(label: &str, polys: &[Polygon<f64>], batch: usize, cfg: &MakeValidConfig) {
+    if !gate_filtered(label) {
+        return;
+    }
     let refs: Vec<&Polygon<f64>> = polys.iter().collect();
     let par = run_par(&refs, cfg);
     #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
@@ -553,16 +649,20 @@ fn bench_polygons(label: &str, polys: &[Polygon<f64>], batch: usize, cfg: &MakeV
             par * 1_000_000.0 / batch as f64,
             geos * 1_000_000.0 / batch as f64,
         );
+        gate_emit(
+            label,
+            None,
+            par * 1_000_000.0 / batch as f64,
+            Some(geos * 1_000_000.0 / batch as f64),
+        );
     }
     #[cfg(not(any(feature = "bench-geos", feature = "bench-geos-system")))]
     {
         let ser = run_ser(polys, cfg);
-        eprintln!(
-            "  {:<20} {:>10.3} {:>10.3} µs",
-            label,
-            ser * 1_000_000.0 / batch as f64,
-            par * 1_000_000.0 / batch as f64,
-        );
+        let par_us = par * 1_000_000.0 / batch as f64;
+        let ser_us = ser * 1_000_000.0 / batch as f64;
+        eprintln!("  {:<20} {:>10.3} {:>10.3} µs", label, ser_us, par_us);
+        gate_emit(label, Some(ser_us), par_us, None);
     }
 }
 
@@ -627,6 +727,26 @@ fn main() {
         bench_polygons("invalid bowtie 4v", &polys, 50000, &cfg);
     }
 
+    // Invalid bowtie at scale: same bowtie with subdivided edges, 50/100/
+    // 500 vertices (the user's explicit ask 2026-08-07 - the bench only
+    // had the 4v bowtie, which never stressed the repair at scale).
+    for &(n, batch) in &[(50usize, 5000usize), (100, 2000), (500, 200)] {
+        let poly = make_bowtie_n(n);
+        let polys: Vec<Polygon<f64>> = (0..batch)
+            .map(|i| {
+                let mut p = poly.clone();
+                p.exterior_mut(|ext| {
+                    for c in &mut ext.0 {
+                        c.x += i as f64 * 20.0;
+                        c.y += i as f64 * 20.0;
+                    }
+                });
+                p
+            })
+            .collect();
+        bench_polygons(&format!("invalid bowtie {:>3}v", n), &polys, batch, &cfg);
+    }
+
     // Large invalid star 100v
     {
         let mut coords = Vec::with_capacity(100);
@@ -653,6 +773,33 @@ fn main() {
             })
             .collect();
         bench_polygons("invalid star 100v", &polys, 1000, &cfg);
+    }
+
+    // NOTE: the star generator (r alternating 100/50 every 3rd vertex) is
+    // VALID geometry at every size - verified with geosop isValid
+    // (2026-08-07): star99/500/1000 all true. The old "invalid star 100v"
+    // row measured a valid spiky polygon, not invalid repair. Real
+    // invalid-at-scale coverage is the bowtie rows above and the
+    // spaghetti rings below.
+
+    // Spaghetti rings: torus-wrapped random walks, dozens of proper
+    // crossings each - the "many crossings at scale" repair class
+    // (geosop isValid: false).
+    for &(n, batch) in &[(500usize, 100usize), (2000, 20)] {
+        let poly = make_spaghetti_ring(n);
+        let polys: Vec<Polygon<f64>> = (0..batch)
+            .map(|i| {
+                let mut p = poly.clone();
+                p.exterior_mut(|ext| {
+                    for c in &mut ext.0 {
+                        c.x += i as f64 * (n as f64);
+                        c.y += i as f64 * (n as f64);
+                    }
+                });
+                p
+            })
+            .collect();
+        bench_polygons(&format!("spaghetti {:>4}v", n), &polys, batch, &cfg);
     }
 
     // Self-touching (banana) polygon — tests self-touch forming hole
@@ -761,7 +908,7 @@ fn main() {
     }
 
     // Self-intersecting: many crossing edges (dense bowtie chain)
-    for &(n, batch) in &[(10, 50000usize), (50, 10000), (100, 5000)] {
+    for &(n, batch) in &[(10, 50000usize), (50, 10000), (100, 5000), (500, 1000)] {
         let mut coords = Vec::new();
         for i in 0..n {
             let x = i as f64 * 10.0;
@@ -850,7 +997,7 @@ fn main() {
     }
 
     // Lissajous curve: complex self-intersection pattern (5:3 ratio)
-    for &(n, batch) in &[(200usize, 5000usize), (500, 1000), (1000, 100)] {
+    for &(n, batch) in &[(200usize, 5000usize), (500, 1000), (1000, 100), (2000, 50), (5000, 10)] {
         let g = make_lissajous(n, 5.0, 3.0, 1000.0);
         bench_line(&format!("lissajous {}v", n), &g, batch, &cfg);
     }

@@ -168,7 +168,9 @@ pub(crate) fn sweep_ring_self_intersects(ring: &[Coord<f64>], eps: f64) -> Optio
         spans.reserve(n);
         for i in 0..n {
             let a = ring[i];
-            let b = ring[(i + 1) % n];
+            // min(n) identical to % n for closed rings (ring[n] == ring[0]),
+            // correct for open chain slices (see check_edge_pair_intersection).
+            let b = ring[(i + 1).min(n)];
             let (lo_x, hi_x) = if a.x < b.x { (a.x, b.x) } else { (b.x, a.x) };
             let (lo_y, hi_y) = if a.y < b.y { (a.y, b.y) } else { (b.y, a.y) };
             let ext = (hi_x - lo_x).abs().max((hi_y - lo_y).abs()).max(1.0) * 1e-10;

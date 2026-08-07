@@ -52,7 +52,7 @@ pub fn split_edges(edges: &[Line<f64>]) -> Vec<Line<f64>> {
     let coord_scale = (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
     let eps = core::EPS * coord_scale;
 
-    if n > core::GRID_THRESHOLD_N {
+    if n > core::SPLIT_BRUTEFORCE_MAX_N {
         if should_use_sweepline(edges, n) {
             split_edges_sweepline(edges, &mut split_points, eps);
         } else {
