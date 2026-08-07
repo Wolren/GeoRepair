@@ -57,14 +57,21 @@ Validity agreement with GEOS: 100% (0/0 disagreements, 2026-08-07).
 
 The big-O is honest: the validator is a radix-sorted sweep, O(n log n), the
 same asymptotics as GEOS; the gap is the per-vertex constant. A valid
-5000-vertex polygon spends its 382 µs (serial) as 231 µs (60%) full
-validator certification, 91 µs (24%) fast-path gate sweep, the rest winding
-+ overhead. GEOS runs fast-FP orientation with robust escalation;
-GeoRepair historically ran Shewchuk exact predicates on every candidate
-pair. The fast-FP-first predicate design landed 2026-08-07 (escalation
-only within the 32-ulp collinear gate, decision-identical - 937/937 GEOS
-XML suite and 100% real-world agreement) and cut real-world validation
-from 3.0-3.2 s to 2.5 s.
+5000-vertex polygon's `make_valid` spends ~148 µs (serial) as ~112 µs
+(76%) fast-path gate (duplicate scan + chains + grid), the rest winding +
+overhead; the full exit certification is ~230 µs and is off the fast path.
+GEOS runs fast-FP orientation with robust escalation at exact-zero
+tolerance; GeoRepair validates at the eps-class (1e-12 x scale, adaptive
+32-ulp margins) by design: the validator, the gate, and the noder share
+one tolerance so repair output is certifiable by construction, where
+GEOS's own `makeValid` can ship geometry its `isValid` rejects (lines
+pass through non-simple unchanged; noding happens at tolerance while
+checks run exact-zero). The eps-class is what flags the 2,298 near-miss
+real-world polygons GEOS calls valid. The price is the valid-input
+constant: exact-zero predicates are cheaper, and our valid-polygon path
+still makes ~6-7 passes over the coords vs GEOS's ~2 (the parallel rows
+are memory-bandwidth-bound, so the throughput gap ~2.8x is wider than the
+serial gap ~1.9x). Full tradeoff analysis: `docs/BENCHMARKS.md`.
 
 Lines carry one deliberate extra cost: the valid-or-empty contract.
 `make_valid` never ships a non-simple line - GEOS passes non-simple lines
@@ -78,49 +85,50 @@ GEOS isSimple (an rstar bulk_load that costs ~1 µs/item); the sweep cut
 that to ~7x, and the 2026-08-07 pass (single-orient adjacent fast path,
 x-sorted-input radix skip, lean pair predicate with vertex-on-edge-gated
 escalation, escalated-only revisit checks replacing the flat hash) cut it
-to ~3x (valid ls 500v: 4.3 -> 1.5 µs). Full stage breakdown:
+to ~2.4x (valid ls 500v: 4.3 -> 1.33 µs). Full stage breakdown:
 `docs/BENCHMARKS.md`.
 
 ### Synthetic benchmarks
 
 Full tables and methodology: `docs/BENCHMARKS.md`. Representative rows (µs,
-parallel batch; ratio = GEOS / GeoRepair). Note: the legacy "invalid star
-100v" row is mislabelled - geosop isValid confirms the star generator
-produces VALID geometry at every size (2026-08-07); it measures a valid
-spiky polygon, not invalid repair. Genuine invalid-at-scale coverage is
-the bowtie and spaghetti rows:
+parallel batch; ratio = GEOS / GeoRepair, >1 means we win). Note: the
+legacy "invalid star 100v" row is mislabelled - geosop isValid confirms
+the star generator produces VALID geometry at every size (2026-08-07); it
+measures a valid spiky polygon, not invalid repair. Genuine invalid-at-
+scale coverage is the bowtie and spaghetti rows:
 
 | Benchmark | GeoRepair | GEOS | Ratio |
 |-----------|----------:|-----:|------:|
-| invalid bowtie 4v | 1.56 | 20.6 | 13x |
-| invalid bowtie 50v | 9.2 | 72.4 | 7.9x |
-| invalid bowtie 100v | 31.2 | 133 | 4.3x |
-| invalid bowtie 500v | 66.5 | 548 | 8.2x |
-| spaghetti 500v | 4992 | 2921 | 0.59x |
-| collapsed poly | 1.50 | 11.9 | 8.0x |
-| overlap mp 50sh | 44.1 | 7719 | 175x |
-| dense grid 20x20=400 | 564 | 114120 | 202x |
-| hole hier 50h | 37.1 | 33.3 | 0.90x |
-| valid polygon 5000v | 26.8 | 9.4 | 0.35x |
-| valid ls 500v | 1.49 | 0.49 | 0.33x |
-| dense self ls 500v | 1.73 | 135 | 78x |
-| lissajous 5000v | 562 | 5325 | 9.5x |
-| collinear ov 500seg | 59 | 584 | 9.9x |
-| star-comb 500sp | 80 | 763 | 9.6x |
-| star-burst 500sp | 8.5 | 38598 | 4500x |
-| spoke 500sp | 11.3 | 41351 | 3700x |
-| mls 50x3v | 3.09 | 2.82 | 0.91x |
+| invalid bowtie 4v | 0.87 | 18.9 | 22x |
+| invalid bowtie 50v | 8.0 | 68.9 | 8.6x |
+| invalid bowtie 100v | 29.4 | 135 | 4.6x |
+| invalid bowtie 500v | 62.1 | 507 | 8.2x |
+| spaghetti 500v | 4631 | 3001 | 0.65x |
+| collapsed poly | 0.61 | 10.5 | 17x |
+| overlap mp 50sh | 22.3 | 230 | 10x |
+| dense grid 20x20=400 | 500 | 2114 | 4.2x |
+| hole hier 50h | 22.2 | 27.7 | 1.25x |
+| valid polygon 5000v | 26.8 | 9.7 | 0.36x |
+| valid ls 500v | 1.33 | 0.56 | 0.42x |
+| dense self ls 500v | 1.46 | 120 | 82x |
+| lissajous 5000v | 597 | 5392 | 9.0x |
+| collinear ov 500seg | 60 | 535 | 8.9x |
+| star-comb 500sp | 75.6 | 688 | 9.1x |
+| star-burst 500sp | 11.1 | 36413 | 3290x |
+| spoke 500sp | 10.2 | 38841 | 3820x |
+| mls 50x3v | 2.99 | 31.3 | 10x |
 
-Pattern: GeoRepair wins on invalid repair and MultiPolygon unification
-(GEOS hits quadratic worst cases: dense grids ~200x, overlaps ~175x,
-bowties 8-13x at every size - the bowtie rows were super-quadratic in our
-noding until 2026-08-07, when the edge-split dispatch moved from a 2000-
-edge brute-force gate to 128, cutting bowtie 500v from 474 us to 66.5 us).
-GEOS wins on large valid polygons (0.14-0.9x) on constant factors - see
-the diagnosis above - and on dense invalid rings (spaghetti 0.6x: the
+Pattern: GeoRepair wins on invalid repair and MultiPolygon unification:
+dense grids 4.2-14x, overlaps 6.9-10x, bowties 4.6-22x at every size,
+collinear-overlap families ~9x, and the line-repair family (zigzag,
+spoke, star-burst, dense-self, lissajous) 5-3,800x - the star-burst and
+spoke rows hit GEOS's quadratic worst cases. GEOS wins on large valid
+polygons (0.33-0.90x) and valid ls >= 10v (0.42-0.58x) on the eps-class
+constant (diagnosis above), on dense invalid rings (spaghetti 0.65x: the
 noding leaves violations that force a snap-round + boolean fallback
-chain; measured 2232 violations on a 500-edge walk). Sub-µs rows
-fluctuate with Rayon dispatch overhead.
+chain; measured 2232 violations on a 500-edge walk), and two noise-level
+rows (invalid star 100v 0.89x - a valid spiky polygon; collinear ls 500v
+0.84x). Sub-µs rows fluctuate with Rayon dispatch overhead.
 
 ### Run benchmarks
 
