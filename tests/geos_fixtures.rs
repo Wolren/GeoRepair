@@ -161,11 +161,20 @@ fn geos_nan_polygon() {
 
 #[test]
 fn geos_self_intersecting_linestring() {
-    // GEOS/OGC: self-intersecting LineString is valid, returned as-is
+    // Line-validity contract (2026-08-07): make_valid never ships a
+    // non-simple line - the crossing is noded into simple pieces
+    // (GEOS returns the non-simple line as-is; deliberate divergence).
     let g = geom_from_wkt("LINESTRING (0 0, 2 2, 2 0, 0 2)");
     let result = g.make_valid_with_config(&cfg_auto());
     assert_not_empty(&result);
-    assert!(matches!(result, Geometry::LineString(_)));
+    match &result {
+        Geometry::MultiLineString(m) => {
+            for c in &m.0 {
+                assert!(c.validate().valid, "component not simple: {c:?}");
+            }
+        }
+        other => panic!("expected MultiLineString of simple pieces, got {other:?}"),
+    }
 }
 
 // ---------------------------------------------------------------------------

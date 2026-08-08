@@ -38,6 +38,11 @@ use std::time::Instant;
 use geo::{Coord, Geometry, Polygon};
 use geo_repair::GeoValidation;
 use geo_repair::dd::{dd_call_count, reset_dd_count};
+// The validation head-to-head section is GEOS-gated; the import must
+// carry the same cfg or the bench fails to compile under the default
+// feature set (bench-geos on, io-geojson-style sets off).
+#[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
+use geo_repair::arrange::validate_polygon;
 use geo_repair::io::load_bin;
 use geo_repair::orient::orient2d;
 #[cfg(feature = "parallel")]

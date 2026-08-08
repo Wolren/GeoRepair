@@ -412,7 +412,11 @@ fn test_linestring_nan_filtered_leaves_single_keep_collapsed() {
 
 #[test]
 fn test_linestring_self_intersecting() {
-    // GEOS/OGC: self-intersecting LineString is valid, returned as-is
+    // The line-validity contract (2026-08-07): make_valid never ships a
+    // non-simple line - the self-intersection is noded into simple pieces.
+    // (GEOS passes non-simple lines through; that is the deliberate
+    // divergence. The line-family validity rule keeps NotSimple valid,
+    // so the pieces must also be validator-clean.)
     let ls = LineString::new(vec![
         Coord { x: 0.0, y: 0.0 },
         Coord { x: 2.0, y: 2.0 },
@@ -421,7 +425,13 @@ fn test_linestring_self_intersecting() {
     ]);
     let result = ls.make_valid();
     assert_not_empty(&result);
-    assert!(matches!(result, Geometry::LineString(_)));
+    let mls = match &result {
+        Geometry::MultiLineString(m) => m,
+        other => panic!("expected MultiLineString of simple pieces, got {other:?}"),
+    };
+    for c in &mls.0 {
+        assert!(c.validate().valid, "component not simple: {c:?}");
+    }
 }
 
 // =========================================================================
@@ -519,7 +529,8 @@ fn test_multilinestring_mixed() {
 
 #[test]
 fn test_multilinestring_self_intersecting_component() {
-    // GEOS/OGC: self-intersecting LineString components are valid, returned as-is
+    // Line-validity contract: the bowtie component is noded into simple
+    // pieces (GEOS returns the non-simple component as-is).
     let mls = MultiLineString::new(vec![LineString::new(vec![
         Coord { x: 0.0, y: 0.0 },
         Coord { x: 2.0, y: 2.0 },
@@ -528,8 +539,13 @@ fn test_multilinestring_self_intersecting_component() {
     ])]);
     let result = mls.make_valid();
     assert_not_empty(&result);
-    // Single component unwrapped: MultiLineString([bowtie]) → LineString
-    assert!(matches!(result, Geometry::LineString(_)));
+    let out = match &result {
+        Geometry::MultiLineString(m) => m,
+        other => panic!("expected MultiLineString of simple pieces, got {other:?}"),
+    };
+    for c in &out.0 {
+        assert!(c.validate().valid, "component not simple: {c:?}");
+    }
 }
 
 // =========================================================================

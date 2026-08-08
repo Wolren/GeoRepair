@@ -281,6 +281,8 @@ jobs:
         with:
           toolchain: nightly
       - uses: dtolnay/install@a75ae3c3a13004d4d2db69b04946c7f7687bda91  # cargo-docs-rs
+        with:
+          crate: cargo-docs-rs
       - run: cargo docs-rs
 
   # Static-GEOS gate: the bench-geos feature (geos-src cmake static

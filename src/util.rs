@@ -79,7 +79,14 @@ pub(crate) fn robust_is_ccw_at(ring: &[Coord<f64>], min_idx: usize) -> bool {
             y: next.y,
         },
     );
-    if orient.abs() <= 1e-15 {
+    if orient.abs() <= 1e-15 || orient.is_nan() {
+        // Two cases land here: a (near-)collinear extremal triple, and a
+        // Shewchuk overflow at extreme magnitude ratios (the products
+        // exceed f64::MAX and the exact predicate degrades to NaN).
+        // Both defer to the ring's signed area - the OGC winding
+        // authority. For the overflow case the shoelace is dominated by
+        // one or few representable terms; the cancellation class the
+        // exact predicate exists for is caught by the non-NaN path.
         shoelace_sum(ring) > 0.0
     } else {
         orient > 0.0

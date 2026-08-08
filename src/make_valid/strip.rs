@@ -229,7 +229,13 @@ pub(super) fn enforce_ccw(mut ring: LineString<f64>) -> (LineString<f64>, usize,
     let (is_ccw, idx) = crate::util::robust_is_ccw_with_index(&ring.0);
     let reversed = !is_ccw;
     if reversed {
-        ring.make_ccw_winding();
+        // Direct reversal, not geo's make_ccw_winding(): that method
+        // re-derives the winding from its own shoelace and silently
+        // no-ops when the sum is indeterminate (NaN/overflow) - leaving
+        // a ring the validator rejects. The robust verdict here is the
+        // authority (it is the validator's own check); reversal must
+        // follow it unconditionally.
+        ring.0.reverse();
     }
     (ring, idx, reversed)
 }
@@ -238,7 +244,7 @@ pub(super) fn enforce_cw(mut ring: LineString<f64>) -> (LineString<f64>, usize, 
     let (is_ccw, idx) = crate::util::robust_is_ccw_with_index(&ring.0);
     let reversed = is_ccw;
     if reversed {
-        ring.make_cw_winding();
+        ring.0.reverse();
     }
     (ring, idx, reversed)
 }
