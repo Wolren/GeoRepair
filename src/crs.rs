@@ -5,8 +5,8 @@
 //! tolerance heuristics per CRS type. When the `proj` feature is enabled,
 //! supports coordinate transformation via the PROJ library.
 //!
-//! The `Crs` type is embedded in [`Feature`](crate::Feature) for I/O
-//! round-tripping and in [`MakeValidConfig`](crate::MakeValidConfig) for
+//! The `Crs` type is embedded in [`Feature`] for I/O
+//! round-tripping and in [`MakeValidConfig`] for
 //! CRS-aware tolerance adjustment.
 
 #[cfg(feature = "proj")]

@@ -14,7 +14,7 @@
 //! OGC, but parseable - the corpus carries them).
 //!
 //! Z, M, and ZM dimension modifiers are recognized and rejected with
-//! [`WktError::UnsupportedDimension`](crate::WktError).
+//! [`WktError::UnsupportedDimension`].
 //!
 //! # Reading
 //!
