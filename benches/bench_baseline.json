@@ -1,0 +1,16 @@
+{
+  "dense grid 10x10=100": 133.70202,
+  "dense grid 20x20=400": 1332.78558,
+  "duped ls 100v": 1.01184818,
+  "hole hier 50h": 58.810915,
+  "invalid bowtie 100v": 78.482629,
+  "invalid bowtie 4v": 2.12223318,
+  "invalid bowtie 500v": 190.49226499999997,
+  "lissajous 2000v": 501.68415999999996,
+  "mls 50x3v": 6.3169108,
+  "overlap mp 50sh": 66.06085999999999,
+  "self-int mls 50x4v": 76.49798960000001,
+  "self-touch poly": 2.30903284,
+  "sliver 500v": 27.60282,
+  "valid polygon 10000v": 179.74947999999998
+}
