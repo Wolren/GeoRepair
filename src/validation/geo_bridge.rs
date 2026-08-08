@@ -1,4 +1,4 @@
-//! Bridge to geo's [`Validation`](geo::algorithm::validation::Validation)
+//! Bridge to geo's [`Validation`]
 //! trait taxonomy.
 //!
 //! geo's `Validation` trait and per-type `Invalid*` error enums are the
