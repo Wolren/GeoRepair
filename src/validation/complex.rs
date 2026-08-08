@@ -29,8 +29,19 @@ impl GeoValidation for Polygon<f64> {
         // parallelism lever that works; per-poly stays serial.
         let ext_errors = check_ring_validity(&self.exterior().0, true);
         if !ext_errors.is_empty() {
+            // The fused ring check folds the shell orientation into the
+            // same pass; the pre-fusion code early-returned on structural
+            // ring errors but continued to the holes when ONLY the
+            // orientation was wrong. Preserve the error-set parity
+            // (IsValidOp t2 expects HoleOutsideShell alongside the
+            // shell's WrongOrientation).
+            let only_orientation = ext_errors
+                .iter()
+                .all(|e| matches!(e, GeometryValidationError::WrongOrientation));
             errors.extend(ext_errors);
-            return ValidationResult::invalid(errors);
+            if !only_orientation {
+                return ValidationResult::invalid(errors);
+            }
         }
 
         // Ring orientation is part of check_ring_validity's verdict (the

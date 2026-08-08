@@ -425,6 +425,12 @@ fn compare_one(
             // All-repeated-point polygon: we emit empty; GEOS keeps a
             // collapsed POINT(0 0). Pinned: our empty area.
             "poly_all_repeated" => our_area == 0.0 && component_count(&ours) == 0,
+            // Self-crossing line: zero-area both sides; ours must be the
+            // noded simple pieces (never a non-simple line).
+            "line_self_crossing" => {
+                our_area == 0.0
+                    && matches!(ours, Geometry::MultiLineString(ref m) if !m.0.is_empty())
+            }
             _ => true,
         };
         if !ok {
@@ -575,6 +581,11 @@ fn area_only_fixtures() -> &'static [&'static str] {
         // GEOS keeps a collapsed POINT(0 0). Documented in geos_fixtures
         // (geos_empty_after_fix).
         "poly_all_repeated",
+        // Self-crossing line: the line-validity contract (2026-08-07) -
+        // make_valid never ships a non-simple line, so the crossing is
+        // noded into simple pieces (MultiLineString); GEOS passes the
+        // non-simple line through unchanged. Zero area both sides.
+        "line_self_crossing",
     ]
 }
 

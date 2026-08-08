@@ -15,7 +15,7 @@
 use crate::util::{point_in_ring_exclusive_even_odd, shoelace_abs_sum};
 use geo::{
     Coord, CoordNum, GeoFloat, Geometry, GeometryCollection, Line, LineString, MultiLineString,
-    MultiPoint, MultiPolygon, Point, Polygon, Rect, Triangle, Winding,
+    MultiPoint, MultiPolygon, Point, Polygon, Rect, Triangle,
 };
 
 use crate::core::MakeValidConfig;

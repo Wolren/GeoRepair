@@ -503,7 +503,7 @@ impl<'a> LineNoder<'a> {
                     .push(i);
             }
             // Large-family members vs sweep members.
-            for (_, members) in by_family.iter() {
+            for members in by_family.values() {
                 for &i in members {
                     let i = i as usize;
                     for &s in &sweep_ids {
