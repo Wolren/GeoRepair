@@ -17,7 +17,6 @@
 //!   too small (fluff) or when it was stripped (last-point repair), but
 //!   never when the original end was invalid.
 
-
 use alloc::vec::Vec;
 use geo::{Coord, Geometry, HasDimensions, LineString, MultiLineString, MultiPolygon, Polygon};
 
@@ -81,14 +80,15 @@ pub fn remove_repeated_points(geom: &Geometry<f64>, tolerance: f64) -> Geometry<
             Geometry::Polygon(Polygon::new(LineString::new(shell), holes))
         }
         Geometry::MultiPolygon(mp) => {
-            let parts: Vec<Polygon<f64>> = mp
-                .0
-                .iter()
-                .filter_map(|p| match remove_repeated_points(&Geometry::Polygon(p.clone()), tolerance) {
-                    Geometry::Polygon(pp) if !pp.is_empty() => Some(pp),
-                    _ => None,
-                })
-                .collect();
+            let parts: Vec<Polygon<f64>> =
+                mp.0.iter()
+                    .filter_map(|p| {
+                        match remove_repeated_points(&Geometry::Polygon(p.clone()), tolerance) {
+                            Geometry::Polygon(pp) if !pp.is_empty() => Some(pp),
+                            _ => None,
+                        }
+                    })
+                    .collect();
             if parts.is_empty() {
                 empty_polygon()
             } else {
@@ -96,11 +96,10 @@ pub fn remove_repeated_points(geom: &Geometry<f64>, tolerance: f64) -> Geometry<
             }
         }
         Geometry::GeometryCollection(gc) => {
-            let parts: Vec<Geometry<f64>> = gc
-                .0
-                .iter()
-                .map(|g| remove_repeated_points(g, tolerance))
-                .collect();
+            let parts: Vec<Geometry<f64>> =
+                gc.0.iter()
+                    .map(|g| remove_repeated_points(g, tolerance))
+                    .collect();
             Geometry::GeometryCollection(geo::GeometryCollection(parts))
         }
         _ => geom.clone(),
@@ -159,11 +158,7 @@ fn edit_sequence(coords: &[Coord<f64>], min_len: usize, tolerance: f64) -> Optio
         filt.push(orig_end);
     }
 
-    if filt.len() <= 1 {
-        None
-    } else {
-        Some(filt)
-    }
+    if filt.len() <= 1 { None } else { Some(filt) }
 }
 
 fn empty_line() -> Geometry<f64> {

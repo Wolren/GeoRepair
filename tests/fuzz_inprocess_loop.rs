@@ -11,13 +11,13 @@ use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 #[test]
 fn fuzz_inprocess_mutation_loop() {
     let crash_bytes: Vec<u8> = vec![
-        255, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20, 64, 0, 0, 0, 0, 0, 0, 0, 64, 0, 0, 0, 0,
-        0, 0, 248, 63, 0, 0, 0, 0, 0, 0, 0, 64, 0, 0, 128, 0, 0, 0, 248, 63, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 248, 63, 0, 0, 0, 0, 0, 0, 8, 64, 0, 0, 0, 0, 0, 0, 240, 191,
-        0, 0, 0, 0, 0, 0, 18, 64, 0, 0, 0, 0, 0, 0, 8, 192, 0, 0, 0, 0, 0, 0, 0, 0, 0, 248,
-        63, 0, 0, 0, 0, 255, 0, 8, 64, 0, 0, 0, 0, 0, 0, 240, 191, 0, 0, 0, 0, 0, 0, 18, 64,
-        0, 0, 0, 0, 252, 255, 7, 0, 0, 0, 0, 248, 63, 0, 0, 0, 0, 0, 0, 0, 192, 0, 0, 5, 0, 0,
-        0, 248, 63, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 20, 64,
+        255, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20, 64, 0, 0, 0, 0, 0, 0, 0, 64, 0, 0, 0, 0, 0,
+        0, 248, 63, 0, 0, 0, 0, 0, 0, 0, 64, 0, 0, 128, 0, 0, 0, 248, 63, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 248, 63, 0, 0, 0, 0, 0, 0, 8, 64, 0, 0, 0, 0, 0, 0, 240, 191, 0, 0, 0, 0,
+        0, 0, 18, 64, 0, 0, 0, 0, 0, 0, 8, 192, 0, 0, 0, 0, 0, 0, 0, 0, 0, 248, 63, 0, 0, 0, 0,
+        255, 0, 8, 64, 0, 0, 0, 0, 0, 0, 240, 191, 0, 0, 0, 0, 0, 0, 18, 64, 0, 0, 0, 0, 252, 255,
+        7, 0, 0, 0, 0, 248, 63, 0, 0, 0, 0, 0, 0, 0, 192, 0, 0, 5, 0, 0, 0, 248, 63, 0, 0, 0, 0, 0,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 20, 64,
     ];
     let mut corpus: Vec<Vec<u8>> = vec![crash_bytes.clone()];
     let dir = std::path::Path::new("fuzz/corpus/make_valid");
@@ -46,23 +46,27 @@ fn fuzz_inprocess_mutation_loop() {
             let mut yb = [0u8; 8];
             xb.copy_from_slice(&chunk[0..8]);
             yb.copy_from_slice(&chunk[8..16]);
-            coords.push(Coord { x: f64::from_le_bytes(xb), y: f64::from_le_bytes(yb) });
+            coords.push(Coord {
+                x: f64::from_le_bytes(xb),
+                y: f64::from_le_bytes(yb),
+            });
         }
         if coords.first() != coords.last() {
             coords.push(coords[0]);
         }
         let poly = Polygon::new(LineString::new(coords), Vec::new());
         for method in [PolyMethod::Auto, PolyMethod::Structure] {
-            let cfg = MakeValidConfig { poly_method: method, ..Default::default() };
+            let cfg = MakeValidConfig {
+                poly_method: method,
+                ..Default::default()
+            };
             let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 poly.make_valid_with_config(&cfg)
             }));
             match out {
                 Ok(g) => {
                     if !g.validate().valid {
-                        panic!(
-                            "invalid output: {g:?} from input poly {poly:?} method {method:?}"
-                        );
+                        panic!("invalid output: {g:?} from input poly {poly:?} method {method:?}");
                     }
                 }
                 Err(_) => {}

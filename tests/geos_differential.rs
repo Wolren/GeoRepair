@@ -26,8 +26,8 @@
 #![cfg(feature = "bench-geos-system")]
 
 use geo::{Coord, Geometry, LineString, Polygon};
-use geo_repair::validation::GeoValidation;
 use geo_repair::MakeValid;
+use geo_repair::validation::GeoValidation;
 use geos::Geometry as GeosGeometry;
 use geos::{CoordSeq, CoordType, Geom};
 use proptest::prelude::*;
@@ -119,8 +119,7 @@ fn polygon_with_holes() -> impl Strategy<Value = Polygon<f64>> {
                     .boxed()
             })
             .collect();
-        (Just(exterior), hole_strategies)
-            .prop_map(|(ex, holes)| Polygon::new(ex, holes))
+        (Just(exterior), hole_strategies).prop_map(|(ex, holes)| Polygon::new(ex, holes))
     })
 }
 
@@ -163,7 +162,9 @@ fn bowtie() -> impl Strategy<Value = Polygon<f64>> {
 fn any_polygon() -> impl Strategy<Value = Polygon<f64>> {
     prop_oneof![
         polygon_with_holes().boxed(),
-        degenerate_ring().prop_map(|r| Polygon::new(r, vec![])).boxed(),
+        degenerate_ring()
+            .prop_map(|r| Polygon::new(r, vec![]))
+            .boxed(),
         bowtie().boxed(),
     ]
 }

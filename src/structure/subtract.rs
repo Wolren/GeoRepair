@@ -1,4 +1,3 @@
-
 use alloc::vec::Vec;
 use geo::{Area, Coord, LinesIter, MultiPolygon, Polygon};
 
@@ -99,7 +98,10 @@ fn needs_build_area_holes(mp: &MultiPolygon<f64>) -> bool {
 /// True if two rings share a collinear edge segment with positive-length overlap.
 /// Vertex-only touches (hourglass patterns) return false — boolean difference
 /// handles those correctly by splitting components.
-fn build_area_shell_holes(shell: &Polygon<f64>, holes: &[Polygon<f64>]) -> Option<MultiPolygon<f64>> {
+fn build_area_shell_holes(
+    shell: &Polygon<f64>,
+    holes: &[Polygon<f64>],
+) -> Option<MultiPolygon<f64>> {
     let mut lines: Vec<geo::Line<f64>> = shell.lines_iter().collect();
     for h in holes {
         lines.extend(h.lines_iter());

@@ -8,9 +8,8 @@ use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 
 fn input_bytes() -> Vec<u8> {
     vec![
-        1, 2, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 20, 64, 0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 36, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0,
+        1, 2, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 20, 64, 0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 36, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     ]
 }
 
@@ -24,6 +23,9 @@ fn fuzz_wkb_repair_degenerate_line() {
             ..Default::default()
         };
         let out = geom.make_valid_with_config(&cfg);
-        assert!(out.validate().valid, "invalid output in mode {method:?}: {out:?}");
+        assert!(
+            out.validate().valid,
+            "invalid output in mode {method:?}: {out:?}"
+        );
     }
 }

@@ -7,11 +7,9 @@
 //!
 //! See validation/mod.rs for the module map.
 
-
-
 #[cfg(feature = "rstar")]
 use alloc::vec::Vec;
-use geo::{Coord};
+use geo::Coord;
 
 pub(crate) fn edges_intersect_general(
     a1: Coord<f64>,
@@ -30,15 +28,27 @@ pub(crate) fn edges_intersect_general(
     // 1e-11 - raw-disjoint y-ranges, genuinely within the gate; measured:
     // geo_bridge stricter_than_geo_collinear_sliver).
     {
-        let (lo_x, hi_x) = if a1.x < a2.x { (a1.x, a2.x) } else { (a2.x, a1.x) };
-        let (lo_y, hi_y) = if a1.y < a2.y { (a1.y, a2.y) } else { (a2.y, a1.y) };
-        let (lo_x2, hi_x2) = if b1.x < b2.x { (b1.x, b2.x) } else { (b2.x, b1.x) };
-        let (lo_y2, hi_y2) = if b1.y < b2.y { (b1.y, b2.y) } else { (b2.y, b1.y) };
-        if hi_x < lo_x2 - eps
-            || lo_x > hi_x2 + eps
-            || hi_y < lo_y2 - eps
-            || lo_y > hi_y2 + eps
-        {
+        let (lo_x, hi_x) = if a1.x < a2.x {
+            (a1.x, a2.x)
+        } else {
+            (a2.x, a1.x)
+        };
+        let (lo_y, hi_y) = if a1.y < a2.y {
+            (a1.y, a2.y)
+        } else {
+            (a2.y, a1.y)
+        };
+        let (lo_x2, hi_x2) = if b1.x < b2.x {
+            (b1.x, b2.x)
+        } else {
+            (b2.x, b1.x)
+        };
+        let (lo_y2, hi_y2) = if b1.y < b2.y {
+            (b1.y, b2.y)
+        } else {
+            (b2.y, b1.y)
+        };
+        if hi_x < lo_x2 - eps || lo_x > hi_x2 + eps || hi_y < lo_y2 - eps || lo_y > hi_y2 + eps {
             return false;
         }
     }
@@ -84,11 +94,7 @@ pub(crate) fn edges_intersect_general(
     let e2 = orient_err(dx_a * (b2.y - a1.y), dy_a * (b2.x - a1.x));
     let e3 = orient_err(dx_b * (a1.y - b1.y), dy_b * (a1.x - b1.x));
     let e4 = orient_err(dx_b * (a2.y - b1.y), dy_b * (a2.x - b1.x));
-    if f1.abs() > 2.0 * e1
-        && f2.abs() > 2.0 * e2
-        && f3.abs() > 2.0 * e3
-        && f4.abs() > 2.0 * e4
-    {
+    if f1.abs() > 2.0 * e1 && f2.abs() > 2.0 * e2 && f3.abs() > 2.0 * e3 && f4.abs() > 2.0 * e4 {
         // Zero-safe strict opposite sign (matches the exact path below).
         if (f1 > 0.0 && f2 < 0.0 || f1 < 0.0 && f2 > 0.0)
             && (f3 > 0.0 && f4 < 0.0 || f3 < 0.0 && f4 > 0.0)
@@ -204,15 +210,27 @@ pub(crate) fn lean_pair_intersects(
     // Bbox prefilter (identical to edges_intersect_general's - padded by
     // eps for the same sliver class).
     {
-        let (lo_x, hi_x) = if a1.x < a2.x { (a1.x, a2.x) } else { (a2.x, a1.x) };
-        let (lo_y, hi_y) = if a1.y < a2.y { (a1.y, a2.y) } else { (a2.y, a1.y) };
-        let (lo_x2, hi_x2) = if b1.x < b2.x { (b1.x, b2.x) } else { (b2.x, b1.x) };
-        let (lo_y2, hi_y2) = if b1.y < b2.y { (b1.y, b2.y) } else { (b2.y, b1.y) };
-        if hi_x < lo_x2 - eps
-            || lo_x > hi_x2 + eps
-            || hi_y < lo_y2 - eps
-            || lo_y > hi_y2 + eps
-        {
+        let (lo_x, hi_x) = if a1.x < a2.x {
+            (a1.x, a2.x)
+        } else {
+            (a2.x, a1.x)
+        };
+        let (lo_y, hi_y) = if a1.y < a2.y {
+            (a1.y, a2.y)
+        } else {
+            (a2.y, a1.y)
+        };
+        let (lo_x2, hi_x2) = if b1.x < b2.x {
+            (b1.x, b2.x)
+        } else {
+            (b2.x, b1.x)
+        };
+        let (lo_y2, hi_y2) = if b1.y < b2.y {
+            (b1.y, b2.y)
+        } else {
+            (b2.y, b1.y)
+        };
+        if hi_x < lo_x2 - eps || lo_x > hi_x2 + eps || hi_y < lo_y2 - eps || lo_y > hi_y2 + eps {
             return false;
         }
     }
@@ -330,10 +348,26 @@ pub(crate) fn edges_vertex_on_edge(
     b1: Coord<f64>,
     b2: Coord<f64>,
 ) -> bool {
-    let (lo_x, hi_x) = if a1.x < a2.x { (a1.x, a2.x) } else { (a2.x, a1.x) };
-    let (lo_y, hi_y) = if a1.y < a2.y { (a1.y, a2.y) } else { (a2.y, a1.y) };
-    let (lo_x2, hi_x2) = if b1.x < b2.x { (b1.x, b2.x) } else { (b2.x, b1.x) };
-    let (lo_y2, hi_y2) = if b1.y < b2.y { (b1.y, b2.y) } else { (b2.y, b1.y) };
+    let (lo_x, hi_x) = if a1.x < a2.x {
+        (a1.x, a2.x)
+    } else {
+        (a2.x, a1.x)
+    };
+    let (lo_y, hi_y) = if a1.y < a2.y {
+        (a1.y, a2.y)
+    } else {
+        (a2.y, a1.y)
+    };
+    let (lo_x2, hi_x2) = if b1.x < b2.x {
+        (b1.x, b2.x)
+    } else {
+        (b2.x, b1.x)
+    };
+    let (lo_y2, hi_y2) = if b1.y < b2.y {
+        (b1.y, b2.y)
+    } else {
+        (b2.y, b1.y)
+    };
     if hi_x < lo_x2 || lo_x > hi_x2 || hi_y < lo_y2 || lo_y > hi_y2 {
         return false;
     }

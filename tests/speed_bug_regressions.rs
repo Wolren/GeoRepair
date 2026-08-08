@@ -356,39 +356,84 @@ fn large_valid_gate_interior_hole() {
 fn is_fill_top_seed_no_panic() {
     let ox = -22.030823457293746;
     let oy = 47.83760522304267;
-    let o = |c: Coord<f64>| Coord { x: c.x + ox, y: c.y + oy };
+    let o = |c: Coord<f64>| Coord {
+        x: c.x + ox,
+        y: c.y + oy,
+    };
     let shell = LineString::new(vec![
-        Coord { x: 54.361268007782414, y: 0.0 },
+        Coord {
+            x: 54.361268007782414,
+            y: 0.0,
+        },
         Coord { x: 0.0, y: 0.0 },
-        Coord { x: 18.545352431810002, y: 82.90780436757512 },
-        Coord { x: -48.9188106442245, y: 33.436234810694 },
-        Coord { x: 54.361268007782414, y: 0.0 },
+        Coord {
+            x: 18.545352431810002,
+            y: 82.90780436757512,
+        },
+        Coord {
+            x: -48.9188106442245,
+            y: 33.436234810694,
+        },
+        Coord {
+            x: 54.361268007782414,
+            y: 0.0,
+        },
     ]);
     let hole = LineString::new(vec![
-        o(Coord { x: -99.23612848939614, y: 36.62847235863089 }),
-        o(Coord { x: -67.18243348803865, y: -91.73029466898309 }),
-        o(Coord { x: 71.0940832095457, y: 73.26259559237775 }),
-        o(Coord { x: 0.0, y: -78.08037623050924 }),
-        o(Coord { x: -17.305041547050905, y: 9.846852235332795 }),
-        o(Coord { x: 56.86075455834379, y: 26.443175029348033 }),
-        o(Coord { x: -99.23612848939614, y: 36.62847235863089 }),
+        o(Coord {
+            x: -99.23612848939614,
+            y: 36.62847235863089,
+        }),
+        o(Coord {
+            x: -67.18243348803865,
+            y: -91.73029466898309,
+        }),
+        o(Coord {
+            x: 71.0940832095457,
+            y: 73.26259559237775,
+        }),
+        o(Coord {
+            x: 0.0,
+            y: -78.08037623050924,
+        }),
+        o(Coord {
+            x: -17.305041547050905,
+            y: 9.846852235332795,
+        }),
+        o(Coord {
+            x: 56.86075455834379,
+            y: 26.443175029348033,
+        }),
+        o(Coord {
+            x: -99.23612848939614,
+            y: 36.62847235863089,
+        }),
     ]);
     let poly = Polygon::new(shell, vec![hole]);
     let g: Geometry<f64> = poly.clone().into();
     let cfgs = [
         ("auto", geo_repair::MakeValidConfig::default()),
-        ("structure", geo_repair::MakeValidConfig {
-            poly_method: geo_repair::PolyMethod::Structure,
-            ..Default::default()
-        }),
-        ("arrange", geo_repair::MakeValidConfig {
-            poly_method: geo_repair::PolyMethod::Arrange,
-            ..Default::default()
-        }),
-        ("auto+keep", geo_repair::MakeValidConfig {
-            keep_collapsed: true,
-            ..Default::default()
-        }),
+        (
+            "structure",
+            geo_repair::MakeValidConfig {
+                poly_method: geo_repair::PolyMethod::Structure,
+                ..Default::default()
+            },
+        ),
+        (
+            "arrange",
+            geo_repair::MakeValidConfig {
+                poly_method: geo_repair::PolyMethod::Arrange,
+                ..Default::default()
+            },
+        ),
+        (
+            "auto+keep",
+            geo_repair::MakeValidConfig {
+                keep_collapsed: true,
+                ..Default::default()
+            },
+        ),
     ];
     for (name, cfg) in &cfgs {
         let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -414,14 +459,32 @@ fn is_fill_top_seed_no_panic() {
 #[test]
 fn sub_ulp_spike_mixed_magnitude_ring() {
     let mut ring = vec![
-        Coord { x: 84956205.27307954, y: -45986769.5228732 },
-        Coord { x: -99794971.69789362, y: 4896957.693364016 },
-        Coord { x: 95593402.35083151, y: -37252189.83613572 },
-        Coord { x: 37149609.09726282, y: -63327990.14115548 },
-        Coord { x: 78418546.04729833, y: 69380301.01700698 },
+        Coord {
+            x: 84956205.27307954,
+            y: -45986769.5228732,
+        },
+        Coord {
+            x: -99794971.69789362,
+            y: 4896957.693364016,
+        },
+        Coord {
+            x: 95593402.35083151,
+            y: -37252189.83613572,
+        },
+        Coord {
+            x: 37149609.09726282,
+            y: -63327990.14115548,
+        },
+        Coord {
+            x: 78418546.04729833,
+            y: 69380301.01700698,
+        },
         Coord { x: 0.0, y: 0.0 },
         Coord { x: 0.0, y: 0.0 },
-        Coord { x: 0.0, y: 5.089116040917129e-9 },
+        Coord {
+            x: 0.0,
+            y: 5.089116040917129e-9,
+        },
     ];
     if ring.first() != ring.last() {
         ring.push(ring[0]);
@@ -430,14 +493,20 @@ fn sub_ulp_spike_mixed_magnitude_ring() {
     let g: Geometry<f64> = poly.clone().into();
     for (name, cfg) in [
         ("auto", geo_repair::MakeValidConfig::default()),
-        ("structure", geo_repair::MakeValidConfig {
-            poly_method: geo_repair::PolyMethod::Structure,
-            ..Default::default()
-        }),
-        ("arrange", geo_repair::MakeValidConfig {
-            poly_method: geo_repair::PolyMethod::Arrange,
-            ..Default::default()
-        }),
+        (
+            "structure",
+            geo_repair::MakeValidConfig {
+                poly_method: geo_repair::PolyMethod::Structure,
+                ..Default::default()
+            },
+        ),
+        (
+            "arrange",
+            geo_repair::MakeValidConfig {
+                poly_method: geo_repair::PolyMethod::Arrange,
+                ..Default::default()
+            },
+        ),
     ] {
         let out = g.make_valid_with_config(&cfg);
         let v = geo_repair::validation::GeoValidation::validate(&out);

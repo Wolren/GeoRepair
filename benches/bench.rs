@@ -188,7 +188,10 @@ fn make_spaghetti_ring(n: usize) -> Polygon<f64> {
         (seed >> 33) as u32
     };
     let mut coords = Vec::with_capacity(n + 1);
-    coords.push(Coord { x: x as f64, y: y as f64 });
+    coords.push(Coord {
+        x: x as f64,
+        y: y as f64,
+    });
     for _ in 1..n {
         match next() % 4 {
             0 => x += 1,
@@ -198,7 +201,10 @@ fn make_spaghetti_ring(n: usize) -> Polygon<f64> {
         }
         x = x.rem_euclid(span);
         y = y.rem_euclid(span);
-        coords.push(Coord { x: x as f64, y: y as f64 });
+        coords.push(Coord {
+            x: x as f64,
+            y: y as f64,
+        });
     }
     coords.push(coords[0]);
     Polygon::new(LineString::new(coords), Vec::new())
@@ -647,7 +653,11 @@ fn gate_emit(label: &str, ser_us: Option<f64>, par_us: f64, geos_us: Option<f64>
         let row = format!(
             "{{\"label\": {label:?}, \"ser_us\": {ser}, \"par_us\": {par_us}, \"geos_us\": {geos}}}\n"
         );
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        {
             use std::io::Write;
             let _ = f.write_all(row.as_bytes());
         }
@@ -1019,7 +1029,13 @@ fn main() {
     }
 
     // Lissajous curve: complex self-intersection pattern (5:3 ratio)
-    for &(n, batch) in &[(200usize, 5000usize), (500, 1000), (1000, 100), (2000, 50), (5000, 10)] {
+    for &(n, batch) in &[
+        (200usize, 5000usize),
+        (500, 1000),
+        (1000, 100),
+        (2000, 50),
+        (5000, 10),
+    ] {
         let g = make_lissajous(n, 5.0, 3.0, 1000.0);
         bench_line(&format!("lissajous {}v", n), &g, batch, &cfg);
     }

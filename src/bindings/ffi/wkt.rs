@@ -1,21 +1,21 @@
 //! WKT single-geometry API (extracted from bindings/ffi.rs 2026-08-07; verbatim).
 
-
-
-use alloc::string::String;
 use super::types::*;
 use super::util::*;
-use std::ffi::c_char;
-use std::ffi::CString;
-use std::panic::{AssertUnwindSafe, catch_unwind};
-use geo::Geometry;
 use crate::core::MakeValidConfig;
 use crate::io::wkt::write_wkt;
 use crate::make_valid::MakeValid;
 use crate::validation::GeoValidation;
+use alloc::string::String;
+use geo::Geometry;
+use std::ffi::CString;
+use std::ffi::c_char;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
-
-fn wkt_result_from(wkt: *const c_char, f: impl FnOnce(Geometry<f64>) -> GeoRepairStringResult) -> GeoRepairStringResult {
+fn wkt_result_from(
+    wkt: *const c_char,
+    f: impl FnOnce(Geometry<f64>) -> GeoRepairStringResult,
+) -> GeoRepairStringResult {
     match catch_unwind(AssertUnwindSafe(|| {
         let geom = match wkt_from_cstr(wkt) {
             Ok(g) => g,
@@ -24,7 +24,10 @@ fn wkt_result_from(wkt: *const c_char, f: impl FnOnce(Geometry<f64>) -> GeoRepai
         f(geom)
     })) {
         Ok(r) => r,
-        Err(_) => GeoRepairStringResult::error(GeoRepairErrorCode::Panic, "internal error: operation panicked"),
+        Err(_) => GeoRepairStringResult::error(
+            GeoRepairErrorCode::Panic,
+            "internal error: operation panicked",
+        ),
     }
 }
 
@@ -148,7 +151,9 @@ pub unsafe extern "C" fn geo_repair_validate_wkt(wkt: *const c_char) -> GeoRepai
 /// [`GeoRepairStringResult`] must be freed with
 /// [`super::geo_repair_free_string_result`].
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn geo_repair_validate_and_fix_wkt(wkt: *const c_char) -> GeoRepairStringResult {
+pub unsafe extern "C" fn geo_repair_validate_and_fix_wkt(
+    wkt: *const c_char,
+) -> GeoRepairStringResult {
     wkt_result_from(wkt, |geom| {
         let reasons = if geom.is_valid() {
             None

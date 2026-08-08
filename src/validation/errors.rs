@@ -10,7 +10,6 @@
 use geo::Coord;
 use thiserror::Error;
 
-
 /// Errors reported by OGC geometry validation.
 ///
 /// Each variant corresponds to an OGC Simple Features validity rule.

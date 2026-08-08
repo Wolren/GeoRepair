@@ -1,4 +1,3 @@
-
 use alloc::vec::Vec;
 use geo::{Coord, LineString, MultiPolygon, Polygon};
 use rustc_hash::FxHashMap;

@@ -8,12 +8,12 @@
 //! Assertions are strict: exact output type, component count, validity,
 //! OGC winding order. No "it should be non-empty" soft passes.
 
+use geo::BooleanOps;
 use geo::{
     Coord, Geometry, GeometryCollection, Line, LineString, MultiLineString, MultiPoint,
     MultiPolygon, Point, Polygon, Rect, Triangle,
 };
 use geo_repair::validation::GeoValidation;
-use geo::BooleanOps;
 use geo_repair::{MakeValid, MakeValidConfig};
 
 #[path = "common/mod.rs"]
@@ -262,9 +262,18 @@ fn jts_shell_collapse_nan_keep_collapsed_point() {
     let g = Geometry::Polygon(Polygon::new(
         LineString::new(vec![
             Coord { x: 10.0, y: 10.0 },
-            Coord { x: 10.0, y: f64::NAN },
-            Coord { x: 90.0, y: f64::NAN },
-            Coord { x: 10.0, y: f64::NAN },
+            Coord {
+                x: 10.0,
+                y: f64::NAN,
+            },
+            Coord {
+                x: 90.0,
+                y: f64::NAN,
+            },
+            Coord {
+                x: 10.0,
+                y: f64::NAN,
+            },
             Coord { x: 10.0, y: 10.0 },
         ]),
         Vec::new(),
@@ -441,7 +450,10 @@ fn cgal_near_self_intersection() {
             Coord { x: 0.0, y: 0.0 },
             Coord { x: 10.0, y: 0.0 },
             Coord { x: 10.0, y: 10.0 },
-            Coord { x: 0.0, y: 9.999999999999 },
+            Coord {
+                x: 0.0,
+                y: 9.999999999999,
+            },
             Coord { x: 0.0, y: 0.0 },
         ]),
         Vec::new(),
@@ -521,14 +533,13 @@ fn multipolygon_no_cross_component_intersection() {
                 }
             }
             Geometry::Polygon(_) => {} // single polygon — trivially ok
-            _ => {} // other types (GC, etc.) skip this check
+            _ => {}                    // other types (GC, etc.) skip this check
         }
     }
 }
 
 fn bbox_coords(coords: &[Coord<f64>]) -> (f64, f64, f64, f64) {
-    let (mut min_x, mut max_x, mut min_y, mut max_y) =
-        (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+    let (mut min_x, mut max_x, mut min_y, mut max_y) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
     for c in coords {
         if c.x.is_finite() {
             min_x = min_x.min(c.x);
@@ -554,8 +565,8 @@ fn point_in_ring_exclusive(pt: Coord<f64>, ring: &[Coord<f64>]) -> bool {
         let yi = ring[i].y;
         let xj = ring[(i + 1) % n].x;
         let yj = ring[(i + 1) % n].y;
-        let intersect = ((yi > pt.y) != (yj > pt.y))
-            && (pt.x < (xj - xi) * (pt.y - yi) / (yj - yi) + xi);
+        let intersect =
+            ((yi > pt.y) != (yj > pt.y)) && (pt.x < (xj - xi) * (pt.y - yi) / (yj - yi) + xi);
         if intersect {
             inside = !inside;
         }
@@ -610,24 +621,33 @@ fn exact_output_type_auto_default() {
     let g = geom_from_wkt("POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))");
     let result = g.make_valid_with_config(&cfg_auto());
     // Valid polygon should remain a Polygon, not get wrapped
-    assert!(matches!(&result, Geometry::Polygon(_)),
-        "valid polygon with Auto should stay Polygon, got: {:?}", geometry_type_name(&result));
+    assert!(
+        matches!(&result, Geometry::Polygon(_)),
+        "valid polygon with Auto should stay Polygon, got: {:?}",
+        geometry_type_name(&result)
+    );
 }
 
 #[test]
 fn exact_output_type_structure_default() {
     let g = geom_from_wkt("POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))");
     let result = g.make_valid_with_config(&cfg_structure());
-    assert!(matches!(&result, Geometry::Polygon(_)),
-        "valid polygon with Structure should stay Polygon, got: {:?}", geometry_type_name(&result));
+    assert!(
+        matches!(&result, Geometry::Polygon(_)),
+        "valid polygon with Structure should stay Polygon, got: {:?}",
+        geometry_type_name(&result)
+    );
 }
 
 #[test]
 fn exact_output_type_arrange_default() {
     let g = geom_from_wkt("POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))");
     let result = g.make_valid_with_config(&cfg_arrange());
-    assert!(matches!(&result, Geometry::Polygon(_)),
-        "valid polygon with Arrange should stay Polygon, got: {:?}", geometry_type_name(&result));
+    assert!(
+        matches!(&result, Geometry::Polygon(_)),
+        "valid polygon with Arrange should stay Polygon, got: {:?}",
+        geometry_type_name(&result)
+    );
 }
 
 #[test]
@@ -663,8 +683,11 @@ fn exact_output_type_mp_one_collapsed_auto() {
     );
     let result = g.make_valid_with_config(&cfg_auto());
     assert_valid_ogc(&result);
-    assert!(matches!(&result, Geometry::Polygon(_)),
-        "collapsed MP should unwrap to Polygon, got: {:?}", geometry_type_name(&result));
+    assert!(
+        matches!(&result, Geometry::Polygon(_)),
+        "collapsed MP should unwrap to Polygon, got: {:?}",
+        geometry_type_name(&result)
+    );
 }
 
 // =========================================================================
@@ -682,20 +705,47 @@ fn stress_200_holes_in_one_polygon() {
         let cy = 50.0 + (i as f64 / 20.0).floor() * 4.0 - 40.0;
         let r = 1.5;
         holes.push(LineString::new(vec![
-            Coord { x: cx - r, y: cy - r },
-            Coord { x: cx + r, y: cy - r },
-            Coord { x: cx + r, y: cy + r },
-            Coord { x: cx - r, y: cy + r },
-            Coord { x: cx - r, y: cy - r },
+            Coord {
+                x: cx - r,
+                y: cy - r,
+            },
+            Coord {
+                x: cx + r,
+                y: cy - r,
+            },
+            Coord {
+                x: cx + r,
+                y: cy + r,
+            },
+            Coord {
+                x: cx - r,
+                y: cy + r,
+            },
+            Coord {
+                x: cx - r,
+                y: cy - r,
+            },
         ]));
     }
     let poly = Polygon::new(
         LineString::new(vec![
-            Coord { x: -100.0, y: -100.0 },
-            Coord { x: 100.0, y: -100.0 },
+            Coord {
+                x: -100.0,
+                y: -100.0,
+            },
+            Coord {
+                x: 100.0,
+                y: -100.0,
+            },
             Coord { x: 100.0, y: 100.0 },
-            Coord { x: -100.0, y: 100.0 },
-            Coord { x: -100.0, y: -100.0 },
+            Coord {
+                x: -100.0,
+                y: 100.0,
+            },
+            Coord {
+                x: -100.0,
+                y: -100.0,
+            },
         ]),
         holes,
     );
@@ -921,9 +971,8 @@ fn geos_issue_658_narrow_gap_hole() {
 
 #[test]
 fn geos_issue_662_antipodal_extents() {
-    let g = geom_from_wkt(
-        "POLYGON ((-1e14 -1e14, 1e14 -1e14, 1e14 1e14, -1e14 1e14, -1e14 -1e14))",
-    );
+    let g =
+        geom_from_wkt("POLYGON ((-1e14 -1e14, 1e14 -1e14, 1e14 1e14, -1e14 1e14, -1e14 -1e14))");
     for cfg in [cfg_auto(), cfg_arrange(), cfg_structure()] {
         let result = g.make_valid_with_config(&cfg);
         assert_valid_ogc(&result);
@@ -944,11 +993,26 @@ fn fp_subnormal_polygon() {
     // Subnormal coordinates: values below f64::MIN_POSITIVE
     let poly = Polygon::new(
         LineString::new(vec![
-            Coord { x: 1e-310, y: 1e-310 },
-            Coord { x: 1e-308, y: 1e-310 },
-            Coord { x: 1e-308, y: 1e-308 },
-            Coord { x: 1e-310, y: 1e-308 },
-            Coord { x: 1e-310, y: 1e-310 },
+            Coord {
+                x: 1e-310,
+                y: 1e-310,
+            },
+            Coord {
+                x: 1e-308,
+                y: 1e-310,
+            },
+            Coord {
+                x: 1e-308,
+                y: 1e-308,
+            },
+            Coord {
+                x: 1e-310,
+                y: 1e-308,
+            },
+            Coord {
+                x: 1e-310,
+                y: 1e-310,
+            },
         ]),
         Vec::new(),
     );
@@ -963,11 +1027,26 @@ fn fp_subnormal_bowtie() {
     // Subnormal bowtie — self-intersection at subnormal scale
     let poly = Polygon::new(
         LineString::new(vec![
-            Coord { x: 0e-310, y: 0e-310 },
-            Coord { x: 1e-308, y: 1e-308 },
-            Coord { x: 1e-308, y: 0e-310 },
-            Coord { x: 0e-310, y: 1e-308 },
-            Coord { x: 0e-310, y: 0e-310 },
+            Coord {
+                x: 0e-310,
+                y: 0e-310,
+            },
+            Coord {
+                x: 1e-308,
+                y: 1e-308,
+            },
+            Coord {
+                x: 1e-308,
+                y: 0e-310,
+            },
+            Coord {
+                x: 0e-310,
+                y: 1e-308,
+            },
+            Coord {
+                x: 0e-310,
+                y: 0e-310,
+            },
         ]),
         Vec::new(),
     );
@@ -1099,7 +1178,10 @@ fn fp_triangle_nearly_degenerate() {
     let tri = geo::Triangle::new(
         Coord { x: 0.0, y: 0.0 },
         Coord { x: 10.0, y: 10.0 },
-        Coord { x: 10.0 + 1e-15, y: 10.0 + 1e-15 },
+        Coord {
+            x: 10.0 + 1e-15,
+            y: 10.0 + 1e-15,
+        },
     );
     let result = tri.make_valid_with_config(&cfg_auto());
     assert_valid_ogc(&result);
@@ -1124,8 +1206,14 @@ fn fp_triangle_extreme_aspect_ratio() {
 #[test]
 fn linestring_all_nan_filtered_to_empty() {
     let ls = LineString::new(vec![
-        Coord { x: f64::NAN, y: f64::NAN },
-        Coord { x: f64::NAN, y: f64::NAN },
+        Coord {
+            x: f64::NAN,
+            y: f64::NAN,
+        },
+        Coord {
+            x: f64::NAN,
+            y: f64::NAN,
+        },
     ]);
     let result = ls.make_valid_with_config(&cfg_auto());
     assert_is_empty(&result);
@@ -1134,9 +1222,15 @@ fn linestring_all_nan_filtered_to_empty() {
 #[test]
 fn linestring_mixed_nan_and_valid_filters_cleanly() {
     let ls = LineString::new(vec![
-        Coord { x: f64::NAN, y: 0.0 },
+        Coord {
+            x: f64::NAN,
+            y: 0.0,
+        },
         Coord { x: 5.0, y: 5.0 },
-        Coord { x: f64::NAN, y: f64::NAN },
+        Coord {
+            x: f64::NAN,
+            y: f64::NAN,
+        },
         Coord { x: 10.0, y: 0.0 },
     ]);
     let result = ls.make_valid_with_config(&cfg_auto());
@@ -1145,10 +1239,15 @@ fn linestring_mixed_nan_and_valid_filters_cleanly() {
     // Should produce a linestring with valid-only coords
     match &result {
         Geometry::LineString(l) => {
-            assert!(l.0.len() >= 2, "filtered linestring should have >= 2 coords");
+            assert!(
+                l.0.len() >= 2,
+                "filtered linestring should have >= 2 coords"
+            );
             for c in &l.0 {
-                assert!(c.x.is_finite() && c.y.is_finite(),
-                        "all coords must be finite after repair");
+                assert!(
+                    c.x.is_finite() && c.y.is_finite(),
+                    "all coords must be finite after repair"
+                );
             }
         }
         _ => {} // could collapse to Point, that's ok
@@ -1215,10 +1314,7 @@ fn rect_zero_height() {
 
 #[test]
 fn rect_negative_dimensions() {
-    let r = geo::Rect::new(
-        Point::new(10.0, 10.0),
-        Point::new(0.0, 0.0),
-    );
+    let r = geo::Rect::new(Point::new(10.0, 10.0), Point::new(0.0, 0.0));
     let result = r.make_valid_with_config(&cfg_auto());
     assert_valid_ogc(&result);
 }
@@ -1236,10 +1332,7 @@ fn line_zero_length_coords_same() {
 
 #[test]
 fn line_zero_length_with_nan() {
-    let l = Line::new(
-        Point::new(f64::NAN, 0.0),
-        Point::new(f64::NAN, 0.0),
-    );
+    let l = Line::new(Point::new(f64::NAN, 0.0), Point::new(f64::NAN, 0.0));
     let result = l.make_valid_with_config(&cfg_auto());
     assert_is_empty(&result);
 }
@@ -1289,8 +1382,7 @@ fn cgal_9_cross_star() {
 #[test]
 fn jts_point() {
     use wkt::TryFromWkt;
-    let input: Geometry<f64> = Geometry::try_from_wkt_str("POINT (0 0)")
-        .expect("valid WKT");
+    let input: Geometry<f64> = Geometry::try_from_wkt_str("POINT (0 0)").expect("valid WKT");
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     assert_valid_ogc(&result);
 }
@@ -1306,8 +1398,7 @@ fn jts_point_nan() {
 #[test]
 fn jts_point_empty() {
     use wkt::TryFromWkt;
-    let input: Geometry<f64> = Geometry::try_from_wkt_str("POINT EMPTY")
-        .expect("valid WKT");
+    let input: Geometry<f64> = Geometry::try_from_wkt_str("POINT EMPTY").expect("valid WKT");
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     assert_valid_ogc(&result);
 }
@@ -1335,7 +1426,10 @@ fn jts_multipoint_nan() {
 
 #[test]
 fn jts_multipoint_keep_multi() {
-    let input = Geometry::MultiPoint(MultiPoint::new(vec![Point::new(0.0, 0.0), Point::new(f64::NAN, f64::NAN)]));
+    let input = Geometry::MultiPoint(MultiPoint::new(vec![
+        Point::new(0.0, 0.0),
+        Point::new(f64::NAN, f64::NAN),
+    ]));
     let config = MakeValidConfig::default();
     let result = input.make_valid_with_config(&config);
     assert_valid_ogc(&result);
@@ -1343,7 +1437,10 @@ fn jts_multipoint_keep_multi() {
 
 #[test]
 fn jts_multipoint_single() {
-    let input = Geometry::MultiPoint(MultiPoint::new(vec![Point::new(0.0, 0.0), Point::new(f64::NAN, f64::NAN)]));
+    let input = Geometry::MultiPoint(MultiPoint::new(vec![
+        Point::new(0.0, 0.0),
+        Point::new(f64::NAN, f64::NAN),
+    ]));
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     assert_valid_ogc(&result);
 }
@@ -1358,8 +1455,8 @@ fn jts_multipoint_multi_empty() {
 #[test]
 fn jts_multipoint_valid() {
     use wkt::TryFromWkt;
-    let input: Geometry<f64> = Geometry::try_from_wkt_str("MULTIPOINT ((0 0), (1 1))")
-        .expect("valid WKT");
+    let input: Geometry<f64> =
+        Geometry::try_from_wkt_str("MULTIPOINT ((0 0), (1 1))").expect("valid WKT");
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     assert_valid_ogc(&result);
 }
@@ -1367,8 +1464,7 @@ fn jts_multipoint_valid() {
 #[test]
 fn jts_linestring_empty() {
     use wkt::TryFromWkt;
-    let input: Geometry<f64> = Geometry::try_from_wkt_str("LINESTRING EMPTY")
-        .expect("valid WKT");
+    let input: Geometry<f64> = Geometry::try_from_wkt_str("LINESTRING EMPTY").expect("valid WKT");
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     assert_valid_ogc(&result);
 }
@@ -1376,7 +1472,12 @@ fn jts_linestring_empty() {
 #[test]
 fn jts_linestring_collapse_nan() {
     let input = Geometry::LineString(LineString::new(vec![
-        Coord { x: 0.0, y: 0.0 }, Coord { x: 1.0, y: f64::NAN }, Coord { x: 0.0, y: 0.0 },
+        Coord { x: 0.0, y: 0.0 },
+        Coord {
+            x: 1.0,
+            y: f64::NAN,
+        },
+        Coord { x: 0.0, y: 0.0 },
     ]));
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     assert_valid_ogc(&result);
@@ -1385,8 +1486,8 @@ fn jts_linestring_collapse_nan() {
 #[test]
 fn jts_linestring_collapse_dupes() {
     use wkt::TryFromWkt;
-    let input: Geometry<f64> = Geometry::try_from_wkt_str("LINESTRING (0 0, 0 0, 0 0)")
-        .expect("valid WKT");
+    let input: Geometry<f64> =
+        Geometry::try_from_wkt_str("LINESTRING (0 0, 0 0, 0 0)").expect("valid WKT");
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     assert_valid_ogc(&result);
 }
@@ -1394,8 +1495,8 @@ fn jts_linestring_collapse_dupes() {
 #[test]
 fn jts_linestring_repeated() {
     use wkt::TryFromWkt;
-    let input: Geometry<f64> = Geometry::try_from_wkt_str("LINESTRING (0 0, 0 0, 0 0, 0 0, 0 0, 1 1)")
-        .expect("valid WKT");
+    let input: Geometry<f64> =
+        Geometry::try_from_wkt_str("LINESTRING (0 0, 0 0, 0 0, 0 0, 0 0, 1 1)").expect("valid WKT");
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     assert_valid_ogc(&result);
 }
@@ -1403,13 +1504,18 @@ fn jts_linestring_repeated() {
 #[test]
 fn jts_linestring_self_cross() {
     use wkt::TryFromWkt;
-    let input: Geometry<f64> = Geometry::try_from_wkt_str("LINESTRING (0 0, 9 9, 9 5, 0 5)")
-        .expect("valid WKT");
+    let input: Geometry<f64> =
+        Geometry::try_from_wkt_str("LINESTRING (0 0, 9 9, 9 5, 0 5)").expect("valid WKT");
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     // NotSimple is valid per OGC for curves — only check for other errors
     let r = result.validate();
     if !r.valid {
-        let non_simple_only = r.errors.iter().all(|e| matches!(e, geo_repair::validation::GeometryValidationError::NotSimple));
+        let non_simple_only = r.errors.iter().all(|e| {
+            matches!(
+                e,
+                geo_repair::validation::GeometryValidationError::NotSimple
+            )
+        });
         assert!(non_simple_only, "linestring invalid: {:?}", r.errors);
     }
     assert_ogc_oriented(&result);
@@ -1418,8 +1524,7 @@ fn jts_linestring_self_cross() {
 #[test]
 fn jts_linearring_empty() {
     use wkt::TryFromWkt;
-    let input: Geometry<f64> = Geometry::try_from_wkt_str("LINESTRING EMPTY")
-        .expect("valid WKT");
+    let input: Geometry<f64> = Geometry::try_from_wkt_str("LINESTRING EMPTY").expect("valid WKT");
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     assert_valid_ogc(&result);
 }
@@ -1427,7 +1532,12 @@ fn jts_linearring_empty() {
 #[test]
 fn jts_linearring_collapse_point() {
     let input = Geometry::LineString(LineString::new(vec![
-        Coord { x: 0.0, y: 0.0 }, Coord { x: 1.0, y: f64::NAN }, Coord { x: 0.0, y: 0.0 },
+        Coord { x: 0.0, y: 0.0 },
+        Coord {
+            x: 1.0,
+            y: f64::NAN,
+        },
+        Coord { x: 0.0, y: 0.0 },
     ]));
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     assert_valid_ogc(&result);
@@ -1436,8 +1546,13 @@ fn jts_linearring_collapse_point() {
 #[test]
 fn jts_linearring_collapse_line() {
     let input = Geometry::LineString(LineString::new(vec![
-        Coord { x: 0.0, y: 0.0 }, Coord { x: 1.0, y: f64::NAN },
-        Coord { x: 1.0, y: 0.0 }, Coord { x: 0.0, y: 0.0 },
+        Coord { x: 0.0, y: 0.0 },
+        Coord {
+            x: 1.0,
+            y: f64::NAN,
+        },
+        Coord { x: 1.0, y: 0.0 },
+        Coord { x: 0.0, y: 0.0 },
     ]));
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     assert_valid_ogc(&result);
@@ -1446,8 +1561,9 @@ fn jts_linearring_collapse_line() {
 #[test]
 fn jts_linearring_valid() {
     use wkt::TryFromWkt;
-    let input: Geometry<f64> = Geometry::try_from_wkt_str("LINESTRING (10 10, 10 90, 90 90, 90 10, 10 10)")
-        .expect("valid WKT");
+    let input: Geometry<f64> =
+        Geometry::try_from_wkt_str("LINESTRING (10 10, 10 90, 90 90, 90 10, 10 10)")
+            .expect("valid WKT");
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     assert_valid_ogc(&result);
 }
@@ -1455,40 +1571,60 @@ fn jts_linearring_valid() {
 #[test]
 fn jts_linearring_flat() {
     let input = Geometry::LineString(LineString::new(vec![
-        Coord { x: 10.0, y: 10.0 }, Coord { x: 10.0, y: 90.0 },
-        Coord { x: 90.0, y: 90.0 }, Coord { x: 10.0, y: 90.0 },
+        Coord { x: 10.0, y: 10.0 },
+        Coord { x: 10.0, y: 90.0 },
+        Coord { x: 90.0, y: 90.0 },
+        Coord { x: 10.0, y: 90.0 },
         Coord { x: 10.0, y: 10.0 },
     ]));
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     // NotSimple is valid per OGC for open curves
     let r = result.validate();
-    let non_simple_only = r.errors.iter().all(|e| matches!(e, geo_repair::validation::GeometryValidationError::NotSimple));
+    let non_simple_only = r.errors.iter().all(|e| {
+        matches!(
+            e,
+            geo_repair::validation::GeometryValidationError::NotSimple
+        )
+    });
     assert!(r.valid || non_simple_only, "invalid: {:?}", r.errors);
 }
 
 #[test]
 fn jts_linearring_self_cross() {
     let input = Geometry::LineString(LineString::new(vec![
-        Coord { x: 10.0, y: 10.0 }, Coord { x: 10.0, y: 90.0 },
-        Coord { x: 90.0, y: 10.0 }, Coord { x: 90.0, y: 90.0 },
+        Coord { x: 10.0, y: 10.0 },
+        Coord { x: 10.0, y: 90.0 },
+        Coord { x: 90.0, y: 10.0 },
+        Coord { x: 90.0, y: 90.0 },
         Coord { x: 10.0, y: 10.0 },
     ]));
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     // NotSimple is valid per OGC for open curves
     let r = result.validate();
-    let non_simple_only = r.errors.iter().all(|e| matches!(e, geo_repair::validation::GeometryValidationError::NotSimple));
+    let non_simple_only = r.errors.iter().all(|e| {
+        matches!(
+            e,
+            geo_repair::validation::GeometryValidationError::NotSimple
+        )
+    });
     assert!(r.valid || non_simple_only, "invalid: {:?}", r.errors);
 }
 
 #[test]
 fn jts_multilinestring_self_cross() {
     use wkt::TryFromWkt;
-    let input: Geometry<f64> = Geometry::try_from_wkt_str("MULTILINESTRING ((10 90, 90 10, 90 90), (90 50, 10 50))")
-        .expect("valid WKT");
+    let input: Geometry<f64> =
+        Geometry::try_from_wkt_str("MULTILINESTRING ((10 90, 90 10, 90 90), (90 50, 10 50))")
+            .expect("valid WKT");
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     let r = result.validate();
     if !r.valid {
-        let non_simple_only = r.errors.iter().all(|e| matches!(e, geo_repair::validation::GeometryValidationError::NotSimple));
+        let non_simple_only = r.errors.iter().all(|e| {
+            matches!(
+                e,
+                geo_repair::validation::GeometryValidationError::NotSimple
+            )
+        });
         assert!(non_simple_only, "multilinestring invalid: {:?}", r.errors);
     }
     assert_ogc_oriented(&result);
@@ -1497,8 +1633,9 @@ fn jts_multilinestring_self_cross() {
 #[test]
 fn jts_multilinestring_collapse() {
     use wkt::TryFromWkt;
-    let input: Geometry<f64> = Geometry::try_from_wkt_str("MULTILINESTRING ((10 10, 90 90), (10 10, 10 10, 10 10))")
-        .expect("valid WKT");
+    let input: Geometry<f64> =
+        Geometry::try_from_wkt_str("MULTILINESTRING ((10 10, 90 90), (10 10, 10 10, 10 10))")
+            .expect("valid WKT");
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     assert_valid_ogc(&result);
 }
@@ -1506,8 +1643,8 @@ fn jts_multilinestring_collapse() {
 #[test]
 fn jts_multilinestring_with_empty() {
     use wkt::TryFromWkt;
-    let input: Geometry<f64> = Geometry::try_from_wkt_str("MULTILINESTRING ((10 10, 90 90), EMPTY)")
-        .expect("valid WKT");
+    let input: Geometry<f64> =
+        Geometry::try_from_wkt_str("MULTILINESTRING ((10 10, 90 90), EMPTY)").expect("valid WKT");
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     assert_valid_ogc(&result);
 }
@@ -1515,8 +1652,8 @@ fn jts_multilinestring_with_empty() {
 #[test]
 fn jts_multilinestring_multi_empty() {
     use wkt::TryFromWkt;
-    let input: Geometry<f64> = Geometry::try_from_wkt_str("MULTILINESTRING (EMPTY, EMPTY)")
-        .expect("valid WKT");
+    let input: Geometry<f64> =
+        Geometry::try_from_wkt_str("MULTILINESTRING (EMPTY, EMPTY)").expect("valid WKT");
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     assert_valid_ogc(&result);
 }
@@ -1525,8 +1662,13 @@ fn jts_multilinestring_multi_empty() {
 fn jts_polygon_nan() {
     let input = Geometry::Polygon(Polygon::new(
         LineString::new(vec![
-            Coord { x: 10.0, y: 90.0 }, Coord { x: 90.0, y: f64::NAN },
-            Coord { x: 90.0, y: 10.0 }, Coord { x: 10.0, y: 10.0 },
+            Coord { x: 10.0, y: 90.0 },
+            Coord {
+                x: 90.0,
+                y: f64::NAN,
+            },
+            Coord { x: 90.0, y: 10.0 },
+            Coord { x: 10.0, y: 10.0 },
             Coord { x: 10.0, y: 90.0 },
         ]),
         Vec::new(),
@@ -1538,8 +1680,10 @@ fn jts_polygon_nan() {
 #[test]
 fn jts_polygon_repeated() {
     use wkt::TryFromWkt;
-    let input: Geometry<f64> = Geometry::try_from_wkt_str("POLYGON ((10 90, 90 10, 90 10, 90 10, 90 10, 90 10, 10 10, 10 90))")
-        .expect("valid WKT");
+    let input: Geometry<f64> = Geometry::try_from_wkt_str(
+        "POLYGON ((10 90, 90 10, 90 10, 90 10, 90 10, 90 10, 10 10, 10 90))",
+    )
+    .expect("valid WKT");
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     assert_valid_ogc(&result);
 }
@@ -1547,8 +1691,10 @@ fn jts_polygon_repeated() {
 #[test]
 fn jts_polygon_shell_collapse() {
     use wkt::TryFromWkt;
-    let input: Geometry<f64> = Geometry::try_from_wkt_str("POLYGON ((10 10, 10 90, 90 90, 10 90, 10 10), (20 80, 60 80, 60 40, 20 40, 20 80))")
-        .expect("valid WKT");
+    let input: Geometry<f64> = Geometry::try_from_wkt_str(
+        "POLYGON ((10 10, 10 90, 90 90, 10 90, 10 10), (20 80, 60 80, 60 40, 20 40, 20 80))",
+    )
+    .expect("valid WKT");
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     assert_valid_ogc(&result);
 }
@@ -1557,8 +1703,19 @@ fn jts_polygon_shell_collapse() {
 fn jts_polygon_shell_collapse_nan() {
     let input = Geometry::Polygon(Polygon::new(
         LineString::new(vec![
-            Coord { x: 10.0, y: 10.0 }, Coord { x: 10.0, y: f64::NAN },
-            Coord { x: 90.0, y: f64::NAN }, Coord { x: 10.0, y: f64::NAN },
+            Coord { x: 10.0, y: 10.0 },
+            Coord {
+                x: 10.0,
+                y: f64::NAN,
+            },
+            Coord {
+                x: 90.0,
+                y: f64::NAN,
+            },
+            Coord {
+                x: 10.0,
+                y: f64::NAN,
+            },
             Coord { x: 10.0, y: 10.0 },
         ]),
         Vec::new(),
@@ -1571,14 +1728,28 @@ fn jts_polygon_shell_collapse_nan() {
 fn jts_polygon_shell_keep_collapse_nan() {
     let input = Geometry::Polygon(Polygon::new(
         LineString::new(vec![
-            Coord { x: 10.0, y: 10.0 }, Coord { x: 10.0, y: f64::NAN },
-            Coord { x: 90.0, y: f64::NAN }, Coord { x: 10.0, y: f64::NAN },
+            Coord { x: 10.0, y: 10.0 },
+            Coord {
+                x: 10.0,
+                y: f64::NAN,
+            },
+            Coord {
+                x: 90.0,
+                y: f64::NAN,
+            },
+            Coord {
+                x: 10.0,
+                y: f64::NAN,
+            },
             Coord { x: 10.0, y: 10.0 },
         ]),
         Vec::new(),
     ));
     for &keep in &[false, true] {
-        let config = MakeValidConfig { keep_collapsed: keep, ..Default::default() };
+        let config = MakeValidConfig {
+            keep_collapsed: keep,
+            ..Default::default()
+        };
         let result = input.make_valid_with_config(&config);
         assert_valid_ogc(&result);
     }
@@ -1587,8 +1758,10 @@ fn jts_polygon_shell_keep_collapse_nan() {
 #[test]
 fn jts_polygon_hole_collapse() {
     use wkt::TryFromWkt;
-    let input: Geometry<f64> = Geometry::try_from_wkt_str("POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), (80 80, 20 80, 20 20, 20 80, 80 80))")
-        .expect("valid WKT");
+    let input: Geometry<f64> = Geometry::try_from_wkt_str(
+        "POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), (80 80, 20 80, 20 20, 20 80, 80 80))",
+    )
+    .expect("valid WKT");
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     assert_valid_ogc(&result);
 }
@@ -1605,8 +1778,7 @@ fn jts_polygon_hole_overlap_outside() {
 #[test]
 fn jts_multipolygon_empty() {
     use wkt::TryFromWkt;
-    let input: Geometry<f64> = Geometry::try_from_wkt_str("MULTIPOLYGON EMPTY")
-        .expect("valid WKT");
+    let input: Geometry<f64> = Geometry::try_from_wkt_str("MULTIPOLYGON EMPTY").expect("valid WKT");
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     assert_valid_ogc(&result);
 }
@@ -1614,8 +1786,8 @@ fn jts_multipolygon_empty() {
 #[test]
 fn jts_multipolygon_multi_empty() {
     use wkt::TryFromWkt;
-    let input: Geometry<f64> = Geometry::try_from_wkt_str("MULTIPOLYGON (EMPTY, EMPTY)")
-        .expect("valid WKT");
+    let input: Geometry<f64> =
+        Geometry::try_from_wkt_str("MULTIPOLYGON (EMPTY, EMPTY)").expect("valid WKT");
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     assert_valid_ogc(&result);
 }
@@ -1641,8 +1813,8 @@ fn jts_multipolygon_collapse() {
 #[test]
 fn jts_gc_empty() {
     use wkt::TryFromWkt;
-    let input: Geometry<f64> = Geometry::try_from_wkt_str("GEOMETRYCOLLECTION EMPTY")
-        .expect("valid WKT");
+    let input: Geometry<f64> =
+        Geometry::try_from_wkt_str("GEOMETRYCOLLECTION EMPTY").expect("valid WKT");
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     assert_valid_ogc(&result);
 }
@@ -1650,8 +1822,10 @@ fn jts_gc_empty() {
 #[test]
 fn jts_gc_all_empty() {
     use wkt::TryFromWkt;
-    let input: Geometry<f64> = Geometry::try_from_wkt_str("GEOMETRYCOLLECTION (POINT EMPTY, LINESTRING EMPTY, POLYGON EMPTY)")
-        .expect("valid WKT");
+    let input: Geometry<f64> = Geometry::try_from_wkt_str(
+        "GEOMETRYCOLLECTION (POINT EMPTY, LINESTRING EMPTY, POLYGON EMPTY)",
+    )
+    .expect("valid WKT");
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     assert_valid_ogc(&result);
 }
@@ -1659,10 +1833,13 @@ fn jts_gc_all_empty() {
 #[test]
 fn jts_linestring_keep_collapse() {
     use wkt::TryFromWkt;
-    let input: Geometry<f64> = Geometry::try_from_wkt_str("LINESTRING (0 0, 0 0, 0 0)")
-        .expect("valid WKT");
+    let input: Geometry<f64> =
+        Geometry::try_from_wkt_str("LINESTRING (0 0, 0 0, 0 0)").expect("valid WKT");
     for &keep in &[false, true] {
-        let config = MakeValidConfig { keep_collapsed: keep, ..Default::default() };
+        let config = MakeValidConfig {
+            keep_collapsed: keep,
+            ..Default::default()
+        };
         let result = input.make_valid_with_config(&config);
         assert_valid_ogc(&result);
     }
@@ -1671,10 +1848,18 @@ fn jts_linestring_keep_collapse() {
 #[test]
 fn jts_linearring_keep_collapse_point() {
     let input = Geometry::LineString(LineString::new(vec![
-        Coord { x: 0.0, y: 0.0 }, Coord { x: 1.0, y: f64::NAN }, Coord { x: 0.0, y: 0.0 },
+        Coord { x: 0.0, y: 0.0 },
+        Coord {
+            x: 1.0,
+            y: f64::NAN,
+        },
+        Coord { x: 0.0, y: 0.0 },
     ]));
     for &keep in &[false, true] {
-        let config = MakeValidConfig { keep_collapsed: keep, ..Default::default() };
+        let config = MakeValidConfig {
+            keep_collapsed: keep,
+            ..Default::default()
+        };
         let result = input.make_valid_with_config(&config);
         assert_valid_ogc(&result);
     }
@@ -1683,11 +1868,19 @@ fn jts_linearring_keep_collapse_point() {
 #[test]
 fn jts_linearring_keep_collapse_line() {
     let input = Geometry::LineString(LineString::new(vec![
-        Coord { x: 0.0, y: 0.0 }, Coord { x: 1.0, y: f64::NAN },
-        Coord { x: 1.0, y: 0.0 }, Coord { x: 0.0, y: 0.0 },
+        Coord { x: 0.0, y: 0.0 },
+        Coord {
+            x: 1.0,
+            y: f64::NAN,
+        },
+        Coord { x: 1.0, y: 0.0 },
+        Coord { x: 0.0, y: 0.0 },
     ]));
     for &keep in &[false, true] {
-        let config = MakeValidConfig { keep_collapsed: keep, ..Default::default() };
+        let config = MakeValidConfig {
+            keep_collapsed: keep,
+            ..Default::default()
+        };
         let result = input.make_valid_with_config(&config);
         assert_valid_ogc(&result);
     }
@@ -1696,10 +1889,14 @@ fn jts_linearring_keep_collapse_line() {
 #[test]
 fn jts_multilinestring_collapse_keep() {
     use wkt::TryFromWkt;
-    let input: Geometry<f64> = Geometry::try_from_wkt_str("MULTILINESTRING ((10 10, 90 90), (10 10, 10 10, 10 10))")
-        .expect("valid WKT");
+    let input: Geometry<f64> =
+        Geometry::try_from_wkt_str("MULTILINESTRING ((10 10, 90 90), (10 10, 10 10, 10 10))")
+            .expect("valid WKT");
     for &keep in &[false, true] {
-        let config = MakeValidConfig { keep_collapsed: keep, ..Default::default() };
+        let config = MakeValidConfig {
+            keep_collapsed: keep,
+            ..Default::default()
+        };
         let result = input.make_valid_with_config(&config);
         assert_valid_ogc(&result);
     }
@@ -1708,10 +1905,15 @@ fn jts_multilinestring_collapse_keep() {
 #[test]
 fn jts_polygon_shell_keep_collapse() {
     use wkt::TryFromWkt;
-    let input: Geometry<f64> = Geometry::try_from_wkt_str("POLYGON ((10 10, 10 90, 90 90, 10 90, 10 10), (20 80, 60 80, 60 40, 20 40, 20 80))")
-        .expect("valid WKT");
+    let input: Geometry<f64> = Geometry::try_from_wkt_str(
+        "POLYGON ((10 10, 10 90, 90 90, 10 90, 10 10), (20 80, 60 80, 60 40, 20 40, 20 80))",
+    )
+    .expect("valid WKT");
     for &keep in &[false, true] {
-        let config = MakeValidConfig { keep_collapsed: keep, ..Default::default() };
+        let config = MakeValidConfig {
+            keep_collapsed: keep,
+            ..Default::default()
+        };
         let result = input.make_valid_with_config(&config);
         assert_valid_ogc(&result);
     }
@@ -1720,10 +1922,15 @@ fn jts_polygon_shell_keep_collapse() {
 #[test]
 fn jts_polygon_hole_keep_collapse() {
     use wkt::TryFromWkt;
-    let input: Geometry<f64> = Geometry::try_from_wkt_str("POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), (80 80, 20 80, 20 20, 20 80, 80 80))")
-        .expect("valid WKT");
+    let input: Geometry<f64> = Geometry::try_from_wkt_str(
+        "POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), (80 80, 20 80, 20 20, 20 80, 80 80))",
+    )
+    .expect("valid WKT");
     for &keep in &[false, true] {
-        let config = MakeValidConfig { keep_collapsed: keep, ..Default::default() };
+        let config = MakeValidConfig {
+            keep_collapsed: keep,
+            ..Default::default()
+        };
         let result = input.make_valid_with_config(&config);
         assert_valid_ogc(&result);
     }
@@ -1735,7 +1942,10 @@ fn jts_multipolygon_collapse_keep() {
     let input: Geometry<f64> = Geometry::try_from_wkt_str("MULTIPOLYGON (((10 40, 40 40, 40 10, 10 10, 10 40)), ((50 40, 50 40, 50 40, 50 40, 50 40)))")
         .expect("valid WKT");
     for &keep in &[false, true] {
-        let config = MakeValidConfig { keep_collapsed: keep, ..Default::default() };
+        let config = MakeValidConfig {
+            keep_collapsed: keep,
+            ..Default::default()
+        };
         let result = input.make_valid_with_config(&config);
         assert_valid_ogc(&result);
     }
@@ -1744,10 +1954,14 @@ fn jts_multipolygon_collapse_keep() {
 #[test]
 fn jts_gc_keep_collapse() {
     use wkt::TryFromWkt;
-    let input: Geometry<f64> = Geometry::try_from_wkt_str("GEOMETRYCOLLECTION (LINESTRING (0 0, 0 0), POINT (1 1))")
-        .expect("valid WKT");
+    let input: Geometry<f64> =
+        Geometry::try_from_wkt_str("GEOMETRYCOLLECTION (LINESTRING (0 0, 0 0), POINT (1 1))")
+            .expect("valid WKT");
     for &keep in &[false, true] {
-        let config = MakeValidConfig { keep_collapsed: keep, ..Default::default() };
+        let config = MakeValidConfig {
+            keep_collapsed: keep,
+            ..Default::default()
+        };
         let result = input.make_valid_with_config(&config);
         assert_valid_ogc(&result);
     }
@@ -1755,9 +1969,15 @@ fn jts_gc_keep_collapse() {
 
 #[test]
 fn jts_multipoint_keep_collapse() {
-    let input = Geometry::MultiPoint(MultiPoint::new(vec![Point::new(0.0, 0.0), Point::new(f64::NAN, f64::NAN)]));
+    let input = Geometry::MultiPoint(MultiPoint::new(vec![
+        Point::new(0.0, 0.0),
+        Point::new(f64::NAN, f64::NAN),
+    ]));
     for &keep in &[false, true] {
-        let config = MakeValidConfig { keep_collapsed: keep, ..Default::default() };
+        let config = MakeValidConfig {
+            keep_collapsed: keep,
+            ..Default::default()
+        };
         let result = input.make_valid_with_config(&config);
         assert_valid_ogc(&result);
     }
@@ -1789,8 +2009,9 @@ fn postgis_mp_2_overlap() {
         5 11,5 12,6 13,6 14,186 194)),((150 90,149 80,146 71,142 62,135 55,
         128 48,119 44,110 41,100 40,90 41,81 44,72 48,65 55,58 62,54 71,51 80,
         50 90,51 100,54 109,58 118,65 125,72 132,81 136,90 139,100 140,110 139,
-        119 136,128 132,135 125,142 118,146 109,149 100,150 90)))")
-        .expect("valid WKT");
+        119 136,128 132,135 125,142 118,146 109,149 100,150 90)))",
+    )
+    .expect("valid WKT");
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     assert_valid_ogc(&result);
     assert_not_empty(&result);
@@ -1805,8 +2026,9 @@ fn postgis_mp_6_overlap() {
         ((91 150,79 122,51 110,23 122,11 150,23 178,51 190,79 178,91 150)),
         ((141 50,129 22,101 10,73 22,61 50,73 78,101 90,129 78,141 50)),
         ((141 100,129 72,101 60,73 72,61 100,73 128,101 140,129 128,141 100)),
-        ((141 150,129 122,101 110,73 122,61 150,73 178,101 190,129 178,141 150)))")
-        .expect("valid WKT");
+        ((141 150,129 122,101 110,73 122,61 150,73 178,101 190,129 178,141 150)))",
+    )
+    .expect("valid WKT");
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     assert_valid_ogc(&result);
     assert_not_empty(&result);
@@ -1815,10 +2037,14 @@ fn postgis_mp_6_overlap() {
 #[test]
 fn postgis_linestring_collapse() {
     let input = Geometry::LineString(LineString::new(vec![
-        Coord { x: 0.0, y: 0.0 }, Coord { x: 0.0, y: 0.0 },
+        Coord { x: 0.0, y: 0.0 },
+        Coord { x: 0.0, y: 0.0 },
     ]));
     for &keep in &[false, true] {
-        let config = MakeValidConfig { keep_collapsed: keep, ..Default::default() };
+        let config = MakeValidConfig {
+            keep_collapsed: keep,
+            ..Default::default()
+        };
         let result = input.make_valid_with_config(&config);
         assert_valid_ogc(&result);
     }
@@ -1829,15 +2055,42 @@ fn postgis_makevalid_regression() {
     // A polygon with a self-intersection at the 92122.136, 463412.826 vertex.
     let input = Geometry::Polygon(Polygon::new(
         LineString::new(vec![
-            Coord { x: 92114.014, y: 463463.469 },
-            Coord { x: 92115.51207431706, y: 463462.2069374289 },
-            Coord { x: 92115.512, y: 463462.207 },
-            Coord { x: 92127.546, y: 463452.075 },
-            Coord { x: 92117.173, y: 463439.755 },
-            Coord { x: 92133.675, y: 463425.942 },
-            Coord { x: 92122.136, y: 463412.826 },
-            Coord { x: 92092.377, y: 463437.77 },
-            Coord { x: 92114.014, y: 463463.469 },
+            Coord {
+                x: 92114.014,
+                y: 463463.469,
+            },
+            Coord {
+                x: 92115.51207431706,
+                y: 463462.2069374289,
+            },
+            Coord {
+                x: 92115.512,
+                y: 463462.207,
+            },
+            Coord {
+                x: 92127.546,
+                y: 463452.075,
+            },
+            Coord {
+                x: 92117.173,
+                y: 463439.755,
+            },
+            Coord {
+                x: 92133.675,
+                y: 463425.942,
+            },
+            Coord {
+                x: 92122.136,
+                y: 463412.826,
+            },
+            Coord {
+                x: 92092.377,
+                y: 463437.77,
+            },
+            Coord {
+                x: 92114.014,
+                y: 463463.469,
+            },
         ]),
         Vec::new(),
     ));
@@ -1859,9 +2112,9 @@ fn jts_polygon_empty() {
 fn jts_polygon_bowtie() {
     // JTS testPolygonBowtie: classic bowtie → MULTIPOLYGON[2]
     use wkt::TryFromWkt;
-    let input: Geometry<f64> = Geometry::try_from_wkt_str(
-        "POLYGON ((10 90, 90 10, 90 90, 10 10, 10 90))")
-        .expect("valid WKT");
+    let input: Geometry<f64> =
+        Geometry::try_from_wkt_str("POLYGON ((10 90, 90 10, 90 90, 10 10, 10 90))")
+            .expect("valid WKT");
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     assert_valid_ogc(&result);
     assert_not_empty(&result);
@@ -1875,9 +2128,13 @@ fn jts_polygon_bowtie() {
 fn geos_linestring_invalid_result_point() {
     // LINESTRING(0 0,0 0) → POINT (0 0) with keepCollapsed
     let input = Geometry::LineString(LineString::new(vec![
-        Coord { x: 0.0, y: 0.0 }, Coord { x: 0.0, y: 0.0 },
+        Coord { x: 0.0, y: 0.0 },
+        Coord { x: 0.0, y: 0.0 },
     ]));
-    let config = MakeValidConfig { keep_collapsed: true, ..Default::default() };
+    let config = MakeValidConfig {
+        keep_collapsed: true,
+        ..Default::default()
+    };
     let result = input.make_valid_with_config(&config);
     assert_valid_ogc(&result);
     assert_not_empty(&result);
@@ -1913,8 +2170,10 @@ fn geos_polygon_bowtie_split() {
     // From GEOS: POLYGON((0 0,1 1,0 1,1 0,0 0)) → MULTIPOLYGON with 2 components
     let input = Geometry::Polygon(Polygon::new(
         LineString::new(vec![
-            Coord { x: 0.0, y: 0.0 }, Coord { x: 1.0, y: 1.0 },
-            Coord { x: 0.0, y: 1.0 }, Coord { x: 1.0, y: 0.0 },
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 1.0, y: 1.0 },
+            Coord { x: 0.0, y: 1.0 },
+            Coord { x: 1.0, y: 0.0 },
             Coord { x: 0.0, y: 0.0 },
         ]),
         Vec::new(),
@@ -1926,39 +2185,59 @@ fn geos_polygon_bowtie_split() {
 
 #[test]
 fn geos_hole_touching_two_places() {
-    use geo_repair::PolyMethod;
     use geo::BooleanOps;
+    use geo_repair::PolyMethod;
     let input = Geometry::Polygon(Polygon::new(
         LineString::new(vec![
-            Coord { x: 0.0, y: 0.0 }, Coord { x: 0.0, y: 1.0 },
-            Coord { x: 1.0, y: 1.0 }, Coord { x: 1.0, y: 0.0 },
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 0.0, y: 1.0 },
+            Coord { x: 1.0, y: 1.0 },
+            Coord { x: 1.0, y: 0.0 },
             Coord { x: 0.0, y: 0.0 },
         ]),
         vec![LineString::new(vec![
-            Coord { x: 0.0, y: 0.5 }, Coord { x: 0.5, y: 0.1 },
-            Coord { x: 1.0, y: 0.5 }, Coord { x: 0.0, y: 0.5 },
+            Coord { x: 0.0, y: 0.5 },
+            Coord { x: 0.5, y: 0.1 },
+            Coord { x: 1.0, y: 0.5 },
+            Coord { x: 0.0, y: 0.5 },
         ])],
     ));
     // Try Arrange first (has boolean-difference fallback)
-    let cfg = MakeValidConfig { poly_method: PolyMethod::Arrange, ..Default::default() };
+    let cfg = MakeValidConfig {
+        poly_method: PolyMethod::Arrange,
+        ..Default::default()
+    };
     let result = input.make_valid_with_config(&cfg);
     let r = result.validate();
-    if r.valid { return; }
-    
+    if r.valid {
+        return;
+    }
+
     // If Arrange also fails, try direct boolean diff
     let shell = Polygon::new(
         LineString::new(vec![
-            Coord { x: 0.0, y: 0.0 }, Coord { x: 0.0, y: 1.0 },
-            Coord { x: 1.0, y: 1.0 }, Coord { x: 1.0, y: 0.0 },
             Coord { x: 0.0, y: 0.0 },
-        ]), Vec::new());
+            Coord { x: 0.0, y: 1.0 },
+            Coord { x: 1.0, y: 1.0 },
+            Coord { x: 1.0, y: 0.0 },
+            Coord { x: 0.0, y: 0.0 },
+        ]),
+        Vec::new(),
+    );
     let hole = Polygon::new(
         LineString::new(vec![
-            Coord { x: 0.0, y: 0.5 }, Coord { x: 0.5, y: 0.1 },
-            Coord { x: 1.0, y: 0.5 }, Coord { x: 0.0, y: 0.5 },
-        ]), Vec::new());
+            Coord { x: 0.0, y: 0.5 },
+            Coord { x: 0.5, y: 0.1 },
+            Coord { x: 1.0, y: 0.5 },
+            Coord { x: 0.0, y: 0.5 },
+        ]),
+        Vec::new(),
+    );
     let diff = shell.boolean_op(&hole, geo::OpType::Difference);
-    assert!(!diff.0.is_empty(), "boolean diff should produce at least 1 polygon");
+    assert!(
+        !diff.0.is_empty(),
+        "boolean diff should produce at least 1 polygon"
+    );
     for p in &diff.0 {
         let v: geo_repair::validation::ValidationResult = p.validate();
         assert!(v.valid, "each component should be valid: {:?}", v.errors);
@@ -1971,16 +2250,20 @@ fn geos_mp_second_overlapping() {
     let input = Geometry::MultiPolygon(MultiPolygon::new(vec![
         Polygon::new(
             LineString::new(vec![
-                Coord { x: 0.0, y: 0.0 }, Coord { x: 0.0, y: 1.0 },
-                Coord { x: 1.0, y: 1.0 }, Coord { x: 1.0, y: 0.0 },
+                Coord { x: 0.0, y: 0.0 },
+                Coord { x: 0.0, y: 1.0 },
+                Coord { x: 1.0, y: 1.0 },
+                Coord { x: 1.0, y: 0.0 },
                 Coord { x: 0.0, y: 0.0 },
             ]),
             Vec::new(),
         ),
         Polygon::new(
             LineString::new(vec![
-                Coord { x: 0.8, y: 0.1 }, Coord { x: 2.0, y: 0.1 },
-                Coord { x: 2.0, y: 0.9 }, Coord { x: 0.8, y: 0.9 },
+                Coord { x: 0.8, y: 0.1 },
+                Coord { x: 2.0, y: 0.1 },
+                Coord { x: 2.0, y: 0.9 },
+                Coord { x: 0.8, y: 0.9 },
                 Coord { x: 0.8, y: 0.1 },
             ]),
             Vec::new(),
@@ -1997,16 +2280,20 @@ fn geos_mp_first_cross_second_overlap() {
     let input = Geometry::MultiPolygon(MultiPolygon::new(vec![
         Polygon::new(
             LineString::new(vec![
-                Coord { x: 0.0, y: 0.0 }, Coord { x: 1.0, y: 1.0 },
-                Coord { x: 0.0, y: 1.0 }, Coord { x: 1.0, y: 0.0 },
+                Coord { x: 0.0, y: 0.0 },
+                Coord { x: 1.0, y: 1.0 },
+                Coord { x: 0.0, y: 1.0 },
+                Coord { x: 1.0, y: 0.0 },
                 Coord { x: 0.0, y: 0.0 },
             ]),
             Vec::new(),
         ),
         Polygon::new(
             LineString::new(vec![
-                Coord { x: 0.8, y: 0.1 }, Coord { x: 2.0, y: 0.1 },
-                Coord { x: 2.0, y: 0.9 }, Coord { x: 0.8, y: 0.9 },
+                Coord { x: 0.8, y: 0.1 },
+                Coord { x: 2.0, y: 0.1 },
+                Coord { x: 2.0, y: 0.9 },
+                Coord { x: 0.8, y: 0.9 },
                 Coord { x: 0.8, y: 0.1 },
             ]),
             Vec::new(),
@@ -2025,17 +2312,28 @@ fn geos_gc_with_empty_and_invalid_poly() {
     // Verify the polygon split works
     let shell = Polygon::new(
         LineString::new(vec![
-            Coord { x: 0.0, y: 0.0 }, Coord { x: 0.0, y: 1.0 },
-            Coord { x: 1.0, y: 1.0 }, Coord { x: 1.0, y: 0.0 },
             Coord { x: 0.0, y: 0.0 },
-        ]), Vec::new());
+            Coord { x: 0.0, y: 1.0 },
+            Coord { x: 1.0, y: 1.0 },
+            Coord { x: 1.0, y: 0.0 },
+            Coord { x: 0.0, y: 0.0 },
+        ]),
+        Vec::new(),
+    );
     let hole = Polygon::new(
         LineString::new(vec![
-            Coord { x: 0.0, y: 0.5 }, Coord { x: 0.5, y: 0.1 },
-            Coord { x: 1.0, y: 0.5 }, Coord { x: 0.0, y: 0.5 },
-        ]), Vec::new());
+            Coord { x: 0.0, y: 0.5 },
+            Coord { x: 0.5, y: 0.1 },
+            Coord { x: 1.0, y: 0.5 },
+            Coord { x: 0.0, y: 0.5 },
+        ]),
+        Vec::new(),
+    );
     let diff = shell.boolean_op(&hole, geo::OpType::Difference);
-    assert!(diff.0.len() >= 2, "hole-touching-2-places should split into 2+ polygons");
+    assert!(
+        diff.0.len() >= 2,
+        "hole-touching-2-places should split into 2+ polygons"
+    );
     for p in &diff.0 {
         let v: geo_repair::validation::ValidationResult = p.validate();
         assert!(v.valid, "split component invalid: {:?}", v.errors);

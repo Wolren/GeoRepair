@@ -1,7 +1,6 @@
-
-use alloc::vec::Vec;
 use alloc::string::String;
 use alloc::string::ToString;
+use alloc::vec::Vec;
 use geo::GeoFloat;
 
 /// Trait for OGC geometry validation.
@@ -40,14 +39,14 @@ pub trait GeoValidation {
     }
 }
 
+pub(crate) use super::edges::*;
 /// Facade: re-export the extracted submodules so existing
 /// `crate::validation::core::*` imports keep resolving. Modules whose
 /// items are all pub(crate) re-export at pub(crate) scope (the facade
 /// itself is crate-internal; mod.rs owns the public surface).
 pub use super::errors::*;
+pub(crate) use super::holes::*;
 pub use super::impls::*;
 pub use super::result::*;
 pub use super::ring::*;
-pub(crate) use super::edges::*;
-pub(crate) use super::holes::*;
 pub(crate) use super::sweep::*;

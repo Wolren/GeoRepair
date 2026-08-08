@@ -1,11 +1,9 @@
 //! WKT writer: geometry serializer + type inference.
 
-
-use alloc::string::String;
 use super::*;
+use alloc::string::String;
 #[cfg(feature = "std")]
 use std::io::{self, Write};
-
 
 /// Serialize a `Geometry<f64>` to WKT and write it to any `io::Write` target.
 ///
@@ -178,30 +176,45 @@ fn write_geom(s: &mut String, geom: &Geometry<f64>) {
         }
         Geometry::Rect(rect) => {
             s.push_str("POLYGON ((");
-            write_coord(s, &Coord {
-                x: rect.min().x,
-                y: rect.min().y,
-            });
+            write_coord(
+                s,
+                &Coord {
+                    x: rect.min().x,
+                    y: rect.min().y,
+                },
+            );
             s.push_str(", ");
-            write_coord(s, &Coord {
-                x: rect.max().x,
-                y: rect.min().y,
-            });
+            write_coord(
+                s,
+                &Coord {
+                    x: rect.max().x,
+                    y: rect.min().y,
+                },
+            );
             s.push_str(", ");
-            write_coord(s, &Coord {
-                x: rect.max().x,
-                y: rect.max().y,
-            });
+            write_coord(
+                s,
+                &Coord {
+                    x: rect.max().x,
+                    y: rect.max().y,
+                },
+            );
             s.push_str(", ");
-            write_coord(s, &Coord {
-                x: rect.min().x,
-                y: rect.max().y,
-            });
+            write_coord(
+                s,
+                &Coord {
+                    x: rect.min().x,
+                    y: rect.max().y,
+                },
+            );
             s.push_str(", ");
-            write_coord(s, &Coord {
-                x: rect.min().x,
-                y: rect.min().y,
-            });
+            write_coord(
+                s,
+                &Coord {
+                    x: rect.min().x,
+                    y: rect.min().y,
+                },
+            );
             s.push_str("))");
         }
         Geometry::Triangle(tri) => {

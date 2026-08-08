@@ -24,11 +24,11 @@
 //! Uses `proptest` with custom strategies tuned to hit both valid geometries
 //! and known invalidity patterns with high probability.
 
+use geo::winding_order::WindingOrder;
 use geo::{
     Coord, Geometry, GeometryCollection, Line, LineString, MultiLineString, MultiPoint,
     MultiPolygon, Point, Polygon, Rect, Triangle, Winding,
 };
-use geo::winding_order::WindingOrder;
 use geo_repair::validation::{GeoValidation, GeometryValidationError};
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 use proptest::prelude::*;
@@ -46,14 +46,17 @@ fn assert_valid(g: &Geometry<f64>) {
         Geometry::Point(_) | Geometry::Line(_) | Geometry::MultiPoint(_) => {
             assert!(r.valid || is_empty(g), "geometry invalid: {:?}", r.errors);
         }
-        Geometry::LineString(_) | Geometry::MultiLineString(_)
-            | Geometry::Triangle(_) => {
+        Geometry::LineString(_) | Geometry::MultiLineString(_) | Geometry::Triangle(_) => {
             if !r.valid && !is_empty(g) {
-                let has_other_errors = r.errors.iter().any(|e| {
-                    !matches!(e, GeometryValidationError::NotSimple)
-                });
-                assert!(!has_other_errors,
-                    "linestring/triangle invalid: {:?}", r.errors);
+                let has_other_errors = r
+                    .errors
+                    .iter()
+                    .any(|e| !matches!(e, GeometryValidationError::NotSimple));
+                assert!(
+                    !has_other_errors,
+                    "linestring/triangle invalid: {:?}",
+                    r.errors
+                );
             }
         }
         _ => {
@@ -99,24 +102,30 @@ fn assert_polygon_orientation(poly: &Polygon<f64>) {
 }
 
 fn assert_ring_invariants(coords: &[Coord<f64>], label: &str) {
-    if coords.len() < 4 { return; }
+    if coords.len() < 4 {
+        return;
+    }
     assert_eq!(
-        coords.first(), coords.last(),
+        coords.first(),
+        coords.last(),
         "{label}: ring not closed: first {:?} != last {:?}",
-        coords.first(), coords.last()
+        coords.first(),
+        coords.last()
     );
     for w in coords.windows(2) {
         assert!(
             w[0] != w[1],
             "{label}: consecutive duplicates at {:?} == {:?}",
-            w[0], w[1]
+            w[0],
+            w[1]
         );
     }
     for c in coords {
         assert!(
             c.x.is_finite() && c.y.is_finite(),
             "{label}: non-finite coordinate ({}, {})",
-            c.x, c.y
+            c.x,
+            c.y
         );
     }
 }
@@ -144,12 +153,20 @@ fn assert_polygon_rings(poly: &Polygon<f64>, label: &str) {
 
 fn assert_linestring_invariants(ls: &LineString<f64>, label: &str) {
     for c in &ls.0 {
-        assert!(c.x.is_finite() && c.y.is_finite(),
-            "{label}: non-finite coord ({}, {})", c.x, c.y);
+        assert!(
+            c.x.is_finite() && c.y.is_finite(),
+            "{label}: non-finite coord ({}, {})",
+            c.x,
+            c.y
+        );
     }
     for w in ls.0.windows(2) {
-        assert!(w[0] != w[1],
-            "{label}: consecutive duplicates at {:?} == {:?}", w[0], w[1]);
+        assert!(
+            w[0] != w[1],
+            "{label}: consecutive duplicates at {:?} == {:?}",
+            w[0],
+            w[1]
+        );
     }
 }
 
@@ -206,17 +223,42 @@ fn all_finite(vals: &[f64]) -> bool {
 }
 
 fn cfg_all() -> Vec<MakeValidConfig> {
-    let auto = MakeValidConfig { poly_method: PolyMethod::Auto, keep_collapsed: false, ..Default::default() };
-    let auto_keep = MakeValidConfig { poly_method: PolyMethod::Auto, keep_collapsed: true, ..Default::default() };
-    let arrange = MakeValidConfig { poly_method: PolyMethod::Arrange, keep_collapsed: false, ..Default::default() };
-    let structure = MakeValidConfig { poly_method: PolyMethod::Structure, keep_collapsed: false, ..Default::default() };
+    let auto = MakeValidConfig {
+        poly_method: PolyMethod::Auto,
+        keep_collapsed: false,
+        ..Default::default()
+    };
+    let auto_keep = MakeValidConfig {
+        poly_method: PolyMethod::Auto,
+        keep_collapsed: true,
+        ..Default::default()
+    };
+    let arrange = MakeValidConfig {
+        poly_method: PolyMethod::Arrange,
+        keep_collapsed: false,
+        ..Default::default()
+    };
+    let structure = MakeValidConfig {
+        poly_method: PolyMethod::Structure,
+        keep_collapsed: false,
+        ..Default::default()
+    };
     vec![auto, auto_keep, arrange, structure]
 }
 
 fn cfg_all_methods() -> Vec<MakeValidConfig> {
-    let auto = MakeValidConfig { poly_method: PolyMethod::Auto, ..Default::default() };
-    let arrange = MakeValidConfig { poly_method: PolyMethod::Arrange, ..Default::default() };
-    let structure = MakeValidConfig { poly_method: PolyMethod::Structure, ..Default::default() };
+    let auto = MakeValidConfig {
+        poly_method: PolyMethod::Auto,
+        ..Default::default()
+    };
+    let arrange = MakeValidConfig {
+        poly_method: PolyMethod::Arrange,
+        ..Default::default()
+    };
+    let structure = MakeValidConfig {
+        poly_method: PolyMethod::Structure,
+        ..Default::default()
+    };
     vec![auto, arrange, structure]
 }
 
@@ -242,14 +284,21 @@ fn coord_small() -> impl Strategy<Value = Coord<f64>> {
 
 /// Integer-valued coordinates (exact, no fp issues)
 fn coord_int() -> impl Strategy<Value = Coord<f64>> {
-    (-1000i32..=1000i32, -1000i32..=1000i32)
-        .prop_map(|(x, y)| Coord { x: x as f64, y: y as f64 })
+    (-1000i32..=1000i32, -1000i32..=1000i32).prop_map(|(x, y)| Coord {
+        x: x as f64,
+        y: y as f64,
+    })
 }
 
 /// Coordinates spanning multiple orders of magnitude (stress fp precision)
 fn coord_mixed_magnitude() -> impl Strategy<Value = Coord<f64>> {
-    (coord_range(-1e6..=1e6), coord_range(-1e-6..=1e-6))
-        .prop_map(|(c1, c2)| if (0..100).next().unwrap_or(0) < 50 { c1 } else { c2 })
+    (coord_range(-1e6..=1e6), coord_range(-1e-6..=1e-6)).prop_map(|(c1, c2)| {
+        if (0..100).next().unwrap_or(0) < 50 {
+            c1
+        } else {
+            c2
+        }
+    })
 }
 
 fn point_range(range: std::ops::RangeInclusive<f64>) -> impl Strategy<Value = Point<f64>> {
@@ -283,13 +332,12 @@ fn ring_strategy(
     n: usize,
     range: std::ops::RangeInclusive<f64>,
 ) -> impl Strategy<Value = LineString<f64>> {
-    proptest::collection::vec(coord_range(range), n..=n)
-        .prop_map(move |mut coords| {
-            if coords.len() >= 3 && coords.first() != coords.last() {
-                coords.push(coords[0]);
-            }
-            LineString::new(coords)
-        })
+    proptest::collection::vec(coord_range(range), n..=n).prop_map(move |mut coords| {
+        if coords.len() >= 3 && coords.first() != coords.last() {
+            coords.push(coords[0]);
+        }
+        LineString::new(coords)
+    })
 }
 
 // =========================================================================
@@ -564,7 +612,7 @@ proptest! {
     }
 
     // -----------------------------------------------------------------------
-    // 2.5  Rect: valid after repair  
+    // 2.5  Rect: valid after repair
     // -----------------------------------------------------------------------
     #[test]
     fn invariant_rect_valid(
@@ -1031,7 +1079,7 @@ proptest! {
     }
 
     // -----------------------------------------------------------------------
-    // 4.2  Near-zero / subnormal coordinates  
+    // 4.2  Near-zero / subnormal coordinates
     // -----------------------------------------------------------------------
     #[test]
     fn invariant_subnormal_coords_no_panic(
@@ -2289,9 +2337,6 @@ proptest! {
 
 }
 
-
-
-
 // =========================================================================
 // ITERATION 8: Stress at fp bounds - Shewchuk limits, f64 extremes,
 // edge-sharing MP, fp limits
@@ -2490,40 +2535,80 @@ mod diag_all_methods_fail {
     #[test]
     fn diagnose_all_methods_fail() {
         let coords = vec![
-            Coord { x: 33.298685125309, y: 25.64285228568552 },
-            Coord { x: 16.056374168398353, y: 41.82073196346561 },
-            Coord { x: 5.2001056860635515, y: -1.4935771193319936 },
-            Coord { x: 40.0953181621632, y: 49.30127327981244 },
-            Coord { x: -30.63143192804603, y: 22.339142189433932 },
-            Coord { x: 17.726542485814562, y: -29.738377616718996 },
+            Coord {
+                x: 33.298685125309,
+                y: 25.64285228568552,
+            },
+            Coord {
+                x: 16.056374168398353,
+                y: 41.82073196346561,
+            },
+            Coord {
+                x: 5.2001056860635515,
+                y: -1.4935771193319936,
+            },
+            Coord {
+                x: 40.0953181621632,
+                y: 49.30127327981244,
+            },
+            Coord {
+                x: -30.63143192804603,
+                y: 22.339142189433932,
+            },
+            Coord {
+                x: 17.726542485814562,
+                y: -29.738377616718996,
+            },
         ];
         let mut ring = coords.clone();
-        if ring.first() != ring.last() { ring.push(ring[0]); }
+        if ring.first() != ring.last() {
+            ring.push(ring[0]);
+        }
         let poly = Polygon::new(LineString::new(ring), Vec::new());
 
         // Assert that at least Auto produces valid output for the 4-coord version
         {
             let coords4 = vec![
-                Coord { x: 33.298685125309, y: 25.64285228568552 },
-                Coord { x: 16.056374168398353, y: 41.82073196346561 },
-                Coord { x: 5.2001056860635515, y: -1.4935771193319936 },
-                Coord { x: 40.0953181621632, y: 49.30127327981244 },
+                Coord {
+                    x: 33.298685125309,
+                    y: 25.64285228568552,
+                },
+                Coord {
+                    x: 16.056374168398353,
+                    y: 41.82073196346561,
+                },
+                Coord {
+                    x: 5.2001056860635515,
+                    y: -1.4935771193319936,
+                },
+                Coord {
+                    x: 40.0953181621632,
+                    y: 49.30127327981244,
+                },
             ];
             let mut ring4 = coords4;
-            if ring4.first() != ring4.last() { ring4.push(ring4[0]); }
+            if ring4.first() != ring4.last() {
+                ring4.push(ring4[0]);
+            }
             let poly4 = Polygon::new(LineString::new(ring4), Vec::new());
             let cfg = MakeValidConfig::default();
             let result = poly4.make_valid_with_config(&cfg);
             let rv = result.validate();
             if !rv.valid {
-                eprintln!("4-coord diagnostic: valid={:?} errors={:?}", rv.valid, rv.errors);
+                eprintln!(
+                    "4-coord diagnostic: valid={:?} errors={:?}",
+                    rv.valid, rv.errors
+                );
             }
         }
 
         // Assert that Auto produces valid for the full polygon
         let cfg_auto = MakeValidConfig::default();
         let result = poly.make_valid_with_config(&cfg_auto);
-        assert!(result.validate().valid, "Auto must produce valid for diagnostic polygon");
+        assert!(
+            result.validate().valid,
+            "Auto must produce valid for diagnostic polygon"
+        );
     }
 }
 
@@ -2668,18 +2753,17 @@ fn union_area_of(mp: &MultiPolygon<f64>) -> f64 {
         let u = geo::algorithm::bool_ops::unary_union(&MultiPolygon::new(vec![p]));
         return u.0.iter().map(|p| p.unsigned_area()).sum();
     }
-    let ccw: Vec<Polygon<f64>> = mp
-        .0
-        .iter()
-        .cloned()
-        .map(|mut p| {
-            use geo::Winding;
-            if p.exterior().0.len() >= 4 {
-                p.exterior_mut(|r| r.make_ccw_winding());
-            }
-            p
-        })
-        .collect();
+    let ccw: Vec<Polygon<f64>> =
+        mp.0.iter()
+            .cloned()
+            .map(|mut p| {
+                use geo::Winding;
+                if p.exterior().0.len() >= 4 {
+                    p.exterior_mut(|r| r.make_ccw_winding());
+                }
+                p
+            })
+            .collect();
     let u = geo::algorithm::bool_ops::unary_union(&MultiPolygon::new(ccw));
     u.0.iter().map(|p| p.unsigned_area()).sum()
 }

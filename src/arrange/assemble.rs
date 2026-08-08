@@ -1,4 +1,3 @@
-
 use alloc::vec::Vec;
 use geo::coordinate_position::{CoordPos, coord_pos_relative_to_ring};
 use geo::{LineString, MultiPolygon, Polygon, Winding};

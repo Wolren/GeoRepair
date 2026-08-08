@@ -1,4 +1,3 @@
-
 use alloc::vec::Vec;
 use geo::Line;
 use rstar::{AABB, RTree, RTreeObject};
@@ -30,8 +29,7 @@ fn segments_properly_cross(li: &Line<f64>, lj: &Line<f64>) -> bool {
     // real-world repaired components rejected by the --fast gate while the
     // full validator and GEOS accept them (2026-08-03). Matches
     // edges_intersect_general's proper-crossing semantics.
-    (o1 > 0.0 && o2 < 0.0 || o1 < 0.0 && o2 > 0.0)
-        && (o3 > 0.0 && o4 < 0.0 || o3 < 0.0 && o4 > 0.0)
+    (o1 > 0.0 && o2 < 0.0 || o1 < 0.0 && o2 > 0.0) && (o3 > 0.0 && o4 < 0.0 || o3 < 0.0 && o4 > 0.0)
 }
 
 fn quadrant(x: f64, y: f64) -> u8 {
@@ -217,7 +215,12 @@ fn rec_overlaps(
             let eps = mc1.ring_eps;
             let mut ambiguous = false;
             if crate::validation::edges::lean_pair_intersects(
-                li.start, li.end, lj.start, lj.end, eps, &mut ambiguous,
+                li.start,
+                li.end,
+                lj.start,
+                lj.end,
+                eps,
+                &mut ambiguous,
             ) {
                 return true;
             }
@@ -237,9 +240,7 @@ fn rec_overlaps(
 
     if (end0 - start0) >= (end1 - start1) {
         let mid = (start0 + end0) / 2;
-        if start0 < mid
-            && rec_overlaps(lines, mc1, start0, mid, mc2, start1, end1)
-        {
+        if start0 < mid && rec_overlaps(lines, mc1, start0, mid, mc2, start1, end1) {
             return true;
         }
         if mid < end0 {
@@ -247,9 +248,7 @@ fn rec_overlaps(
         }
     } else {
         let mid = (start1 + end1) / 2;
-        if start1 < mid
-            && rec_overlaps(lines, mc1, start0, end0, mc2, start1, mid)
-        {
+        if start1 < mid && rec_overlaps(lines, mc1, start0, end0, mc2, start1, mid) {
             return true;
         }
         if mid < end1 {
@@ -309,7 +308,10 @@ pub fn has_no_intersections_small(lines: &[Line<f64>]) -> bool {
     }
     let mut eps_by_ring = vec![0.0f64; nrings as usize];
     for r in 0..nrings as usize {
-        let scale = (max_x[r] - min_x[r]).abs().max((max_y[r] - min_y[r]).abs()).max(1.0);
+        let scale = (max_x[r] - min_x[r])
+            .abs()
+            .max((max_y[r] - min_y[r]).abs())
+            .max(1.0);
         eps_by_ring[r] = 1e-12 * scale;
     }
 
@@ -341,7 +343,12 @@ pub fn has_no_intersections_small(lines: &[Line<f64>]) -> bool {
                 let eps = eps_by_ring[ri];
                 let mut ambiguous = false;
                 if crate::validation::edges::lean_pair_intersects(
-                    li.start, li.end, lj.start, lj.end, eps, &mut ambiguous,
+                    li.start,
+                    li.end,
+                    lj.start,
+                    lj.end,
+                    eps,
+                    &mut ambiguous,
                 ) {
                     return false;
                 }
@@ -413,9 +420,9 @@ pub fn has_no_intersections(lines: &[Line<f64>]) -> bool {
     {
         let do_parallel = nc >= 200;
         if do_parallel {
-            use rayon::prelude::*;
             use core::ops::ControlFlow;
             use core::sync::atomic::Ordering;
+            use rayon::prelude::*;
             let found = std::sync::atomic::AtomicBool::new(false);
             (0..nc).into_par_iter().for_each(|i| {
                 if found.load(Ordering::Acquire) {

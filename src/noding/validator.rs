@@ -7,9 +7,8 @@
 //! has no remaining intersections. If this check fails, a different noding
 //! algorithm or tolerance should be used.
 
-
-use alloc::vec::Vec;
 use crate::orient::orient2d;
+use alloc::vec::Vec;
 use geo::{Coord, Line};
 #[cfg(feature = "rstar")]
 use rustc_hash::FxHashSet;

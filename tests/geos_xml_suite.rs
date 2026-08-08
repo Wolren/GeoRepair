@@ -15,7 +15,9 @@
 //! documented baseline (see VALIDATOR_DIVERGENCE_BASELINE). If the repair
 //! fails, or GEOS says invalid and we accept, the case FAILS.
 
-use geo::{Coord, Geometry, Line, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
+use geo::{
+    Coord, Geometry, Line, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon,
+};
 use geo_repair::structure::build_area::build_area;
 use geo_repair::validation::{GeoValidation, GeometryValidationError};
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
@@ -162,7 +164,12 @@ fn parse_xml_cases(xml: &str) -> Vec<XmlCase> {
             op_pos += op_start + op_end;
         }
 
-        cases.push(XmlCase { desc, geoms, raw_geoms, ops });
+        cases.push(XmlCase {
+            desc,
+            geoms,
+            raw_geoms,
+            ops,
+        });
     }
     cases
 }
@@ -225,7 +232,10 @@ fn record_divergence_reason(geom: &Geometry<f64>) -> String {
 }
 
 fn print_divergence_reasons() {
-    let reasons = DIVERGENCE_REASONS.lock().expect("divergence tally lock").take();
+    let reasons = DIVERGENCE_REASONS
+        .lock()
+        .expect("divergence tally lock")
+        .take();
     if let Some(m) = reasons {
         let total: usize = m.values().sum();
         eprintln!("  Masked divergence classes ({total}):");
@@ -250,10 +260,7 @@ fn line_family_geos_valid(g: &Geometry<f64>, as_ring: bool) -> bool {
         if ls.0.is_empty() {
             return true;
         }
-        if ls.0
-            .iter()
-            .any(|c| !c.x.is_finite() || !c.y.is_finite())
-        {
+        if ls.0.iter().any(|c| !c.x.is_finite() || !c.y.is_finite()) {
             return false;
         }
         let mut prev: Option<Coord<f64>> = None;
@@ -392,9 +399,9 @@ fn is_simple_by_our_validator(geom: &Geometry<f64>) -> bool {
                 .cloned()
                 .collect(),
         )),
-        Geometry::GeometryCollection(gc) => Geometry::GeometryCollection(
-            geo::GeometryCollection(gc.0.iter().filter(|g| !is_empty_geom(g)).cloned().collect()),
-        ),
+        Geometry::GeometryCollection(gc) => Geometry::GeometryCollection(geo::GeometryCollection(
+            gc.0.iter().filter(|g| !is_empty_geom(g)).cloned().collect(),
+        )),
         _ => geom.clone(),
     };
     let r = stripped.validate();
@@ -601,7 +608,8 @@ fn run_make_valid_compare(
     // Both pins below keep the divergence visible (pattern: pinned
     // documented-divergence, see geos_compare.rs mp_overlapping).
     let exp_area = total_poly_area(&expected);
-    let pinned_union: Option<f64> = if desc.contains("first_part_crossing_second_part_overlapping") {
+    let pinned_union: Option<f64> = if desc.contains("first_part_crossing_second_part_overlapping")
+    {
         // More specific desc first: case 14 contains "second_part_overlapping"
         // as a substring, so it must be matched before the case-13 branch.
         Some(1.45)
@@ -632,8 +640,10 @@ fn run_make_valid_compare(
     // emits 1 - both correct). Only fail when BOTH count AND area mismatch.
     let our_count = component_count(&fixed);
     let exp_count = component_count(&expected);
-    if matches!(&fixed, Geometry::MultiPolygon(_) | Geometry::MultiLineString(_))
-        && our_count != exp_count
+    if matches!(
+        &fixed,
+        Geometry::MultiPolygon(_) | Geometry::MultiLineString(_)
+    ) && our_count != exp_count
     {
         let area_ok = input_union_area <= 1e-9
             || (our_area - input_union_area).abs() <= 1e-6 * input_union_area.abs().max(1.0);
@@ -686,15 +696,14 @@ fn geom_union(g: &Geometry<f64>, cfg: &MakeValidConfig) -> Geometry<f64> {
             }
         }
         Geometry::GeometryCollection(gc) => {
-            let mut polys: Vec<Polygon<f64>> = gc
-                .0
-                .iter()
-                .filter_map(|c| match c {
-                    Geometry::Polygon(p) => Some(p.clone()),
-                    Geometry::MultiPolygon(mp) => Some(mp.0[0].clone()),
-                    _ => None,
-                })
-                .collect();
+            let mut polys: Vec<Polygon<f64>> =
+                gc.0.iter()
+                    .filter_map(|c| match c {
+                        Geometry::Polygon(p) => Some(p.clone()),
+                        Geometry::MultiPolygon(mp) => Some(mp.0[0].clone()),
+                        _ => None,
+                    })
+                    .collect();
             // Flatten any multi-polygon components (only first shell kept per
             // component - union below merges them anyway).
             for c in &gc.0 {
@@ -724,8 +733,7 @@ fn type_family_match(a: &Geometry<f64>, b: &Geometry<f64>) -> bool {
         (LineString(_), LineString(_)) | (MultiLineString(_), MultiLineString(_)) => true,
         (Triangle(_), Triangle(_)) => true,
         (GeometryCollection(a), GeometryCollection(b)) => {
-            a.len() == b.len()
-                && a.iter().zip(b.iter()).all(|(x, y)| type_family_match(x, y))
+            a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| type_family_match(x, y))
         }
         // Empty-vs-empty counts as a match regardless of concrete type
         // (our empty GC vs GEOS's POINT EMPTY etc).
@@ -798,7 +806,16 @@ fn component_count(g: &Geometry<f64>) -> usize {
     }
 }
 
-fn run_all_geos_xml_tests() -> Vec<(String, usize, usize, usize, usize, usize, usize, Vec<String>)> {
+fn run_all_geos_xml_tests() -> Vec<(
+    String,
+    usize,
+    usize,
+    usize,
+    usize,
+    usize,
+    usize,
+    Vec<String>,
+)> {
     let mut results = Vec::new();
     let dir = Path::new("tests/geos_xml");
     if !dir.is_dir() {
@@ -873,8 +890,7 @@ fn run_all_geos_xml_tests() -> Vec<(String, usize, usize, usize, usize, usize, u
                 // are lowercase - match both. Without this, every isValid /
                 // isSimple case silently skips (the case passes trivially).
                 let geom = match args.first().and_then(|a| {
-                    case
-                        .geoms
+                    case.geoms
                         .get(a)
                         .or_else(|| case.geoms.get(&a.to_ascii_lowercase()))
                 }) {
@@ -891,8 +907,7 @@ fn run_all_geos_xml_tests() -> Vec<(String, usize, usize, usize, usize, usize, u
                         let as_ring = args
                             .first()
                             .and_then(|a| {
-                                case
-                                    .raw_geoms
+                                case.raw_geoms
                                     .get(a)
                                     .or_else(|| case.raw_geoms.get(&a.to_ascii_lowercase()))
                             })
@@ -929,11 +944,7 @@ fn run_all_geos_xml_tests() -> Vec<(String, usize, usize, usize, usize, usize, u
                         // GEOS exact-output oracle: type + area + component count
                         let (ok, why) = run_make_valid_compare(geom, &expected, &cfg, &case.desc);
                         if !ok {
-                            failures.push(format!(
-                                "{} op='{}' {why}",
-                                case.desc.trim(),
-                                op_name
-                            ));
+                            failures.push(format!("{} op='{}' {why}", case.desc.trim(), op_name));
                         }
                         ok
                     }
@@ -947,11 +958,7 @@ fn run_all_geos_xml_tests() -> Vec<(String, usize, usize, usize, usize, usize, u
                             run_build_area_compare(geom, &expected)
                         };
                         if !ok {
-                            failures.push(format!(
-                                "{} op='{}' {why}",
-                                case.desc.trim(),
-                                op_name
-                            ));
+                            failures.push(format!("{} op='{}' {why}", case.desc.trim(), op_name));
                         }
                         ok
                     }
@@ -1020,26 +1027,66 @@ fn run_all_geos_xml_tests() -> Vec<(String, usize, usize, usize, usize, usize, u
 ///   permissive mode: we reject them, which is the strict answer
 const ST_RFH_CASES: &[(&str, bool, bool)] = &[
     // 1 - testShellAndHoleSelfTouch: STR valid, OGC invalid
-    ("POLYGON ((0 0, 0 340, 320 340, 320 0, 120 0, 180 100, 60 100, 120 0, 0 0), (80 300, 80 180, 200 180, 200 240, 280 200, 280 280, 200 240, 200 300, 80 300))", false, true),
+    (
+        "POLYGON ((0 0, 0 340, 320 340, 320 0, 120 0, 180 100, 60 100, 120 0, 0 0), (80 300, 80 180, 200 180, 200 240, 280 200, 280 280, 200 240, 200 300, 80 300))",
+        false,
+        true,
+    ),
     // 2 - testShellHoleAndHoleHoleTouch: valid in OGC
-    ("POLYGON ((0 0, 0 340, 320 340, 320 0, 120 0, 0 0), (120 0, 180 100, 60 100, 120 0), (80 300, 80 180, 200 180, 200 240, 200 300, 80 300), (200 240, 280 200, 280 280, 200 240))", true, true),
+    (
+        "POLYGON ((0 0, 0 340, 320 340, 320 0, 120 0, 0 0), (120 0, 180 100, 60 100, 120 0), (80 300, 80 180, 200 180, 200 240, 200 300, 80 300), (200 240, 280 200, 280 280, 200 240))",
+        true,
+        true,
+    ),
     // 3 - testShellSelfTouchHoleOverlappingHole: never valid
-    ("POLYGON ((0 0, 220 0, 220 200, 120 200, 140 100, 80 100, 120 200, 0 200, 0 0), (200 80, 20 80, 120 200, 200 80))", false, false),
+    (
+        "POLYGON ((0 0, 220 0, 220 200, 120 200, 140 100, 80 100, 120 200, 0 200, 0 0), (200 80, 20 80, 120 200, 200 80))",
+        false,
+        false,
+    ),
     // 4 - testDisconnectedInteriorShellSelfTouchAtNonVertex
-    ("POLYGON ((40 180, 40 60, 240 60, 240 180, 140 60, 40 180))", false, false),
+    (
+        "POLYGON ((40 180, 40 60, 240 60, 240 180, 140 60, 40 180))",
+        false,
+        false,
+    ),
     // 5 - testDisconnectedInteriorShellSelfTouchAtVertex
-    ("POLYGON ((20 20, 20 100, 140 100, 140 180, 260 180, 260 100, 140 100, 140 20, 20 20))", false, false),
+    (
+        "POLYGON ((20 20, 20 100, 140 100, 140 180, 260 180, 260 100, 140 100, 140 20, 20 20))",
+        false,
+        false,
+    ),
     // 6 - testShellCross
-    ("POLYGON ((20 20, 120 20, 120 220, 240 220, 240 120, 20 120, 20 20))", false, false),
+    (
+        "POLYGON ((20 20, 120 20, 120 220, 240 220, 240 120, 20 120, 20 20))",
+        false,
+        false,
+    ),
     // 7 - testShellCrossAndSTR
-    ("POLYGON ((20 20, 120 20, 120 220, 180 220, 140 160, 200 160, 180 220, 240 220, 240 120, 20 120, 20 20))", false, false),
+    (
+        "POLYGON ((20 20, 120 20, 120 220, 180 220, 140 160, 200 160, 180 220, 240 220, 240 120, 20 120, 20 20))",
+        false,
+        false,
+    ),
     // 8 - basic one-ring self-touch (ring forming hole): STR valid, OGC invalid
-    ("POLYGON ((100 0, 100 100, 200 100, 200 0, 150 0, 170 40, 130 40, 150 0, 100 0))", false, true),
+    (
+        "POLYGON ((100 0, 100 100, 200 100, 200 0, 150 0, 170 40, 130 40, 150 0, 100 0))",
+        false,
+        true,
+    ),
     // 9 - testExvertedHoleStarTouchHoleCycle (STR=false asserted; default
     // unchecked in GEOS - never valid, we must reject)
-    ("POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), (20 80, 50 30, 80 80, 80 30, 20 30, 20 80), (40 70, 50 70, 50 30, 40 70), (40 20, 60 20, 50 30, 40 20), (40 80, 20 80, 40 70, 40 80))", false, false),
+    (
+        "POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), (20 80, 50 30, 80 80, 80 30, 20 30, 20 80), (40 70, 50 70, 50 30, 40 70), (40 20, 60 20, 50 30, 40 20), (40 80, 20 80, 40 70, 40 80))",
+        false,
+        false,
+    ),
     // 10 - testExvertedHoleStarTouchHoleCycle: STR valid, OGC invalid
-    ("POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), (20 80, 50 30, 80 80, 80 30, 20 30, 20 80), (40 70, 50 70, 50 30, 40 70), (40 20, 60 20, 50 30, 40 20))", false, true),
+    (
+        "POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), (20 80, 50 30, 80 80, 80 30, 20 30, 20 80), (40 70, 50 70, 50 30, 40 70), (40 20, 60 20, 50 30, 40 20))",
+        false,
+        true,
+    ),
 ];
 
 /// Run the ported ST_RFH corpus. Returns (passed, masked, failed, failures).
@@ -1111,7 +1158,9 @@ fn geos_xml_suite() {
     let mut total_unparseable = 0usize;
     eprintln!("\n=== GEOS XML Test Suite ===");
     let mut had_issues = false;
-    for (fname, passed, failed, masked, known_gaps, skipped_cases, unparseable, failures) in &results {
+    for (fname, passed, failed, masked, known_gaps, skipped_cases, unparseable, failures) in
+        &results
+    {
         let status = if *failed == 0 { "ok" } else { "FAIL" };
         if *failed > 0 {
             had_issues = true;
@@ -1152,9 +1201,15 @@ fn geos_xml_suite() {
     let total = total_passed + total_failed;
     eprintln!("  -----");
     eprintln!("  Total: {total_passed}/{total} dispatched-case passed ({total_failed} failed)");
-    eprintln!("  Masked validator divergence: {total_masked} (baseline {VALIDATOR_DIVERGENCE_BASELINE})");
-    eprintln!("  Known validator gaps (too lenient): {total_known_gaps} (baseline {KNOWN_VALIDATOR_GAP_BASELINE})");
-    eprintln!("  Overlay-only skipped cases: {total_skipped}; unparseable dispatch misses: {total_unparseable}");
+    eprintln!(
+        "  Masked validator divergence: {total_masked} (baseline {VALIDATOR_DIVERGENCE_BASELINE})"
+    );
+    eprintln!(
+        "  Known validator gaps (too lenient): {total_known_gaps} (baseline {KNOWN_VALIDATOR_GAP_BASELINE})"
+    );
+    eprintln!(
+        "  Overlay-only skipped cases: {total_skipped}; unparseable dispatch misses: {total_unparseable}"
+    );
     print_divergence_reasons();
     eprintln!("==============================");
 

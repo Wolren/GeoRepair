@@ -1,8 +1,7 @@
-
+use ::core::sync::atomic::Ordering;
 use alloc::vec::Vec;
 use geo::{Coord, Line, LineString, Polygon};
 use rustc_hash::FxHashSet;
-use ::core::sync::atomic::Ordering;
 
 use crate::core;
 use crate::noding;
@@ -17,7 +16,6 @@ use crate::structure::edge_split::{intersect_param, lerp};
 pub use crate::structure::symdiff::{
     edges_from_coords, make_valid_poly_symdiff, single_pass_fix, symdiff_test,
 };
-
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn repair_ring(ring: &LineString<f64>) -> Option<Vec<Polygon<f64>>> {
@@ -35,8 +33,7 @@ pub fn repair_ring(ring: &LineString<f64>) -> Option<Vec<Polygon<f64>>> {
     // invariant_barely_closed_ring). Invalid-only repair path, O(n) scale
     // scan - hot-path safe.
     if coords.len() >= 5 {
-        let (mut min_x, mut max_x, mut min_y, mut max_y) =
-            (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+        let (mut min_x, mut max_x, mut min_y, mut max_y) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
         for c in &coords {
             min_x = min_x.min(c.x);
             max_x = max_x.max(c.x);
@@ -47,7 +44,11 @@ pub fn repair_ring(ring: &LineString<f64>) -> Option<Vec<Polygon<f64>>> {
         let eps = 1e-12 * scale;
         let first = coords[0];
         let near_closure = coords[coords.len() - 2];
-        if (near_closure.x - first.x).abs().max((near_closure.y - first.y).abs()) <= eps {
+        if (near_closure.x - first.x)
+            .abs()
+            .max((near_closure.y - first.y).abs())
+            <= eps
+        {
             coords.remove(coords.len() - 2);
         }
     }
@@ -72,7 +73,9 @@ pub fn repair_ring(ring: &LineString<f64>) -> Option<Vec<Polygon<f64>>> {
             .filter(|p| p.exterior().0.len() >= 4)
             .collect();
         if !cleaned.is_empty()
-            && cleaned.iter().all(|p| !has_self_intersections(&p.exterior().0))
+            && cleaned
+                .iter()
+                .all(|p| !has_self_intersections(&p.exterior().0))
         {
             return Some(cleaned);
         }
@@ -142,7 +145,10 @@ pub(crate) fn basic_cleanup(ring: &LineString<f64>) -> Option<Vec<Coord<f64>>> {
 ///   (`snap_clean=true`). A spike at a random offset (e.g. (-7.55e-9,0)
 ///   instead of (0,0)) produces CDT triangles that cross each other,
 ///   measured seed 00c11200 → cross-component SelfIntersection.
-pub(crate) fn collapse_sub_ulp_vertices(coords: &[Coord<f64>], snap_clean: bool) -> Vec<Coord<f64>> {
+pub(crate) fn collapse_sub_ulp_vertices(
+    coords: &[Coord<f64>],
+    snap_clean: bool,
+) -> Vec<Coord<f64>> {
     if coords.len() < 4 {
         return coords.to_vec();
     }
@@ -181,7 +187,9 @@ pub(crate) fn collapse_sub_ulp_vertices(coords: &[Coord<f64>], snap_clean: bool)
         let mut run_len = 1usize;
         let mut last_in_run = coords[i];
         while j < interior_len {
-            let d = (coords[j].x - last_in_run.x).abs().max((coords[j].y - last_in_run.y).abs());
+            let d = (coords[j].x - last_in_run.x)
+                .abs()
+                .max((coords[j].y - last_in_run.y).abs());
             if d <= sub_ulp {
                 last_in_run = coords[j];
                 let m = coords[j].x.abs().max(coords[j].y.abs());
@@ -307,8 +315,7 @@ pub fn segments_properly_cross_seg(
     let o2 = crate::orient::orient2d(a1, a2, b2);
     let o3 = crate::orient::orient2d(b1, b2, a1);
     let o4 = crate::orient::orient2d(b1, b2, a2);
-    (o1 > 0.0 && o2 < 0.0 || o1 < 0.0 && o2 > 0.0)
-        && (o3 > 0.0 && o4 < 0.0 || o3 < 0.0 && o4 > 0.0)
+    (o1 > 0.0 && o2 < 0.0 || o1 < 0.0 && o2 > 0.0) && (o3 > 0.0 && o4 < 0.0 || o3 < 0.0 && o4 > 0.0)
 }
 
 #[inline(always)]

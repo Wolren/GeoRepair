@@ -7,23 +7,42 @@
 //!
 //! See validation/mod.rs for the module map.
 
-
-
-use alloc::vec::Vec;
-use alloc::boxed::Box;
 use crate::validation::core::*;
-use geo::{Coord};
+use alloc::boxed::Box;
+use alloc::vec::Vec;
+use geo::Coord;
 
 /// Padded 2D bounding-box overlap for an edge pair (the R-tree envelope
 /// filter equivalent: both boxes inflated by 1e-10 x max-dim, floored at
 /// 1e-10). Conservative by construction: any pair the exact predicates
 /// accept has overlapping boxes, so rejecting here never changes results.
 #[inline]
-pub(crate) fn padded_bbox_overlap(a1: Coord<f64>, a2: Coord<f64>, b1: Coord<f64>, b2: Coord<f64>) -> bool {
-    let (lo_x, hi_x) = if a1.x < a2.x { (a1.x, a2.x) } else { (a2.x, a1.x) };
-    let (lo_y, hi_y) = if a1.y < a2.y { (a1.y, a2.y) } else { (a2.y, a1.y) };
-    let (lo_x2, hi_x2) = if b1.x < b2.x { (b1.x, b2.x) } else { (b2.x, b1.x) };
-    let (lo_y2, hi_y2) = if b1.y < b2.y { (b1.y, b2.y) } else { (b2.y, b1.y) };
+pub(crate) fn padded_bbox_overlap(
+    a1: Coord<f64>,
+    a2: Coord<f64>,
+    b1: Coord<f64>,
+    b2: Coord<f64>,
+) -> bool {
+    let (lo_x, hi_x) = if a1.x < a2.x {
+        (a1.x, a2.x)
+    } else {
+        (a2.x, a1.x)
+    };
+    let (lo_y, hi_y) = if a1.y < a2.y {
+        (a1.y, a2.y)
+    } else {
+        (a2.y, a1.y)
+    };
+    let (lo_x2, hi_x2) = if b1.x < b2.x {
+        (b1.x, b2.x)
+    } else {
+        (b2.x, b1.x)
+    };
+    let (lo_y2, hi_y2) = if b1.y < b2.y {
+        (b1.y, b2.y)
+    } else {
+        (b2.y, b1.y)
+    };
     let ext = (hi_x - lo_x).abs().max((hi_y - lo_y).abs()).max(1.0) * 1e-10;
     let ext2 = (hi_x2 - lo_x2).abs().max((hi_y2 - lo_y2).abs()).max(1.0) * 1e-10;
     hi_x + ext >= lo_x2 - ext2
@@ -236,7 +255,12 @@ pub(crate) fn sweep_ring_self_intersects(
                 let b2 = ring[(r_j + 1).min(n)];
                 let mut ambiguous = false;
                 if crate::validation::edges::lean_pair_intersects(
-                    a1, a2, b1, b2, eps, &mut ambiguous,
+                    a1,
+                    a2,
+                    b1,
+                    b2,
+                    eps,
+                    &mut ambiguous,
                 ) {
                     return Some(true);
                 }

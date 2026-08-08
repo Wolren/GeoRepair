@@ -1,4 +1,3 @@
-
 use alloc::vec::Vec;
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
@@ -512,7 +511,8 @@ fn split_face_at_pinch_points_depth(
     }
 
     vec![face.to_vec()]
-}/// ---------------------------------------------------------------------------
+}
+/// ---------------------------------------------------------------------------
 /// Face labeling: even-odd winding parity (GEOS MakeValidPoly equivalent)
 /// ---------------------------------------------------------------------------
 /// GEOS's BuildArea + symdiff loop selects the faces whose winding number
@@ -609,4 +609,3 @@ fn winding_number(ring: &[Coord<f64>], pt: Coord<f64>) -> i32 {
 #[cfg(test)]
 #[path = "fix_ring_graph_tests.rs"]
 mod tests;
-

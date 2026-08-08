@@ -51,7 +51,10 @@ fn load_geoms() -> Vec<Geometry<f64>> {
             for k in 0..12 {
                 let a = k as f64 * std::f64::consts::TAU / 12.0;
                 let rr = r * (0.7 + (next() % 100) as f64 / 200.0);
-                ring.push(geo::Coord { x: cx + rr * a.cos(), y: cy + rr * a.sin() });
+                ring.push(geo::Coord {
+                    x: cx + rr * a.cos(),
+                    y: cy + rr * a.sin(),
+                });
             }
             ring.push(ring[0]);
             Geometry::Polygon(Polygon::new(LineString::new(ring), vec![]))
@@ -173,7 +176,9 @@ fn main() {
 
     eprintln!("    our  on our   bytes  {our_ro:>8.0} ns/op");
     eprintln!("    our  on their bytes  {our_rt:>8.0} ns/op");
-    eprintln!("    their bare parse    {their_bare:>8.0} ns/op  (zero-copy view, no geo conversion)");
+    eprintln!(
+        "    their bare parse    {their_bare:>8.0} ns/op  (zero-copy view, no geo conversion)"
+    );
     eprintln!("    their on our   bytes  {their_ro:>8.0} ns/op  (read + to_geometry)");
     eprintln!("    their on their bytes  {their_tt:>8.0} ns/op  (read + to_geometry)");
     let our_wkb_avg = (our_ro + our_rt) / 2.0;

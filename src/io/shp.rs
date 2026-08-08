@@ -11,22 +11,22 @@
 //! rings, producing `.shp` + `.shx` (no `.dbf` — geometry only; add an
 //! attribute table with a GIS tool if attributes are needed).
 
-use alloc::vec::Vec;
 use alloc::string::String;
+use alloc::vec::Vec;
 use geo::{Coord, Geometry, LineString, MultiLineString, MultiPoint, Point, Polygon};
 
 use shapefile::{PolygonRing, Shape, ShapeWriter};
 
 /// Load every shape from a `.shp` file as geometries.
 pub fn load_shp(path: &str) -> Result<Vec<Geometry<f64>>, String> {
-    let mut reader =
-        shapefile::ShapeReader::from_path(path).map_err(|e| format!("{path}: {e}"))?;
+    let mut reader = shapefile::ShapeReader::from_path(path).map_err(|e| format!("{path}: {e}"))?;
     let mut out = Vec::new();
     for (i, shape) in reader.iter_shapes().enumerate() {
         let shape = shape.map_err(|e| format!("{path}: record {}: {e}", i + 1))?;
-        out.push(shape_to_geo(shape).ok_or_else(|| {
-            format!("{path}: record {}: unsupported shape type", i + 1)
-        })?);
+        out.push(
+            shape_to_geo(shape)
+                .ok_or_else(|| format!("{path}: record {}: unsupported shape type", i + 1))?,
+        );
     }
     Ok(out)
 }
@@ -47,8 +47,8 @@ pub fn save_shp(path: &str, geoms: &[Geometry<f64>]) -> Result<(), String> {
     for g in &polys {
         // Shape::try_from maps Polygon -> Polygon record and MultiPolygon ->
         // one Polygon record with several outer rings (shapefile semantics).
-        let shape = Shape::try_from(g.clone())
-            .map_err(|e| format!("{path}: shape conversion: {e}"))?;
+        let shape =
+            Shape::try_from(g.clone()).map_err(|e| format!("{path}: shape conversion: {e}"))?;
         // Each polygon variant carries a different point type but all
         // implement EsriShape, so write through a match on the record.
         match shape {
@@ -117,10 +117,7 @@ fn rings_to_geometry<P: CoordLike>(rings: &[PolygonRing<P>]) -> Geometry<f64> {
         return Geometry::Polygon(Polygon::new(LineString(Vec::new()), Vec::new()));
     }
     if exteriors.len() == 1 {
-        return Geometry::Polygon(Polygon::new(
-            exteriors.pop().unwrap(),
-            holes,
-        ));
+        return Geometry::Polygon(Polygon::new(exteriors.pop().unwrap(), holes));
     }
     let ext_bbox: Vec<(LineString<f64>, [f64; 4])> = exteriors
         .into_iter()
@@ -170,18 +167,27 @@ trait CoordLike {
 
 impl CoordLike for shapefile::Point {
     fn as_coord(&self) -> Coord<f64> {
-        Coord { x: self.x, y: self.y }
+        Coord {
+            x: self.x,
+            y: self.y,
+        }
     }
 }
 
 impl CoordLike for shapefile::PointZ {
     fn as_coord(&self) -> Coord<f64> {
-        Coord { x: self.x, y: self.y }
+        Coord {
+            x: self.x,
+            y: self.y,
+        }
     }
 }
 
 impl CoordLike for shapefile::PointM {
     fn as_coord(&self) -> Coord<f64> {
-        Coord { x: self.x, y: self.y }
+        Coord {
+            x: self.x,
+            y: self.y,
+        }
     }
 }

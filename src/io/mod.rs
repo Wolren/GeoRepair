@@ -44,45 +44,45 @@
 //! only in-memory WKB parsing is available via `read_wkb` (no file paths).
 
 #[cfg(feature = "std")]
+use crate::MakeValid;
+#[cfg(feature = "std")]
+use crate::core::MakeValidConfig;
+#[cfg(feature = "std")]
+use crate::validation::{ValidationResult, validate};
+#[cfg(feature = "std")]
 use alloc::string::String;
 #[cfg(feature = "std")]
 use alloc::string::ToString;
 #[cfg(feature = "std")]
 use alloc::vec::Vec;
 #[cfg(feature = "std")]
+use geo::GeometryCollection;
+use geo::{Coord, Geometry, Polygon};
+#[cfg(feature = "std")]
 use std::fs;
 #[cfg(feature = "std")]
 use std::io::Read;
-use geo::{Coord, Geometry, Polygon};
-#[cfg(feature = "std")]
-use geo::GeometryCollection;
-#[cfg(feature = "std")]
-use crate::MakeValid;
-#[cfg(feature = "std")]
-use crate::core::MakeValidConfig;
-#[cfg(feature = "std")]
-use crate::validation::{ValidationResult, validate};
 
 /// Custom binary format for bulk polygon storage (`.bin`).
 #[cfg(feature = "std")]
 pub mod binary;
-/// OGC Well-Known Binary (WKB) parsing and serialization.
-pub mod wkb;
-/// OGC Well-Known Text (WKT) parsing and serialization.
-pub mod wkt;
+/// CSV with WKT in the first column (`io-csv`).
+#[cfg(feature = "io-csv")]
+pub mod csv_io;
+/// OGC GML 3.2 geometry subset (`.gml`) (`io-gml`).
+#[cfg(feature = "io-gml")]
+pub mod gml;
 /// GeoPackage (`.gpkg`) via SQLite (`io-gpkg`; default feature, gated out
 /// on wasm32 - bundled SQLite compiles C).
 #[cfg(all(feature = "io-gpkg", not(target_arch = "wasm32")))]
 pub mod gpkg;
-/// CSV with WKT in the first column (`io-csv`).
-#[cfg(feature = "io-csv")]
-pub mod csv_io;
 /// ESRI Shapefile (`.shp`) (`io-shp`).
 #[cfg(feature = "io-shp")]
 pub mod shp;
-/// OGC GML 3.2 geometry subset (`.gml`) (`io-gml`).
-#[cfg(feature = "io-gml")]
-pub mod gml;
+/// OGC Well-Known Binary (WKB) parsing and serialization.
+pub mod wkb;
+/// OGC Well-Known Text (WKT) parsing and serialization.
+pub mod wkt;
 
 /// Load polygons from a custom binary file.
 #[cfg(feature = "std")]
@@ -90,8 +90,7 @@ pub use binary::{load_bin, load_bin_stream, write_bin};
 /// Read/write OGC WKB geometry format.
 pub use wkb::{
     Endianness, EwkbDims, EwkbGeometry, WkbError, WriteOptions, estimate_wkb_size, read_ewkb,
-    read_wkb, read_wkb_concat, write_ewkb, write_wkb,
-    write_wkb_with_opts,
+    read_wkb, read_wkb_concat, write_ewkb, write_wkb, write_wkb_with_opts,
 };
 #[cfg(feature = "std")]
 pub use wkb::{read_wkb_from, write_wkb_to};

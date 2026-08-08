@@ -1,9 +1,8 @@
 //! Polygon repair: Triangle/Polygon MakeValid impls, strategy dispatch,
 //! OGC winding enforcement, and reduction fallbacks.
 
-
-use super::*;
 use super::strip::{enforce_ccw, enforce_cw, has_nan, strip_degenerate};
+use super::*;
 
 #[cfg(any(feature = "arrange", feature = "structure"))]
 impl MakeValid for Triangle<f64> {
@@ -116,14 +115,13 @@ impl MakeValid for Polygon<f64> {
                 // geo::BooleanOps) can assert on degenerate inputs; a foreign
                 // library panic must degrade to empty, never crash the host.
                 #[cfg(feature = "std")]
-                let repaired =
-                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        make_valid_impl(self, self, config, coords[0])
-                    }))
-                    .unwrap_or_else(|_| {
-                        warn!("make_valid panicked on polygon; returning empty geometry");
-                        empty_geom::<f64>()
-                    });
+                let repaired = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    make_valid_impl(self, self, config, coords[0])
+                }))
+                .unwrap_or_else(|_| {
+                    warn!("make_valid panicked on polygon; returning empty geometry");
+                    empty_geom::<f64>()
+                });
                 #[cfg(not(feature = "std"))]
                 let repaired = make_valid_impl(self, self, config, coords[0]);
                 let result = strip_degenerate(repaired);
@@ -212,10 +210,13 @@ impl MakeValid for Polygon<f64> {
 
 /// Check if any coordinate in a polygon is NaN or Infinity.
 pub(super) fn has_nan_or_infinite(p: &Polygon<f64>) -> bool {
-    p.exterior().0.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
-        || p.interiors().iter().any(|ring| {
-            ring.0.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
-        })
+    p.exterior()
+        .0
+        .iter()
+        .any(|c| !c.x.is_finite() || !c.y.is_finite())
+        || p.interiors()
+            .iter()
+            .any(|ring| ring.0.iter().any(|c| !c.x.is_finite() || !c.y.is_finite()))
 }
 
 /// True when a single snap grid (SNAP_SCALE = 1e8) cannot represent the
@@ -344,116 +345,124 @@ pub(super) fn make_valid_impl(
         "make_valid_impl requires NaN-free input"
     );
     let result = match config.poly_method {
-            PolyMethod::Arrange => arrange_chain(poly, config),
-            PolyMethod::Structure => {
-                let st = structure_fix_owned(poly.clone(), config, None);
-                match st {
-                    // Fast path: the gate is a COMPLETE certifier (2026-08-07)
-                    // - winding is the only normalization needed, and the
-                    // exit validator would re-run the same sweep. The
-                    // winding-invariant checks survive re-winding, and the
-                    // re-wound orientation is OGC-correct by construction.
-                    crate::structure::FixOutcome::Fast(g) => {
-                        // The gate certifies the winding-invariant checks;
-                        // orientation is the only property the re-wind can
-                        // invalidate (extreme-magnitude rings in the
-                        // exact-orient ~0 zone - fuzz
-                        // invariant_mixed_fp_in_same_ring). Verify comes
-                        // from the enforce pass's extremal indices (no
-                        // re-search - winding fusion, 2026-08-08);
-                        // ambiguous orientation routes to arrange.
-                        let (g_norm, ok) = enforce_ogc_winding(g);
-                        if ok {
-                            g_norm
-                        } else {
-                            warn!(
-                                "Structure mode: fast-path orientation ambiguous, retrying with CDT arrange"
-                            );
-                            arrange_chain(poly, config)
-                        }
-                    }
-                    crate::structure::FixOutcome::Repaired(g) => {
-                        // Normalize winding BEFORE the validity gate: the
-                        // fast path can pass a wrong-wound (CW) input
-                        // through and CW shells are valid per GEOS but
-                        // flagged WrongOrientation by our validator
-                        // (measured: large valid shell + boundary-touching
-                        // hole, speed_bug_regressions — gating pre-winding
-                        // sent it to arrange, which decomposed the touch
-                        // into a MultiPolygon).
-                        let g_norm = enforce_ogc_winding(g).0;
-                        if is_valid_with_geo(&g_norm) {
-                            g_norm
-                        } else {
-                            warn!("Structure mode: fix output invalid, retrying with CDT arrange");
-                            arrange_chain(poly, config)
-                        }
-                    }
-                    crate::structure::FixOutcome::Unconsumed(p) => {
-                        warn!("Structure mode: fix failed, retrying with CDT arrange");
-                        arrange_chain(&p, config)
+        PolyMethod::Arrange => arrange_chain(poly, config),
+        PolyMethod::Structure => {
+            let st = structure_fix_owned(poly.clone(), config, None);
+            match st {
+                // Fast path: the gate is a COMPLETE certifier (2026-08-07)
+                // - winding is the only normalization needed, and the
+                // exit validator would re-run the same sweep. The
+                // winding-invariant checks survive re-winding, and the
+                // re-wound orientation is OGC-correct by construction.
+                crate::structure::FixOutcome::Fast(g) => {
+                    // The gate certifies the winding-invariant checks;
+                    // orientation is the only property the re-wind can
+                    // invalidate (extreme-magnitude rings in the
+                    // exact-orient ~0 zone - fuzz
+                    // invariant_mixed_fp_in_same_ring). Verify comes
+                    // from the enforce pass's extremal indices (no
+                    // re-search - winding fusion, 2026-08-08);
+                    // ambiguous orientation routes to arrange.
+                    let (g_norm, ok) = enforce_ogc_winding(g);
+                    if ok {
+                        g_norm
+                    } else {
+                        warn!(
+                            "Structure mode: fast-path orientation ambiguous, retrying with CDT arrange"
+                        );
+                        arrange_chain(poly, config)
                     }
                 }
-            }
-            PolyMethod::Auto => {
-                match structure_fix_owned(poly.clone(), config, None) {
-                    // Fast: complete-certifier gate (2026-08-07) - same
-                    // argument as the Structure arm above.
-                    crate::structure::FixOutcome::Fast(g) => {
-                        let (g_norm, ok) = enforce_ogc_winding(g);
-                        if ok {
-                            g_norm
-                        } else {
-                            warn!(
-                                "Auto mode: fast-path orientation ambiguous, falling back to CDT arrange"
-                            );
-                            arrange_chain(poly, config)
-                        }
-                    }
-                    crate::structure::FixOutcome::Repaired(r) => {
-                        // The structure path emits GEOS walker winding (CW
-                        // shells, CCW holes - GEOS polygonizer convention).
-                        // OGC validity requires CCW shells; normalize before
-                        // the gate.
-                        let r_norm = enforce_ogc_winding(r).0;
-                        #[cfg(all(any(test, debug_assertions), feature = "std"))]
-                        if std::env::var("DIAG_MV").is_ok() {
-                            use geo::Area;
-                            let ra = match &r_norm {
-                                Geometry::Polygon(p) => p.unsigned_area(),
-                                Geometry::MultiPolygon(mp) => {
-                                    mp.0.iter().map(|p| p.unsigned_area()).sum()
-                                }
-                                Geometry::GeometryCollection(gc) => gc.0.iter().map(|x| match x {
-                                    Geometry::Polygon(p) => p.unsigned_area(),
-                                    _ => 0.0,
-                                }).sum(),
-                                _ => 0.0,
-                            };
-                            eprintln!(
-                                "DIAG_MV auto: structure r={ra:.4} valid={}",
-                                is_valid_with_geo(&r_norm)
-                            );
-                        }
-                        if is_valid_with_geo(&r_norm) {
-                            r_norm
-                        } else {
-                            warn!("Auto mode: structure_fix invalid, falling back to CDT arrange");
-                            arrange_chain(poly, config)
-                        }
-                    }
-                    crate::structure::FixOutcome::Unconsumed(p) => {
-                        warn!("Auto mode: structure_fix failed, falling back to CDT arrange");
-                        arrange_chain(&p, config)
+                crate::structure::FixOutcome::Repaired(g) => {
+                    // Normalize winding BEFORE the validity gate: the
+                    // fast path can pass a wrong-wound (CW) input
+                    // through and CW shells are valid per GEOS but
+                    // flagged WrongOrientation by our validator
+                    // (measured: large valid shell + boundary-touching
+                    // hole, speed_bug_regressions — gating pre-winding
+                    // sent it to arrange, which decomposed the touch
+                    // into a MultiPolygon).
+                    let g_norm = enforce_ogc_winding(g).0;
+                    if is_valid_with_geo(&g_norm) {
+                        g_norm
+                    } else {
+                        warn!("Structure mode: fix output invalid, retrying with CDT arrange");
+                        arrange_chain(poly, config)
                     }
                 }
+                crate::structure::FixOutcome::Unconsumed(p) => {
+                    warn!("Structure mode: fix failed, retrying with CDT arrange");
+                    arrange_chain(&p, config)
+                }
             }
-        };
-        // Every dispatch outcome is already OGC-wound (each arm winds
-        // before returning), so the old re-wind here was a full no-op
-        // pass over every ring - removed 2026-08-08.
-        if has_nan(&result) { empty_geom::<f64>() } else { result }
         }
+        PolyMethod::Auto => {
+            match structure_fix_owned(poly.clone(), config, None) {
+                // Fast: complete-certifier gate (2026-08-07) - same
+                // argument as the Structure arm above.
+                crate::structure::FixOutcome::Fast(g) => {
+                    let (g_norm, ok) = enforce_ogc_winding(g);
+                    if ok {
+                        g_norm
+                    } else {
+                        warn!(
+                            "Auto mode: fast-path orientation ambiguous, falling back to CDT arrange"
+                        );
+                        arrange_chain(poly, config)
+                    }
+                }
+                crate::structure::FixOutcome::Repaired(r) => {
+                    // The structure path emits GEOS walker winding (CW
+                    // shells, CCW holes - GEOS polygonizer convention).
+                    // OGC validity requires CCW shells; normalize before
+                    // the gate.
+                    let r_norm = enforce_ogc_winding(r).0;
+                    #[cfg(all(any(test, debug_assertions), feature = "std"))]
+                    if std::env::var("DIAG_MV").is_ok() {
+                        use geo::Area;
+                        let ra = match &r_norm {
+                            Geometry::Polygon(p) => p.unsigned_area(),
+                            Geometry::MultiPolygon(mp) => {
+                                mp.0.iter().map(|p| p.unsigned_area()).sum()
+                            }
+                            Geometry::GeometryCollection(gc) => {
+                                gc.0.iter()
+                                    .map(|x| match x {
+                                        Geometry::Polygon(p) => p.unsigned_area(),
+                                        _ => 0.0,
+                                    })
+                                    .sum()
+                            }
+                            _ => 0.0,
+                        };
+                        eprintln!(
+                            "DIAG_MV auto: structure r={ra:.4} valid={}",
+                            is_valid_with_geo(&r_norm)
+                        );
+                    }
+                    if is_valid_with_geo(&r_norm) {
+                        r_norm
+                    } else {
+                        warn!("Auto mode: structure_fix invalid, falling back to CDT arrange");
+                        arrange_chain(poly, config)
+                    }
+                }
+                crate::structure::FixOutcome::Unconsumed(p) => {
+                    warn!("Auto mode: structure_fix failed, falling back to CDT arrange");
+                    arrange_chain(&p, config)
+                }
+            }
+        }
+    };
+    // Every dispatch outcome is already OGC-wound (each arm winds
+    // before returning), so the old re-wind here was a full no-op
+    // pass over every ring - removed 2026-08-08.
+    if has_nan(&result) {
+        empty_geom::<f64>()
+    } else {
+        result
+    }
+}
 
 /// Owned twin of [`make_valid_impl`]: takes ownership of the working
 /// polygon so the Structure fast path can MOVE it into the output instead of
@@ -517,14 +526,20 @@ pub(super) fn make_valid_impl_owned(
             }
             #[cfg(not(feature = "structure"))]
             {
-                warn!("PolyMethod::Structure selected but 'structure' feature is not enabled. Enable the 'structure' feature in Cargo.toml to use Structure mode.");
+                warn!(
+                    "PolyMethod::Structure selected but 'structure' feature is not enabled. Enable the 'structure' feature in Cargo.toml to use Structure mode."
+                );
                 arrange_chain(&poly, config)
             }
         }
         PolyMethod::Auto => make_valid_impl(&poly, &poly, config, _first_valid),
     };
     let result = enforce_ogc_winding(result).0;
-    if has_nan(&result) { (empty_geom::<f64>(), true) } else { (result, false) }
+    if has_nan(&result) {
+        (empty_geom::<f64>(), true)
+    } else {
+        (result, false)
+    }
 }
 
 /// Owned twin of [`Polygon::make_valid_with_config`] for batch pipelines
@@ -685,22 +700,21 @@ pub(crate) fn enforce_ogc_winding(g: Geometry<f64>) -> (Geometry<f64>, bool) {
         }
         Geometry::MultiPolygon(mp) => {
             let mut ok = true;
-            let polys: Vec<Polygon<f64>> = mp
-                .0
-                .into_iter()
-                .map(|p| {
-                    let (ext, mut holes) = p.into_inner();
-                    let (ext, ext_idx, ext_rev) = enforce_ccw(ext);
-                    ok &= winding_ok(&ext.0, ext_idx, ext_rev, true);
-                    for h in holes.iter_mut() {
-                        let owned = core::mem::replace(h, geo::LineString::new(Vec::new()));
-                        let (hw, h_idx, h_rev) = enforce_cw(owned);
-                        ok &= winding_ok(&hw.0, h_idx, h_rev, false);
-                        *h = hw;
-                    }
-                    Polygon::new(ext, holes)
-                })
-                .collect();
+            let polys: Vec<Polygon<f64>> =
+                mp.0.into_iter()
+                    .map(|p| {
+                        let (ext, mut holes) = p.into_inner();
+                        let (ext, ext_idx, ext_rev) = enforce_ccw(ext);
+                        ok &= winding_ok(&ext.0, ext_idx, ext_rev, true);
+                        for h in holes.iter_mut() {
+                            let owned = core::mem::replace(h, geo::LineString::new(Vec::new()));
+                            let (hw, h_idx, h_rev) = enforce_cw(owned);
+                            ok &= winding_ok(&hw.0, h_idx, h_rev, false);
+                            *h = hw;
+                        }
+                        Polygon::new(ext, holes)
+                    })
+                    .collect();
             (Geometry::MultiPolygon(MultiPolygon::new(polys)), ok)
         }
         other => (other, true),
@@ -749,7 +763,9 @@ impl<T: NodingFloat> MakeValid for Geometry<T> {
             Geometry::Line(g) => g.make_valid_with_config(config),
             Geometry::LineString(g) => g.make_valid_with_config(config),
             Geometry::Polygon(_) | Geometry::MultiPolygon(_) => {
-                warn!("Geometry::make_valid: Polygon/MultiPolygon repair requires 'arrange' or 'structure' feature");
+                warn!(
+                    "Geometry::make_valid: Polygon/MultiPolygon repair requires 'arrange' or 'structure' feature"
+                );
                 empty_geom()
             }
             Geometry::MultiPoint(g) => g.make_valid_with_config(config),
@@ -824,25 +840,32 @@ pub(super) fn reduce_fallback(poly: &Polygon<f64>, config: &MakeValidConfig) -> 
 /// no chance of shell overlap, so we can safely skip the expensive union.
 #[cfg(any(feature = "arrange", feature = "structure"))]
 pub(super) fn shells_have_overlapping_bboxes(mp: &MultiPolygon<f64>) -> bool {
-    let bboxes: Vec<(f64, f64, f64, f64)> = mp
-        .0
-        .iter()
-        .map(|p| {
-            let coords = &p.exterior().0;
-            if coords.is_empty() {
-                return (0.0, 0.0, 0.0, 0.0);
-            }
-            let (mut min_x, mut max_x, mut min_y, mut max_y) =
-                (coords[0].x, coords[0].x, coords[0].y, coords[0].y);
-            for c in coords.iter().skip(1) {
-                if c.x < min_x { min_x = c.x; }
-                if c.x > max_x { max_x = c.x; }
-                if c.y < min_y { min_y = c.y; }
-                if c.y > max_y { max_y = c.y; }
-            }
-            (min_x, max_x, min_y, max_y)
-        })
-        .collect();
+    let bboxes: Vec<(f64, f64, f64, f64)> =
+        mp.0.iter()
+            .map(|p| {
+                let coords = &p.exterior().0;
+                if coords.is_empty() {
+                    return (0.0, 0.0, 0.0, 0.0);
+                }
+                let (mut min_x, mut max_x, mut min_y, mut max_y) =
+                    (coords[0].x, coords[0].x, coords[0].y, coords[0].y);
+                for c in coords.iter().skip(1) {
+                    if c.x < min_x {
+                        min_x = c.x;
+                    }
+                    if c.x > max_x {
+                        max_x = c.x;
+                    }
+                    if c.y < min_y {
+                        min_y = c.y;
+                    }
+                    if c.y > max_y {
+                        max_y = c.y;
+                    }
+                }
+                (min_x, max_x, min_y, max_y)
+            })
+            .collect();
     for i in 0..bboxes.len() {
         for j in (i + 1)..bboxes.len() {
             let (min_ix, max_ix, min_iy, max_iy) = bboxes[i];
@@ -861,11 +884,17 @@ pub(super) fn shells_have_overlapping_bboxes(mp: &MultiPolygon<f64>) -> bool {
 pub(super) fn shells_have_vertex_inside(mp: &MultiPolygon<f64>) -> bool {
     for i in 0..mp.0.len() {
         let ext_i = &mp.0[i].exterior().0;
-        if ext_i.len() < 4 { continue; }
+        if ext_i.len() < 4 {
+            continue;
+        }
         for j in 0..mp.0.len() {
-            if i == j { continue; }
+            if i == j {
+                continue;
+            }
             let ext_j = &mp.0[j].exterior().0;
-            if ext_j.len() < 4 { continue; }
+            if ext_j.len() < 4 {
+                continue;
+            }
             let max_check = ext_i.len().min(32);
             for pt in ext_i.iter().take(max_check) {
                 if point_in_ring_exclusive_even_odd(*pt, ext_j) {

@@ -6,7 +6,6 @@
 //! container for I/O operations — the repair pipeline modifies only the
 //! geometry while preserving all other fields.
 
-
 use alloc::string::String;
 use alloc::vec::Vec;
 use geo::{Coord, Geometry};

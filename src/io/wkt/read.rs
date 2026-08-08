@@ -1,9 +1,8 @@
 //! WKT parser: single-pass tokenizer + reader.
 
-
-use alloc::vec::Vec;
 use alloc::string::String;
 use alloc::string::ToString;
+use alloc::vec::Vec;
 /// Maximum GEOMETRYCOLLECTION nesting depth. Each level consumes at least
 /// ~14 bytes of input, so the cap never rejects real data while bounding
 /// recursion (stack overflow is an uncatchable abort).
@@ -664,8 +663,6 @@ pub fn read_wkt_from(mut reader: impl Read) -> Result<Geometry<f64>, WktError> {
     reader.read_to_string(&mut s).map_err(WktError::IoError)?;
     read_wkt(&s)
 }
-
-
 
 /// Peek at the beginning of a WKT string to determine the geometry type name
 /// and dimension (always 2 for GeoRepair, since Z/M/ZM are rejected).

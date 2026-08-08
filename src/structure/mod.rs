@@ -26,11 +26,13 @@
 //! - `sweep`: Plane-sweep intersection detection
 
 use alloc::vec::Vec;
-/// Edge classification and planar graph building for polygon faces.
-pub mod classify;
 /// GEOS BuildArea port: polygonize linework → shell/hole classification →
 /// even-parent filter. The reference area-building algorithm.
 pub mod build_area;
+/// Edge classification and planar graph building for polygon faces.
+pub mod classify;
+/// Edge splitting at intersection points (R-tree / sweep / brute force).
+pub(crate) mod edge_split;
 /// Ring repair: self-intersection resolution, winding correction.
 pub mod fix_ring;
 /// Graph-based ring intersection resolution.
@@ -41,16 +43,14 @@ pub mod merge;
 pub mod polygonizer;
 /// Hole subtraction during polygon face assembly.
 pub mod subtract;
-/// Edge splitting at intersection points (R-tree / sweep / brute force).
-pub(crate) mod edge_split;
-/// GEOS MakeValidPoly symdiff loop (BuildArea + XOR accumulation).
-pub(crate) mod symdiff;
 /// Plane-sweep intersection detection for edge segments.
 pub mod sweep;
+/// GEOS MakeValidPoly symdiff loop (BuildArea + XOR accumulation).
+pub(crate) mod symdiff;
 
+use ::core::sync::atomic::Ordering;
 use geo::{Geometry, Line, LineString, LinesIter, Polygon};
 use smallvec::SmallVec;
-use ::core::sync::atomic::Ordering;
 
 use crate::core;
 use crate::core::MakeValidConfig;
@@ -111,96 +111,98 @@ pub(crate) fn fix_polygon_owned(
     }
     PROFILE_FP_NS.fetch_add(_t_fp.ns(), Ordering::Relaxed);
 
-/// Fast-path gate: valid polygons return immediately, zero-copy. The gate
-/// is a COMPLETE certifier: it must accept exactly what the exit validator
-/// accepts (the Fast path skips that validator - 2026-08-07), minus
-/// orientation, which the caller's re-winding normalizes afterwards. Gates:
-/// basic form, sub-ULP edges, per-ring full pair predicate (proper
-/// crossing + eps-collinear overlap + vertex-on-edge T-junction, ring-
-/// local eps - SmallVec, no heap for <= 32 lines), duplicated rings, and
-/// the validator's own hole validation. Large rings swap the chain sweep
-/// for the validator itself (one radix pass) - the R-tree proper-crossing
-/// sweep was cheaper only in constants and missed the collinear/T-junction
-/// classes.
-#[cfg(feature = "arrange")]
-#[cfg_attr(feature = "hotpath", hotpath::measure)]
-fn fast_path_check(poly: &Polygon<f64>, _ext_scale: Option<f64>) -> bool {
-    let total_verts: usize =
-        poly.exterior().0.len() + poly.interiors().iter().map(|h| h.0.len()).sum::<usize>();
-    if total_verts == 0 || poly.exterior().0.len() < 4 {
-        return false;
-    }
-    // Basic form + sub-ULP edges + the global envelope bbox in ONE pass
-    // over the coords (measured 2026-08-08: the separate sub-ULP and
-    // envelope scans cost ~15-20 us on a 5000-vertex ring).
-    let mut bbox = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
-    let mut sub_ulp = false;
-    let mut acc = crate::arrange::GateAccum {
-        lines: None,
-        bbox: Some(&mut bbox),
-        sub_ulp: Some(&mut sub_ulp),
-    };
-    if !crate::arrange::ring_is_plausible(poly.exterior(), &mut acc) {
-        return false;
-    }
-    for hole in poly.interiors() {
-        if !crate::arrange::ring_is_plausible(hole, &mut acc) {
+    /// Fast-path gate: valid polygons return immediately, zero-copy. The gate
+    /// is a COMPLETE certifier: it must accept exactly what the exit validator
+    /// accepts (the Fast path skips that validator - 2026-08-07), minus
+    /// orientation, which the caller's re-winding normalizes afterwards. Gates:
+    /// basic form, sub-ULP edges, per-ring full pair predicate (proper
+    /// crossing + eps-collinear overlap + vertex-on-edge T-junction, ring-
+    /// local eps - SmallVec, no heap for <= 32 lines), duplicated rings, and
+    /// the validator's own hole validation. Large rings swap the chain sweep
+    /// for the validator itself (one radix pass) - the R-tree proper-crossing
+    /// sweep was cheaper only in constants and missed the collinear/T-junction
+    /// classes.
+    #[cfg(feature = "arrange")]
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
+    fn fast_path_check(poly: &Polygon<f64>, _ext_scale: Option<f64>) -> bool {
+        let total_verts: usize =
+            poly.exterior().0.len() + poly.interiors().iter().map(|h| h.0.len()).sum::<usize>();
+        if total_verts == 0 || poly.exterior().0.len() < 4 {
             return false;
         }
+        // Basic form + sub-ULP edges + the global envelope bbox in ONE pass
+        // over the coords (measured 2026-08-08: the separate sub-ULP and
+        // envelope scans cost ~15-20 us on a 5000-vertex ring).
+        let mut bbox = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+        let mut sub_ulp = false;
+        let mut acc = crate::arrange::GateAccum {
+            lines: None,
+            bbox: Some(&mut bbox),
+            sub_ulp: Some(&mut sub_ulp),
+        };
+        if !crate::arrange::ring_is_plausible(poly.exterior(), &mut acc) {
+            return false;
+        }
+        for hole in poly.interiors() {
+            if !crate::arrange::ring_is_plausible(hole, &mut acc) {
+                return false;
+            }
+        }
+        if sub_ulp {
+            // Sub-ULP edge check: an edge shorter than EPSILON * bbox_scale
+            // (mixed-magnitude rings, e.g. 1e8 coords with 1e-8 spikes) makes
+            // proper-crossing detection blind - collinear overlap is invisible.
+            // Such inputs are invalid anyway; route them to the full repair.
+            return false;
+        }
+        // Absolute envelope degeneracy - the validator's own rule: a geometry
+        // whose bbox is thinner than f64::EPSILON on either axis is rejected
+        // as DegenerateExterior. The basic-form gate uses a LOCAL relative
+        // rule (correct for mixed magnitudes - a 5e-305-thick sliver is valid
+        // at its own scale), so this class needs its own check or the Fast
+        // path ships a polygon the validator rejects (fuzz_inprocess_loop
+        // micro-sliver, 2026-08-07).
+        if (bbox.1 - bbox.0).abs() < f64::EPSILON || (bbox.3 - bbox.2).abs() < f64::EPSILON {
+            return false;
+        }
+        // Duplicated rings (hole == shell, hole == hole): the pair sweeps
+        // cannot see identical rings (no proper crossings, no touches that
+        // the inclusive hole checks would flag). Validator's own check.
+        let interiors: Vec<&[geo::Coord<f64>]> =
+            poly.interiors().iter().map(|h| &h.0[..]).collect();
+        if crate::validation::has_duplicate_rings(&interiors, poly.exterior().0.as_slice()) {
+            return false;
+        }
+        if total_verts <= core::FAST_PATH_MAX_VERTS {
+            // SmallVec: ~95.6% of the real-world dataset has <= 32 vertices, so
+            // the line collection stays on the stack and skips the heap
+            // allocation entirely; larger rings spill to the heap transparently.
+            let lines: SmallVec<[Line<f64>; crate::core::SMALL_RING_LINES]> =
+                poly.lines_iter().collect();
+            !lines.is_empty()
+                && crate::arrange::prep::has_no_intersections(&lines)
+                && crate::validation::holes::check_holes_valid(
+                    poly.exterior().0.as_slice(),
+                    poly.interiors(),
+                )
+                .is_empty()
+        } else {
+            // Very large rings: the validator IS the gate - one radix sweep
+            // that covers every class the exit validator would re-check
+            // (ring simplicity incl. eps-collinear + T-junctions, hole ring
+            // validity, hole containment/nesting, duplicates). Orientation
+            // errors are filtered: the fast path re-winds after the gate, and
+            // winding is the only normalization a simple polygon needs.
+            use crate::validation::{GeoValidation, GeometryValidationError};
+            let r = poly.validate();
+            r.valid
+                || r.errors
+                    .iter()
+                    .all(|e| matches!(e, GeometryValidationError::WrongOrientation))
+        }
     }
-    if sub_ulp {
-        // Sub-ULP edge check: an edge shorter than EPSILON * bbox_scale
-        // (mixed-magnitude rings, e.g. 1e8 coords with 1e-8 spikes) makes
-        // proper-crossing detection blind - collinear overlap is invisible.
-        // Such inputs are invalid anyway; route them to the full repair.
-        return false;
-    }
-    // Absolute envelope degeneracy - the validator's own rule: a geometry
-    // whose bbox is thinner than f64::EPSILON on either axis is rejected
-    // as DegenerateExterior. The basic-form gate uses a LOCAL relative
-    // rule (correct for mixed magnitudes - a 5e-305-thick sliver is valid
-    // at its own scale), so this class needs its own check or the Fast
-    // path ships a polygon the validator rejects (fuzz_inprocess_loop
-    // micro-sliver, 2026-08-07).
-    if (bbox.1 - bbox.0).abs() < f64::EPSILON || (bbox.3 - bbox.2).abs() < f64::EPSILON {
-        return false;
-    }
-    // Duplicated rings (hole == shell, hole == hole): the pair sweeps
-    // cannot see identical rings (no proper crossings, no touches that
-    // the inclusive hole checks would flag). Validator's own check.
-    let interiors: Vec<&[geo::Coord<f64>]> = poly.interiors().iter().map(|h| &h.0[..]).collect();
-    if crate::validation::has_duplicate_rings(&interiors, poly.exterior().0.as_slice()) {
-        return false;
-    }
-    if total_verts <= core::FAST_PATH_MAX_VERTS {
-        // SmallVec: ~95.6% of the real-world dataset has <= 32 vertices, so
-        // the line collection stays on the stack and skips the heap
-        // allocation entirely; larger rings spill to the heap transparently.
-        let lines: SmallVec<[Line<f64>; crate::core::SMALL_RING_LINES]> = poly.lines_iter().collect();
-        !lines.is_empty()
-            && crate::arrange::prep::has_no_intersections(&lines)
-            && crate::validation::holes::check_holes_valid(
-                poly.exterior().0.as_slice(),
-                poly.interiors(),
-            )
-            .is_empty()
-    } else {
-        // Very large rings: the validator IS the gate - one radix sweep
-        // that covers every class the exit validator would re-check
-        // (ring simplicity incl. eps-collinear + T-junctions, hole ring
-        // validity, hole containment/nesting, duplicates). Orientation
-        // errors are filtered: the fast path re-winds after the gate, and
-        // winding is the only normalization a simple polygon needs.
-        use crate::validation::{GeoValidation, GeometryValidationError};
-        let r = poly.validate();
-        r.valid
-            || r.errors
-                .iter()
-                .all(|e| matches!(e, GeometryValidationError::WrongOrientation))
-    }
-}
 
-// Single-pass GEOS MakeValid repair (primary path for invalid input):
+    // Single-pass GEOS MakeValid repair (primary path for invalid input):
     // node shell + holes together in ONE pass, walk even-odd faces. This
     // replaces the multi-stage boolean pipeline (per-ring symdiff +
     // subtract_holes + merge — three noding passes) for the common invalid
@@ -285,8 +287,10 @@ fn fast_path_check(poly: &Polygon<f64>, _ext_scale: Option<f64>) -> bool {
                 }
                 // Polygons carry structural holes from BuildArea (self-crossing
                 // lobes) — they must survive into the subtract step.
-                let valid: Vec<Polygon<f64>> =
-                    shell_polys.into_iter().filter(|p| p.exterior().0.len() >= 4).collect();
+                let valid: Vec<Polygon<f64>> = shell_polys
+                    .into_iter()
+                    .filter(|p| p.exterior().0.len() >= 4)
+                    .collect();
                 PROFILE_SR_NS.fetch_add(_t.ns(), Ordering::Relaxed);
                 if valid.is_empty() { None } else { Some(valid) }
             },
@@ -303,9 +307,9 @@ fn fast_path_check(poly: &Polygon<f64>, _ext_scale: Option<f64>) -> bool {
                         if !fix_ring::has_self_intersections_with_bbox(&h.0, hole_bbox) {
                             return vec![h.clone()];
                         }
-                        fix_ring::repair_ring(h).map(|polys| {
-                            polys.into_iter().map(|p| p.exterior().clone()).collect()
-                        }).unwrap_or_else(|| vec![h.clone()])
+                        fix_ring::repair_ring(h)
+                            .map(|polys| polys.into_iter().map(|p| p.exterior().clone()).collect())
+                            .unwrap_or_else(|| vec![h.clone()])
                     })
                     .collect();
                 PROFILE_HR_NS.fetch_add(_t.ns(), Ordering::Relaxed);
@@ -324,7 +328,10 @@ fn fast_path_check(poly: &Polygon<f64>, _ext_scale: Option<f64>) -> bool {
                 if !poly.exterior().0.is_empty() {
                     return FixOutcome::Repaired(crate::arrange::fallback_polygon_fix(&poly));
                 }
-                return FixOutcome::Repaired(handle_collapse_result(poly.exterior(), config).unwrap_or_else(crate::make_valid::empty_geom));
+                return FixOutcome::Repaired(
+                    handle_collapse_result(poly.exterior(), config)
+                        .unwrap_or_else(crate::make_valid::empty_geom),
+                );
             }
         };
         (valid_shells, holes)
@@ -341,18 +348,28 @@ fn fast_path_check(poly: &Polygon<f64>, _ext_scale: Option<f64>) -> bool {
                 #[cfg(feature = "arrange")]
                 if !poly.exterior().0.is_empty() {
                     return FixOutcome::Repaired(crate::arrange::fallback_polygon_fix(&poly));
-
                 }
-                return FixOutcome::Repaired(handle_collapse_result(poly.exterior(), config).unwrap_or_else(crate::make_valid::empty_geom));
+                return FixOutcome::Repaired(
+                    handle_collapse_result(poly.exterior(), config)
+                        .unwrap_or_else(crate::make_valid::empty_geom),
+                );
             }
         };
         if shell_polys.is_empty() {
-            return FixOutcome::Repaired(handle_collapse_result(poly.exterior(), config).unwrap_or_else(crate::make_valid::empty_geom));
+            return FixOutcome::Repaired(
+                handle_collapse_result(poly.exterior(), config)
+                    .unwrap_or_else(crate::make_valid::empty_geom),
+            );
         }
-        let valid_shells: Vec<Polygon<f64>> =
-            shell_polys.into_iter().filter(|p| p.exterior().0.len() >= 4).collect();
+        let valid_shells: Vec<Polygon<f64>> = shell_polys
+            .into_iter()
+            .filter(|p| p.exterior().0.len() >= 4)
+            .collect();
         if valid_shells.is_empty() {
-            return FixOutcome::Repaired(handle_collapse_result(poly.exterior(), config).unwrap_or_else(crate::make_valid::empty_geom));
+            return FixOutcome::Repaired(
+                handle_collapse_result(poly.exterior(), config)
+                    .unwrap_or_else(crate::make_valid::empty_geom),
+            );
         }
         PROFILE_SR_NS.fetch_add(_t_sr.ns(), Ordering::Relaxed);
 
@@ -505,10 +522,14 @@ fn fast_path_check(poly: &Polygon<f64>, _ext_scale: Option<f64>) -> bool {
                 let ga = match &g {
                     Geometry::Polygon(p) => p.unsigned_area(),
                     Geometry::MultiPolygon(mp) => mp.0.iter().map(|p| p.unsigned_area()).sum(),
-                    Geometry::GeometryCollection(gc) => gc.0.iter().map(|x| match x {
-                        Geometry::Polygon(p) => p.unsigned_area(),
-                        _ => 0.0,
-                    }).sum(),
+                    Geometry::GeometryCollection(gc) => {
+                        gc.0.iter()
+                            .map(|x| match x {
+                                Geometry::Polygon(p) => p.unsigned_area(),
+                                _ => 0.0,
+                            })
+                            .sum()
+                    }
                     _ => 0.0,
                 };
                 eprintln!("DIAG_STR: drop_nested -> {ga:.4}");
@@ -516,12 +537,11 @@ fn fast_path_check(poly: &Polygon<f64>, _ext_scale: Option<f64>) -> bool {
             // Discard components with proper self-crossings (floating-point edge
             // cases). Legitimate hole/shell vertex touches survive.
             if let Geometry::MultiPolygon(ref mp) = g {
-                let filtered: Vec<Polygon<f64>> = mp
-                    .0
-                    .iter()
-                    .filter(|p| !has_proper_self_crossing(p))
-                    .cloned()
-                    .collect();
+                let filtered: Vec<Polygon<f64>> =
+                    mp.0.iter()
+                        .filter(|p| !has_proper_self_crossing(p))
+                        .cloned()
+                        .collect();
                 if filtered.is_empty() {
                     Geometry::GeometryCollection(geo::GeometryCollection(Vec::new()))
                 } else if filtered.len() == 1 {

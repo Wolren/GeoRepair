@@ -1,7 +1,6 @@
-
 use alloc::vec::Vec;
 use geo::Coord;
-use rstar::{RTree, RTreeObject, AABB};
+use rstar::{AABB, RTree, RTreeObject};
 
 use crate::orient::orient2d_fast;
 #[cfg(feature = "std")]
@@ -171,7 +170,6 @@ fn segments_adjacent_in_ring(i: usize, j: usize, ring_offsets: &[usize]) -> bool
     // First and last real segment of a closed ring share the closure vertex.
     j == start && i == seg_end - 1
 }
-
 
 /// Edge envelope as a flat [min_x, max_x, min_y, max_y] with the same
 /// epsilon expansion as [`edge_envelope`].
@@ -433,39 +431,41 @@ pub(crate) fn has_self_intersections(coords: &[Coord<f64>], eps: f64) -> bool {
     {
         use rayon::prelude::*;
         let t_q = std::time::Instant::now();
-        let found = (0..n_edges).into_par_iter().find_any(|&i| {
-            tree.query(envs[i], |j| {
-                let j = j as usize;
-                if j <= i {
-                    return false;
-                }
-                if i.abs_diff(j) <= 1 || (i == 0 && j == n_edges - 1) {
-                    return false;
-                }
-                if coords[i] == coords[j]
-                    && orient2d_fast(coords[i], coords[i + 1], coords[j + 1]) != 0.0
-                {
-                    return false;
-                }
-                if coords[i] == coords[j + 1]
-                    && orient2d_fast(coords[i], coords[i + 1], coords[j]) != 0.0
-                {
-                    return false;
-                }
-                if coords[i + 1] == coords[j]
-                    && orient2d_fast(coords[i + 1], coords[i], coords[j + 1]) != 0.0
-                {
-                    return false;
-                }
-                if coords[i + 1] == coords[j + 1]
-                    && orient2d_fast(coords[i + 1], coords[i], coords[j]) != 0.0
-                {
-                    return false;
-                }
-                super::fix_ring::check_edge_pair(coords, i, j, eps)
+        let found = (0..n_edges)
+            .into_par_iter()
+            .find_any(|&i| {
+                tree.query(envs[i], |j| {
+                    let j = j as usize;
+                    if j <= i {
+                        return false;
+                    }
+                    if i.abs_diff(j) <= 1 || (i == 0 && j == n_edges - 1) {
+                        return false;
+                    }
+                    if coords[i] == coords[j]
+                        && orient2d_fast(coords[i], coords[i + 1], coords[j + 1]) != 0.0
+                    {
+                        return false;
+                    }
+                    if coords[i] == coords[j + 1]
+                        && orient2d_fast(coords[i], coords[i + 1], coords[j]) != 0.0
+                    {
+                        return false;
+                    }
+                    if coords[i + 1] == coords[j]
+                        && orient2d_fast(coords[i + 1], coords[i], coords[j + 1]) != 0.0
+                    {
+                        return false;
+                    }
+                    if coords[i + 1] == coords[j + 1]
+                        && orient2d_fast(coords[i + 1], coords[i], coords[j]) != 0.0
+                    {
+                        return false;
+                    }
+                    super::fix_ring::check_edge_pair(coords, i, j, eps)
+                })
             })
-        })
-        .is_some();
+            .is_some();
         #[cfg(feature = "std")]
         if std::env::var("DIAG_SI").is_ok() {
             eprintln!(

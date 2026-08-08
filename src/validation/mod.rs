@@ -85,10 +85,14 @@
 //! (213 documented masked divergences, 0 known gaps; measured 2026-08-07).
 /// Complex validation rules (polygon nesting, multi-geometry checks).
 mod complex;
+/// Core validation types, traits, and per-geometry implementations (facade).
+mod core;
 /// Edge-pair intersection predicates and ring edge trees.
 pub(crate) mod edges;
 /// GeometryValidationError and its impls.
 mod errors;
+/// Adapter exposing geo_repair's validator through geo's `Validation` trait.
+mod geo_bridge;
 /// Hole validation, nesting, and cycle detection.
 pub(crate) mod holes;
 /// Per-geometry GeoValidation impls and free validate functions.
@@ -99,15 +103,11 @@ mod result;
 pub(crate) mod ring;
 /// Sweep-line machinery for ring self-intersection.
 pub(crate) mod sweep;
-/// Core validation types, traits, and per-geometry implementations (facade).
-mod core;
-/// Adapter exposing geo_repair's validator through geo's `Validation` trait.
-mod geo_bridge;
 
+/// Shared by the validator and the fast-path gate (duplicated rings).
+pub(crate) use complex::has_duplicate_rings;
 /// Re-export all core validation items: [`GeoValidation`], [`GeometryValidationError`],
 /// [`ValidationResult`], [`is_valid`], [`validate`], [`validate_reason`].
 pub use core::*;
-/// Shared by the validator and the fast-path gate (duplicated rings).
-pub(crate) use complex::has_duplicate_rings;
 /// geo-trait-compatible adapter and error mapping.
 pub use geo_bridge::{GeoRepairValidation, map_geo_invalid};

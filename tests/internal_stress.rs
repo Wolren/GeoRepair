@@ -31,9 +31,18 @@ fn assert_no_panic<F: FnOnce() + std::panic::UnwindSafe>(f: F) {
 fn cfg_all() -> Vec<MakeValidConfig> {
     vec![
         MakeValidConfig::default(),
-        MakeValidConfig { keep_collapsed: true, ..Default::default() },
-        MakeValidConfig { poly_method: PolyMethod::Arrange, ..Default::default() },
-        MakeValidConfig { poly_method: PolyMethod::Structure, ..Default::default() },
+        MakeValidConfig {
+            keep_collapsed: true,
+            ..Default::default()
+        },
+        MakeValidConfig {
+            poly_method: PolyMethod::Arrange,
+            ..Default::default()
+        },
+        MakeValidConfig {
+            poly_method: PolyMethod::Structure,
+            ..Default::default()
+        },
     ]
 }
 
@@ -62,7 +71,10 @@ fn stress_ring_dup_at_extreme_coords() {
                 let shell = LineString::new(vec![
                     Coord { x, y },
                     Coord { x: x + 10.0, y },
-                    Coord { x: x + 10.0, y: y + 10.0 },
+                    Coord {
+                        x: x + 10.0,
+                        y: y + 10.0,
+                    },
                     Coord { x, y: y + 10.0 },
                     Coord { x, y },
                 ]);
@@ -91,16 +103,34 @@ fn stress_hole_containment_at_extreme() {
                     LineString::new(vec![
                         Coord { x, y },
                         Coord { x: x + 100.0, y },
-                        Coord { x: x + 100.0, y: y + 100.0 },
+                        Coord {
+                            x: x + 100.0,
+                            y: y + 100.0,
+                        },
                         Coord { x, y: y + 100.0 },
                         Coord { x, y },
                     ]),
                     vec![LineString::new(vec![
-                        Coord { x: x + 10.0, y: y + 10.0 },
-                        Coord { x: x + 40.0, y: y + 10.0 },
-                        Coord { x: x + 40.0, y: y + 40.0 },
-                        Coord { x: x + 10.0, y: y + 40.0 },
-                        Coord { x: x + 10.0, y: y + 10.0 },
+                        Coord {
+                            x: x + 10.0,
+                            y: y + 10.0,
+                        },
+                        Coord {
+                            x: x + 40.0,
+                            y: y + 10.0,
+                        },
+                        Coord {
+                            x: x + 40.0,
+                            y: y + 40.0,
+                        },
+                        Coord {
+                            x: x + 10.0,
+                            y: y + 40.0,
+                        },
+                        Coord {
+                            x: x + 10.0,
+                            y: y + 10.0,
+                        },
                     ])],
                 );
                 let _ = poly.make_valid_with_config(cfg);
@@ -119,24 +149,57 @@ fn stress_hole_hole_overlap_at_extreme() {
                     LineString::new(vec![
                         Coord { x, y },
                         Coord { x: x + 100.0, y },
-                        Coord { x: x + 100.0, y: y + 100.0 },
+                        Coord {
+                            x: x + 100.0,
+                            y: y + 100.0,
+                        },
                         Coord { x, y: y + 100.0 },
                         Coord { x, y },
                     ]),
                     vec![
                         LineString::new(vec![
-                            Coord { x: x + 10.0, y: y + 10.0 },
-                            Coord { x: x + 60.0, y: y + 10.0 },
-                            Coord { x: x + 60.0, y: y + 60.0 },
-                            Coord { x: x + 10.0, y: y + 60.0 },
-                            Coord { x: x + 10.0, y: y + 10.0 },
+                            Coord {
+                                x: x + 10.0,
+                                y: y + 10.0,
+                            },
+                            Coord {
+                                x: x + 60.0,
+                                y: y + 10.0,
+                            },
+                            Coord {
+                                x: x + 60.0,
+                                y: y + 60.0,
+                            },
+                            Coord {
+                                x: x + 10.0,
+                                y: y + 60.0,
+                            },
+                            Coord {
+                                x: x + 10.0,
+                                y: y + 10.0,
+                            },
                         ]),
                         LineString::new(vec![
-                            Coord { x: x + 30.0, y: y + 30.0 },
-                            Coord { x: x + 80.0, y: y + 30.0 },
-                            Coord { x: x + 80.0, y: y + 80.0 },
-                            Coord { x: x + 30.0, y: y + 80.0 },
-                            Coord { x: x + 30.0, y: y + 30.0 },
+                            Coord {
+                                x: x + 30.0,
+                                y: y + 30.0,
+                            },
+                            Coord {
+                                x: x + 80.0,
+                                y: y + 30.0,
+                            },
+                            Coord {
+                                x: x + 80.0,
+                                y: y + 80.0,
+                            },
+                            Coord {
+                                x: x + 30.0,
+                                y: y + 80.0,
+                            },
+                            Coord {
+                                x: x + 30.0,
+                                y: y + 30.0,
+                            },
                         ]),
                     ],
                 );
@@ -163,7 +226,10 @@ fn stress_orient2d_at_extreme_ratio() {
                 let poly = Polygon::new(
                     LineString::new(vec![
                         Coord { x, y },
-                        Coord { x: x + 10.0, y: y + 10.0 },
+                        Coord {
+                            x: x + 10.0,
+                            y: y + 10.0,
+                        },
                         Coord { x: x + 10.0, y },
                         Coord { x, y: y + 10.0 },
                         Coord { x, y },
@@ -188,21 +254,51 @@ fn stress_bbox_vertex_at_extreme_ratio() {
         assert_no_panic(move || {
             let p1 = Polygon::new(
                 LineString::new(vec![
-                    Coord { x: f64::MAX, y: f64::MAX },
-                    Coord { x: f64::MAX, y: f64::MAX - 100.0 },
-                    Coord { x: f64::MAX - 100.0, y: f64::MAX - 100.0 },
-                    Coord { x: f64::MAX - 100.0, y: f64::MAX },
-                    Coord { x: f64::MAX, y: f64::MAX },
+                    Coord {
+                        x: f64::MAX,
+                        y: f64::MAX,
+                    },
+                    Coord {
+                        x: f64::MAX,
+                        y: f64::MAX - 100.0,
+                    },
+                    Coord {
+                        x: f64::MAX - 100.0,
+                        y: f64::MAX - 100.0,
+                    },
+                    Coord {
+                        x: f64::MAX - 100.0,
+                        y: f64::MAX,
+                    },
+                    Coord {
+                        x: f64::MAX,
+                        y: f64::MAX,
+                    },
                 ]),
                 Vec::new(),
             );
             let p2 = Polygon::new(
                 LineString::new(vec![
-                    Coord { x: f64::MIN, y: f64::MIN },
-                    Coord { x: f64::MIN, y: f64::MIN + 0.001 },
-                    Coord { x: f64::MIN + 0.001, y: f64::MIN + 0.001 },
-                    Coord { x: f64::MIN + 0.001, y: f64::MIN },
-                    Coord { x: f64::MIN, y: f64::MIN },
+                    Coord {
+                        x: f64::MIN,
+                        y: f64::MIN,
+                    },
+                    Coord {
+                        x: f64::MIN,
+                        y: f64::MIN + 0.001,
+                    },
+                    Coord {
+                        x: f64::MIN + 0.001,
+                        y: f64::MIN + 0.001,
+                    },
+                    Coord {
+                        x: f64::MIN + 0.001,
+                        y: f64::MIN,
+                    },
+                    Coord {
+                        x: f64::MIN,
+                        y: f64::MIN,
+                    },
                 ]),
                 Vec::new(),
             );
@@ -223,7 +319,10 @@ fn stress_alternating_extreme_vertices() {
     let mut coords = Vec::new();
     for i in 0..50 {
         if i % 2 == 0 {
-            coords.push(Coord { x: f64::MAX - i as f64, y: f64::MAX - i as f64 });
+            coords.push(Coord {
+                x: f64::MAX - i as f64,
+                y: f64::MAX - i as f64,
+            });
         } else {
             coords.push(Coord { x: 0.0, y: 0.0 });
         }
@@ -252,9 +351,18 @@ fn stress_nan_filter_leaves_two_coords() {
             let poly = Polygon::new(
                 LineString::new(vec![
                     Coord { x: 0.0, y: 0.0 },
-                    Coord { x: f64::NAN, y: f64::NAN },
-                    Coord { x: f64::NAN, y: f64::NAN },
-                    Coord { x: f64::NAN, y: f64::NAN },
+                    Coord {
+                        x: f64::NAN,
+                        y: f64::NAN,
+                    },
+                    Coord {
+                        x: f64::NAN,
+                        y: f64::NAN,
+                    },
+                    Coord {
+                        x: f64::NAN,
+                        y: f64::NAN,
+                    },
                     Coord { x: 10.0, y: 10.0 },
                 ]),
                 Vec::new(),
@@ -277,20 +385,44 @@ fn stress_unary_union_at_extreme() {
             let p1 = Polygon::new(
                 LineString::new(vec![
                     Coord { x: 1e200, y: 1e200 },
-                    Coord { x: 1e200 + 100.0, y: 1e200 },
-                    Coord { x: 1e200 + 100.0, y: 1e200 + 100.0 },
-                    Coord { x: 1e200, y: 1e200 + 100.0 },
+                    Coord {
+                        x: 1e200 + 100.0,
+                        y: 1e200,
+                    },
+                    Coord {
+                        x: 1e200 + 100.0,
+                        y: 1e200 + 100.0,
+                    },
+                    Coord {
+                        x: 1e200,
+                        y: 1e200 + 100.0,
+                    },
                     Coord { x: 1e200, y: 1e200 },
                 ]),
                 Vec::new(),
             );
             let p2 = Polygon::new(
                 LineString::new(vec![
-                    Coord { x: 1e200 + 50.0, y: 1e200 + 50.0 },
-                    Coord { x: 1e200 + 150.0, y: 1e200 + 50.0 },
-                    Coord { x: 1e200 + 150.0, y: 1e200 + 150.0 },
-                    Coord { x: 1e200 + 50.0, y: 1e200 + 150.0 },
-                    Coord { x: 1e200 + 50.0, y: 1e200 + 50.0 },
+                    Coord {
+                        x: 1e200 + 50.0,
+                        y: 1e200 + 50.0,
+                    },
+                    Coord {
+                        x: 1e200 + 150.0,
+                        y: 1e200 + 50.0,
+                    },
+                    Coord {
+                        x: 1e200 + 150.0,
+                        y: 1e200 + 150.0,
+                    },
+                    Coord {
+                        x: 1e200 + 50.0,
+                        y: 1e200 + 150.0,
+                    },
+                    Coord {
+                        x: 1e200 + 50.0,
+                        y: 1e200 + 50.0,
+                    },
                 ]),
                 Vec::new(),
             );

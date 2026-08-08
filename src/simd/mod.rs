@@ -21,10 +21,10 @@
 //! required" bug — call sites throughout the crate use `crate::simd::*`
 //! without `#[cfg(feature = "simd")]` guards.
 
-#[cfg(not(feature = "simd-portable"))]
-use geo::{Coord, GeoFloat};
 #[cfg(feature = "simd-portable")]
 use geo::Coord;
+#[cfg(not(feature = "simd-portable"))]
+use geo::{Coord, GeoFloat};
 
 use crate::orient::orient2d as orient2d_robust;
 
@@ -90,8 +90,7 @@ fn point_in_ring_scalar_loop(
 /// Used by the large-valid fast-path gate: GEOS IsValidOp allows a hole to
 /// touch the shell at a point (OGC polygon validity), so a hole whose probe
 /// vertex lies exactly ON the shell must not disqualify the polygon.
-pub fn point_in_ring_inclusive_test
-    (pt: Coord<f64>, coords: &[Coord<f64>]) -> bool {
+pub fn point_in_ring_inclusive_test(pt: Coord<f64>, coords: &[Coord<f64>]) -> bool {
     point_in_ring_inclusive(pt, coords)
 }
 
@@ -151,23 +150,21 @@ pub(crate) fn orient2d_batch_4_robust(
     out
 }
 
-#[cfg(feature = "simd-portable")]
-mod portable;
 #[cfg(not(feature = "simd-portable"))]
 mod fallback;
+#[cfg(feature = "simd-portable")]
+mod portable;
 #[cfg(test)]
 mod tests;
 
-#[cfg(feature = "simd-portable")]
-pub(crate) use portable::{
-    aabb_minmax_simd, is_ring_ccw_simd, orient2d_batch_4, point_in_ring_exclusive,
-    snap_coords_simd,
-};
-#[cfg(not(feature = "simd-portable"))]
-pub(crate) use fallback::{
-    aabb_minmax_simd, is_ring_ccw_simd, orient2d_batch_4, point_in_ring_exclusive,
-    snap_coords_simd,
-};
 /// Public aabb for external diagnostics (examples).
 #[cfg(not(feature = "simd-portable"))]
 pub use fallback::aabb_minmax_simd as aabb_minmax_public;
+#[cfg(not(feature = "simd-portable"))]
+pub(crate) use fallback::{
+    aabb_minmax_simd, is_ring_ccw_simd, orient2d_batch_4, point_in_ring_exclusive, snap_coords_simd,
+};
+#[cfg(feature = "simd-portable")]
+pub(crate) use portable::{
+    aabb_minmax_simd, is_ring_ccw_simd, orient2d_batch_4, point_in_ring_exclusive, snap_coords_simd,
+};

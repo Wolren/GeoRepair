@@ -101,12 +101,7 @@ pub(super) fn classify(
 }
 
 #[inline]
-fn cross_point(
-    a1: Coord<f64>,
-    a2: Coord<f64>,
-    b1: Coord<f64>,
-    b2: Coord<f64>,
-) -> Hit {
+fn cross_point(a1: Coord<f64>, a2: Coord<f64>, b1: Coord<f64>, b2: Coord<f64>) -> Hit {
     match crate::dd::segment_intersection_dd(a1, a2, b1, b2) {
         Some((pt, _, _)) if !pt.x.is_nan() && !pt.y.is_nan() => Hit::Cross(pt),
         // DD failure on a near-parallel exact crossing: fall back to the

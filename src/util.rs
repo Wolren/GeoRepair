@@ -1,6 +1,5 @@
 //! Shared utility functions used across the crate.
 
-
 use alloc::vec::Vec;
 use geo::Coord;
 
@@ -67,9 +66,18 @@ pub(crate) fn robust_is_ccw_at(ring: &[Coord<f64>], min_idx: usize) -> bool {
     let curr = &ring[min_idx];
     let next = &ring[(min_idx + 1) % interior_n];
     let orient = robust::orient2d(
-        robust::Coord { x: prev.x, y: prev.y },
-        robust::Coord { x: curr.x, y: curr.y },
-        robust::Coord { x: next.x, y: next.y },
+        robust::Coord {
+            x: prev.x,
+            y: prev.y,
+        },
+        robust::Coord {
+            x: curr.x,
+            y: curr.y,
+        },
+        robust::Coord {
+            x: next.x,
+            y: next.y,
+        },
     );
     if orient.abs() <= 1e-15 {
         shoelace_sum(ring) > 0.0
@@ -204,7 +212,11 @@ pub(crate) fn shoelace_abs_sum(coords: &[Coord<f64>]) -> f64 {
     if n < 3 {
         return 0.0;
     }
-    let end = if coords.first() == coords.last() { n - 1 } else { n };
+    let end = if coords.first() == coords.last() {
+        n - 1
+    } else {
+        n
+    };
     let mut sum = 0.0_f64;
     for i in 0..end - 1 {
         sum += coords[i].x * coords[i + 1].y - coords[i + 1].x * coords[i].y;
@@ -258,24 +270,48 @@ pub(crate) fn interval_overlap(a0: f64, a1: f64, b0: f64, b1: f64) -> f64 {
 ///   1.6e-7 edges with cross 2.8e-14 < 1e-12 → false DIR).
 pub(crate) fn rings_share_collinear_edge_quantized(a: &[Coord<f64>], b: &[Coord<f64>]) -> bool {
     rings_bbox_overlap_prefilter(a, b)
-        && rings_scan(a, b, |ax1, ay1, _ax2, _ay2, dax, day, dbx, dby, aminx, amaxx, aminy, amaxy, bx1, bx2, by1, by2| {
-            let scale = dax.abs().max(day.abs()).max(dbx.abs()).max(dby.abs()).max(1.0);
-            let rel = 1e-12 * scale * scale;
-            let cross = dax * dby - day * dbx;
-            if cross.abs() > rel {
-                return None;
-            }
-            let cross2 = (bx2 - bx1) * (ay1 - by1) - (by2 - by1) * (ax1 - bx1);
-            if cross2.abs() > rel {
-                return None;
-            }
-            let overlap = if dax.abs() >= day.abs() {
-                interval_overlap(aminx, amaxx, bx1.min(bx2), bx1.max(bx2))
-            } else {
-                interval_overlap(aminy, amaxy, by1.min(by2), by1.max(by2))
-            };
-            (overlap > 1e-12 * scale).then_some(())
-        })
+        && rings_scan(
+            a,
+            b,
+            |ax1,
+             ay1,
+             _ax2,
+             _ay2,
+             dax,
+             day,
+             dbx,
+             dby,
+             aminx,
+             amaxx,
+             aminy,
+             amaxy,
+             bx1,
+             bx2,
+             by1,
+             by2| {
+                let scale = dax
+                    .abs()
+                    .max(day.abs())
+                    .max(dbx.abs())
+                    .max(dby.abs())
+                    .max(1.0);
+                let rel = 1e-12 * scale * scale;
+                let cross = dax * dby - day * dbx;
+                if cross.abs() > rel {
+                    return None;
+                }
+                let cross2 = (bx2 - bx1) * (ay1 - by1) - (by2 - by1) * (ax1 - bx1);
+                if cross2.abs() > rel {
+                    return None;
+                }
+                let overlap = if dax.abs() >= day.abs() {
+                    interval_overlap(aminx, amaxx, bx1.min(bx2), bx1.max(bx2))
+                } else {
+                    interval_overlap(aminy, amaxy, by1.min(by2), by1.max(by2))
+                };
+                (overlap > 1e-12 * scale).then_some(())
+            },
+        )
 }
 
 pub(crate) fn rings_share_collinear_edge_precise(a: &[Coord<f64>], b: &[Coord<f64>]) -> bool {
@@ -285,7 +321,25 @@ pub(crate) fn rings_share_collinear_edge_precise(a: &[Coord<f64>], b: &[Coord<f6
     // EXACT bbox test rejects such pairs outright (the shared edge would
     // never be scanned → DisconnectedInteriorRing). The quantized variant
     // keeps its prefilter because post-noding coordinates are exact.
-    rings_scan(a, b, |ax1, ay1, _ax2, _ay2, dax, day, dbx, dby, aminx, amaxx, aminy, amaxy, bx1, bx2, by1, by2| {
+    rings_scan(
+        a,
+        b,
+        |ax1,
+         ay1,
+         _ax2,
+         _ay2,
+         dax,
+         day,
+         dbx,
+         dby,
+         aminx,
+         amaxx,
+         aminy,
+         amaxy,
+         bx1,
+         bx2,
+         by1,
+         by2| {
             // Relative collinearity: |cross| / (|da| * |db|) = sin(angle).
             let da_len = (dax * dax + day * day).sqrt().max(1e-300);
             let db_len = (dbx * dbx + dby * dby).sqrt().max(1e-300);
@@ -305,7 +359,8 @@ pub(crate) fn rings_share_collinear_edge_precise(a: &[Coord<f64>], b: &[Coord<f6
                 interval_overlap(aminy, amaxy, by1.min(by2), by1.max(by2))
             };
             (overlap > 1e-12 * da_len.max(db_len)).then_some(())
-        })
+        },
+    )
 }
 
 fn rings_bbox_overlap_prefilter(a: &[Coord<f64>], b: &[Coord<f64>]) -> bool {
@@ -327,14 +382,34 @@ fn rings_scan(
     a: &[Coord<f64>],
     b: &[Coord<f64>],
     mut pair: impl FnMut(
-        f64, f64, f64, f64, // ax1, ay1, ax2, ay2
-        f64, f64, f64, f64, // dax, day, dbx, dby
-        f64, f64, f64, f64, // aminx, amaxx, aminy, amaxy
-        f64, f64, f64, f64, // bx1, bx2, by1, by2
+        f64,
+        f64,
+        f64,
+        f64, // ax1, ay1, ax2, ay2
+        f64,
+        f64,
+        f64,
+        f64, // dax, day, dbx, dby
+        f64,
+        f64,
+        f64,
+        f64, // aminx, amaxx, aminy, amaxy
+        f64,
+        f64,
+        f64,
+        f64, // bx1, bx2, by1, by2
     ) -> Option<()>,
 ) -> bool {
-    let na = if a.first() == a.last() { a.len() - 1 } else { a.len() };
-    let nb = if b.first() == b.last() { b.len() - 1 } else { b.len() };
+    let na = if a.first() == a.last() {
+        a.len() - 1
+    } else {
+        a.len()
+    };
+    let nb = if b.first() == b.last() {
+        b.len() - 1
+    } else {
+        b.len()
+    };
     if na < 2 || nb < 2 {
         return false;
     }
@@ -356,8 +431,11 @@ fn rings_scan(
             let amaxx = ax1.max(ax2);
             let aminy = ay1.min(ay2);
             let amaxy = ay1.max(ay2);
-            if pair(ax1, ay1, ax2, ay2, dax, day, dbx, dby, aminx, amaxx, aminy, amaxy, bx1, bx2, by1, by2)
-                .is_some()
+            if pair(
+                ax1, ay1, ax2, ay2, dax, day, dbx, dby, aminx, amaxx, aminy, amaxy, bx1, bx2, by1,
+                by2,
+            )
+            .is_some()
             {
                 return true;
             }

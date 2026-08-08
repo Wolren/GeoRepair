@@ -1,9 +1,7 @@
 //! ABI types: error codes, result structs, buffer wrappers (extracted from bindings/ffi.rs 2026-08-07; verbatim).
 
-
-
-use alloc::vec::Vec;
 use alloc::string::String;
+use alloc::vec::Vec;
 use std::ffi::{CString, c_char};
 use std::ptr;
 

@@ -1,4 +1,3 @@
-
 use alloc::vec::Vec;
 #[cfg_attr(not(test), allow(unused_imports))]
 use geo::{
@@ -76,16 +75,10 @@ impl GeoValidation for Polygon<f64> {
 /// scan. Shared by the validator and the fast-path gate (the gate must
 /// certify exactly what the validator accepts before it may skip the exit
 /// validator - 2026-08-07).
-pub(crate) fn has_duplicate_rings(
-    interiors: &[&[Coord<f64>]],
-    shell: &[Coord<f64>],
-) -> bool {
+pub(crate) fn has_duplicate_rings(interiors: &[&[Coord<f64>]], shell: &[Coord<f64>]) -> bool {
     if interiors.len() > 1 {
         let mut groups: rustc_hash::FxHashMap<(usize, u64), Vec<usize>> =
-            rustc_hash::FxHashMap::with_capacity_and_hasher(
-                interiors.len(),
-                Default::default(),
-            );
+            rustc_hash::FxHashMap::with_capacity_and_hasher(interiors.len(), Default::default());
         for (i, h) in interiors.iter().enumerate() {
             groups.entry(ring_dup_fingerprint(h)).or_default().push(i);
         }
@@ -101,8 +94,7 @@ pub(crate) fn has_duplicate_rings(
     }
     // Also check each hole against the shell
     for h in interiors {
-        if ring_dup_fingerprint(h) == ring_dup_fingerprint(shell)
-            && is_rotated_duplicate(h, shell)
+        if ring_dup_fingerprint(h) == ring_dup_fingerprint(shell) && is_rotated_duplicate(h, shell)
         {
             return true;
         }
@@ -205,11 +197,15 @@ impl GeoValidation for MultiPolygon<f64> {
                 // already caught above; nested shells are the nesting
                 // check's job.
                 if all_rings[a].1 != all_rings[b].1 {
-                    if all_rings[a].1 && ring_has_vertex_inside(ra, rb2, rb[b], &comp_holes[all_rings[b].0]) {
+                    if all_rings[a].1
+                        && ring_has_vertex_inside(ra, rb2, rb[b], &comp_holes[all_rings[b].0])
+                    {
                         errors.push(GeometryValidationError::SelfIntersection);
                         return ValidationResult::invalid(errors);
                     }
-                    if all_rings[b].1 && ring_has_vertex_inside(rb2, ra, rb[a], &comp_holes[all_rings[a].0]) {
+                    if all_rings[b].1
+                        && ring_has_vertex_inside(rb2, ra, rb[a], &comp_holes[all_rings[a].0])
+                    {
                         errors.push(GeometryValidationError::SelfIntersection);
                         return ValidationResult::invalid(errors);
                     }
@@ -430,4 +426,3 @@ impl GeoValidation for GeometryCollection<f64> {
 #[cfg(test)]
 #[path = "complex_tests.rs"]
 mod tests;
-

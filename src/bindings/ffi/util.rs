@@ -1,20 +1,20 @@
 //! conversion helpers: WKB/WKT to Geometry, config, error strings (extracted from bindings/ffi.rs 2026-08-07; verbatim).
 
-
-
-use alloc::vec::Vec;
-use alloc::string::String;
-use alloc::string::ToString;
 use super::types::*;
-use std::ffi::c_char;
-use std::ffi::CStr;
-use geo::Geometry;
 use crate::core::MakeValidConfig;
 use crate::io::wkt::read_wkt;
 use crate::validation::GeoValidation;
+use alloc::string::String;
+use alloc::string::ToString;
+use alloc::vec::Vec;
+use geo::Geometry;
+use std::ffi::CStr;
+use std::ffi::c_char;
 
-
-pub(crate) fn geometry_from_wkb(data: *const u8, len: usize) -> Result<Geometry<f64>, GeoRepairErrorCode> {
+pub(crate) fn geometry_from_wkb(
+    data: *const u8,
+    len: usize,
+) -> Result<Geometry<f64>, GeoRepairErrorCode> {
     if data.is_null() {
         return Err(GeoRepairErrorCode::InvalidInput);
     }

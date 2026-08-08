@@ -7,13 +7,11 @@
 //!
 //! See validation/mod.rs for the module map.
 
-
-
-use alloc::vec::Vec;
 use crate::validation::core::*;
-use geo::{Coord, LineString};
 #[cfg(feature = "rstar")]
 use alloc::sync::Arc;
+use alloc::vec::Vec;
+use geo::{Coord, LineString};
 
 /// Per-hole boundary check (crossing / exact touches / any-inside), shared
 /// by the serial and parallel per-hole phases. Returns the FIRST error in
@@ -149,8 +147,8 @@ pub(crate) fn check_holes_valid(
     // 0.8-2.3s for the cheap structural gate the README's validation row
     // documented. Tree queries per hole are O(|hole| log|shell|).
     #[cfg(feature = "rstar")]
-    let shell_tree: Option<Arc<rstar::RTree<EdgeIdx>>> = (shell.len() - 1 > 64)
-        .then(|| Arc::new(build_ring_edge_tree(shell)));
+    let shell_tree: Option<Arc<rstar::RTree<EdgeIdx>>> =
+        (shell.len() - 1 > 64).then(|| Arc::new(build_ring_edge_tree(shell)));
 
     // Giant shells: the per-hole checks are independent, but nested
     // parallelism (rayon::join + per-hole par_iter inside the batch) was
@@ -339,11 +337,7 @@ fn point_in_ring_exclusive_tree(
             wn -= 1;
         }
     }
-    if boundary_hit {
-        false
-    } else {
-        wn != 0
-    }
+    if boundary_hit { false } else { wn != 0 }
 }
 
 /// Tree-accelerated hole-vs-shell crossing test: query the prebuilt shell
@@ -365,8 +359,16 @@ fn ring_edges_intersect_tree(
     for i in 0..n_hole {
         let a1 = hole[i];
         let a2 = hole[(i + 1) % n_hole];
-        let (lo_x, hi_x) = if a1.x < a2.x { (a1.x, a2.x) } else { (a2.x, a1.x) };
-        let (lo_y, hi_y) = if a1.y < a2.y { (a1.y, a2.y) } else { (a2.y, a1.y) };
+        let (lo_x, hi_x) = if a1.x < a2.x {
+            (a1.x, a2.x)
+        } else {
+            (a2.x, a1.x)
+        };
+        let (lo_y, hi_y) = if a1.y < a2.y {
+            (a1.y, a2.y)
+        } else {
+            (a2.y, a1.y)
+        };
         let q = rstar::AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]);
         let found = tree.locate_in_envelope_intersecting_int(q, |c| {
             let b1 = shell[c.idx];
@@ -416,7 +418,6 @@ fn ring_touch_points(
     }
     out
 }
-
 
 /// Ring-touch cycle detection (extracted 2026-08-07; content verbatim).
 mod cycle;

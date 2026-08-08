@@ -1,8 +1,8 @@
 #![allow(dead_code)]
-use alloc::vec::Vec;
 use crate::orient::orient2d_fast;
-use geo::{Coord, GeoFloat, Line};
+use alloc::vec::Vec;
 use core::mem;
+use geo::{Coord, GeoFloat, Line};
 
 // ── Sealed trait: safe f64 downcast ────────────────────────────────────
 //

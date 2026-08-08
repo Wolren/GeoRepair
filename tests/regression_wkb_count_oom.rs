@@ -8,7 +8,7 @@
 //! These documents are 9-13 bytes: header + one huge u32 count, nothing
 //! else. Before the guard, `n` flowed straight into with_capacity(n).
 
-use geo_repair::io::wkb::{read_wkb, WkbError};
+use geo_repair::io::wkb::{WkbError, read_wkb};
 
 fn expect_eof(buf: &[u8], what: &str) {
     match read_wkb(buf) {

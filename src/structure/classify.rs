@@ -1,4 +1,3 @@
-
 use alloc::vec::Vec;
 use geo::{Coord, LineString};
 
@@ -73,16 +72,8 @@ fn ring_set_equal(a: &LineString<f64>, b: &LineString<f64>) -> bool {
     if a.0.len() != b.0.len() {
         return false;
     }
-    let mut aset: Vec<(u64, u64)> = a
-        .0
-        .iter()
-        .map(|c| (c.x.to_bits(), c.y.to_bits()))
-        .collect();
-    let mut bset: Vec<(u64, u64)> = b
-        .0
-        .iter()
-        .map(|c| (c.x.to_bits(), c.y.to_bits()))
-        .collect();
+    let mut aset: Vec<(u64, u64)> = a.0.iter().map(|c| (c.x.to_bits(), c.y.to_bits())).collect();
+    let mut bset: Vec<(u64, u64)> = b.0.iter().map(|c| (c.x.to_bits(), c.y.to_bits())).collect();
     // Closure duplicates: last == first appears in both.
     if aset.first() == aset.last() {
         aset.pop();

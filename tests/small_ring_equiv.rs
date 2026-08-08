@@ -13,13 +13,25 @@ fn lines_of(coords: &[(f64, f64)]) -> Vec<Line<f64>> {
     let mut v: Vec<Line<f64>> = Vec::new();
     for w in coords.windows(2) {
         v.push(Line::new(
-            Coord { x: w[0].0, y: w[0].1 },
-            Coord { x: w[1].0, y: w[1].1 },
+            Coord {
+                x: w[0].0,
+                y: w[0].1,
+            },
+            Coord {
+                x: w[1].0,
+                y: w[1].1,
+            },
         ));
     }
     v.push(Line::new(
-        Coord { x: coords[coords.len() - 1].0, y: coords[coords.len() - 1].1 },
-        Coord { x: coords[0].0, y: coords[0].1 },
+        Coord {
+            x: coords[coords.len() - 1].0,
+            y: coords[coords.len() - 1].1,
+        },
+        Coord {
+            x: coords[0].0,
+            y: coords[0].1,
+        },
     ));
     v
 }
@@ -39,7 +51,12 @@ fn chain_path(lines: &[Line<f64>]) -> bool {
     // with them. So: pad -> public function -> same verdict.
     let mut padded = lines.to_vec();
     let base = 1e9;
-    let pad = [(base, base), (base + 1.0, base), (base + 1.0, base + 1.0), (base, base + 1.0)];
+    let pad = [
+        (base, base),
+        (base + 1.0, base),
+        (base + 1.0, base + 1.0),
+        (base, base + 1.0),
+    ];
     padded.extend(lines_of(&pad));
     has_no_intersections(&padded)
 }
@@ -163,6 +180,9 @@ fn degenerate_inputs_match() {
     ]);
     assert_eq!(has_no_intersections_small(&off), chain_path(&off));
 
-    assert!(has_no_intersections_small(&lines_of(&[(0.0, 0.0), (1.0, 0.0)])));
+    assert!(has_no_intersections_small(&lines_of(&[
+        (0.0, 0.0),
+        (1.0, 0.0)
+    ])));
     assert!(has_no_intersections_small(&[]));
 }

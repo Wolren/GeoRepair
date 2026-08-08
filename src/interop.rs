@@ -26,7 +26,6 @@
 //! }
 //! ```
 
-
 use alloc::vec::Vec;
 use geo::{Geometry, GeometryCollection};
 use geo_traits::to_geo::ToGeoGeometry;
@@ -121,7 +120,13 @@ mod tests {
     #[test]
     fn valid_geometry_passes_through() {
         let poly = Polygon::new(
-            LineString::from(vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0), (0.0, 0.0)]),
+            LineString::from(vec![
+                (0.0, 0.0),
+                (10.0, 0.0),
+                (10.0, 10.0),
+                (0.0, 10.0),
+                (0.0, 0.0),
+            ]),
             vec![],
         );
         let geom = Geometry::Polygon(poly);
@@ -147,7 +152,13 @@ mod tests {
     #[test]
     fn batch_repair_collection() {
         let valid = Geometry::Polygon(Polygon::new(
-            LineString::from(vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0), (0.0, 0.0)]),
+            LineString::from(vec![
+                (0.0, 0.0),
+                (10.0, 0.0),
+                (10.0, 10.0),
+                (0.0, 10.0),
+                (0.0, 0.0),
+            ]),
             vec![],
         ));
         let invalid = Geometry::Polygon(bowtie());

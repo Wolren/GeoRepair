@@ -1,13 +1,14 @@
 //! MultiPolygon/Geometry repair: union + even-parent filtering, nested
 //! component dropping, and precision-reduction fallbacks.
 
-
-use alloc::vec::Vec;
-use super::*;
-use super::polygon::{apply_target_crs, enforce_ogc_winding, is_valid_with_geo, shells_have_overlapping_bboxes, shells_have_vertex_inside};
 use super::polygon::has_nan_or_infinite;
+use super::polygon::{
+    apply_target_crs, enforce_ogc_winding, is_valid_with_geo, shells_have_overlapping_bboxes,
+    shells_have_vertex_inside,
+};
 use super::strip::strip_degenerate;
-
+use super::*;
+use alloc::vec::Vec;
 
 #[cfg(any(feature = "arrange", feature = "structure"))]
 impl MakeValid for MultiPolygon<f64> {
@@ -38,7 +39,8 @@ impl MakeValid for MultiPolygon<f64> {
             return Geometry::MultiPolygon(MultiPolygon::new(Vec::new()));
         }
         if shells.len() == 1 {
-            return enforce_ogc_winding(Geometry::Polygon(shells.pop().expect("len==1 verified"))).0;
+            return enforce_ogc_winding(Geometry::Polygon(shells.pop().expect("len==1 verified")))
+                .0;
         }
         let mp = MultiPolygon::new(shells);
         // Fast-path: already valid, return unchanged (idempotency)
@@ -49,59 +51,61 @@ impl MakeValid for MultiPolygon<f64> {
         // shells that are fully contained inside larger shells.
         let filtered = crate::structure::merge::merge_shells(mp.0);
         if filtered.0.len() <= 1 {
-                    return if filtered.0.is_empty() {
-                        empty_geom::<f64>()
-                    } else {
-                        // Keep MultiPolygon type for multi input
-                        enforce_ogc_winding(Geometry::MultiPolygon(filtered)).0
-                    };
-                }
+            return if filtered.0.is_empty() {
+                empty_geom::<f64>()
+            } else {
+                // Keep MultiPolygon type for multi input
+                enforce_ogc_winding(Geometry::MultiPolygon(filtered)).0
+            };
+        }
         let mp = filtered;
-                // Check if shells have overlapping bboxes - if not, unary_union is overkill
-                let shells_overlap = shells_have_overlapping_bboxes(&mp);
-                let result = if !shells_overlap {
-                    enforce_ogc_winding(Geometry::MultiPolygon(mp)).0
-                } else {
-                    let unioned = geo::algorithm::bool_ops::unary_union(&mp);
-                    // Accept if valid AND no vertex containment (partial overlap w/o edge crossing)
-                    if is_valid_with_geo(&Geometry::MultiPolygon(unioned.clone()))
-                        && !shells_have_vertex_inside(&unioned)
-                    {
-                        enforce_ogc_winding(Geometry::MultiPolygon(unioned)).0
-                    } else {
-                        warn!("MultiPolygon: unary_union invalid, retrying with precision reduction");
-                        let scales = [1e-8, 1e-6, 1e-4, 1e-2];
-                        let mut best = None;
-                        for &scale in &scales {
-                            let snapped = reduce_mp_at_scale(&mp, config, scale);
-                            let re_union = geo::algorithm::bool_ops::unary_union(&snapped);
-                            let re_valid = is_valid_with_geo(&Geometry::MultiPolygon(re_union.clone()))
-                                && !shells_have_vertex_inside(&re_union);
-                            if re_valid {
-                                best = Some(enforce_ogc_winding(Geometry::MultiPolygon(re_union)).0);
-                                break;
-                            }
-                            if best.is_none() {
-                                best = Some(enforce_ogc_winding(Geometry::MultiPolygon(re_union)).0);
-                            }
-                        }
-                        // If all retries failed, clean union output with drop_nested_components
-                        // Use the best (last) retry result to avoid another union call.
-                        let unioned = best.take()
-                            .map(|g| match g { Geometry::MultiPolygon(mp) => mp, _ => MultiPolygon::new(Vec::new()) })
-                            .unwrap_or_else(|| geo::algorithm::bool_ops::unary_union(&mp));
-                        drop_nested_components(unioned)
+        // Check if shells have overlapping bboxes - if not, unary_union is overkill
+        let shells_overlap = shells_have_overlapping_bboxes(&mp);
+        let result = if !shells_overlap {
+            enforce_ogc_winding(Geometry::MultiPolygon(mp)).0
+        } else {
+            let unioned = geo::algorithm::bool_ops::unary_union(&mp);
+            // Accept if valid AND no vertex containment (partial overlap w/o edge crossing)
+            if is_valid_with_geo(&Geometry::MultiPolygon(unioned.clone()))
+                && !shells_have_vertex_inside(&unioned)
+            {
+                enforce_ogc_winding(Geometry::MultiPolygon(unioned)).0
+            } else {
+                warn!("MultiPolygon: unary_union invalid, retrying with precision reduction");
+                let scales = [1e-8, 1e-6, 1e-4, 1e-2];
+                let mut best = None;
+                for &scale in &scales {
+                    let snapped = reduce_mp_at_scale(&mp, config, scale);
+                    let re_union = geo::algorithm::bool_ops::unary_union(&snapped);
+                    let re_valid = is_valid_with_geo(&Geometry::MultiPolygon(re_union.clone()))
+                        && !shells_have_vertex_inside(&re_union);
+                    if re_valid {
+                        best = Some(enforce_ogc_winding(Geometry::MultiPolygon(re_union)).0);
+                        break;
                     }
-                };
-                // MultiPolygon input → prefer MultiPolygon output type (GEOS/JTS convention
-                // for multi-component repair, even when union collapses to one shell).
-                match result {
-                    Geometry::Polygon(p) => {
-                        Geometry::MultiPolygon(MultiPolygon::new(vec![p]))
+                    if best.is_none() {
+                        best = Some(enforce_ogc_winding(Geometry::MultiPolygon(re_union)).0);
                     }
-                    other => other,
                 }
+                // If all retries failed, clean union output with drop_nested_components
+                // Use the best (last) retry result to avoid another union call.
+                let unioned = best
+                    .take()
+                    .map(|g| match g {
+                        Geometry::MultiPolygon(mp) => mp,
+                        _ => MultiPolygon::new(Vec::new()),
+                    })
+                    .unwrap_or_else(|| geo::algorithm::bool_ops::unary_union(&mp));
+                drop_nested_components(unioned)
             }
+        };
+        // MultiPolygon input → prefer MultiPolygon output type (GEOS/JTS convention
+        // for multi-component repair, even when union collapses to one shell).
+        match result {
+            Geometry::Polygon(p) => Geometry::MultiPolygon(MultiPolygon::new(vec![p])),
+            other => other,
+        }
+    }
 
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     fn par_make_valid_with_config(&self, config: &MakeValidConfig) -> Geometry<f64> {
@@ -156,18 +160,28 @@ impl MakeValid for Geometry<f64> {
 /// Post-repair: transform to target CRS if configured.
 pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
     if mp.0.len() <= 1 {
-        return if mp.0.is_empty() { empty_geom::<f64>() }
-               else { enforce_ogc_winding(Geometry::Polygon(mp.0.into_iter().next().unwrap())).0 };
+        return if mp.0.is_empty() {
+            empty_geom::<f64>()
+        } else {
+            enforce_ogc_winding(Geometry::Polygon(mp.0.into_iter().next().unwrap())).0
+        };
     }
-    let mut with_area: Vec<(Polygon<f64>, f64)> = mp.0.into_iter()
-        .map(|p| { let a = shoelace_abs_sum(&p.exterior().0); (p, a) })
-        .collect();
+    let mut with_area: Vec<(Polygon<f64>, f64)> =
+        mp.0.into_iter()
+            .map(|p| {
+                let a = shoelace_abs_sum(&p.exterior().0);
+                (p, a)
+            })
+            .collect();
     with_area.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(core::cmp::Ordering::Equal));
     let n = with_area.len();
     let mut keep: Vec<bool> = vec![true; n];
     for i in 0..n {
         let ext_i = &with_area[i].0.exterior().0;
-        if ext_i.len() < 4 { keep[i] = false; continue; }
+        if ext_i.len() < 4 {
+            keep[i] = false;
+            continue;
+        }
         // Interior probes: first vertex, first-edge midpoint nudged toward
         // the interior, and a mid-edge probe. The vertex MEAN is NOT a safe
         // candidate for concave faces (can land outside, inside a neighbor -
@@ -196,9 +210,13 @@ pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
         };
         let pt_candidates = [ext_i[0], edge_mid, interior_probe];
         let is_nested = with_area.iter().enumerate().any(|(j, (p_j, _))| {
-            if i == j || !keep[j] { return false; }
+            if i == j || !keep[j] {
+                return false;
+            }
             let ext_j = &p_j.exterior().0;
-            if ext_j.len() < 4 { return false; }
+            if ext_j.len() < 4 {
+                return false;
+            }
             // Hole-aware nesting: a component is only nested when it lies in
             // another component's FILL (exterior minus holes). An island
             // inside another component's HOLE is positive space and must be
@@ -217,7 +235,9 @@ pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
                     .iter()
                     .any(|h| point_in_ring_exclusive_even_odd(interior_probe, &h.0))
         });
-        if is_nested { keep[i] = false; }
+        if is_nested {
+            keep[i] = false;
+        }
     }
     let kept: Vec<Polygon<f64>> = with_area
         .iter()
@@ -230,7 +250,9 @@ pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
         let t: f64 = kept.iter().map(|p| p.unsigned_area()).sum();
         eprintln!("DIAG_DN: kept={} total={t:.4}", kept.len());
     }
-    if kept.is_empty() { return empty_geom::<f64>(); }
+    if kept.is_empty() {
+        return empty_geom::<f64>();
+    }
     let kept_len = kept.len();
     if kept_len == 1 {
         return enforce_ogc_winding(Geometry::Polygon(kept.into_iter().next().unwrap())).0;
@@ -261,17 +283,32 @@ pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
     }
     // Polygonizer failed - filter out components with PinchPoint,
     // RepeatedPoint, or other remaining errors.
-    let valid: Vec<Polygon<f64>> = mp_kept.0.into_iter().filter(|p| {
-        let v = crate::validation::GeoValidation::validate(p);
-        !v.errors.iter().any(|e| matches!(e,
-            crate::validation::GeometryValidationError::PinchPoint
-            | crate::validation::GeometryValidationError::RepeatedPoint
-        )) && v.errors.iter().filter(|e| !matches!(e,
-            crate::validation::GeometryValidationError::PinchPoint
-            | crate::validation::GeometryValidationError::RepeatedPoint
-            | crate::validation::GeometryValidationError::NestedHoles
-        )).count() == 0
-    }).collect();
+    let valid: Vec<Polygon<f64>> = mp_kept
+        .0
+        .into_iter()
+        .filter(|p| {
+            let v = crate::validation::GeoValidation::validate(p);
+            !v.errors.iter().any(|e| {
+                matches!(
+                    e,
+                    crate::validation::GeometryValidationError::PinchPoint
+                        | crate::validation::GeometryValidationError::RepeatedPoint
+                )
+            }) && v
+                .errors
+                .iter()
+                .filter(|e| {
+                    !matches!(
+                        e,
+                        crate::validation::GeometryValidationError::PinchPoint
+                            | crate::validation::GeometryValidationError::RepeatedPoint
+                            | crate::validation::GeometryValidationError::NestedHoles
+                    )
+                })
+                .count()
+                == 0
+        })
+        .collect();
     if valid.is_empty() {
         return empty_geom::<f64>();
     }
@@ -285,10 +322,10 @@ pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
 /// that containment-based drop_nested_components can't handle.
 pub(super) fn polygonizer_fallback(mp: &MultiPolygon<f64>) -> Option<Geometry<f64>> {
     use geo::LinesIter;
-    let lines: Vec<geo::Line<f64>> = mp.0.iter()
-        .flat_map(|p| p.lines_iter())
-        .collect();
-    if lines.is_empty() { return None; }
+    let lines: Vec<geo::Line<f64>> = mp.0.iter().flat_map(|p| p.lines_iter()).collect();
+    if lines.is_empty() {
+        return None;
+    }
     // GEOS BuildArea: correct face extraction + shell/hole classification +
     // even-parent. (The legacy polygonizer misclassifies multi-shell inputs:
     // measured 1 poly with 6 holes instead of 5 disjoint shells.)
@@ -296,12 +333,22 @@ pub(super) fn polygonizer_fallback(mp: &MultiPolygon<f64>) -> Option<Geometry<f6
     #[cfg(all(any(test, debug_assertions), feature = "std"))]
     if std::env::var("DIAG_PF").is_ok() {
         use geo::Area;
-        eprintln!("PF: lines={} build_area -> {} polys", lines.len(), area.0.len());
+        eprintln!(
+            "PF: lines={} build_area -> {} polys",
+            lines.len(),
+            area.0.len()
+        );
         for (i, p) in area.0.iter().enumerate() {
-            eprintln!("PF:   [{i}] area={:.4} holes={}", p.unsigned_area(), p.interiors().len());
+            eprintln!(
+                "PF:   [{i}] area={:.4} holes={}",
+                p.unsigned_area(),
+                p.interiors().len()
+            );
         }
     }
-    let valid: Vec<Polygon<f64>> = area.0.into_iter()
+    let valid: Vec<Polygon<f64>> = area
+        .0
+        .into_iter()
         .filter(|p| {
             let ext = &p.exterior().0;
             ext.len() >= 4 && !ext.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
@@ -312,8 +359,12 @@ pub(super) fn polygonizer_fallback(mp: &MultiPolygon<f64>) -> Option<Geometry<f6
                 && !crate::structure::has_proper_self_crossing(p)
         })
         .collect();
-    if valid.is_empty() { return None; }
-    if valid.len() == 1 { return Some(Geometry::Polygon(valid.into_iter().next().unwrap())); }
+    if valid.is_empty() {
+        return None;
+    }
+    if valid.len() == 1 {
+        return Some(Geometry::Polygon(valid.into_iter().next().unwrap()));
+    }
     Some(Geometry::MultiPolygon(MultiPolygon::new(valid)))
 }
 
@@ -326,26 +377,29 @@ pub(super) fn reduce_mp(mp: &MultiPolygon<f64>, config: &MakeValidConfig) -> Mul
 
 /// Snap all coordinates in a MultiPolygon to a specific precision grid scale.
 #[cfg(any(feature = "arrange", feature = "structure"))]
-pub(super) fn reduce_mp_at_scale(mp: &MultiPolygon<f64>, config: &MakeValidConfig, scale: f64) -> MultiPolygon<f64> {
+pub(super) fn reduce_mp_at_scale(
+    mp: &MultiPolygon<f64>,
+    config: &MakeValidConfig,
+    scale: f64,
+) -> MultiPolygon<f64> {
     use crate::reduce::{GeometryPrecisionReducer, PrecisionModel};
     let model = PrecisionModel::new(scale);
     let reducer = GeometryPrecisionReducer::with_config(model, config.clone());
-    let snapped: Vec<Polygon<f64>> = mp
-        .0
-        .iter()
-        .map(|p| {
-            let g = reducer.reduce_raw(p);
-            match g {
-                Geometry::Polygon(poly) => poly,
-                Geometry::MultiPolygon(mp) => {
-                    mp.0.into_iter().next().unwrap_or_else(|| {
-                        Polygon::new(LineString::new(Vec::new()), Vec::new())
-                    })
+    let snapped: Vec<Polygon<f64>> =
+        mp.0.iter()
+            .map(|p| {
+                let g = reducer.reduce_raw(p);
+                match g {
+                    Geometry::Polygon(poly) => poly,
+                    Geometry::MultiPolygon(mp) => {
+                        mp.0.into_iter().next().unwrap_or_else(|| {
+                            Polygon::new(LineString::new(Vec::new()), Vec::new())
+                        })
+                    }
+                    _ => Polygon::new(LineString::new(Vec::new()), Vec::new()),
                 }
-                _ => Polygon::new(LineString::new(Vec::new()), Vec::new()),
-            }
-        })
-        .collect();
+            })
+            .collect();
     MultiPolygon::new(snapped)
 }
 

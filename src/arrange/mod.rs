@@ -45,7 +45,9 @@ pub mod prep_intersect;
 
 use crate::core::MakeValidConfig;
 use crate::validation::GeoValidation;
-use geo::{BooleanOps, Coord, Geometry, GeometryCollection, LineString, LinesIter, MultiPolygon, Polygon};
+use geo::{
+    BooleanOps, Coord, Geometry, GeometryCollection, LineString, LinesIter, MultiPolygon, Polygon,
+};
 use rstar::{AABB, RTree, RTreeObject};
 use spade::{ConstrainedDelaunayTriangulation, Triangulation};
 
@@ -79,15 +81,16 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, _config: &MakeValidConfig) -> Geo
     // SelfIntersection; GEOS snaps the spike to the grid). Collapsing the
     // run up front routes everything downstream through clean geometry.
     if has_sub_ulp_edge(poly, None) {
-        let ext: LineString<f64> =
-            LineString::new(crate::structure::fix_ring::collapse_sub_ulp_vertices(&poly.exterior().0, true));
+        let ext: LineString<f64> = LineString::new(
+            crate::structure::fix_ring::collapse_sub_ulp_vertices(&poly.exterior().0, true),
+        );
         let holes: Vec<LineString<f64>> = poly
             .interiors()
             .iter()
             .map(|h| {
-                LineString::new(
-                    crate::structure::fix_ring::collapse_sub_ulp_vertices(&h.0, true),
-                )
+                LineString::new(crate::structure::fix_ring::collapse_sub_ulp_vertices(
+                    &h.0, true,
+                ))
             })
             .collect();
         #[cfg(all(any(test, debug_assertions), feature = "std"))]
@@ -175,7 +178,9 @@ pub(crate) fn fallback_polygon_fix(poly: &Polygon<f64>) -> Geometry<f64> {
         return empty();
     }
     let shell = Polygon::new(poly.exterior().clone(), Vec::new());
-    let holes: Vec<Polygon<f64>> = poly.interiors().iter()
+    let holes: Vec<Polygon<f64>> = poly
+        .interiors()
+        .iter()
         .map(|h| Polygon::new(h.clone(), Vec::new()))
         .collect();
     match boolean_difference_catch(&shell, &holes) {
@@ -444,10 +449,7 @@ fn holes_valid_impl(poly: &Polygon<f64>, inclusive: bool) -> bool {
 }
 
 /// True if two rings share a collinear edge segment with positive-length overlap.
-pub fn rings_share_collinear_edge_test(
-    a: &[geo::Coord<f64>],
-    b: &[geo::Coord<f64>],
-) -> bool {
+pub fn rings_share_collinear_edge_test(a: &[geo::Coord<f64>], b: &[geo::Coord<f64>]) -> bool {
     crate::util::rings_share_collinear_edge_precise(a, b)
 }
 
@@ -466,7 +468,11 @@ pub fn has_sub_ulp_edge(poly: &Polygon<f64>, _scale_hint: Option<f64>) -> bool {
         if n < 2 {
             return false;
         }
-        let end = if ring.first() == ring.last() { n - 1 } else { n };
+        let end = if ring.first() == ring.last() {
+            n - 1
+        } else {
+            n
+        };
         for i in 0..end {
             let a = ring[i];
             let b = ring[(i + 1) % n];
@@ -481,11 +487,7 @@ pub fn has_sub_ulp_edge(poly: &Polygon<f64>, _scale_hint: Option<f64>) -> bool {
             // flagged sub-ULP and was collapsed to empty by every repair
             // mode. Local eps still catches the noise class the gate
             // exists for (1e-8 spikes at 1e8 magnitude: 1e-8 < 2.2e-8).
-            let eps = f64::EPSILON
-                * a.x.abs()
-                    .max(a.y.abs())
-                    .max(b.x.abs())
-                    .max(b.y.abs());
+            let eps = f64::EPSILON * a.x.abs().max(a.y.abs()).max(b.x.abs()).max(b.y.abs());
             if eps <= 0.0 {
                 continue;
             }
@@ -647,7 +649,9 @@ pub fn poly_has_basic_form(poly: &Polygon<f64>) -> bool {
     if !ring_is_plausible(poly.exterior(), &mut acc) {
         return false;
     }
-    poly.interiors().iter().all(|h| ring_is_plausible(h, &mut acc))
+    poly.interiors()
+        .iter()
+        .all(|h| ring_is_plausible(h, &mut acc))
 }
 
 pub(crate) fn fix_from_lines(lines: Vec<geo::Line<f64>>) -> Option<MultiPolygon<f64>> {
@@ -666,7 +670,8 @@ pub(crate) fn fix_from_lines(lines: Vec<geo::Line<f64>>) -> Option<MultiPolygon<
         .flat_map(extract::split_ring_at_pinch_points)
         .filter(|coords| {
             // O(n log n): discard rings with self-intersections from CDT precision
-            let lines: Vec<geo::Line<f64>> = coords.windows(2)
+            let lines: Vec<geo::Line<f64>> = coords
+                .windows(2)
                 .map(|w| geo::Line::new(w[0], w[1]))
                 .collect();
             lines.len() < 4 || prep_intersect::has_no_intersections(&lines)

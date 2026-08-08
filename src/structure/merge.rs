@@ -1,4 +1,3 @@
-
 use alloc::vec::Vec;
 use geo::{Area, Coord, LineString, MultiPolygon, Polygon, Winding};
 use log::warn;
@@ -24,9 +23,7 @@ pub fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
     let shells: Vec<Polygon<f64>> = shells
         .into_iter()
         .map(|mut p| {
-            if p.exterior().0.len() >= 4
-                && !crate::util::robust_is_ccw(&p.exterior().0)
-            {
+            if p.exterior().0.len() >= 4 && !crate::util::robust_is_ccw(&p.exterior().0) {
                 p.exterior_mut(|r| r.make_ccw_winding());
             }
             for i in 0..p.interiors().len() {
@@ -76,7 +73,9 @@ pub fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
     let mut parent: Vec<Option<usize>> = vec![None; n];
     for i in 0..n {
         let ext_i = &with_area[i].0.exterior().0;
-        if ext_i.len() < 4 { continue; }
+        if ext_i.len() < 4 {
+            continue;
+        }
         // Full-containment check: EVERY vertex of shell i must be strictly
         // inside shell j (exclusive, holes excluded). A single probe point
         // (or even two) misclassifies PARTIAL overlaps as nesting - e.g.
@@ -119,7 +118,8 @@ pub fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
                 .enumerate()
                 .filter(|(k, _)| *k != i && parent_count[*k].is_multiple_of(2))
                 .all(|(k, _)| {
-                    let (m2x, m2x2, m2y, m2y2) = crate::simd::aabb_minmax_simd(&with_area[k].0.exterior().0);
+                    let (m2x, m2x2, m2y, m2y2) =
+                        crate::simd::aabb_minmax_simd(&with_area[k].0.exterior().0);
                     let (mnx, mxx, mny, mxy) = parent_bbox;
                     !(mnx <= m2x2 && mxx >= m2x && mny <= m2y2 && mxy >= m2y)
                 });
@@ -326,14 +326,19 @@ fn point_in_polygon_exclusive(pt: Coord<f64>, poly: &Polygon<f64>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use geo::{Coord, LineString};
     use crate::validation::GeoValidation;
+    use geo::{Coord, LineString};
 
     #[test]
     fn test_single() {
         let shell = Polygon::new(
-            LineString::new(vec![Coord { x: 0., y: 0. }, Coord { x: 1., y: 0. },
-                Coord { x: 1., y: 1. }, Coord { x: 0., y: 1. }, Coord { x: 0., y: 0. }]),
+            LineString::new(vec![
+                Coord { x: 0., y: 0. },
+                Coord { x: 1., y: 0. },
+                Coord { x: 1., y: 1. },
+                Coord { x: 0., y: 1. },
+                Coord { x: 0., y: 0. },
+            ]),
             Vec::new(),
         );
         let result = merge_shells(vec![shell]);
@@ -344,13 +349,23 @@ mod tests {
     #[test]
     fn test_disjoint() {
         let s1 = Polygon::new(
-            LineString::new(vec![Coord { x: 0., y: 0. }, Coord { x: 1., y: 0. },
-                Coord { x: 1., y: 1. }, Coord { x: 0., y: 1. }, Coord { x: 0., y: 0. }]),
+            LineString::new(vec![
+                Coord { x: 0., y: 0. },
+                Coord { x: 1., y: 0. },
+                Coord { x: 1., y: 1. },
+                Coord { x: 0., y: 1. },
+                Coord { x: 0., y: 0. },
+            ]),
             Vec::new(),
         );
         let s2 = Polygon::new(
-            LineString::new(vec![Coord { x: 2., y: 2. }, Coord { x: 3., y: 2. },
-                Coord { x: 3., y: 3. }, Coord { x: 2., y: 3. }, Coord { x: 2., y: 2. }]),
+            LineString::new(vec![
+                Coord { x: 2., y: 2. },
+                Coord { x: 3., y: 2. },
+                Coord { x: 3., y: 3. },
+                Coord { x: 2., y: 3. },
+                Coord { x: 2., y: 2. },
+            ]),
             Vec::new(),
         );
         let result = merge_shells(vec![s1, s2]);
@@ -362,13 +377,23 @@ mod tests {
     fn test_nested_removes_inner() {
         // Outer fully contains inner → even-odd: inner becomes a hole of outer
         let outer = Polygon::new(
-            LineString::new(vec![Coord { x: 0., y: 0. }, Coord { x: 10., y: 0. },
-                Coord { x: 10., y: 10. }, Coord { x: 0., y: 10. }, Coord { x: 0., y: 0. }]),
+            LineString::new(vec![
+                Coord { x: 0., y: 0. },
+                Coord { x: 10., y: 0. },
+                Coord { x: 10., y: 10. },
+                Coord { x: 0., y: 10. },
+                Coord { x: 0., y: 0. },
+            ]),
             Vec::new(),
         );
         let inner = Polygon::new(
-            LineString::new(vec![Coord { x: 3., y: 3. }, Coord { x: 7., y: 3. },
-                Coord { x: 7., y: 7. }, Coord { x: 3., y: 7. }, Coord { x: 3., y: 3. }]),
+            LineString::new(vec![
+                Coord { x: 3., y: 3. },
+                Coord { x: 7., y: 3. },
+                Coord { x: 7., y: 7. },
+                Coord { x: 3., y: 7. },
+                Coord { x: 3., y: 3. },
+            ]),
             Vec::new(),
         );
         let result = merge_shells(vec![outer, inner]);
@@ -379,18 +404,33 @@ mod tests {
     #[test]
     fn test_deep_nesting() {
         let l0 = Polygon::new(
-            LineString::new(vec![Coord { x: 0., y: 0. }, Coord { x: 20., y: 0. },
-                Coord { x: 20., y: 20. }, Coord { x: 0., y: 20. }, Coord { x: 0., y: 0. }]),
+            LineString::new(vec![
+                Coord { x: 0., y: 0. },
+                Coord { x: 20., y: 0. },
+                Coord { x: 20., y: 20. },
+                Coord { x: 0., y: 20. },
+                Coord { x: 0., y: 0. },
+            ]),
             Vec::new(),
         );
         let l1 = Polygon::new(
-            LineString::new(vec![Coord { x: 3., y: 3. }, Coord { x: 17., y: 3. },
-                Coord { x: 17., y: 17. }, Coord { x: 3., y: 17. }, Coord { x: 3., y: 3. }]),
+            LineString::new(vec![
+                Coord { x: 3., y: 3. },
+                Coord { x: 17., y: 3. },
+                Coord { x: 17., y: 17. },
+                Coord { x: 3., y: 17. },
+                Coord { x: 3., y: 3. },
+            ]),
             Vec::new(),
         );
         let l2 = Polygon::new(
-            LineString::new(vec![Coord { x: 6., y: 6. }, Coord { x: 14., y: 6. },
-                Coord { x: 14., y: 14. }, Coord { x: 6., y: 14. }, Coord { x: 6., y: 6. }]),
+            LineString::new(vec![
+                Coord { x: 6., y: 6. },
+                Coord { x: 14., y: 6. },
+                Coord { x: 14., y: 14. },
+                Coord { x: 6., y: 14. },
+                Coord { x: 6., y: 6. },
+            ]),
             Vec::new(),
         );
         let result = merge_shells(vec![l0, l1, l2]);

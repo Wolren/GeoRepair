@@ -1,15 +1,12 @@
 //! parallel batch API (extracted from bindings/ffi.rs 2026-08-07; verbatim).
 
-
-
-use alloc::vec::Vec;
 use super::types::*;
 use super::util::*;
 use super::wkb::*;
-use std::panic::{AssertUnwindSafe, catch_unwind};
-use geo::Geometry;
 use crate::make_valid::MakeValid;
-
+use alloc::vec::Vec;
+use geo::Geometry;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
 /// Repair an array of WKB geometries in one call.
 ///
