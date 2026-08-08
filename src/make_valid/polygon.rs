@@ -365,7 +365,19 @@ pub(super) fn make_valid_impl(
                     // ambiguous orientation routes to arrange.
                     let (g_norm, ok) = enforce_ogc_winding(g);
                     if ok {
-                        g_norm
+                        // Same extreme-span gate as Auto: the fast-path
+                        // plausibility sweep can miss self-intersections
+                        // at subnormal/huge magnitude mixes (fuzz
+                        // crash-65111cd0).
+                        if extreme_span(&g_norm) && !is_valid_with_geo(&g_norm) {
+                            warn!(
+                                "Structure mode: fast-path extreme-magnitude output invalid, \
+                                 retrying with CDT arrange"
+                            );
+                            arrange_chain(poly, config)
+                        } else {
+                            g_norm
+                        }
                     } else {
                         warn!(
                             "Structure mode: fast-path orientation ambiguous, retrying with CDT arrange"
@@ -403,7 +415,24 @@ pub(super) fn make_valid_impl(
                 crate::structure::FixOutcome::Fast(g) => {
                     let (g_norm, ok) = enforce_ogc_winding(g);
                     if ok {
-                        g_norm
+                        // The fast-path plausibility sweep can miss
+                        // self-intersections when the ring mixes subnormal
+                        // and huge coordinates (the eps-padded bbox makes
+                        // every pair overlap; the orient overflow yields
+                        // NaN no-cross verdicts - fuzz crash-65111cd0).
+                        // Extreme-span rings get the full validator; the
+                        // normal fast path stays cheap (the Structure arm
+                        // full-gates unconditionally; here the cheap
+                        // span check keeps the 1.58M-valid case at the
+                        // fast-path cost).
+                        if extreme_span(&g_norm) && !is_valid_with_geo(&g_norm) {
+                            warn!(
+                                "Auto mode: fast-path extreme-magnitude output invalid,                                  falling back to CDT arrange"
+                            );
+                            arrange_chain(poly, config)
+                        } else {
+                            g_norm
+                        }
                     } else {
                         warn!(
                             "Auto mode: fast-path orientation ambiguous, falling back to CDT arrange"
@@ -813,6 +842,53 @@ pub(super) fn structure_fix_owned(
 pub fn is_valid_with_geo(g: &Geometry<f64>) -> bool {
     use crate::validation::GeoValidation;
     g.is_valid()
+}
+
+/// True when a geometry's coordinate magnitudes span > 1e100 (largest
+/// absolute value over the smallest nonzero absolute value). At such
+/// ratios the fast-path plausibility sweep can miss self-intersections
+/// (eps-padded bboxes make every pair overlap; orient2d products
+/// overflow to NaN), so the repair dispatch full-gates these.
+pub fn extreme_span(g: &Geometry<f64>) -> bool {
+    let mut min_abs = f64::INFINITY;
+    let mut max_abs = 0.0f64;
+    let mut visit = |c: &Coord<f64>| {
+        let ax = c.x.abs();
+        let ay = c.y.abs();
+        if ax != 0.0 {
+            min_abs = min_abs.min(ax);
+        }
+        if ay != 0.0 {
+            min_abs = min_abs.min(ay);
+        }
+        max_abs = max_abs.max(ax).max(ay);
+    };
+    match g {
+        Geometry::Polygon(p) => {
+            for c in &p.exterior().0 {
+                visit(c);
+            }
+            for h in p.interiors() {
+                for c in &h.0 {
+                    visit(c);
+                }
+            }
+        }
+        Geometry::MultiPolygon(mp) => {
+            for p in &mp.0 {
+                for c in &p.exterior().0 {
+                    visit(c);
+                }
+                for h in p.interiors() {
+                    for c in &h.0 {
+                        visit(c);
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    min_abs.is_finite() && min_abs > 0.0 && max_abs / min_abs > 1e100
 }
 
 /// Last-resort fallback: BuildArea on noded boundary, then precision snap.
