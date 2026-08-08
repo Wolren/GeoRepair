@@ -107,17 +107,24 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, _config: &MakeValidConfig) -> Geo
             return fix_polygon(&collapsed, _config);
         }
     }
-    if !poly_has_basic_form(poly) {
-        let lines: Vec<_> = poly.lines_iter().collect();
-        if lines.is_empty() {
-            return empty();
-        }
-        return match fix_from_lines(lines) {
-            Some(mp) => Geometry::MultiPolygon(mp),
-            None => empty(),
-        };
+    // Basic form + line collection in ONE pass (the separate `collect`
+    // was a full extra read of the coords - measured 2026-08-07:
+    // ~10-15 us on a 5000-vertex ring). The repair path re-collects
+    // when the basic form fails (the partial lines are unusable there).
+    let cap = poly
+        .exterior()
+        .0
+        .len()
+        .saturating_add(poly.interiors().iter().map(|h| h.0.len()).sum());
+    let mut lines = Vec::with_capacity(cap);
+    if !ring_is_plausible(poly.exterior(), Some(&mut lines)) {
+        return fix_from_poly_lines(poly);
     }
-    let lines: Vec<_> = poly.lines_iter().collect();
+    for hole in poly.interiors() {
+        if !ring_is_plausible(hole, Some(&mut lines)) {
+            return fix_from_poly_lines(poly);
+        }
+    }
     if lines.is_empty() {
         return empty();
     }
@@ -133,6 +140,19 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, _config: &MakeValidConfig) -> Geo
         }
     }
     fallback_polygon_fix(poly)
+}
+
+/// Collect a polygon's lines for the repair path (used when the basic
+/// form fails mid-scan: the fused scan's partial lines are unusable).
+fn fix_from_poly_lines(poly: &Polygon<f64>) -> Geometry<f64> {
+    let lines: Vec<_> = poly.lines_iter().collect();
+    if lines.is_empty() {
+        return empty();
+    }
+    match fix_from_lines(lines) {
+        Some(mp) => Geometry::MultiPolygon(mp),
+        None => empty(),
+    }
 }
 
 /// Run CDT on polygon edges, falling back to boolean difference when CDT
@@ -270,12 +290,27 @@ pub(crate) fn holes_contained_cheap(poly: &Polygon<f64>) -> bool {
 /// Does NOT check OGC winding (CCW exterior) — GEOS isValid accepts both
 /// winding orders, and winding is enforced on repair output separately.
 pub fn validate_polygon(poly: &Polygon<f64>) -> bool {
-    if !poly_has_basic_form(poly) {
+    // One pass over the coords does the basic form (closure, adjacent
+    // duplicates, NaN) AND the bit-exact duplicate scan AND the line
+    // collection for the intersection sweep - the gate's separate
+    // `lines_iter` collect is fused into the plausibility scan
+    // (measured 2026-08-07: the collect was a full extra read, ~10-15 us
+    // on a 5000-vertex ring).
+    let cap = poly
+        .exterior()
+        .0
+        .len()
+        .saturating_add(poly.interiors().iter().map(|h| h.0.len()).sum());
+    let mut lines = Vec::with_capacity(cap);
+    if !ring_is_plausible(poly.exterior(), Some(&mut lines)) {
         return false;
     }
-    // NaN/Inf: folded into ring_is_plausible's scan (no separate pass).
+    for hole in poly.interiors() {
+        if !ring_is_plausible(hole, Some(&mut lines)) {
+            return false;
+        }
+    }
     // Self-intersection check
-    let lines: Vec<_> = poly.lines_iter().collect();
     if lines.is_empty() || !prep::has_no_intersections(&lines) {
         return false;
     }
@@ -514,72 +549,86 @@ pub fn diagnose_arrange(poly: &Polygon<f64>) -> Option<ArrangeTiming> {
     Some(t)
 }
 
-pub fn poly_has_basic_form(poly: &Polygon<f64>) -> bool {
-    fn ring_is_plausible(ring: &geo::LineString<f64>) -> bool {
-        let coords = &ring.0;
-        if coords.len() < 4 || coords.first() != coords.last() {
-            return false;
-        }
-        for w in coords.windows(2) {
-            // Adjacent duplicates AND non-finite coords (the gate's
-            // separate NaN scan is folded here - measured 2026-08-07: one
-            // fewer full pass over the ring on the valid-polygon path).
-            if w[0] == w[1] || !w[0].x.is_finite() || !w[0].y.is_finite() {
-                return false;
-            }
-        }
-        let n = coords.len() - 1;
-        // Small rings: O(n²) bit-exact duplicate scan, no allocation.
-        // 95.6% of the 1.58M real-world dataset has ≤ 32 vertices, and the
-        // FxHashSet allocation per polygon dominates this gate there
-        // (measured in the speed_probe fast path). Large rings keep the
-        // hash set. Bit-exact (`to_bits`) comparison matches the hash set
-        // semantics: -0.0 vs +0.0 are distinct, NaN equals NaN.
-        if n <= 32 {
-            for i in 0..n {
-                let xi = coords[i].x.to_bits();
-                let yi = coords[i].y.to_bits();
-                for c in &coords[i + 1..n] {
-                    if c.x.to_bits() == xi && c.y.to_bits() == yi {
-                        return false;
-                    }
-                }
-            }
-            return true;
-        }
-        // Large rings: custom open-addressing table (bit-exact keys, no
-        // hashbrown bucket overhead). Measured (2026-08-07): the FxHashSet
-        // pass was ~60 us on a 5000-vertex valid ring - the gate's single
-        // biggest constant; the direct-addressed table is ~3x cheaper at
-        // load factor 0.5.
-        let cap = (n * 2).next_power_of_two().max(8);
-        let mask = cap - 1;
-        let mut slots: Vec<(u64, u64)> = vec![(0, 0); cap];
-        let mut used: Vec<u64> = vec![0; cap / 64];
-        for c in &coords[..n] {
-            let kx = c.x.to_bits();
-            let ky = c.y.to_bits();
-            let mut h = (kx ^ ky.rotate_left(32)) as usize & mask;
-            loop {
-                let word = h >> 6;
-                let bit = 1u64 << (h & 63);
-                if used[word] & bit == 0 {
-                    used[word] |= bit;
-                    slots[h] = (kx, ky);
-                    break;
-                }
-                if slots[h] == (kx, ky) {
-                    return false; // duplicate vertex
-                }
-                h = (h + 1) & mask;
-            }
-        }
-        true
-    }
-    if !ring_is_plausible(poly.exterior()) {
+/// Basic-form plausibility scan for one ring: closure, min points,
+/// adjacent duplicates, non-finite coords, bit-exact duplicate scan.
+/// When `lines` is `Some`, the ring's segments are collected in the same
+/// pass (the gate's separate `lines_iter` collect was a full extra read
+/// of the coords - measured 2026-08-07: ~10-15 us on a 5000-vertex
+/// ring). Kept as ONE function so the gate's verdict cannot drift from
+/// `poly_has_basic_form`'s.
+fn ring_is_plausible(
+    ring: &geo::LineString<f64>,
+    mut lines: Option<&mut Vec<geo::Line<f64>>>,
+) -> bool {
+    let coords = &ring.0;
+    if coords.len() < 4 || coords.first() != coords.last() {
         return false;
     }
-    poly.interiors().iter().all(ring_is_plausible)
+    for w in coords.windows(2) {
+        // Adjacent duplicates AND non-finite coords (the gate's
+        // separate NaN scan is folded here - measured 2026-08-07: one
+        // fewer full pass over the ring on the valid-polygon path).
+        if w[0] == w[1] || !w[0].x.is_finite() || !w[0].y.is_finite() {
+            return false;
+        }
+        if let Some(l) = lines.as_deref_mut() {
+            l.push(geo::Line::new(w[0], w[1]));
+        }
+    }
+    let n = coords.len() - 1;
+    // Small rings: O(n²) bit-exact duplicate scan, no allocation.
+    // 95.6% of the 1.58M real-world dataset has ≤ 32 vertices, and the
+    // FxHashSet allocation per polygon dominates this gate there
+    // (measured in the speed_probe fast path). Large rings keep the
+    // custom open-addressing table (bit-exact keys). Bit-exact
+    // (`to_bits`) comparison: -0.0 vs +0.0 are distinct, NaN equals NaN.
+    if n <= 32 {
+        for i in 0..n {
+            let xi = coords[i].x.to_bits();
+            let yi = coords[i].y.to_bits();
+            for c in &coords[i + 1..n] {
+                if c.x.to_bits() == xi && c.y.to_bits() == yi {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+    // Large rings: custom open-addressing table (bit-exact keys, no
+    // hashbrown bucket overhead). Measured (2026-08-07): the FxHashSet
+    // pass was ~60 us on a 5000-vertex valid ring - the gate's single
+    // biggest constant; the direct-addressed table is ~3x cheaper at
+    // load factor 0.5.
+    let cap = (n * 2).next_power_of_two().max(8);
+    let mask = cap - 1;
+    let mut slots: Vec<(u64, u64)> = vec![(0, 0); cap];
+    let mut used: Vec<u64> = vec![0; cap / 64];
+    for c in &coords[..n] {
+        let kx = c.x.to_bits();
+        let ky = c.y.to_bits();
+        let mut h = (kx ^ ky.rotate_left(32)) as usize & mask;
+        loop {
+            let word = h >> 6;
+            let bit = 1u64 << (h & 63);
+            if used[word] & bit == 0 {
+                used[word] |= bit;
+                slots[h] = (kx, ky);
+                break;
+            }
+            if slots[h] == (kx, ky) {
+                return false; // duplicate vertex
+            }
+            h = (h + 1) & mask;
+        }
+    }
+    true
+}
+
+pub fn poly_has_basic_form(poly: &Polygon<f64>) -> bool {
+    if !ring_is_plausible(poly.exterior(), None) {
+        return false;
+    }
+    poly.interiors().iter().all(|h| ring_is_plausible(h, None))
 }
 
 pub(crate) fn fix_from_lines(lines: Vec<geo::Line<f64>>) -> Option<MultiPolygon<f64>> {
