@@ -304,19 +304,19 @@ fn arrange_chain(poly: &Polygon<f64>, config: &MakeValidConfig) -> Geometry<f64>
     // Arrange mode needs the same guarantee here). GEOS keeps such
     // polygons; so do we.
     if is_valid_with_geo(&Geometry::Polygon(poly.clone())) {
-        return enforce_ogc_winding(Geometry::Polygon(poly.clone()));
+        return enforce_ogc_winding(Geometry::Polygon(poly.clone())).0;
     }
     // Normalize winding BEFORE the validity gate: repair outputs are
     // OGC-wound at the dispatch exit (enforce_ogc_winding after the match),
     // and CW shells are valid per GEOS but flagged WrongOrientation by our
     // validator — gating pre-winding would empty every CW-valid input
     // (measured: invariant_area_preserved, a valid CW triangle collapsed).
-    let arranged = enforce_ogc_winding(arrange_or_empty(poly, config));
+    let arranged = enforce_ogc_winding(arrange_or_empty(poly, config)).0;
     if is_valid_with_geo(&arranged) {
         arranged
     } else {
         warn!("arrange output invalid, retrying with precision reduction");
-        let fb = enforce_ogc_winding(reduce_fallback(poly, config));
+        let fb = enforce_ogc_winding(reduce_fallback(poly, config)).0;
         if is_valid_with_geo(&fb) {
             fb
         } else {
@@ -354,14 +354,16 @@ pub(super) fn make_valid_impl(
                     // winding-invariant checks survive re-winding, and the
                     // re-wound orientation is OGC-correct by construction.
                     crate::structure::FixOutcome::Fast(g) => {
-                        let g_norm = enforce_ogc_winding(g);
                         // The gate certifies the winding-invariant checks;
                         // orientation is the only property the re-wind can
                         // invalidate (extreme-magnitude rings in the
                         // exact-orient ~0 zone - fuzz
-                        // invariant_mixed_fp_in_same_ring). O(n) verify,
-                        // no sweep; ambiguous orientation routes to arrange.
-                        if ogc_orientation_ok(&g_norm) {
+                        // invariant_mixed_fp_in_same_ring). Verify comes
+                        // from the enforce pass's extremal indices (no
+                        // re-search - winding fusion, 2026-08-08);
+                        // ambiguous orientation routes to arrange.
+                        let (g_norm, ok) = enforce_ogc_winding(g);
+                        if ok {
                             g_norm
                         } else {
                             warn!(
@@ -379,7 +381,7 @@ pub(super) fn make_valid_impl(
                         // hole, speed_bug_regressions — gating pre-winding
                         // sent it to arrange, which decomposed the touch
                         // into a MultiPolygon).
-                        let g_norm = enforce_ogc_winding(g);
+                        let g_norm = enforce_ogc_winding(g).0;
                         if is_valid_with_geo(&g_norm) {
                             g_norm
                         } else {
@@ -398,8 +400,8 @@ pub(super) fn make_valid_impl(
                     // Fast: complete-certifier gate (2026-08-07) - same
                     // argument as the Structure arm above.
                     crate::structure::FixOutcome::Fast(g) => {
-                        let g_norm = enforce_ogc_winding(g);
-                        if ogc_orientation_ok(&g_norm) {
+                        let (g_norm, ok) = enforce_ogc_winding(g);
+                        if ok {
                             g_norm
                         } else {
                             warn!(
@@ -413,7 +415,7 @@ pub(super) fn make_valid_impl(
                         // shells, CCW holes - GEOS polygonizer convention).
                         // OGC validity requires CCW shells; normalize before
                         // the gate.
-                        let r_norm = enforce_ogc_winding(r);
+                        let r_norm = enforce_ogc_winding(r).0;
                         #[cfg(all(any(test, debug_assertions), feature = "std"))]
                         if std::env::var("DIAG_MV").is_ok() {
                             use geo::Area;
@@ -447,7 +449,9 @@ pub(super) fn make_valid_impl(
                 }
             }
         };
-        let result = enforce_ogc_winding(result);
+        // Every dispatch outcome is already OGC-wound (each arm winds
+        // before returning), so the old re-wind here was a full no-op
+        // pass over every ring - removed 2026-08-08.
         if has_nan(&result) { empty_geom::<f64>() } else { result }
         }
 
@@ -489,8 +493,8 @@ pub(super) fn make_valid_impl_owned(
                     // orientation O(n) (extreme-magnitude rings can sit in the
                     // exact-orient ~0 zone, fuzz invariant_mixed_fp_in_same_ring).
                     crate::structure::FixOutcome::Fast(g) => {
-                        let g = enforce_ogc_winding(g);
-                        if ogc_orientation_ok(&g) {
+                        let (g, ok) = enforce_ogc_winding(g);
+                        if ok {
                             return (g, true);
                         }
                         // The Fast geometry IS the input polygon (moved into
@@ -519,7 +523,7 @@ pub(super) fn make_valid_impl_owned(
         }
         PolyMethod::Auto => make_valid_impl(&poly, &poly, config, _first_valid),
     };
-    let result = enforce_ogc_winding(result);
+    let result = enforce_ogc_winding(result).0;
     if has_nan(&result) { (empty_geom::<f64>(), true) } else { (result, false) }
 }
 
@@ -659,53 +663,65 @@ pub fn make_valid_owned(poly: Polygon<f64>, config: &MakeValidConfig) -> Geometr
 /// reversed when their winding is wrong. The previous implementation cloned
 /// every ring unconditionally, which cost two `Vec` allocations per polygon
 /// on the hot path (1.58M polygons in the real-world benchmark).
-pub(crate) fn enforce_ogc_winding(g: Geometry<f64>) -> Geometry<f64> {
+///
+/// Returns `(geometry, orientation_ok)` — the bool is the old
+/// `ogc_orientation_ok` verdict computed from the enforce pass's extremal
+/// indices: the verify's per-ring extremal SEARCH is not re-run (the
+/// orient and the rare ~0-zone shoelace fallback are recomputed fresh, so
+/// the verdict is identical - winding fusion, 2026-08-08).
+pub(crate) fn enforce_ogc_winding(g: Geometry<f64>) -> (Geometry<f64>, bool) {
     match g {
         Geometry::Polygon(p) => {
             let (ext, mut holes) = p.into_inner();
-            let ext = enforce_ccw(ext);
+            let (ext, ext_idx, ext_rev) = enforce_ccw(ext);
+            let mut ok = winding_ok(&ext.0, ext_idx, ext_rev, true);
             for h in holes.iter_mut() {
                 let owned = core::mem::replace(h, geo::LineString::new(Vec::new()));
-                *h = enforce_cw(owned);
+                let (hw, h_idx, h_rev) = enforce_cw(owned);
+                ok &= winding_ok(&hw.0, h_idx, h_rev, false);
+                *h = hw;
             }
-            Geometry::Polygon(Polygon::new(ext, holes))
+            (Geometry::Polygon(Polygon::new(ext, holes)), ok)
         }
-        Geometry::MultiPolygon(mp) => Geometry::MultiPolygon(MultiPolygon::new(
-            mp.0.into_iter()
+        Geometry::MultiPolygon(mp) => {
+            let mut ok = true;
+            let polys: Vec<Polygon<f64>> = mp
+                .0
+                .into_iter()
                 .map(|p| {
                     let (ext, mut holes) = p.into_inner();
-                    let ext = enforce_ccw(ext);
+                    let (ext, ext_idx, ext_rev) = enforce_ccw(ext);
+                    ok &= winding_ok(&ext.0, ext_idx, ext_rev, true);
                     for h in holes.iter_mut() {
                         let owned = core::mem::replace(h, geo::LineString::new(Vec::new()));
-                        *h = enforce_cw(owned);
+                        let (hw, h_idx, h_rev) = enforce_cw(owned);
+                        ok &= winding_ok(&hw.0, h_idx, h_rev, false);
+                        *h = hw;
                     }
                     Polygon::new(ext, holes)
                 })
-                .collect(),
-        )),
-        other => other,
+                .collect();
+            (Geometry::MultiPolygon(MultiPolygon::new(polys)), ok)
+        }
+        other => (other, true),
     }
 }
 
-/// True when every shell is CCW and every hole CW - the validator's
-/// orientation contract. O(n) extremal-vertex check (no sweep). The Fast
-/// path needs it AFTER re-winding: extreme-magnitude rings can sit in the
-/// exact-orient ~0 zone where even the robust predicate's collinear
-/// fallback sign is garbage, so the re-wound form is not guaranteed
-/// OGC-oriented (fuzz invariant_mixed_fp_in_same_ring, 2026-08-07).
-pub(crate) fn ogc_orientation_ok(g: &Geometry<f64>) -> bool {
-    use crate::validation::check_orientation;
-    match g {
-        Geometry::Polygon(p) => {
-            check_orientation(p.exterior().0.as_slice())
-                && p.interiors().iter().all(|h| !check_orientation(&h.0))
-        }
-        Geometry::MultiPolygon(mp) => mp.0.iter().all(|p| {
-            check_orientation(p.exterior().0.as_slice())
-                && p.interiors().iter().all(|h| !check_orientation(&h.0))
-        }),
-        _ => true,
-    }
+/// Post-winding orientation verdict for one ring, computed from the
+/// enforce pass's extremal index. A reversed ring maps the index n - idx
+/// (the closure point stays at index 0). The orient and the ~0-zone
+/// shoelace fallback are recomputed on the current ring - identical to
+/// what the old `ogc_orientation_ok`'s fresh search would produce (the
+/// min vertex is order-independent; only the O(n) search is saved).
+fn winding_ok(ring: &[Coord<f64>], idx: usize, reversed: bool, shell: bool) -> bool {
+    let n = ring.len() - 1;
+    let mapped = if reversed {
+        if idx == 0 { 0 } else { n - idx }
+    } else {
+        idx
+    };
+    let ccw = crate::util::robust_is_ccw_at(ring, mapped);
+    if shell { ccw } else { !ccw }
 }
 
 /// Check if a geometry contains NaN coordinates using CoordsIter.

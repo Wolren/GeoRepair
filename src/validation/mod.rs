@@ -96,7 +96,7 @@ pub(crate) mod impls;
 /// ValidationResult and its helper methods.
 mod result;
 /// Ring validity: closure, self-intersection, orientation, points, duplicates.
-mod ring;
+pub(crate) mod ring;
 /// Sweep-line machinery for ring self-intersection.
 pub(crate) mod sweep;
 /// Core validation types, traits, and per-geometry implementations (facade).
@@ -109,7 +109,5 @@ mod geo_bridge;
 pub use core::*;
 /// Shared by the validator and the fast-path gate (duplicated rings).
 pub(crate) use complex::has_duplicate_rings;
-/// Ring winding predicate (extremal-vertex Shewchuk orient2d).
-pub(crate) use ring::check_orientation;
 /// geo-trait-compatible adapter and error mapping.
 pub use geo_bridge::{GeoRepairValidation, map_geo_invalid};

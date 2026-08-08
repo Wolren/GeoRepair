@@ -61,7 +61,7 @@ gate, and the noder share one tolerance, so repair output is certifiable
 by construction - GEOS's own `makeValid` can ship geometry its `isValid`
 rejects. That contract is why the valid rows lose: tolerance predicates
 cost more than GEOS's exact-zero ones, and the valid-polygon path makes
-~6-7 passes over the coords vs GEOS's ~2 (a valid 5000-vertex polygon:
+~5-6 passes over the coords vs GEOS's ~2 (a valid 5000-vertex polygon:
 ~148 µs serial vs GEOS ~78 µs; the parallel rows are bandwidth-bound, so
 the throughput gap ~2.8x is wider than the serial ~1.9x). The eps-class
 is stricter than GEOS only on borderline inputs (213 baselined XML
@@ -99,7 +99,7 @@ scale coverage is the bowtie and spaghetti rows:
 | overlap mp 50sh | 22.3 | 230 | 10x |
 | dense grid 20x20=400 | 500 | 2114 | 4.2x |
 | hole hier 50h | 22.2 | 27.7 | 1.25x |
-| valid polygon 5000v | 26.8 | 9.7 | 0.36x |
+| valid polygon 5000v | 25.7 | 9.3 | 0.36x |
 | valid ls 500v | 1.33 | 0.56 | 0.42x |
 | dense self ls 500v | 1.46 | 120 | 82x |
 | lissajous 5000v | 597 | 5392 | 9.0x |

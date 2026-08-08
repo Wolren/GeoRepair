@@ -221,23 +221,28 @@ pub(super) fn strip_degenerate(g: Geometry<f64>) -> Geometry<f64> {
     }
 }
 
-pub(super) fn enforce_ccw(mut ring: LineString<f64>) -> LineString<f64> {
+pub(super) fn enforce_ccw(mut ring: LineString<f64>) -> (LineString<f64>, usize, bool) {
     // Use Shewchuk's orient2d (adaptive precision) on the extremal vertex
     // to determine winding order. The shoelace sum in geo's winding_order()
     // can flip sign at extreme fp ratios (e.g. 1e12 and 1e-12 in same ring).
-    let is_ccw = crate::util::robust_is_ccw(&ring.0);
-    if !is_ccw {
+    // Returns the extremal index + whether the ring was reversed so the
+    // caller can verify the post-winding orientation without re-searching
+    // (winding fusion, 2026-08-08).
+    let (is_ccw, idx) = crate::util::robust_is_ccw_with_index(&ring.0);
+    let reversed = !is_ccw;
+    if reversed {
         ring.make_ccw_winding();
     }
-    ring
+    (ring, idx, reversed)
 }
 
-pub(super) fn enforce_cw(mut ring: LineString<f64>) -> LineString<f64> {
-    let is_ccw = crate::util::robust_is_ccw(&ring.0);
-    if is_ccw {
+pub(super) fn enforce_cw(mut ring: LineString<f64>) -> (LineString<f64>, usize, bool) {
+    let (is_ccw, idx) = crate::util::robust_is_ccw_with_index(&ring.0);
+    let reversed = is_ccw;
+    if reversed {
         ring.make_cw_winding();
     }
-    ring
+    (ring, idx, reversed)
 }
 
 

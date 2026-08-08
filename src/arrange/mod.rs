@@ -117,11 +117,16 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, _config: &MakeValidConfig) -> Geo
         .len()
         .saturating_add(poly.interiors().iter().map(|h| h.0.len()).sum());
     let mut lines = Vec::with_capacity(cap);
-    if !ring_is_plausible(poly.exterior(), Some(&mut lines)) {
+    let mut acc = GateAccum {
+        lines: Some(&mut lines),
+        bbox: None,
+        sub_ulp: None,
+    };
+    if !ring_is_plausible(poly.exterior(), &mut acc) {
         return fix_from_poly_lines(poly);
     }
     for hole in poly.interiors() {
-        if !ring_is_plausible(hole, Some(&mut lines)) {
+        if !ring_is_plausible(hole, &mut acc) {
             return fix_from_poly_lines(poly);
         }
     }
@@ -302,11 +307,16 @@ pub fn validate_polygon(poly: &Polygon<f64>) -> bool {
         .len()
         .saturating_add(poly.interiors().iter().map(|h| h.0.len()).sum());
     let mut lines = Vec::with_capacity(cap);
-    if !ring_is_plausible(poly.exterior(), Some(&mut lines)) {
+    let mut acc = GateAccum {
+        lines: Some(&mut lines),
+        bbox: None,
+        sub_ulp: None,
+    };
+    if !ring_is_plausible(poly.exterior(), &mut acc) {
         return false;
     }
     for hole in poly.interiors() {
-        if !ring_is_plausible(hole, Some(&mut lines)) {
+        if !ring_is_plausible(hole, &mut acc) {
             return false;
         }
     }
@@ -549,17 +559,36 @@ pub fn diagnose_arrange(poly: &Polygon<f64>) -> Option<ArrangeTiming> {
     Some(t)
 }
 
+/// Side-channel accumulators for the gate's fused scan: optional line
+/// collection (the gate's separate collect), the global bbox (the
+/// envelope degeneracy check), and the sub-ULP edge flag. Every field
+/// optional - a caller pays only for the accumulators it requested.
+pub(crate) struct GateAccum<'a> {
+    pub lines: Option<&'a mut Vec<geo::Line<f64>>>,
+    pub bbox: Option<&'a mut (f64, f64, f64, f64)>,
+    pub sub_ulp: Option<&'a mut bool>,
+}
+
+impl GateAccum<'_> {
+    pub(crate) fn none() -> GateAccum<'static> {
+        GateAccum {
+            lines: None,
+            bbox: None,
+            sub_ulp: None,
+        }
+    }
+}
+
 /// Basic-form plausibility scan for one ring: closure, min points,
-/// adjacent duplicates, non-finite coords, bit-exact duplicate scan.
-/// When `lines` is `Some`, the ring's segments are collected in the same
-/// pass (the gate's separate `lines_iter` collect was a full extra read
-/// of the coords - measured 2026-08-07: ~10-15 us on a 5000-vertex
-/// ring). Kept as ONE function so the gate's verdict cannot drift from
-/// `poly_has_basic_form`'s.
-fn ring_is_plausible(
-    ring: &geo::LineString<f64>,
-    mut lines: Option<&mut Vec<geo::Line<f64>>>,
-) -> bool {
+/// adjacent duplicates, non-finite coords, non-adjacent duplicate scan
+/// (shared with the exit validator - the gate must certify exactly what
+/// the validator accepts, 2026-08-07 gate rule). The same pass also
+/// drives the optional accumulators (lines, global bbox, sub-ULP flag) -
+/// the gate's separate collect, envelope scan and sub-ULP scan are all
+/// fused here (measured 2026-08-08: the envelope + sub-ULP passes cost
+/// ~15-20 us on a 5000-vertex ring). Kept as ONE function so the gate's
+/// verdict cannot drift from `poly_has_basic_form`'s.
+pub(crate) fn ring_is_plausible(ring: &geo::LineString<f64>, acc: &mut GateAccum) -> bool {
     let coords = &ring.0;
     if coords.len() < 4 || coords.first() != coords.last() {
         return false;
@@ -571,64 +600,54 @@ fn ring_is_plausible(
         if w[0] == w[1] || !w[0].x.is_finite() || !w[0].y.is_finite() {
             return false;
         }
-        if let Some(l) = lines.as_deref_mut() {
+        if let Some(l) = acc.lines.as_deref_mut() {
             l.push(geo::Line::new(w[0], w[1]));
+        }
+        if let Some(bb) = acc.bbox.as_deref_mut() {
+            bb.0 = bb.0.min(w[0].x);
+            bb.1 = bb.1.max(w[0].x);
+            bb.2 = bb.2.min(w[0].y);
+            bb.3 = bb.3.max(w[0].y);
+        }
+        if let Some(sub) = acc.sub_ulp.as_deref_mut()
+            && !*sub
+        {
+            // has_sub_ulp_edge's LOCAL rule: an edge is sub-ULP when
+            // its length is below EPSILON * the edge's own max |coord|
+            // (axis-aligned edges are valid - max component, not either).
+            let dx = (w[1].x - w[0].x).abs();
+            let dy = (w[1].y - w[0].y).abs();
+            let eps = f64::EPSILON
+                * w[0]
+                    .x
+                    .abs()
+                    .max(w[0].y.abs())
+                    .max(w[1].x.abs())
+                    .max(w[1].y.abs());
+            if eps > 0.0 && dx.max(dy) < eps {
+                *sub = true;
+            }
         }
     }
     let n = coords.len() - 1;
-    // Small rings: O(n²) bit-exact duplicate scan, no allocation.
-    // 95.6% of the 1.58M real-world dataset has ≤ 32 vertices, and the
-    // FxHashSet allocation per polygon dominates this gate there
-    // (measured in the speed_probe fast path). Large rings keep the
-    // custom open-addressing table (bit-exact keys). Bit-exact
-    // (`to_bits`) comparison: -0.0 vs +0.0 are distinct, NaN equals NaN.
-    if n <= 32 {
-        for i in 0..n {
-            let xi = coords[i].x.to_bits();
-            let yi = coords[i].y.to_bits();
-            for c in &coords[i + 1..n] {
-                if c.x.to_bits() == xi && c.y.to_bits() == yi {
-                    return false;
-                }
-            }
-        }
-        return true;
-    }
-    // Large rings: custom open-addressing table (bit-exact keys, no
-    // hashbrown bucket overhead). Measured (2026-08-07): the FxHashSet
-    // pass was ~60 us on a 5000-vertex valid ring - the gate's single
-    // biggest constant; the direct-addressed table is ~3x cheaper at
-    // load factor 0.5.
-    let cap = (n * 2).next_power_of_two().max(8);
-    let mask = cap - 1;
-    let mut slots: Vec<(u64, u64)> = vec![(0, 0); cap];
-    let mut used: Vec<u64> = vec![0; cap / 64];
-    for c in &coords[..n] {
-        let kx = c.x.to_bits();
-        let ky = c.y.to_bits();
-        let mut h = (kx ^ ky.rotate_left(32)) as usize & mask;
-        loop {
-            let word = h >> 6;
-            let bit = 1u64 << (h & 63);
-            if used[word] & bit == 0 {
-                used[word] |= bit;
-                slots[h] = (kx, ky);
-                break;
-            }
-            if slots[h] == (kx, ky) {
-                return false; // duplicate vertex
-            }
-            h = (h + 1) & mask;
-        }
+    // Non-adjacent duplicate (pinch) scan: shared helper with the exit
+    // validator, -0.0-normalized keys (the old raw-to_bits keys diverged:
+    // a (-0.0, y) / (+0.0, y) pinch passed the gate but the validator
+    // flagged PinchPoint - 2026-08-08), custom table on large rings
+    // (measured 2026-08-07: the FxHashSet pass was ~60 us on a
+    // 5000-vertex ring; the direct-addressed table is ~3x cheaper).
+    if crate::validation::ring::first_pinch_dup(&coords[..n]).is_some() {
+        return false;
     }
     true
 }
 
 pub fn poly_has_basic_form(poly: &Polygon<f64>) -> bool {
-    if !ring_is_plausible(poly.exterior(), None) {
+    let mut acc = GateAccum::none();
+    if !ring_is_plausible(poly.exterior(), &mut acc) {
         return false;
     }
-    poly.interiors().iter().all(|h| ring_is_plausible(h, None))
+    poly.interiors().iter().all(|h| ring_is_plausible(h, &mut acc))
 }
 
 pub(crate) fn fix_from_lines(lines: Vec<geo::Line<f64>>) -> Option<MultiPolygon<f64>> {
