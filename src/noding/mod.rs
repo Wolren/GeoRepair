@@ -478,4 +478,3 @@ fn empty<T: CoordNum>() -> Geometry<T> {
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;
-

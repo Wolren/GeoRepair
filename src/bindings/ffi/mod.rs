@@ -139,7 +139,13 @@ pub unsafe extern "C" fn geo_repair_free_batch_result(result: *mut GeoRepairBatc
         let items = unsafe { std::slice::from_raw_parts_mut(r.items, r.count) };
         for item in items.iter_mut() {
             if !item.wkb_data.is_null() {
-                unsafe { drop(Vec::from_raw_parts(item.wkb_data, item.wkb_len, item.wkb_len)) };
+                unsafe {
+                    drop(Vec::from_raw_parts(
+                        item.wkb_data,
+                        item.wkb_len,
+                        item.wkb_len,
+                    ))
+                };
             }
             if !item.error_msg.is_null() {
                 unsafe { drop(CString::from_raw(item.error_msg)) };

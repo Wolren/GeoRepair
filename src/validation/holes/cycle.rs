@@ -1,9 +1,8 @@
 //! Ring-touch graph cycle detection for disconnected-interior checks
 //! (split from validation/holes.rs 2026-08-07; verbatim).
 
-
-use alloc::vec::Vec;
 use super::*;
+use alloc::vec::Vec;
 
 /// Ring-touch graph cycle detection (GEOS PolygonRing::findHoleCycleLocation
 /// and scanForHoleCycle port). Touches are exact shared vertices plus
@@ -358,7 +357,12 @@ pub(super) fn is_incident_segment_in_ring(
 }
 
 /// GEOS PolygonNodeTopology::isInteriorSegment port.
-pub(super) fn is_interior_segment(node: Coord<f64>, a0: Coord<f64>, a1: Coord<f64>, b: Coord<f64>) -> bool {
+pub(super) fn is_interior_segment(
+    node: Coord<f64>,
+    a0: Coord<f64>,
+    a1: Coord<f64>,
+    b: Coord<f64>,
+) -> bool {
     let (mut a_lo, mut a_hi) = (a0, a1);
     let mut is_interior_between = true;
     if is_angle_greater(node, a_lo, a_hi) {
@@ -385,7 +389,12 @@ pub(super) fn is_angle_greater(origin: Coord<f64>, p: Coord<f64>, q: Coord<f64>)
 }
 
 /// GEOS isBetween port: p lies in the CCW angle wedge e0 -> e1 from origin.
-pub(super) fn is_between(origin: Coord<f64>, p: Coord<f64>, e0: Coord<f64>, e1: Coord<f64>) -> bool {
+pub(super) fn is_between(
+    origin: Coord<f64>,
+    p: Coord<f64>,
+    e0: Coord<f64>,
+    e1: Coord<f64>,
+) -> bool {
     if !is_angle_greater(origin, p, e0) {
         return false;
     }
@@ -398,11 +407,7 @@ pub(super) fn quadrant(origin: Coord<f64>, p: Coord<f64>) -> u8 {
     let dy = p.y - origin.y;
     debug_assert!(dx != 0.0 || dy != 0.0, "quadrant of zero vector");
     if dx >= 0.0 {
-        if dy >= 0.0 {
-            0
-        } else {
-            3
-        }
+        if dy >= 0.0 { 0 } else { 3 }
     } else if dy >= 0.0 {
         1
     } else {

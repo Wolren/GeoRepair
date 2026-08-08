@@ -24,16 +24,15 @@ pub fn par_fix_multi_point<T: GeoFloat + Send + Sync>(
     // Same GEOS-parity rule as the serial MultiPoint impl: a point with a
     // single non-finite ordinate is invalid (CoordinateNaN) and dropped; a
     // true empty point (NaN, NaN) is valid and preserved.
-    let filtered: Vec<Point<T>> = mp
-        .0
-        .par_iter()
-        .copied()
-        .filter(|p| {
-            let finite = p.0.x.is_finite() && p.0.y.is_finite();
-            let empty_point = p.0.x.is_nan() && p.0.y.is_nan();
-            finite || empty_point
-        })
-        .collect();
+    let filtered: Vec<Point<T>> =
+        mp.0.par_iter()
+            .copied()
+            .filter(|p| {
+                let finite = p.0.x.is_finite() && p.0.y.is_finite();
+                let empty_point = p.0.x.is_nan() && p.0.y.is_nan();
+                finite || empty_point
+            })
+            .collect();
     // Serial dedup: a shared hash set inside par_iter would race.
     use rustc_hash::FxHashSet;
     let mut seen: FxHashSet<(u64, u64)> = FxHashSet::default();
@@ -138,18 +137,19 @@ pub fn par_fix_multi_polygon(mp: &MultiPolygon<f64>, config: &MakeValidConfig) -
     }
     // Normalize winding first: geo's unary_union silently drops area on CW
     // input shells (verified 0.84 vs 1.80 for square+rect overlap).
-    let ccw: Vec<Polygon<f64>> = mp
-        .0
-        .iter()
-        .map(|p| {
-            let mut p = p.clone();
-            if p.exterior().0.len() >= 4 && !crate::util::robust_is_ccw(&p.exterior().0) {
-                p.exterior_mut(|r| r.make_ccw_winding());
-            }
-            p
-        })
-        .collect();
-    Geometry::MultiPolygon(geo::algorithm::bool_ops::unary_union(&MultiPolygon::new(ccw)))
+    let ccw: Vec<Polygon<f64>> =
+        mp.0.iter()
+            .map(|p| {
+                let mut p = p.clone();
+                if p.exterior().0.len() >= 4 && !crate::util::robust_is_ccw(&p.exterior().0) {
+                    p.exterior_mut(|r| r.make_ccw_winding());
+                }
+                p
+            })
+            .collect();
+    Geometry::MultiPolygon(geo::algorithm::bool_ops::unary_union(&MultiPolygon::new(
+        ccw,
+    )))
 }
 
 /// Process a batch of independent polygons in parallel.

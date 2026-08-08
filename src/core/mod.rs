@@ -8,8 +8,8 @@
 //! Also defines internal numeric constants used across the crate for
 //! epsilon comparisons, grid thresholds, and snap scaling.
 
-use geo::algorithm::bool_ops::FillRule;
 use alloc::string::String;
+use geo::algorithm::bool_ops::FillRule;
 use thiserror::Error;
 
 use crate::crs::Crs;

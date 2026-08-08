@@ -5,9 +5,9 @@
 //! conforming GeoPackage (WGS 84 / EPSG:4326) with a single `georepair`
 //! feature table. All SQLite identifiers are double-quoted and escaped.
 
-use alloc::vec::Vec;
 use alloc::string::String;
 use alloc::string::ToString;
+use alloc::vec::Vec;
 use std::fs;
 
 use geo::{Coord, Geometry};
@@ -23,9 +23,7 @@ pub fn load_gpkg(path: &str) -> Result<Vec<Geometry<f64>>, String> {
     {
         // Which tables carry geometry, and which column in each.
         let mut stmt = conn
-            .prepare(
-                "SELECT table_name, column_name FROM gpkg_geometry_columns",
-            )
+            .prepare("SELECT table_name, column_name FROM gpkg_geometry_columns")
             .map_err(|e| format!("{path}: cannot read gpkg_geometry_columns: {e}"))?;
         let tables: Vec<(String, String)> = stmt
             .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
@@ -39,23 +37,17 @@ pub fn load_gpkg(path: &str) -> Result<Vec<Geometry<f64>>, String> {
                 quote(&table),
                 quote(&col)
             );
-            let mut q = conn
-                .prepare(&sql)
-                .map_err(|e| format!("{path}: {e}"))?;
+            let mut q = conn.prepare(&sql).map_err(|e| format!("{path}: {e}"))?;
             let blobs = q
                 .query_map([], |r| r.get::<_, Vec<u8>>(0))
                 .map_err(|e| format!("{path}: {e}"))?;
             for blob in blobs {
                 let blob = blob.map_err(|e| format!("{path}: {e}"))?;
-                let wkb = strip_gpkg_header(&blob)
-                    .map_err(|e| format!("{path}: {table}.{col}: {e}"))?;
+                let wkb =
+                    strip_gpkg_header(&blob).map_err(|e| format!("{path}: {table}.{col}: {e}"))?;
                 match read_wkb(wkb) {
                     Ok(g) => out.push(g),
-                    Err(e) => {
-                        return Err(format!(
-                            "{path}: WKB parse error in {table}.{col}: {e}"
-                        ))
-                    }
+                    Err(e) => return Err(format!("{path}: WKB parse error in {table}.{col}: {e}")),
                 }
             }
         }
@@ -193,11 +185,8 @@ pub fn save_gpkg(path: &str, geoms: &[Geometry<f64>]) -> Result<(), String> {
 }
 
 fn open_readonly(path: &str) -> Result<rusqlite::Connection, String> {
-    rusqlite::Connection::open_with_flags(
-        path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .map_err(|e| format!("{path}: cannot open GeoPackage: {e}"))
+    rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|e| format!("{path}: cannot open GeoPackage: {e}"))
 }
 
 /// Double-quote an SQLite identifier, escaping embedded quotes.

@@ -38,7 +38,10 @@ fn ls_eq(a: &LineString<f64>, b: &LineString<f64>) -> bool {
 fn poly_eq(a: &Polygon<f64>, b: &Polygon<f64>) -> bool {
     ls_eq(a.exterior(), b.exterior())
         && a.interiors().len() == b.interiors().len()
-        && a.interiors().iter().zip(b.interiors()).all(|(x, y)| ls_eq(x, y))
+        && a.interiors()
+            .iter()
+            .zip(b.interiors())
+            .all(|(x, y)| ls_eq(x, y))
 }
 fn geom_eq(a: &Geometry<f64>, b: &Geometry<f64>) -> bool {
     match (a, b) {
@@ -83,7 +86,10 @@ fn check(g: &Geometry<f64>, via: &str) -> Vec<String> {
     }
     // Idempotence
     for method in [PolyMethod::Auto, PolyMethod::Structure] {
-        let cfg = MakeValidConfig { poly_method: method, ..Default::default() };
+        let cfg = MakeValidConfig {
+            poly_method: method,
+            ..Default::default()
+        };
         let o1 = g.make_valid_with_config(&cfg);
         let o2 = o1.make_valid_with_config(&cfg);
         if !geom_norm_eq(&o1, &o2) {
@@ -110,32 +116,31 @@ fn roundtrip_and_idempotence_probe() {
     let wkb_seeds: Vec<Vec<u8>> = vec![
         // polygon
         vec![
-            1u8, 3, 0, 0, 0, 1, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0, 0,
-            0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            1u8, 3, 0, 0, 0, 1, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0, 0, 0, 0,
+            0, 240, 63, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         ],
         // multipolygon with a hole (two polygons)
         vec![
             1u8, 6, 0, 0, 0, 2, 0, 0, 0, 1, 3, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 0, 0, 0, 0,
-            0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 1, 3, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 30, 0, 0, 0, 0, 0, 0, 0, 30, 0, 0, 0, 0, 0, 0, 0, 20,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0,
+            0, 0, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 1, 3, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 30, 0, 0, 0, 0, 0, 0, 0, 30, 0, 0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0,
         ],
         // geometry collection: point + linestring
         vec![
-            1u8, 7, 0, 0, 0, 2, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 1, 2, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0,
-            0, 0,
+            1u8, 7, 0, 0, 0, 2, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 1, 2, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0,
         ],
         // degenerate: collinear ring
         vec![
             1u8, 3, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0,
-            0, 2, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0,
+            0, 2, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0,
         ],
     ];
     let wkt_seeds: Vec<String> = vec![
@@ -204,5 +209,8 @@ fn roundtrip_and_idempotence_probe() {
         }
     }
     println!("parsed: {parsed}, failures: {failures}");
-    assert_eq!(failures, 0, "roundtrip/idempotence violations found: {failures}");
+    assert_eq!(
+        failures, 0,
+        "roundtrip/idempotence violations found: {failures}"
+    );
 }

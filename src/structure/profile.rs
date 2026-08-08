@@ -4,7 +4,6 @@
 //! Content is verbatim - no behavior changes; items are re-exported by
 //! structure/mod.rs so `crate::structure::X` paths keep resolving.
 
-
 use ::core::sync::atomic::{AtomicU64, Ordering};
 pub static PROFILE_FP_NS: AtomicU64 = AtomicU64::new(0);
 pub static PROFILE_SR_NS: AtomicU64 = AtomicU64::new(0);

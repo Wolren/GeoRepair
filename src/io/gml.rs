@@ -6,9 +6,9 @@
 //! minimal GML 3.2 feature collection of the same element set. The
 //! `srsDimension`/`srsName` attributes are accepted and ignored on read.
 
-use alloc::vec::Vec;
 use alloc::string::String;
 use alloc::string::ToString;
+use alloc::vec::Vec;
 use std::fs;
 use std::io::Write;
 
@@ -23,10 +23,7 @@ pub fn load_gml(path: &str) -> Result<Vec<Geometry<f64>>, String> {
     let mut reader = Reader::from_reader(data.as_slice());
     let mut out = Vec::new();
     loop {
-        match reader
-            .read_event()
-            .map_err(|e| format!("{path}: {e}"))?
-        {
+        match reader.read_event().map_err(|e| format!("{path}: {e}"))? {
             Event::Start(e) if is_geometry(local(e.name())) => {
                 out.push(parse_geometry(&mut reader, local(e.name()))?);
             }
@@ -83,10 +80,7 @@ fn is_geometry(local: &[u8]) -> bool {
 
 /// Parse one geometry element; `local` is the element's local name. Consumes
 /// events through the geometry's matching end tag.
-fn parse_geometry(
-    reader: &mut Reader<&[u8]>,
-    local: &[u8],
-) -> Result<Geometry<f64>, String> {
+fn parse_geometry(reader: &mut Reader<&[u8]>, local: &[u8]) -> Result<Geometry<f64>, String> {
     match local {
         b"Point" => {
             let coords = read_pos(reader, b"Point")?;
@@ -131,7 +125,8 @@ fn parse_geometry(
             };
             let polys = read_members(reader, local, member)?;
             Ok(Geometry::MultiPolygon(geo::MultiPolygon(
-                polys.into_iter()
+                polys
+                    .into_iter()
                     .filter_map(|g| match g {
                         Geometry::Polygon(p) => Some(p),
                         _ => None,
@@ -170,10 +165,7 @@ fn read_pos(reader: &mut Reader<&[u8]>, container: &[u8]) -> Result<Vec<f64>, St
 
 /// Read a `<posList>` element: a flat list of coordinate tuples (honors
 /// `srsDimension` on the element; extra ordinates are dropped).
-fn read_pos_list(
-    reader: &mut Reader<&[u8]>,
-    container: &[u8],
-) -> Result<Vec<Coord<f64>>, String> {
+fn read_pos_list(reader: &mut Reader<&[u8]>, container: &[u8]) -> Result<Vec<Coord<f64>>, String> {
     let mut nums = Vec::new();
     let mut dim = 2usize;
     loop {
@@ -216,10 +208,7 @@ fn collect_numbers(reader: &mut Reader<&[u8]>, elem: &[u8]) -> Result<Vec<f64>, 
 type RingSet = (Option<LineString<f64>>, Vec<LineString<f64>>);
 
 /// Read a Polygon's `<exterior>`/`<interior>` rings.
-fn read_rings(
-    reader: &mut Reader<&[u8]>,
-    container: &[u8],
-) -> Result<RingSet, String> {
+fn read_rings(reader: &mut Reader<&[u8]>, container: &[u8]) -> Result<RingSet, String> {
     let mut exterior = None;
     let mut holes = Vec::new();
     loop {
@@ -262,15 +251,18 @@ fn read_linear_ring(reader: &mut Reader<&[u8]>) -> Result<LineString<f64>, Strin
 
 /// Read the `srsDimension` attribute of a start tag (default 2).
 fn dimension_of(e: &BytesStart) -> usize {
-    e.attributes().flatten().find_map(|a| {
-        if a.key.0 == b"srsDimension" {
-            std::str::from_utf8(&a.value)
-                .ok()
-                .and_then(|s| s.trim().parse::<usize>().ok())
-        } else {
-            None
-        }
-    }).unwrap_or(2)
+    e.attributes()
+        .flatten()
+        .find_map(|a| {
+            if a.key.0 == b"srsDimension" {
+                std::str::from_utf8(&a.value)
+                    .ok()
+                    .and_then(|s| s.trim().parse::<usize>().ok())
+            } else {
+                None
+            }
+        })
+        .unwrap_or(2)
 }
 
 /// Read a multi-geometry: every member element (e.g. `polygonMember`)
@@ -330,11 +322,7 @@ fn skip_element(reader: &mut Reader<&[u8]>) -> Result<(), String> {
 
 /// Turn a flat number list into coordinates, validating the count against
 /// the declared dimension (3D ordinates are dropped).
-fn coords_from_flat(
-    nums: &[f64],
-    ctx: &[u8],
-    dim: usize,
-) -> Result<Vec<Coord<f64>>, String> {
+fn coords_from_flat(nums: &[f64], ctx: &[u8], dim: usize) -> Result<Vec<Coord<f64>>, String> {
     if nums.is_empty() {
         return Ok(Vec::new());
     }
@@ -377,9 +365,7 @@ fn write_geometry(
         }
         Geometry::Polygon(p) => write_polygon(out, p, id, indent)?,
         Geometry::MultiPoint(mp) => {
-            out.push_str(&format!(
-                "{indent}<gml:MultiPoint gml:id=\"mp{id}\">\n"
-            ));
+            out.push_str(&format!("{indent}<gml:MultiPoint gml:id=\"mp{id}\">\n"));
             for p in &mp.0 {
                 out.push_str(&format!(
                     "{indent}  <gml:pointMember><gml:Point><gml:pos>{} {}</gml:pos></gml:Point></gml:pointMember>\n",
@@ -419,7 +405,7 @@ fn write_geometry(
             }
         }
         Geometry::Rect(_) | Geometry::Triangle(_) | Geometry::Line(_) => {
-            return Err("GML writer: unsupported geometry type".to_string())
+            return Err("GML writer: unsupported geometry type".to_string());
         }
     }
     Ok(())

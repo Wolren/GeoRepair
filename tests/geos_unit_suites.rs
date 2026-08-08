@@ -57,70 +57,266 @@ struct IsValidParityCase {
 
 const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
     // test<1> - NaN coordinate
-    IsValidParityCase { name: "t1_nan_coord", wkt: "LINESTRING (0 0, 1 nan)", geos_valid: false, our_class: Some(GeometryValidationError::CoordinateNaN), geos_class: "eInvalidCoordinate", note: "" },
+    IsValidParityCase {
+        name: "t1_nan_coord",
+        wkt: "LINESTRING (0 0, 1 nan)",
+        geos_valid: false,
+        our_class: Some(GeometryValidationError::CoordinateNaN),
+        geos_class: "eInvalidCoordinate",
+        note: "",
+    },
     // test<29> - Inf coordinate
-    IsValidParityCase { name: "t29_inf_coord", wkt: "LINESTRING (0 0, 1 inf)", geos_valid: false, our_class: Some(GeometryValidationError::CoordinateNaN), geos_class: "eInvalidCoordinate", note: "" },
+    IsValidParityCase {
+        name: "t29_inf_coord",
+        wkt: "LINESTRING (0 0, 1 inf)",
+        geos_valid: false,
+        our_class: Some(GeometryValidationError::CoordinateNaN),
+        geos_class: "eInvalidCoordinate",
+        note: "",
+    },
     // test<2> - tiny hole outside shell
-    IsValidParityCase { name: "t2_hole_outside_shell", wkt: "POLYGON((25495445.625 6671632.625,25495445.625 6671711.375,25495555.375 6671711.375,25495555.375 6671632.625,25495445.625 6671632.625),(25495368.0441 6671726.9312,25495368.3959388 6671726.93601515,25495368.7478 6671726.9333,25495368.0441 6671726.9312))", geos_valid: false, our_class: Some(GeometryValidationError::HoleOutsideShell), geos_class: "eHoleOutsideShell", note: "" },
+    IsValidParityCase {
+        name: "t2_hole_outside_shell",
+        wkt: "POLYGON((25495445.625 6671632.625,25495445.625 6671711.375,25495555.375 6671711.375,25495555.375 6671632.625,25495445.625 6671632.625),(25495368.0441 6671726.9312,25495368.3959388 6671726.93601515,25495368.7478 6671726.9333,25495368.0441 6671726.9312))",
+        geos_valid: false,
+        our_class: Some(GeometryValidationError::HoleOutsideShell),
+        geos_class: "eHoleOutsideShell",
+        note: "",
+    },
     // test<3> - ticket 588: GEOS-valid; we reject (CW ring) and repair. The
     // reversed ring is covered by geos_isvalidop_ticket588_reversed below.
-    IsValidParityCase { name: "t3_ticket588", wkt: "POLYGON (( -86.3958130146539250 114.3482370100377900, 64.7285128575111490 156.9678884302379600, 138.3490775437400700 43.1639042523018260, 87.9271046586986810 -10.5302909001479570, 87.9271046586986810 -10.5302909001479530, 55.7321237336437390 -44.8146215164960250, -86.3958130146539250 114.3482370100377900))", geos_valid: true, our_class: None, geos_class: "", note: "masked: WrongOrientation + repair" },
+    IsValidParityCase {
+        name: "t3_ticket588",
+        wkt: "POLYGON (( -86.3958130146539250 114.3482370100377900, 64.7285128575111490 156.9678884302379600, 138.3490775437400700 43.1639042523018260, 87.9271046586986810 -10.5302909001479570, 87.9271046586986810 -10.5302909001479530, 55.7321237336437390 -44.8146215164960250, -86.3958130146539250 114.3482370100377900))",
+        geos_valid: true,
+        our_class: None,
+        geos_class: "",
+        note: "masked: WrongOrientation + repair",
+    },
     // test<4> - JTS PR 737 LINEARING self-crossing (parsed as LineString)
-    IsValidParityCase { name: "t4_jts737_ring", wkt: "LINEARRING (150 100, 300 300, 100 300, 350 100, 150 100)", geos_valid: false, our_class: Some(GeometryValidationError::NotSimple), geos_class: "eRingSelfIntersection", note: "line family: GEOS eRingSelfIntersection, ours NotSimple" },
+    IsValidParityCase {
+        name: "t4_jts737_ring",
+        wkt: "LINEARRING (150 100, 300 300, 100 300, 350 100, 150 100)",
+        geos_valid: false,
+        our_class: Some(GeometryValidationError::NotSimple),
+        geos_class: "eRingSelfIntersection",
+        note: "line family: GEOS eRingSelfIntersection, ours NotSimple",
+    },
     // test<5> - valid MP
-    IsValidParityCase { name: "t5_valid_mp", wkt: "MULTIPOLYGON(((0 0, 10 0, 10 10, 0 10, 0 0),(2 2, 2 6, 6 4, 2 2)),((60 60, 60 50, 70 40, 60 60)))", geos_valid: true, our_class: None, geos_class: "", note: "" },
+    IsValidParityCase {
+        name: "t5_valid_mp",
+        wkt: "MULTIPOLYGON(((0 0, 10 0, 10 10, 0 10, 0 0),(2 2, 2 6, 6 4, 2 2)),((60 60, 60 50, 70 40, 60 60)))",
+        geos_valid: true,
+        our_class: None,
+        geos_class: "",
+        note: "",
+    },
     // test<6> - disconnected interior; structural class shadowed by
     // WrongOrientation on the mis-oriented fixture - oriented variant is
     // now REJECTED (gap fixed 2026-08-06, see
     // geos_isvalidop_t6_disconnected_interior_gap).
-    IsValidParityCase { name: "t6_disconnected_interior", wkt: "POLYGON((40 320,340 320,340 20,40 20,40 320),(100 120,40 20,180 100,100 120),(200 200,180 100,240 160,200 200),(260 260,240 160,300 200,260 260),(300 300,300 200,340 260,300 300))", geos_valid: false, our_class: Some(GeometryValidationError::WrongOrientation), geos_class: "eDisconnectedInterior", note: "orientation-shadowed; oriented variant = gap fixed" },
+    IsValidParityCase {
+        name: "t6_disconnected_interior",
+        wkt: "POLYGON((40 320,340 320,340 20,40 20,40 320),(100 120,40 20,180 100,100 120),(200 200,180 100,240 160,200 200),(260 260,240 160,300 200,260 260),(300 300,300 200,340 260,300 300))",
+        geos_valid: false,
+        our_class: Some(GeometryValidationError::WrongOrientation),
+        geos_class: "eDisconnectedInterior",
+        note: "orientation-shadowed; oriented variant = gap fixed",
+    },
     // test<7> - simple square, CW in the fixture: masked
-    IsValidParityCase { name: "t7_simple", wkt: "POLYGON ((10 89, 90 89, 90 10, 10 10, 10 89))", geos_valid: true, our_class: None, geos_class: "", note: "masked: WrongOrientation + repair" },
+    IsValidParityCase {
+        name: "t7_simple",
+        wkt: "POLYGON ((10 89, 90 89, 90 10, 10 10, 10 89))",
+        geos_valid: true,
+        our_class: None,
+        geos_class: "",
+        note: "masked: WrongOrientation + repair",
+    },
     // test<8> - bowtie
-    IsValidParityCase { name: "t8_bowtie", wkt: "POLYGON ((10 90, 90 10, 90 90, 10 10, 10 90))", geos_valid: false, our_class: Some(GeometryValidationError::SelfIntersection), geos_class: "eSelfIntersection", note: "" },
+    IsValidParityCase {
+        name: "t8_bowtie",
+        wkt: "POLYGON ((10 90, 90 10, 90 90, 10 10, 10 90))",
+        geos_valid: false,
+        our_class: Some(GeometryValidationError::SelfIntersection),
+        geos_class: "eSelfIntersection",
+        note: "",
+    },
     // test<22> - inverted polygon: GEOS eRingSelfIntersection, ours PinchPoint
-    IsValidParityCase { name: "t22_inverted", wkt: "POLYGON ((70 250, 40 500, 100 400, 70 250, 80 350, 60 350, 70 250))", geos_valid: false, our_class: Some(GeometryValidationError::PinchPoint), geos_class: "eRingSelfIntersection", note: "non-consecutive vertex revisit" },
+    IsValidParityCase {
+        name: "t22_inverted",
+        wkt: "POLYGON ((70 250, 40 500, 100 400, 70 250, 80 350, 60 350, 70 250))",
+        geos_valid: false,
+        our_class: Some(GeometryValidationError::PinchPoint),
+        geos_class: "eRingSelfIntersection",
+        note: "non-consecutive vertex revisit",
+    },
     // test<9> - polygon with hole, CW fixture: masked
-    IsValidParityCase { name: "t9_hole", wkt: "POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), (60 20, 20 70, 90 90, 60 20))", geos_valid: true, our_class: None, geos_class: "", note: "masked: WrongOrientation + repair" },
+    IsValidParityCase {
+        name: "t9_hole",
+        wkt: "POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), (60 20, 20 70, 90 90, 60 20))",
+        geos_valid: true,
+        our_class: None,
+        geos_class: "",
+        note: "masked: WrongOrientation + repair",
+    },
     // test<10> - hole touching shell at a vertex: valid
-    IsValidParityCase { name: "t10_hole_touch_vertex", wkt: "POLYGON ((240 260, 40 260, 40 80, 240 80, 240 260), (140 180, 40 260, 140 240, 140 180))", geos_valid: true, our_class: None, geos_class: "", note: "" },
+    IsValidParityCase {
+        name: "t10_hole_touch_vertex",
+        wkt: "POLYGON ((240 260, 40 260, 40 80, 240 80, 240 260), (140 180, 40 260, 140 240, 140 180))",
+        geos_valid: true,
+        our_class: None,
+        geos_class: "",
+        note: "",
+    },
     // test<11> - hole properly crossing the shell: GEOS eSelfIntersection,
     // ours HoleOutsideShell (the hole genuinely pokes out)
-    IsValidParityCase { name: "t11_hole_proper_intersection", wkt: "POLYGON ((10 90, 50 50, 10 10, 10 90), (20 50, 60 70, 60 30, 20 50))", geos_valid: false, our_class: Some(GeometryValidationError::HoleOutsideShell), geos_class: "eSelfIntersection", note: "hole pokes outside thin shell" },
+    IsValidParityCase {
+        name: "t11_hole_proper_intersection",
+        wkt: "POLYGON ((10 90, 50 50, 10 10, 10 90), (20 50, 60 70, 60 30, 20 50))",
+        geos_valid: false,
+        our_class: Some(GeometryValidationError::HoleOutsideShell),
+        geos_class: "eSelfIntersection",
+        note: "hole pokes outside thin shell",
+    },
     // test<12> - disconnected interior; orientation-shadowed, oriented = gap fixed
-    IsValidParityCase { name: "t12_disconnected_interior", wkt: "POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), (20 80, 30 80, 20 20, 20 80), (80 30, 20 20, 80 20, 80 30), (80 80, 30 80, 80 30, 80 80))", geos_valid: false, our_class: Some(GeometryValidationError::WrongOrientation), geos_class: "eDisconnectedInterior", note: "orientation-shadowed; oriented variant = gap fixed" },
+    IsValidParityCase {
+        name: "t12_disconnected_interior",
+        wkt: "POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), (20 80, 30 80, 20 20, 20 80), (80 30, 20 20, 80 20, 80 30), (80 80, 30 80, 80 30, 80 80))",
+        geos_valid: false,
+        our_class: Some(GeometryValidationError::WrongOrientation),
+        geos_class: "eDisconnectedInterior",
+        note: "orientation-shadowed; oriented variant = gap fixed",
+    },
     // test<13> - MP touch at vertices, CW fixture: masked
-    IsValidParityCase { name: "t13_mp_touch_vertices", wkt: "MULTIPOLYGON (((10 10, 10 90, 90 90, 90 10, 80 80, 50 20, 20 80, 10 10)), ((90 10, 10 10, 50 20, 90 10)))", geos_valid: true, our_class: None, geos_class: "", note: "masked: WrongOrientation + repair" },
+    IsValidParityCase {
+        name: "t13_mp_touch_vertices",
+        wkt: "MULTIPOLYGON (((10 10, 10 90, 90 90, 90 10, 80 80, 50 20, 20 80, 10 10)), ((90 10, 10 10, 50 20, 90 10)))",
+        geos_valid: true,
+        our_class: None,
+        geos_class: "",
+        note: "masked: WrongOrientation + repair",
+    },
     // test<14> - MP touch at segments: valid
-    IsValidParityCase { name: "t14_mp_touch_segments", wkt: "MULTIPOLYGON (((60 40, 90 10, 90 90, 10 90, 10 10, 40 40, 60 40)), ((50 40, 20 20, 80 20, 50 40)))", geos_valid: true, our_class: None, geos_class: "", note: "" },
+    IsValidParityCase {
+        name: "t14_mp_touch_segments",
+        wkt: "MULTIPOLYGON (((60 40, 90 10, 90 90, 10 90, 10 10, 40 40, 60 40)), ((50 40, 20 20, 80 20, 50 40)))",
+        geos_valid: true,
+        our_class: None,
+        geos_class: "",
+        note: "",
+    },
     // test<15> - nested shells (all vertices touch): orientation-shadowed;
     // oriented variant = KNOWN GAP
-    IsValidParityCase { name: "t15_nested_shells", wkt: "MULTIPOLYGON (((10 10, 20 30, 10 90, 90 90, 80 30, 90 10, 50 20, 10 10)), ((80 30, 20 30, 50 20, 80 30)))", geos_valid: false, our_class: Some(GeometryValidationError::WrongOrientation), geos_class: "eNestedShells", note: "orientation-shadowed; oriented variant = KNOWN GAP" },
+    IsValidParityCase {
+        name: "t15_nested_shells",
+        wkt: "MULTIPOLYGON (((10 10, 20 30, 10 90, 90 90, 80 30, 90 10, 50 20, 10 10)), ((80 30, 20 30, 50 20, 80 30)))",
+        geos_valid: false,
+        our_class: Some(GeometryValidationError::WrongOrientation),
+        geos_class: "eNestedShells",
+        note: "orientation-shadowed; oriented variant = KNOWN GAP",
+    },
     // test<16> - MP hole touch vertices, CW fixture: masked
-    IsValidParityCase { name: "t16_mp_hole_touch", wkt: "MULTIPOLYGON (((20 380, 420 380, 420 20, 20 20, 20 380), (220 340, 80 320, 60 200, 140 100, 340 60, 300 240, 220 340)), ((60 200, 340 60, 220 340, 60 200)))", geos_valid: true, our_class: None, geos_class: "", note: "masked: WrongOrientation + repair" },
+    IsValidParityCase {
+        name: "t16_mp_hole_touch",
+        wkt: "MULTIPOLYGON (((20 380, 420 380, 420 20, 20 20, 20 380), (220 340, 80 320, 60 200, 140 100, 340 60, 300 240, 220 340)), ((60 200, 340 60, 220 340, 60 200)))",
+        geos_valid: true,
+        our_class: None,
+        geos_class: "",
+        note: "masked: WrongOrientation + repair",
+    },
     // test<17> - multiple holes touching at one point, CW fixture: masked
-    IsValidParityCase { name: "t17_holes_touch_same_point", wkt: "POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), (40 80, 60 80, 50 50, 40 80), (20 60, 20 40, 50 50, 20 60), (40 20, 60 20, 50 50, 40 20))", geos_valid: true, our_class: None, geos_class: "", note: "masked: WrongOrientation + repair" },
+    IsValidParityCase {
+        name: "t17_holes_touch_same_point",
+        wkt: "POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), (40 80, 60 80, 50 50, 40 80), (20 60, 20 40, 50 50, 20 60), (40 20, 60 20, 50 50, 40 20))",
+        geos_valid: true,
+        our_class: None,
+        geos_class: "",
+        note: "masked: WrongOrientation + repair",
+    },
     // test<18> - hole outside shell all-touch: GEOS eHoleOutsideShell, ours
     // DisconnectedInteriorRing (touching at >= 2 shell points)
-    IsValidParityCase { name: "t18_hole_outside_all_touch", wkt: "POLYGON ((10 10, 30 10, 30 50, 70 50, 70 10, 90 10, 90 90, 10 90, 10 10), (50 50, 30 10, 70 10, 50 50))", geos_valid: false, our_class: Some(GeometryValidationError::DisconnectedInteriorRing), geos_class: "eHoleOutsideShell", note: "hole double-touch reads as disconnected interior" },
+    IsValidParityCase {
+        name: "t18_hole_outside_all_touch",
+        wkt: "POLYGON ((10 10, 30 10, 30 50, 70 50, 70 10, 90 10, 90 90, 10 90, 10 10), (50 50, 30 10, 70 10, 50 50))",
+        geos_valid: false,
+        our_class: Some(GeometryValidationError::DisconnectedInteriorRing),
+        geos_class: "eHoleOutsideShell",
+        note: "hole double-touch reads as disconnected interior",
+    },
     // test<19> - hole outside shell double-touch: same delta
-    IsValidParityCase { name: "t19_hole_outside_double_touch", wkt: "POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), (20 80, 80 80, 80 20, 20 20, 20 80), (90 70, 150 50, 90 20, 110 40, 90 70))", geos_valid: false, our_class: Some(GeometryValidationError::DisconnectedInteriorRing), geos_class: "eHoleOutsideShell", note: "hole double-touch reads as disconnected interior" },
+    IsValidParityCase {
+        name: "t19_hole_outside_double_touch",
+        wkt: "POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), (20 80, 80 80, 80 20, 20 20, 20 80), (90 70, 150 50, 90 20, 110 40, 90 70))",
+        geos_valid: false,
+        our_class: Some(GeometryValidationError::DisconnectedInteriorRing),
+        geos_class: "eHoleOutsideShell",
+        note: "hole double-touch reads as disconnected interior",
+    },
     // test<20> - nested holes: orientation-shadowed; oriented variant now
     // REJECTED as DisconnectedInteriorRing (touch-cycle fires first; class
     // delta vs GEOS eNestedHoles, boolean parity)
-    IsValidParityCase { name: "t20_nested_holes", wkt: "POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), (20 80, 80 80, 80 20, 20 20, 20 80), (50 80, 80 50, 50 20, 20 50, 50 80))", geos_valid: false, our_class: Some(GeometryValidationError::WrongOrientation), geos_class: "eNestedHoles", note: "orientation-shadowed; oriented variant = gap fixed" },
+    IsValidParityCase {
+        name: "t20_nested_holes",
+        wkt: "POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), (20 80, 80 80, 80 20, 20 20, 20 80), (50 80, 80 50, 50 20, 20 50, 50 80))",
+        geos_valid: false,
+        our_class: Some(GeometryValidationError::WrongOrientation),
+        geos_class: "eNestedHoles",
+        note: "orientation-shadowed; oriented variant = gap fixed",
+    },
     // test<21> - MP hole overlap crossing: orientation-shadowed; oriented = gap fixed
-    IsValidParityCase { name: "t21_mp_hole_overlap", wkt: "MULTIPOLYGON (((20 380, 420 380, 420 20, 20 20, 20 380), (220 340, 180 240, 60 200, 140 100, 340 60, 300 240, 220 340)), ((60 200, 340 60, 220 340, 60 200)))", geos_valid: false, our_class: Some(GeometryValidationError::WrongOrientation), geos_class: "eSelfIntersection", note: "orientation-shadowed; oriented variant = gap fixed" },
+    IsValidParityCase {
+        name: "t21_mp_hole_overlap",
+        wkt: "MULTIPOLYGON (((20 380, 420 380, 420 20, 20 20, 20 380), (220 340, 180 240, 60 200, 140 100, 340 60, 300 240, 220 340)), ((60 200, 340 60, 220 340, 60 200)))",
+        geos_valid: false,
+        our_class: Some(GeometryValidationError::WrongOrientation),
+        geos_class: "eSelfIntersection",
+        note: "orientation-shadowed; oriented variant = gap fixed",
+    },
     // test<23> - zero-length line
-    IsValidParityCase { name: "t23_zero_length_line", wkt: "LINESTRING(0 0, 0 0)", geos_valid: false, our_class: Some(GeometryValidationError::RepeatedPoint), geos_class: "(no class asserted)", note: "" },
+    IsValidParityCase {
+        name: "t23_zero_length_line",
+        wkt: "LINESTRING(0 0, 0 0)",
+        geos_valid: false,
+        our_class: Some(GeometryValidationError::RepeatedPoint),
+        geos_class: "(no class asserted)",
+        note: "",
+    },
     // test<24> - linear ring triangle: valid
-    IsValidParityCase { name: "t24_ring_triangle", wkt: "LINEARRING (100 100, 150 200, 200 100, 100 100)", geos_valid: true, our_class: None, geos_class: "", note: "" },
+    IsValidParityCase {
+        name: "t24_ring_triangle",
+        wkt: "LINEARRING (100 100, 150 200, 200 100, 100 100)",
+        geos_valid: true,
+        our_class: None,
+        geos_class: "",
+        note: "",
+    },
     // test<26> - linear ring bowtie: line family, ours NotSimple
-    IsValidParityCase { name: "t26_ring_bowtie", wkt: "LINEARRING (0 0, 100 100, 100 0, 0 100, 0 0)", geos_valid: false, our_class: Some(GeometryValidationError::NotSimple), geos_class: "eRingSelfIntersection", note: "line family" },
+    IsValidParityCase {
+        name: "t26_ring_bowtie",
+        wkt: "LINEARRING (0 0, 100 100, 100 0, 0 100, 0 0)",
+        geos_valid: false,
+        our_class: Some(GeometryValidationError::NotSimple),
+        geos_class: "eRingSelfIntersection",
+        note: "line family",
+    },
     // test<27> - same polygon as test<22>
-    IsValidParityCase { name: "t27_inverted2", wkt: "POLYGON ((70 250, 40 500, 100 400, 70 250, 80 350, 60 350, 70 250))", geos_valid: false, our_class: Some(GeometryValidationError::PinchPoint), geos_class: "eRingSelfIntersection", note: "non-consecutive vertex revisit" },
+    IsValidParityCase {
+        name: "t27_inverted2",
+        wkt: "POLYGON ((70 250, 40 500, 100 400, 70 250, 80 350, 60 350, 70 250))",
+        geos_valid: false,
+        our_class: Some(GeometryValidationError::PinchPoint),
+        geos_class: "eRingSelfIntersection",
+        note: "non-consecutive vertex revisit",
+    },
     // test<28> - self-intersecting polygon
-    IsValidParityCase { name: "t28_polygon_si", wkt: "POLYGON ((70 250, 70 500, 80 400, 40 400, 70 250))", geos_valid: false, our_class: Some(GeometryValidationError::SelfIntersection), geos_class: "eSelfIntersection", note: "" },
+    IsValidParityCase {
+        name: "t28_polygon_si",
+        wkt: "POLYGON ((70 250, 70 500, 80 400, 40 400, 70 250))",
+        geos_valid: false,
+        our_class: Some(GeometryValidationError::SelfIntersection),
+        geos_class: "eSelfIntersection",
+        note: "",
+    },
 ];
 
 /// Even-odd (set-theoretic) area of polygon parts: shell minus holes.
@@ -152,7 +348,8 @@ fn even_odd_area(g: &Geometry<f64>) -> f64 {
 fn assert_masked_orientation_case(name: &str, geom: &Geometry<f64>) {
     let r = validate(geom);
     assert!(
-        r.errors.contains(&GeometryValidationError::WrongOrientation),
+        r.errors
+            .contains(&GeometryValidationError::WrongOrientation),
         "{name}: GEOS-valid input must reject via WrongOrientation only, got {:?}",
         r.errors,
         name = name
@@ -190,7 +387,10 @@ fn geos_isvalidop_error_class_parity() {
                 "{name}: GEOS-invalid input accepted (too lenient): {geom:?}",
                 name = case.name
             );
-            let cls = case.our_class.as_ref().expect("GEOS-invalid case needs a class");
+            let cls = case
+                .our_class
+                .as_ref()
+                .expect("GEOS-invalid case needs a class");
             assert!(
                 r.errors.contains(cls),
                 "{name}: expected {cls:?} in errors, got {:?} ({})",
@@ -213,7 +413,9 @@ fn geos_isvalidop_ticket588_reversed() {
     let wkt = "POLYGON (( -86.3958130146539250 114.3482370100377900, 64.7285128575111490 156.9678884302379600, 138.3490775437400700 43.1639042523018260, 87.9271046586986810 -10.5302909001479570, 87.9271046586986810 -10.5302909001479530, 55.7321237336437390 -44.8146215164960250, -86.3958130146539250 114.3482370100377900))";
     let g = geom_from_wkt(wkt);
     // Reverse the ring: GEOS asserts the reversed polygon is also valid.
-    let Geometry::Polygon(p) = &g else { unreachable!() };
+    let Geometry::Polygon(p) = &g else {
+        unreachable!()
+    };
     let mut ring: Vec<Coord<f64>> = p.exterior().0.clone();
     ring.reverse();
     let rev = Geometry::Polygon(Polygon::new(LineString::new(ring), Vec::new()));
@@ -246,26 +448,46 @@ fn geos_isvalidop_ticket588_reversed() {
 // ---------------------------------------------------------------------------
 #[test]
 fn geos_isvalidop_t6_disconnected_interior_gap() {
-    let g = geom_from_wkt("POLYGON ((40 320, 40 20, 340 20, 340 320, 40 320), (100 120, 180 100, 40 20, 100 120), (200 200, 240 160, 180 100, 200 200), (260 260, 300 200, 240 160, 260 260), (300 300, 340 260, 300 200, 300 300))");
-    assert!(!validate(&g).valid, "GEOS: eDisconnectedInterior (hole chain to shell)");
+    let g = geom_from_wkt(
+        "POLYGON ((40 320, 40 20, 340 20, 340 320, 40 320), (100 120, 180 100, 40 20, 100 120), (200 200, 240 160, 180 100, 200 200), (260 260, 300 200, 240 160, 260 260), (300 300, 340 260, 300 200, 300 300))",
+    );
+    assert!(
+        !validate(&g).valid,
+        "GEOS: eDisconnectedInterior (hole chain to shell)"
+    );
 }
 
 #[test]
 fn geos_isvalidop_t12_disconnected_interior_gap() {
-    let g = geom_from_wkt("POLYGON ((10 90, 10 10, 90 10, 90 90, 10 90), (20 80, 30 80, 20 20, 20 80), (80 30, 20 20, 80 20, 80 30), (80 80, 30 80, 80 30, 80 80))");
-    assert!(!validate(&g).valid, "GEOS: eDisconnectedInterior (closed hole chain)");
+    let g = geom_from_wkt(
+        "POLYGON ((10 90, 10 10, 90 10, 90 90, 10 90), (20 80, 30 80, 20 20, 20 80), (80 30, 20 20, 80 20, 80 30), (80 80, 30 80, 80 30, 80 80))",
+    );
+    assert!(
+        !validate(&g).valid,
+        "GEOS: eDisconnectedInterior (closed hole chain)"
+    );
 }
 
 #[test]
 fn geos_isvalidop_t20_nested_holes_gap() {
-    let g = geom_from_wkt("POLYGON ((10 90, 10 10, 90 10, 90 90, 10 90), (20 80, 80 80, 80 20, 20 20, 20 80), (50 80, 80 50, 50 20, 20 50, 50 80))");
-    assert!(!validate(&g).valid, "GEOS: eNestedHoles (boundary-sharing inner hole)");
+    let g = geom_from_wkt(
+        "POLYGON ((10 90, 10 10, 90 10, 90 90, 10 90), (20 80, 80 80, 80 20, 20 20, 20 80), (50 80, 80 50, 50 20, 20 50, 50 80))",
+    );
+    assert!(
+        !validate(&g).valid,
+        "GEOS: eNestedHoles (boundary-sharing inner hole)"
+    );
 }
 
 #[test]
 fn geos_isvalidop_t21_mp_hole_overlap_gap() {
-    let g = geom_from_wkt("MULTIPOLYGON (((20 380, 20 20, 420 20, 420 380, 20 380), (220 340, 300 240, 340 60, 140 100, 60 200, 180 240, 220 340)), ((60 200, 340 60, 220 340, 60 200)))");
-    assert!(!validate(&g).valid, "GEOS: eSelfIntersection (component crossing hole)");
+    let g = geom_from_wkt(
+        "MULTIPOLYGON (((20 380, 20 20, 420 20, 420 380, 20 380), (220 340, 300 240, 340 60, 140 100, 60 200, 180 240, 220 340)), ((60 200, 340 60, 220 340, 60 200)))",
+    );
+    assert!(
+        !validate(&g).valid,
+        "GEOS: eSelfIntersection (component crossing hole)"
+    );
 }
 
 /// Parse a line WKT and return its coordinates.
@@ -337,7 +559,11 @@ fn assert_geom_eq(input: &str, expected: &str, tolerance: f64) {
                     ring_rot_eq(&pa.exterior().0, &pb.exterior().0),
                     "part shell mismatch"
                 );
-                assert_eq!(pa.interiors().len(), pb.interiors().len(), "part hole count");
+                assert_eq!(
+                    pa.interiors().len(),
+                    pb.interiors().len(),
+                    "part hole count"
+                );
                 for (ha, hb) in pa.interiors().iter().zip(pb.interiors()) {
                     assert!(ring_rot_eq(&ha.0, &hb.0), "part hole mismatch");
                 }
@@ -350,26 +576,42 @@ fn assert_geom_eq(input: &str, expected: &str, tolerance: f64) {
 #[test]
 fn rpr_test_1_exact_dups_removed() {
     // "(3 7, 8 8, 8 8, 8 8, 10 9)" -> "(3 7, 8 8, 10 9)"
-    assert_seq_eq("LINESTRING (3 7, 8 8, 8 8, 8 8, 10 9)", "LINESTRING (3 7, 8 8, 10 9)", 0.0);
+    assert_seq_eq(
+        "LINESTRING (3 7, 8 8, 8 8, 8 8, 10 9)",
+        "LINESTRING (3 7, 8 8, 10 9)",
+        0.0,
+    );
 }
 
 #[test]
 fn rpr_test_2_exact_dups_tail() {
     // "(3 7, 8 8, 8 8, 8 8)" -> "(3 7, 8 8)"
-    assert_seq_eq("LINESTRING (3 7, 8 8, 8 8, 8 8)", "LINESTRING (3 7, 8 8)", 0.0);
+    assert_seq_eq(
+        "LINESTRING (3 7, 8 8, 8 8, 8 8)",
+        "LINESTRING (3 7, 8 8)",
+        0.0,
+    );
 }
 
 #[test]
 fn rpr_test_3_sequence_within_tolerance() {
     // CoordinateSequences just retain each coordinate within the tolerance.
-    assert_seq_eq("LINESTRING (0 0, 1 0, 4 0, 5 0)", "LINESTRING (0 0, 4 0)", 3.0);
+    assert_seq_eq(
+        "LINESTRING (0 0, 1 0, 4 0, 5 0)",
+        "LINESTRING (0 0, 4 0)",
+        3.0,
+    );
 }
 
 #[test]
 fn rpr_test_4_line_keeps_last_point() {
     // Linestrings note the last point and retain it in preference over the
     // internal point.
-    assert_geom_eq("LINESTRING (0 0, 1 0, 4 0, 5 0)", "LINESTRING (0 0, 5 0)", 3.0);
+    assert_geom_eq(
+        "LINESTRING (0 0, 1 0, 4 0, 5 0)",
+        "LINESTRING (0 0, 5 0)",
+        3.0,
+    );
 }
 
 #[test]
@@ -390,7 +632,11 @@ fn rpr_test_7_all_exact_dups_single_entry() {
 
 #[test]
 fn rpr_test_8_all_within_tolerance_single_entry() {
-    assert_seq_eq("LINESTRING (3 7, 3.1 7.1, 3.2 7.2, 3.3 7.3)", "LINESTRING (3 7)", 1.0);
+    assert_seq_eq(
+        "LINESTRING (3 7, 3.1 7.1, 3.2 7.2, 3.3 7.3)",
+        "LINESTRING (3 7)",
+        1.0,
+    );
 }
 
 #[test]
@@ -429,7 +675,11 @@ fn rpr_test_12_shell_collapses_to_empty_polygon() {
 
 #[test]
 fn rpr_test_13_invalid_coords_not_replaced() {
-    assert_geom_eq("LINESTRING (0 0, 0 Inf, 1 1, Inf 0)", "LINESTRING (0 0, 1 1)", 1.0);
+    assert_geom_eq(
+        "LINESTRING (0 0, 0 Inf, 1 1, Inf 0)",
+        "LINESTRING (0 0, 1 1)",
+        1.0,
+    );
 }
 
 #[test]
@@ -518,7 +768,10 @@ fn vcr_test_2_closed_linear_ring_valid_in_geos_masked() {
     let g = Geometry::Polygon(ring_as_polygon("LINESTRING (0 0, 0 10, 10 10, 10 0, 0 0)"));
     assert_has_error(&g, GeometryValidationError::WrongOrientation);
     let fixed = g.make_valid();
-    assert!(validate(&fixed).valid, "repair must restore validity: {fixed:?}");
+    assert!(
+        validate(&fixed).valid,
+        "repair must restore validity: {fixed:?}"
+    );
     assert!(
         (geo::Area::unsigned_area(&fixed) - 100.0).abs() < 1e-9,
         "area must be preserved: {}",
@@ -529,7 +782,9 @@ fn vcr_test_2_closed_linear_ring_valid_in_geos_masked() {
 #[test]
 fn vcr_test_3_open_polygon_shell_invalid() {
     let g = geom_from_wkt("POLYGON ((0 0, 0 10, 10 10, 10 0, 0 0))");
-    let Geometry::Polygon(p) = g else { unreachable!() };
+    let Geometry::Polygon(p) = g else {
+        unreachable!()
+    };
     let mut ring = p.exterior().clone();
     ring.0[0].x += 0.0001;
     let g = Geometry::Polygon(Polygon::new(ring, p.interiors().to_vec()));
@@ -539,13 +794,12 @@ fn vcr_test_3_open_polygon_shell_invalid() {
 #[test]
 fn vcr_test_4_open_polygon_hole_invalid() {
     let g = geom_from_wkt("POLYGON ((0 0, 0 10, 10 10, 10 0, 0 0), (1 1, 2 1, 2 2, 1 2, 1 1))");
-    let Geometry::Polygon(p) = g else { unreachable!() };
+    let Geometry::Polygon(p) = g else {
+        unreachable!()
+    };
     let mut hole = p.interiors()[0].clone();
     hole.0[0].x += 0.0001;
-    let g = Geometry::Polygon(Polygon::new(
-        p.exterior().clone(),
-        vec![hole],
-    ));
+    let g = Geometry::Polygon(Polygon::new(p.exterior().clone(), vec![hole]));
     assert!(!validate(&g).valid, "open hole must be invalid");
 }
 
@@ -556,7 +810,10 @@ fn vcr_test_5_closed_polygon_valid_in_geos_masked() {
     let g = geom_from_wkt("POLYGON ((0 0, 0 10, 10 10, 10 0, 0 0))");
     assert_has_error(&g, GeometryValidationError::WrongOrientation);
     let fixed = g.make_valid();
-    assert!(validate(&fixed).valid, "repair must restore validity: {fixed:?}");
+    assert!(
+        validate(&fixed).valid,
+        "repair must restore validity: {fixed:?}"
+    );
     assert!(
         (geo::Area::unsigned_area(&fixed) - 100.0).abs() < 1e-9,
         "area must be preserved: {}",

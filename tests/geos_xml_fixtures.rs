@@ -1,6 +1,6 @@
 use geo::{Coord, Geometry, LineString, Point, Polygon};
-use geo_repair::validation::GeoValidation;
 use geo_repair::MakeValid;
+use geo_repair::validation::GeoValidation;
 
 #[path = "common/mod.rs"]
 mod common;
@@ -91,10 +91,7 @@ fn xml_multilinestring_case1() {
     let result = g.make_valid_with_config(&cfg_auto());
     // GEOS exact output (makevalid.xml) - asserted, not just typed:
     let expected = geom_from_wkt("GEOMETRYCOLLECTION (LINESTRING (1 1, 2 2), POINT (0 0))");
-    assert_eq!(
-        result, expected,
-        "GEOS makevalid.xml case 7 exact output"
-    );
+    assert_eq!(result, expected, "GEOS makevalid.xml case 7 exact output");
 }
 
 /// Flatten a geometry to (line coordinate lists, point coordinates) so a
@@ -103,11 +100,7 @@ fn xml_multilinestring_case1() {
 fn flatten_gc(g: &Geometry<f64>) -> (Vec<Vec<(f64, f64)>>, Vec<(f64, f64)>) {
     let mut lines = Vec::new();
     let mut points = Vec::new();
-    fn walk(
-        g: &Geometry<f64>,
-        lines: &mut Vec<Vec<(f64, f64)>>,
-        points: &mut Vec<(f64, f64)>,
-    ) {
+    fn walk(g: &Geometry<f64>, lines: &mut Vec<Vec<(f64, f64)>>, points: &mut Vec<(f64, f64)>) {
         match g {
             Geometry::LineString(ls) => {
                 lines.push(ls.0.iter().map(|c| (c.x, c.y)).collect());
@@ -151,13 +144,14 @@ fn xml_multilinestring_case2() {
     // GEOS expected: two lines (1 1,2 2) and (2 2,3 3), one point (0 0)
     assert_eq!(
         lines,
-        vec![
-            vec![(1.0, 1.0), (2.0, 2.0)],
-            vec![(2.0, 2.0), (3.0, 3.0)]
-        ],
+        vec![vec![(1.0, 1.0), (2.0, 2.0)], vec![(2.0, 2.0), (3.0, 3.0)]],
         "GEOS makevalid.xml case 8 line components"
     );
-    assert_eq!(points, vec![(0.0, 0.0)], "GEOS makevalid.xml case 8 point component");
+    assert_eq!(
+        points,
+        vec![(0.0, 0.0)],
+        "GEOS makevalid.xml case 8 point component"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -174,10 +168,7 @@ fn xml_multilinestring_two_collapses() {
     let (lines, points) = flatten_gc(&result);
     assert_eq!(
         lines,
-        vec![
-            vec![(1.0, 1.0), (2.0, 2.0)],
-            vec![(2.0, 2.0), (3.0, 3.0)]
-        ],
+        vec![vec![(1.0, 1.0), (2.0, 2.0)], vec![(2.0, 2.0), (3.0, 3.0)]],
         "GEOS makevalid.xml case 9 line components"
     );
     let mut pts = points.clone();
@@ -211,11 +202,7 @@ fn ring_fp(ring: &[Coord<f64>]) -> Vec<(i64, i64)> {
 /// Polygon fingerprint: (shell fp, sorted hole fps).
 fn poly_fp(p: &Polygon<f64>) -> (Vec<(i64, i64)>, Vec<Vec<(i64, i64)>>) {
     let ext = ring_fp(&p.exterior().0);
-    let mut holes: Vec<Vec<(i64, i64)>> = p
-        .interiors()
-        .iter()
-        .map(|h| ring_fp(&h.0))
-        .collect();
+    let mut holes: Vec<Vec<(i64, i64)>> = p.interiors().iter().map(|h| ring_fp(&h.0)).collect();
     holes.sort_unstable();
     (ext, holes)
 }
@@ -445,10 +432,15 @@ fn xml_geometry_collection_with_empties() {
 fn geos_makevalid_test1_issue265_polygon() {
     use geo::Area;
 
-    let g = geom_from_wkt("POLYGON ((2.22 2.28, 7.67 2.06, 10.98 7.70, 9.39 5.00, 7.96 7.12, 6.77 5.16, 7.43 6.24, 3.70 7.22, 5.72 5.77, 4.18 10.74, 2.20 6.83, 2.22 2.28))");
+    let g = geom_from_wkt(
+        "POLYGON ((2.22 2.28, 7.67 2.06, 10.98 7.70, 9.39 5.00, 7.96 7.12, 6.77 5.16, 7.43 6.24, 3.70 7.22, 5.72 5.77, 4.18 10.74, 2.20 6.83, 2.22 2.28))",
+    );
 
     // GEOS asserts !isValid() on the input.
-    assert!(!g.validate().valid, "issue-265 input must be invalid (GEOS parity)");
+    assert!(
+        !g.validate().valid,
+        "issue-265 input must be invalid (GEOS parity)"
+    );
 
     let result = g.make_valid_with_config(&cfg_auto());
     // GEOS asserts isValid() on the output.
@@ -496,7 +488,10 @@ fn geos_makevalid_test4_postgis_ring() {
     let g = geo_repair::io::wkb::read_wkb(&bytes).expect("GEOS test<4> WKB parses");
 
     // GEOS asserts !isValid() on the input.
-    assert!(!g.validate().valid, "test<4> input must be invalid (GEOS parity)");
+    assert!(
+        !g.validate().valid,
+        "test<4> input must be invalid (GEOS parity)"
+    );
 
     let result = g.make_valid_with_config(&cfg_auto());
     // GEOS asserts isValid() on the output.

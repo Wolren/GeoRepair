@@ -39,26 +39,62 @@ struct FpClass {
 }
 
 const FP_CLASSES: &[FpClass] = &[
-    FpClass { x: f64::NAN, y: f64::NAN },
-    FpClass { x: f64::INFINITY, y: f64::INFINITY },
-    FpClass { x: f64::NEG_INFINITY, y: f64::NEG_INFINITY },
-    FpClass { x: f64::MAX, y: f64::MAX },
-    FpClass { x: f64::MIN, y: f64::MIN },
-    FpClass { x: f64::MIN_POSITIVE, y: f64::MIN_POSITIVE * 2.0 },
-    FpClass { x: -f64::MIN_POSITIVE, y: -f64::MIN_POSITIVE * 2.0 },
+    FpClass {
+        x: f64::NAN,
+        y: f64::NAN,
+    },
+    FpClass {
+        x: f64::INFINITY,
+        y: f64::INFINITY,
+    },
+    FpClass {
+        x: f64::NEG_INFINITY,
+        y: f64::NEG_INFINITY,
+    },
+    FpClass {
+        x: f64::MAX,
+        y: f64::MAX,
+    },
+    FpClass {
+        x: f64::MIN,
+        y: f64::MIN,
+    },
+    FpClass {
+        x: f64::MIN_POSITIVE,
+        y: f64::MIN_POSITIVE * 2.0,
+    },
+    FpClass {
+        x: -f64::MIN_POSITIVE,
+        y: -f64::MIN_POSITIVE * 2.0,
+    },
     FpClass { x: 1e15, y: 1e-15 },
     FpClass { x: 1e-15, y: 1e15 },
     FpClass { x: 0.0, y: 0.0 },
-    FpClass { x: f64::EPSILON, y: -f64::EPSILON },
-    FpClass { x: -1e300, y: -1e300 },
+    FpClass {
+        x: f64::EPSILON,
+        y: -f64::EPSILON,
+    },
+    FpClass {
+        x: -1e300,
+        y: -1e300,
+    },
     FpClass { x: 1e300, y: 1e300 },
 ];
 
 fn all_configs() -> Vec<MakeValidConfig> {
     let auto = MakeValidConfig::default();
-    let auto_keep = MakeValidConfig { keep_collapsed: true, ..Default::default() };
-    let arrange = MakeValidConfig { poly_method: PolyMethod::Arrange, ..Default::default() };
-    let structure = MakeValidConfig { poly_method: PolyMethod::Structure, ..Default::default() };
+    let auto_keep = MakeValidConfig {
+        keep_collapsed: true,
+        ..Default::default()
+    };
+    let arrange = MakeValidConfig {
+        poly_method: PolyMethod::Arrange,
+        ..Default::default()
+    };
+    let structure = MakeValidConfig {
+        poly_method: PolyMethod::Structure,
+        ..Default::default()
+    };
     vec![auto, auto_keep, arrange, structure]
 }
 
@@ -128,7 +164,10 @@ fn make_ls_with(fp: &FpClass, n: usize) -> LineString<f64> {
     let coords: Vec<Coord<f64>> = (0..n)
         .map(|i| {
             let t = i as f64;
-            Coord { x: fp.x + t, y: fp.y - t }
+            Coord {
+                x: fp.x + t,
+                y: fp.y - t,
+            }
         })
         .collect();
     LineString::new(coords)
@@ -162,10 +201,7 @@ fn panic_linestring_two_points_all_fp() {
     for fp in FP_CLASSES {
         let cfg = MakeValidConfig::default();
         assert_no_panic(move || {
-            let ls = LineString::new(vec![
-                Coord { x: fp.x, y: fp.y },
-                Coord { x: fp.y, y: fp.x },
-            ]);
+            let ls = LineString::new(vec![Coord { x: fp.x, y: fp.y }, Coord { x: fp.y, y: fp.x }]);
             let _ = ls.make_valid_with_config(&cfg);
         });
     }
@@ -212,14 +248,25 @@ fn panic_polygon_all_nan_hole() {
         assert_no_panic(move || {
             let poly = Polygon::new(
                 LineString::new(vec![
-                    Coord { x: 0.0, y: 0.0 }, Coord { x: 100.0, y: 0.0 },
-                    Coord { x: 100.0, y: 100.0 }, Coord { x: 0.0, y: 100.0 },
+                    Coord { x: 0.0, y: 0.0 },
+                    Coord { x: 100.0, y: 0.0 },
+                    Coord { x: 100.0, y: 100.0 },
+                    Coord { x: 0.0, y: 100.0 },
                     Coord { x: 0.0, y: 0.0 },
                 ]),
                 vec![LineString::new(vec![
-                    Coord { x: f64::NAN, y: f64::NAN },
-                    Coord { x: f64::NAN, y: f64::NAN },
-                    Coord { x: f64::NAN, y: f64::NAN },
+                    Coord {
+                        x: f64::NAN,
+                        y: f64::NAN,
+                    },
+                    Coord {
+                        x: f64::NAN,
+                        y: f64::NAN,
+                    },
+                    Coord {
+                        x: f64::NAN,
+                        y: f64::NAN,
+                    },
                 ])],
             );
             let _ = poly.make_valid_with_config(cfg);
@@ -233,14 +280,25 @@ fn panic_polygon_inf_hole() {
         assert_no_panic(move || {
             let poly = Polygon::new(
                 LineString::new(vec![
-                    Coord { x: 0.0, y: 0.0 }, Coord { x: 100.0, y: 0.0 },
-                    Coord { x: 100.0, y: 100.0 }, Coord { x: 0.0, y: 100.0 },
+                    Coord { x: 0.0, y: 0.0 },
+                    Coord { x: 100.0, y: 0.0 },
+                    Coord { x: 100.0, y: 100.0 },
+                    Coord { x: 0.0, y: 100.0 },
                     Coord { x: 0.0, y: 0.0 },
                 ]),
                 vec![LineString::new(vec![
-                    Coord { x: f64::INFINITY, y: f64::INFINITY },
-                    Coord { x: f64::NEG_INFINITY, y: f64::NEG_INFINITY },
-                    Coord { x: f64::INFINITY, y: f64::NEG_INFINITY },
+                    Coord {
+                        x: f64::INFINITY,
+                        y: f64::INFINITY,
+                    },
+                    Coord {
+                        x: f64::NEG_INFINITY,
+                        y: f64::NEG_INFINITY,
+                    },
+                    Coord {
+                        x: f64::INFINITY,
+                        y: f64::NEG_INFINITY,
+                    },
                 ])],
             );
             let _ = poly.make_valid_with_config(cfg);
@@ -256,19 +314,46 @@ fn panic_polygon_max_coords_multiple_holes() {
                 .map(|i| {
                     let base = if i % 2 == 0 { f64::MAX } else { f64::MIN };
                     LineString::new(vec![
-                        Coord { x: base + i as f64, y: base - i as f64 },
-                        Coord { x: base - i as f64, y: base + i as f64 },
-                        Coord { x: base + i as f64 * 2.0, y: base - i as f64 * 2.0 },
-                        Coord { x: base + i as f64, y: base - i as f64 },
+                        Coord {
+                            x: base + i as f64,
+                            y: base - i as f64,
+                        },
+                        Coord {
+                            x: base - i as f64,
+                            y: base + i as f64,
+                        },
+                        Coord {
+                            x: base + i as f64 * 2.0,
+                            y: base - i as f64 * 2.0,
+                        },
+                        Coord {
+                            x: base + i as f64,
+                            y: base - i as f64,
+                        },
                     ])
                 })
                 .collect();
             let shell = LineString::new(vec![
-                Coord { x: f64::MAX, y: f64::MAX },
-                Coord { x: -f64::MAX, y: f64::MAX },
-                Coord { x: -f64::MAX, y: -f64::MAX },
-                Coord { x: f64::MAX, y: -f64::MAX },
-                Coord { x: f64::MAX, y: f64::MAX },
+                Coord {
+                    x: f64::MAX,
+                    y: f64::MAX,
+                },
+                Coord {
+                    x: -f64::MAX,
+                    y: f64::MAX,
+                },
+                Coord {
+                    x: -f64::MAX,
+                    y: -f64::MAX,
+                },
+                Coord {
+                    x: f64::MAX,
+                    y: -f64::MAX,
+                },
+                Coord {
+                    x: f64::MAX,
+                    y: f64::MAX,
+                },
             ]);
             let poly = Polygon::new(shell, holes);
             let _ = poly.make_valid_with_config(cfg);
@@ -305,10 +390,7 @@ fn panic_multilinestring_all_fp_classes() {
     for fp in FP_CLASSES {
         for cfg in &all_configs() {
             assert_no_panic(move || {
-                let mls = MultiLineString::new(vec![
-                    make_ls_with(fp, 3),
-                    make_ls_with(fp, 7),
-                ]);
+                let mls = MultiLineString::new(vec![make_ls_with(fp, 3), make_ls_with(fp, 7)]);
                 let _ = mls.make_valid_with_config(cfg);
             });
         }
@@ -325,10 +407,8 @@ fn panic_multipolygon_all_fp_classes() {
         for n in [3, 6] {
             for cfg in &all_configs() {
                 assert_no_panic(move || {
-                    let mp = MultiPolygon::new(vec![
-                        make_poly_with(fp, n),
-                        make_poly_with(fp, n + 1),
-                    ]);
+                    let mp =
+                        MultiPolygon::new(vec![make_poly_with(fp, n), make_poly_with(fp, n + 1)]);
                     let _ = mp.make_valid_with_config(cfg);
                 });
             }
@@ -344,19 +424,43 @@ fn panic_multipolygon_extreme_bbox_overlap() {
             let mp = MultiPolygon::new(vec![
                 Polygon::new(
                     LineString::new(vec![
-                        Coord { x: f64::MAX, y: f64::MAX },
-                        Coord { x: f64::MAX, y: f64::MAX - 100.0 },
-                        Coord { x: f64::MAX - 100.0, y: f64::MAX - 100.0 },
-                        Coord { x: f64::MAX, y: f64::MAX },
+                        Coord {
+                            x: f64::MAX,
+                            y: f64::MAX,
+                        },
+                        Coord {
+                            x: f64::MAX,
+                            y: f64::MAX - 100.0,
+                        },
+                        Coord {
+                            x: f64::MAX - 100.0,
+                            y: f64::MAX - 100.0,
+                        },
+                        Coord {
+                            x: f64::MAX,
+                            y: f64::MAX,
+                        },
                     ]),
                     Vec::new(),
                 ),
                 Polygon::new(
                     LineString::new(vec![
-                        Coord { x: f64::MAX, y: f64::MAX },
-                        Coord { x: f64::MAX - 100.0, y: f64::MAX },
-                        Coord { x: f64::MAX - 100.0, y: f64::MAX - 100.0 },
-                        Coord { x: f64::MAX, y: f64::MAX },
+                        Coord {
+                            x: f64::MAX,
+                            y: f64::MAX,
+                        },
+                        Coord {
+                            x: f64::MAX - 100.0,
+                            y: f64::MAX,
+                        },
+                        Coord {
+                            x: f64::MAX - 100.0,
+                            y: f64::MAX - 100.0,
+                        },
+                        Coord {
+                            x: f64::MAX,
+                            y: f64::MAX,
+                        },
                     ]),
                     Vec::new(),
                 ),
@@ -397,7 +501,10 @@ fn panic_rect_all_fp_classes() {
         assert_no_panic(move || {
             let r = Rect::new(
                 Coord { x: fp.x, y: fp.y },
-                Coord { x: fp.x + 10.0, y: fp.y + 10.0 },
+                Coord {
+                    x: fp.x + 10.0,
+                    y: fp.y + 10.0,
+                },
             );
             let _ = r.make_valid_with_config(&cfg);
         });
@@ -411,8 +518,14 @@ fn panic_triangle_all_fp_classes() {
             assert_no_panic(move || {
                 let tri = Triangle::new(
                     Coord { x: fp.x, y: fp.y },
-                    Coord { x: fp.x + 10.0, y: fp.y },
-                    Coord { x: fp.x, y: fp.y + 10.0 },
+                    Coord {
+                        x: fp.x + 10.0,
+                        y: fp.y,
+                    },
+                    Coord {
+                        x: fp.x,
+                        y: fp.y + 10.0,
+                    },
                 );
                 let _ = tri.make_valid_with_config(cfg);
             });
@@ -431,10 +544,22 @@ fn panic_ring_with_only_nans_removed_to_empty() {
         assert_no_panic(move || {
             let poly = Polygon::new(
                 LineString::new(vec![
-                    Coord { x: f64::NAN, y: f64::NAN },
-                    Coord { x: f64::NAN, y: f64::NAN },
-                    Coord { x: f64::NAN, y: f64::NAN },
-                    Coord { x: f64::NAN, y: f64::NAN },
+                    Coord {
+                        x: f64::NAN,
+                        y: f64::NAN,
+                    },
+                    Coord {
+                        x: f64::NAN,
+                        y: f64::NAN,
+                    },
+                    Coord {
+                        x: f64::NAN,
+                        y: f64::NAN,
+                    },
+                    Coord {
+                        x: f64::NAN,
+                        y: f64::NAN,
+                    },
                 ]),
                 Vec::new(),
             );
@@ -448,11 +573,29 @@ fn panic_ring_with_mixed_nan_and_valid() {
     // Ring with NaNs interleaved — filtering leaves 2 or fewer coords
     let patterns = [
         // 3 coords: valid, NaN, valid → after filter: 2 coords (edges)
-        vec![Coord { x: 0.0, y: 0.0 }, Coord { x: f64::NAN, y: f64::NAN }, Coord { x: 10.0, y: 10.0 }],
+        vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord {
+                x: f64::NAN,
+                y: f64::NAN,
+            },
+            Coord { x: 10.0, y: 10.0 },
+        ],
         // 5 coords with valid at positions 0 and 4 only
         vec![
-            Coord { x: 0.0, y: 0.0 }, Coord { x: f64::NAN, y: f64::NAN },
-            Coord { x: f64::NAN, y: f64::NAN }, Coord { x: f64::NAN, y: f64::NAN },
+            Coord { x: 0.0, y: 0.0 },
+            Coord {
+                x: f64::NAN,
+                y: f64::NAN,
+            },
+            Coord {
+                x: f64::NAN,
+                y: f64::NAN,
+            },
+            Coord {
+                x: f64::NAN,
+                y: f64::NAN,
+            },
             Coord { x: 10.0, y: 10.0 },
         ],
     ];
@@ -472,10 +615,22 @@ fn panic_ring_with_inf_and_neg_inf() {
         assert_no_panic(move || {
             let poly = Polygon::new(
                 LineString::new(vec![
-                    Coord { x: f64::INFINITY, y: f64::NEG_INFINITY },
-                    Coord { x: f64::NEG_INFINITY, y: f64::INFINITY },
-                    Coord { x: f64::INFINITY, y: f64::INFINITY },
-                    Coord { x: f64::INFINITY, y: f64::NEG_INFINITY },
+                    Coord {
+                        x: f64::INFINITY,
+                        y: f64::NEG_INFINITY,
+                    },
+                    Coord {
+                        x: f64::NEG_INFINITY,
+                        y: f64::INFINITY,
+                    },
+                    Coord {
+                        x: f64::INFINITY,
+                        y: f64::INFINITY,
+                    },
+                    Coord {
+                        x: f64::INFINITY,
+                        y: f64::NEG_INFINITY,
+                    },
                 ]),
                 Vec::new(),
             );
@@ -491,11 +646,26 @@ fn panic_ring_with_f64_max_overflow_ops() {
         assert_no_panic(move || {
             let poly = Polygon::new(
                 LineString::new(vec![
-                    Coord { x: f64::MAX, y: 0.0 },
-                    Coord { x: 0.0, y: f64::MIN },
-                    Coord { x: f64::MIN, y: 0.0 },
-                    Coord { x: 0.0, y: f64::MAX },
-                    Coord { x: f64::MAX, y: 0.0 },
+                    Coord {
+                        x: f64::MAX,
+                        y: 0.0,
+                    },
+                    Coord {
+                        x: 0.0,
+                        y: f64::MIN,
+                    },
+                    Coord {
+                        x: f64::MIN,
+                        y: 0.0,
+                    },
+                    Coord {
+                        x: 0.0,
+                        y: f64::MAX,
+                    },
+                    Coord {
+                        x: f64::MAX,
+                        y: 0.0,
+                    },
                 ]),
                 Vec::new(),
             );
@@ -512,20 +682,68 @@ fn panic_ring_with_f64_max_overflow_ops() {
 fn panic_polygon_mixed_fp_classes_in_same_ring() {
     // Each vertex is a different fp class
     let vertices = [
-        ("nan+nan", Coord { x: f64::NAN, y: f64::NAN }),
-        ("inf+inf", Coord { x: f64::INFINITY, y: f64::INFINITY }),
-        ("max+min", Coord { x: f64::MAX, y: f64::MIN }),
-        ("zero+eps", Coord { x: 0.0, y: f64::EPSILON }),
-        ("large+small", Coord { x: 1e300, y: 1e-300 }),
-        ("neg+pos", Coord { x: -1e200, y: 1e200 }),
-        ("subnormal+subnormal", Coord { x: f64::MIN_POSITIVE, y: f64::MIN_POSITIVE * 2.0 }),
+        (
+            "nan+nan",
+            Coord {
+                x: f64::NAN,
+                y: f64::NAN,
+            },
+        ),
+        (
+            "inf+inf",
+            Coord {
+                x: f64::INFINITY,
+                y: f64::INFINITY,
+            },
+        ),
+        (
+            "max+min",
+            Coord {
+                x: f64::MAX,
+                y: f64::MIN,
+            },
+        ),
+        (
+            "zero+eps",
+            Coord {
+                x: 0.0,
+                y: f64::EPSILON,
+            },
+        ),
+        (
+            "large+small",
+            Coord {
+                x: 1e300,
+                y: 1e-300,
+            },
+        ),
+        (
+            "neg+pos",
+            Coord {
+                x: -1e200,
+                y: 1e200,
+            },
+        ),
+        (
+            "subnormal+subnormal",
+            Coord {
+                x: f64::MIN_POSITIVE,
+                y: f64::MIN_POSITIVE * 2.0,
+            },
+        ),
     ];
     // Test each vertex as the first vertex (can trigger different paths)
     for i in 0..vertices.len() {
         for cfg in &all_configs() {
             let verts = vertices.to_vec();
             assert_no_panic(move || {
-                let rotated: Vec<Coord<f64>> = verts.iter().cycle().skip(i).take(4).map(|(_, c)| *c).collect();
+                let rotated: Vec<Coord<f64>> = verts
+                    .iter()
+                    .cycle()
+                    .skip(i)
+                    .take(4)
+                    .map(|(_, c)| *c)
+                    .collect();
                 let poly = Polygon::new(LineString::new(rotated), Vec::new());
                 let _ = poly.make_valid_with_config(cfg);
             });
@@ -541,7 +759,10 @@ fn panic_polygon_mixed_fp_classes_in_same_ring() {
 fn panic_empty_all_types() {
     let empties: Vec<Geometry<f64>> = vec![
         Geometry::Point(Point::new(f64::NAN, f64::NAN)),
-        Geometry::Line(Line::new(Coord { x: 0.0, y: 0.0 }, Coord { x: 0.0, y: 0.0 })),
+        Geometry::Line(Line::new(
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 0.0, y: 0.0 },
+        )),
         Geometry::LineString(LineString::new(Vec::new())),
         Geometry::Polygon(Polygon::new(LineString::new(Vec::new()), Vec::new())),
         Geometry::MultiPoint(MultiPoint::new(Vec::new())),
@@ -568,14 +789,25 @@ fn panic_hole_collapses_after_nan_removal() {
         assert_no_panic(move || {
             let poly = Polygon::new(
                 LineString::new(vec![
-                    Coord { x: 0.0, y: 0.0 }, Coord { x: 10.0, y: 0.0 },
-                    Coord { x: 10.0, y: 10.0 }, Coord { x: 0.0, y: 10.0 },
+                    Coord { x: 0.0, y: 0.0 },
+                    Coord { x: 10.0, y: 0.0 },
+                    Coord { x: 10.0, y: 10.0 },
+                    Coord { x: 0.0, y: 10.0 },
                     Coord { x: 0.0, y: 0.0 },
                 ]),
                 vec![LineString::new(vec![
-                    Coord { x: f64::NAN, y: f64::NAN },
-                    Coord { x: f64::NAN, y: f64::NAN },
-                    Coord { x: f64::NAN, y: f64::NAN },
+                    Coord {
+                        x: f64::NAN,
+                        y: f64::NAN,
+                    },
+                    Coord {
+                        x: f64::NAN,
+                        y: f64::NAN,
+                    },
+                    Coord {
+                        x: f64::NAN,
+                        y: f64::NAN,
+                    },
                 ])],
             );
             let _ = poly.make_valid_with_config(cfg);
@@ -594,11 +826,26 @@ fn panic_f64_max_subtraction_chain() {
     assert_no_panic(move || {
         let poly = Polygon::new(
             LineString::new(vec![
-                Coord { x: f64::MAX - 1.0e200, y: f64::MAX - 1.0e200 },
-                Coord { x: f64::MAX, y: f64::MAX - 1.0e200 },
-                Coord { x: f64::MAX, y: f64::MAX },
-                Coord { x: f64::MAX - 1.0e200, y: f64::MAX },
-                Coord { x: f64::MAX - 1.0e200, y: f64::MAX - 1.0e200 },
+                Coord {
+                    x: f64::MAX - 1.0e200,
+                    y: f64::MAX - 1.0e200,
+                },
+                Coord {
+                    x: f64::MAX,
+                    y: f64::MAX - 1.0e200,
+                },
+                Coord {
+                    x: f64::MAX,
+                    y: f64::MAX,
+                },
+                Coord {
+                    x: f64::MAX - 1.0e200,
+                    y: f64::MAX,
+                },
+                Coord {
+                    x: f64::MAX - 1.0e200,
+                    y: f64::MAX - 1.0e200,
+                },
             ]),
             Vec::new(),
         );
@@ -612,8 +859,24 @@ fn panic_f64_max_subtraction_chain() {
 
 #[test]
 fn panic_origin_to_extreme() {
-    for &x in &[f64::MAX, f64::MIN, f64::INFINITY, f64::NEG_INFINITY, f64::NAN, 1e300, -1e300] {
-        for &y in &[f64::MAX, f64::MIN, f64::INFINITY, f64::NEG_INFINITY, f64::NAN, 1e300, -1e300] {
+    for &x in &[
+        f64::MAX,
+        f64::MIN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::NAN,
+        1e300,
+        -1e300,
+    ] {
+        for &y in &[
+            f64::MAX,
+            f64::MIN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NAN,
+            1e300,
+            -1e300,
+        ] {
             for cfg in &all_configs() {
                 assert_no_panic(move || {
                     let poly = Polygon::new(
@@ -642,10 +905,22 @@ fn panic_near_max_subtraction() {
         assert_no_panic(move || {
             let poly = Polygon::new(
                 LineString::new(vec![
-                    Coord { x: f64::MAX, y: f64::MAX },
-                    Coord { x: f64::MAX - 1e150, y: f64::MAX - 2e150 },
-                    Coord { x: f64::MAX - 3e150, y: f64::MAX - 4e150 },
-                    Coord { x: f64::MAX, y: f64::MAX },
+                    Coord {
+                        x: f64::MAX,
+                        y: f64::MAX,
+                    },
+                    Coord {
+                        x: f64::MAX - 1e150,
+                        y: f64::MAX - 2e150,
+                    },
+                    Coord {
+                        x: f64::MAX - 3e150,
+                        y: f64::MAX - 4e150,
+                    },
+                    Coord {
+                        x: f64::MAX,
+                        y: f64::MAX,
+                    },
                 ]),
                 Vec::new(),
             );
@@ -660,7 +935,16 @@ fn panic_near_max_subtraction() {
 
 #[test]
 fn panic_single_vertex_at_extreme() {
-    for &val in &[f64::NAN, f64::INFINITY, f64::NEG_INFINITY, f64::MAX, f64::MIN, 0.0, 1e300, -1e300] {
+    for &val in &[
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::MAX,
+        f64::MIN,
+        0.0,
+        1e300,
+        -1e300,
+    ] {
         for cfg in &all_configs() {
             assert_no_panic(move || {
                 let poly = Polygon::new(
@@ -702,7 +986,10 @@ fn panic_cdt_all_collinear_with_nan() {
         assert_no_panic(move || {
             let poly = Polygon::new(
                 LineString::new(vec![
-                    Coord { x: f64::NAN, y: f64::NAN },
+                    Coord {
+                        x: f64::NAN,
+                        y: f64::NAN,
+                    },
                     Coord { x: 50.0, y: 0.0 },
                     Coord { x: 100.0, y: 0.0 },
                     Coord { x: 0.0, y: 0.0 },
@@ -720,10 +1007,22 @@ fn panic_cdt_extreme_collinear() {
         assert_no_panic(move || {
             let poly = Polygon::new(
                 LineString::new(vec![
-                    Coord { x: f64::MAX, y: f64::MAX },
-                    Coord { x: f64::MAX + 1e150, y: f64::MAX + 1e150 },
-                    Coord { x: f64::MAX + 2e150, y: f64::MAX + 2e150 },
-                    Coord { x: f64::MAX, y: f64::MAX },
+                    Coord {
+                        x: f64::MAX,
+                        y: f64::MAX,
+                    },
+                    Coord {
+                        x: f64::MAX + 1e150,
+                        y: f64::MAX + 1e150,
+                    },
+                    Coord {
+                        x: f64::MAX + 2e150,
+                        y: f64::MAX + 2e150,
+                    },
+                    Coord {
+                        x: f64::MAX,
+                        y: f64::MAX,
+                    },
                 ]),
                 Vec::new(),
             );
@@ -755,7 +1054,13 @@ fn panic_validate_or_fix_all_extreme() {
 fn panic_massive_ring_1000_vertices_all_nan() {
     let cfg = MakeValidConfig::default();
     assert_no_panic(move || {
-        let coords = vec![Coord { x: f64::NAN, y: f64::NAN }; 1000];
+        let coords = vec![
+            Coord {
+                x: f64::NAN,
+                y: f64::NAN
+            };
+            1000
+        ];
         let poly = Polygon::new(LineString::new(coords), Vec::new());
         let _ = poly.make_valid_with_config(&cfg);
     });
@@ -765,7 +1070,13 @@ fn panic_massive_ring_1000_vertices_all_nan() {
 fn panic_massive_ring_1000_vertices_all_max() {
     let cfg = MakeValidConfig::default();
     assert_no_panic(move || {
-        let coords = vec![Coord { x: f64::MAX, y: f64::MAX }; 1000];
+        let coords = vec![
+            Coord {
+                x: f64::MAX,
+                y: f64::MAX
+            };
+            1000
+        ];
         let poly = Polygon::new(LineString::new(coords), Vec::new());
         let _ = poly.make_valid_with_config(&cfg);
     });
@@ -778,9 +1089,15 @@ fn panic_massive_ring_1000_vertices_mixed_extreme() {
         let coords: Vec<Coord<f64>> = (0..1000)
             .map(|i| {
                 if i % 2 == 0 {
-                    Coord { x: f64::MAX - i as f64, y: f64::MIN + i as f64 }
+                    Coord {
+                        x: f64::MAX - i as f64,
+                        y: f64::MIN + i as f64,
+                    }
                 } else {
-                    Coord { x: f64::NAN, y: f64::NAN }
+                    Coord {
+                        x: f64::NAN,
+                        y: f64::NAN,
+                    }
                 }
             })
             .collect();
@@ -827,13 +1144,16 @@ fn panic_gc_mixed_types_extreme() {
                     Geometry::LineString(make_ls_with(fp, 5)),
                     Geometry::Polygon(make_poly_with(fp, 4)),
                     Geometry::MultiPoint(MultiPoint::new(vec![
-                        Point::new(fp.x, fp.y), Point::new(fp.y, fp.x),
+                        Point::new(fp.x, fp.y),
+                        Point::new(fp.y, fp.x),
                     ])),
                     Geometry::MultiLineString(MultiLineString::new(vec![
-                        make_ls_with(fp, 3), make_ls_with(fp, 4),
+                        make_ls_with(fp, 3),
+                        make_ls_with(fp, 4),
                     ])),
                     Geometry::MultiPolygon(MultiPolygon::new(vec![
-                        make_poly_with(fp, 3), make_poly_with(fp, 4),
+                        make_poly_with(fp, 3),
+                        make_poly_with(fp, 4),
                     ])),
                 ]);
                 let _ = gc.make_valid_with_config(cfg);
@@ -886,20 +1206,44 @@ fn panic_mp_extreme_overlap() {
                     Polygon::new(
                         LineString::new(vec![
                             Coord { x: fp.x, y: fp.y },
-                            Coord { x: fp.x + 10.0, y: fp.y },
-                            Coord { x: fp.x + 10.0, y: fp.y + 10.0 },
-                            Coord { x: fp.x, y: fp.y + 10.0 },
+                            Coord {
+                                x: fp.x + 10.0,
+                                y: fp.y,
+                            },
+                            Coord {
+                                x: fp.x + 10.0,
+                                y: fp.y + 10.0,
+                            },
+                            Coord {
+                                x: fp.x,
+                                y: fp.y + 10.0,
+                            },
                             Coord { x: fp.x, y: fp.y },
                         ]),
                         Vec::new(),
                     ),
                     Polygon::new(
                         LineString::new(vec![
-                            Coord { x: fp.x + 5.0, y: fp.y + 5.0 },
-                            Coord { x: fp.x + 15.0, y: fp.y + 5.0 },
-                            Coord { x: fp.x + 15.0, y: fp.y + 15.0 },
-                            Coord { x: fp.x + 5.0, y: fp.y + 15.0 },
-                            Coord { x: fp.x + 5.0, y: fp.y + 5.0 },
+                            Coord {
+                                x: fp.x + 5.0,
+                                y: fp.y + 5.0,
+                            },
+                            Coord {
+                                x: fp.x + 15.0,
+                                y: fp.y + 5.0,
+                            },
+                            Coord {
+                                x: fp.x + 15.0,
+                                y: fp.y + 15.0,
+                            },
+                            Coord {
+                                x: fp.x + 5.0,
+                                y: fp.y + 15.0,
+                            },
+                            Coord {
+                                x: fp.x + 5.0,
+                                y: fp.y + 5.0,
+                            },
                         ]),
                         Vec::new(),
                     ),
@@ -921,15 +1265,24 @@ fn panic_rect_triangle_extreme() {
             assert_no_panic(move || {
                 let r = Rect::new(
                     Coord { x: fp.x, y: fp.y },
-                    Coord { x: fp.x + 10.0, y: fp.y + 10.0 },
+                    Coord {
+                        x: fp.x + 10.0,
+                        y: fp.y + 10.0,
+                    },
                 );
                 let _ = r.make_valid_with_config(cfg);
             });
             assert_no_panic(move || {
                 let tri = Triangle::new(
                     Coord { x: fp.x, y: fp.y },
-                    Coord { x: fp.x + 10.0, y: fp.y },
-                    Coord { x: fp.x, y: fp.y + 10.0 },
+                    Coord {
+                        x: fp.x + 10.0,
+                        y: fp.y,
+                    },
+                    Coord {
+                        x: fp.x,
+                        y: fp.y + 10.0,
+                    },
                 );
                 let _ = tri.make_valid_with_config(cfg);
             });

@@ -123,10 +123,7 @@ fn ring_fingerprint(ring: &[Coord<f64>]) -> Vec<(i64, i64)> {
         .fold(0.0_f64, f64::max);
     let mag = if mag == 0.0 { 1.0 } else { mag };
     let q = |v: f64| ((v / mag) * 1e9).round() as i64;
-    let mut pts: Vec<(i64, i64)> = ring
-        .iter()
-        .map(|c| (q(c.x), q(c.y)))
-        .collect();
+    let mut pts: Vec<(i64, i64)> = ring.iter().map(|c| (q(c.x), q(c.y))).collect();
     if pts.first() == pts.last() {
         pts.pop();
     }
@@ -229,13 +226,13 @@ fn significant_component_count(g: &Geometry<f64>, total: f64) -> usize {
     let rel = |a: f64| a >= 1e-8 * total.abs().max(1.0);
     match g {
         Geometry::Polygon(p) => {
-            if rel(p.unsigned_area()) { 1 } else { 0 }
+            if rel(p.unsigned_area()) {
+                1
+            } else {
+                0
+            }
         }
-        Geometry::MultiPolygon(mp) => mp
-            .0
-            .iter()
-            .filter(|p| rel(p.unsigned_area()))
-            .count(),
+        Geometry::MultiPolygon(mp) => mp.0.iter().filter(|p| rel(p.unsigned_area())).count(),
         _ => 0,
     }
 }
@@ -292,7 +289,13 @@ fn compare_one(
 ) -> CompareResult {
     let input = match Geometry::try_from_wkt_str(input_wkt) {
         Ok(g) => g,
-        Err(e) => return CompareResult { name: name.into(), ok: false, detail: format!("input WKT unparseable: {e}") },
+        Err(e) => {
+            return CompareResult {
+                name: name.into(),
+                ok: false,
+                detail: format!("input WKT unparseable: {e}"),
+            };
+        }
     };
     // Our output: the geometry-level dispatch (the public API path). Fixing
     // components individually would skip the MP/GC merge logic (overlapping
@@ -321,11 +324,23 @@ fn compare_one(
     // GEOS output
     let geos_wkt = match geos_make_valid(geosop, input_wkt) {
         Some(w) => w,
-        None => return CompareResult { name: name.into(), ok: false, detail: "geosop failed to produce output".into() },
+        None => {
+            return CompareResult {
+                name: name.into(),
+                ok: false,
+                detail: "geosop failed to produce output".into(),
+            };
+        }
     };
     let geos = match parse_geos_wkt(&geos_wkt) {
         Some(g) => g,
-        None => return CompareResult { name: name.into(), ok: false, detail: format!("GEOS WKT unparseable: {geos_wkt}") },
+        None => {
+            return CompareResult {
+                name: name.into(),
+                ok: false,
+                detail: format!("GEOS WKT unparseable: {geos_wkt}"),
+            };
+        }
     };
     // GEOS output validity: ask GEOS itself, NOT our validator. Our
     // validator is deliberately stricter than GEOS IsValidOp (WrongOrientation,
@@ -337,25 +352,33 @@ fn compare_one(
             return CompareResult {
                 name: name.into(),
                 ok: false,
-                detail: "could not determine GEOS output validity (geosop parse failure; oracle broken)".into(),
+                detail:
+                    "could not determine GEOS output validity (geosop parse failure; oracle broken)"
+                        .into(),
             };
         }
     };
 
     // 1. both valid (or both empty for degenerate input)
     if !our_valid {
-        return CompareResult { name: name.into(), ok: false, detail: "our output invalid".into() };
+        return CompareResult {
+            name: name.into(),
+            ok: false,
+            detail: "our output invalid".into(),
+        };
     }
     if !geos_valid {
-        return CompareResult { name: name.into(), ok: false, detail: "GEOS output invalid (oracle broken?)".into() };
+        return CompareResult {
+            name: name.into(),
+            ok: false,
+            detail: "GEOS output invalid (oracle broken?)".into(),
+        };
     }
     // 2. type family - Polygon and MultiPolygon-with-1-component are
     // equivalent (both valid representations of the same geometry;
     // measured: Arrange wraps the same hole-role-swap result as MP(1)
     // while GEOS emits Polygon). Area-only classes skip the type check.
-    if !area_only_fixtures().contains(&name)
-        && !type_family_match(&ours, &geos)
-    {
+    if !area_only_fixtures().contains(&name) && !type_family_match(&ours, &geos) {
         return CompareResult {
             name: name.into(),
             ok: false,
@@ -380,7 +403,9 @@ fn compare_one(
         return CompareResult {
             name: name.into(),
             ok: false,
-            detail: format!("component count: ours={our_count} (sig {our_sig}) geos={geos_count} (sig {geos_sig})"),
+            detail: format!(
+                "component count: ours={our_count} (sig {our_sig}) geos={geos_count} (sig {geos_sig})"
+            ),
         };
     }
     // 4. area - strict match for normal classes; the area-only divergence
@@ -407,9 +432,7 @@ fn compare_one(
             "hole_equals_shell" => our_area == 0.0 && component_count(&ours) == 0,
             // GEOS keeps the degenerate sliver component; we collapse it.
             // Area must match GEOS to within the sliver's share (1.6e-6).
-            "mixed_magnitude" => {
-                (our_area - geos_area).abs() <= 1e-5 * geos_area.abs()
-            }
+            "mixed_magnitude" => (our_area - geos_area).abs() <= 1e-5 * geos_area.abs(),
             // We union overlapping MP shells to a single component (JTS
             // rule 09, area 46); GEOS even-odd EXCLUDES the overlap (42).
             // Pinned: our union area.
@@ -440,7 +463,18 @@ fn compare_one(
             ),
         };
     }
-    CompareResult { name: name.into(), ok: true, detail: format!("area {our_area:.4} = GEOS {geos_area:.4}, {our_count} comps{}", if area_only_fixtures().contains(&name) { " (area-only class)" } else { ", normalized equal" }) }
+    CompareResult {
+        name: name.into(),
+        ok: true,
+        detail: format!(
+            "area {our_area:.4} = GEOS {geos_area:.4}, {our_count} comps{}",
+            if area_only_fixtures().contains(&name) {
+                " (area-only class)"
+            } else {
+                ", normalized equal"
+            }
+        ),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -450,48 +484,81 @@ fn compare_one(
 fn make_valid_fixtures() -> Vec<(&'static str, &'static str)> {
     vec![
         // The two hard seeds from the port (bit-exact verified in session)
-        ("seed2_multi_crossing", "POLYGON ((0 0, 100 0, 100 100, 0 100, 0 0), (20 20, 80 20, 80 80, 20 80, 20 20))"),
+        (
+            "seed2_multi_crossing",
+            "POLYGON ((0 0, 100 0, 100 100, 0 100, 0 0), (20 20, 80 20, 80 80, 20 80, 20 20))",
+        ),
         // self-crossing star
-        ("star_crossing", "POLYGON ((0 0, 10 0, 5 5, 15 5, 10 10, 0 10, 0 0))"),
+        (
+            "star_crossing",
+            "POLYGON ((0 0, 10 0, 5 5, 15 5, 10 10, 0 10, 0 0))",
+        ),
         // bowtie / hourglass
         ("bowtie", "POLYGON ((0 0, 10 10, 10 0, 0 10, 0 0))"),
         // figure-eight - GEOS keeps dangling lines + full rect in a GC
         // (area 37.5 incl. overlap); we emit the even-odd fill (28.125 =
         // 37.5 − 9.375 lobe). Divergence class: BETTER (stroke coverage),
         // compared as area-only.
-        ("figure_eight", "POLYGON ((0 0, 5 0, 5 5, 0 5, 2.5 2.5, 5 2.5, 5 7.5, 0 7.5, 0 0))"),
+        (
+            "figure_eight",
+            "POLYGON ((0 0, 5 0, 5 5, 0 5, 2.5 2.5, 5 2.5, 5 7.5, 0 7.5, 0 0))",
+        ),
         // nested holes (island case)
-        ("nested_holes", "POLYGON ((0 0, 20 0, 20 20, 0 20, 0 0), (2 2, 18 2, 18 18, 2 18, 2 2), (6 6, 14 6, 14 14, 6 14, 6 6))"),
+        (
+            "nested_holes",
+            "POLYGON ((0 0, 20 0, 20 20, 0 20, 0 0), (2 2, 18 2, 18 18, 2 18, 2 2), (6 6, 14 6, 14 14, 6 14, 6 6))",
+        ),
         // boundary-touching rhombus hole
-        ("square_hole_rhombus", "POLYGON ((0 0, 1 0, 1 1, 0 1, 0 0), (0.5 0, 1 0.5, 0.5 1, 0 0.5, 0.5 0))"),
+        (
+            "square_hole_rhombus",
+            "POLYGON ((0 0, 1 0, 1 1, 0 1, 0 0), (0.5 0, 1 0.5, 0.5 1, 0 0.5, 0.5 0))",
+        ),
         // hole == shell (degenerate) - GEOS returns the shell (edge
         // cancellation); we return empty GC. Divergence class: empty is
         // set-theoretically correct (hole cancels shell), compared as
         // area-only with tolerance 0.
-        ("hole_equals_shell", "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (0 0, 10 0, 10 10, 0 10, 0 0))"),
+        (
+            "hole_equals_shell",
+            "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (0 0, 10 0, 10 10, 0 10, 0 0))",
+        ),
         // hole larger than shell - GEOS swaps roles: big ring becomes
         // shell, small ring becomes hole (area 300 = 400−100 even-odd).
         // Fixed in process_shell; strict comparison.
-        ("hole_larger_than_shell", "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (-5 -5, 15 -5, 15 15, -5 15, -5 -5))"),
+        (
+            "hole_larger_than_shell",
+            "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (-5 -5, 15 -5, 15 15, -5 15, -5 -5))",
+        ),
         // mixed magnitude (the fuzz seed) - GEOS keeps a degenerate sliver
         // component (7 comps), we collapse it (6 comps). Area matches to
         // 1.6e-6 relative. Divergence class: sliver collapse; compared
         // with component-count allowance for sub-1e-8-relative components.
-        ("mixed_magnitude", "POLYGON ((84956205.27307954 -45986769.5228732, -99794971.69789362 4896957.693364016, 95593402.35083151 -37252189.83613572, 37149609.09726282 -63327990.14115548, 78418546.04729833 69380301.01700698, 0 0, 0 0, 0 5.089116040917129e-9, 84956205.27307954 -45986769.5228732))"),
+        (
+            "mixed_magnitude",
+            "POLYGON ((84956205.27307954 -45986769.5228732, -99794971.69789362 4896957.693364016, 95593402.35083151 -37252189.83613572, 37149609.09726282 -63327990.14115548, 78418546.04729833 69380301.01700698, 0 0, 0 0, 0 5.089116040917129e-9, 84956205.27307954 -45986769.5228732))",
+        ),
         // ------------------------------------------------------------------
         // Non-polygon and multi-part inputs (exercises the geometry-level
         // dispatch paths that the polygon-only fixture set never reached).
         // ------------------------------------------------------------------
         // Overlapping MP components - GEOS makeValid unions the overlap
         // (area 46 = 25 + 25 − 4); exercises the MP merge path.
-        ("mp_overlapping", "MULTIPOLYGON (((0 0, 5 0, 5 5, 0 5, 0 0)), ((3 3, 8 3, 8 8, 3 8, 3 3)))"),
+        (
+            "mp_overlapping",
+            "MULTIPOLYGON (((0 0, 5 0, 5 5, 0 5, 0 0)), ((3 3, 8 3, 8 8, 3 8, 3 3)))",
+        ),
         // Nested MP component (island-in-hole) - valid positive space per
         // GEOS; GEOS returns outer shell with the inner ring as a hole
         // (area 144 = 400 − 256).
-        ("mp_nested_island", "MULTIPOLYGON (((0 0, 20 0, 20 20, 0 20, 0 0)), ((2 2, 18 2, 18 18, 2 18, 2 2)))"),
+        (
+            "mp_nested_island",
+            "MULTIPOLYGON (((0 0, 20 0, 20 20, 0 20, 0 0)), ((2 2, 18 2, 18 18, 2 18, 2 2)))",
+        ),
         // Mixed GC (GEOS makevalid.xml case 15): empties + a polygon with a
         // hole touching the shell at two points.
-        ("gc_mixed", "GEOMETRYCOLLECTION (POINT EMPTY, LINESTRING EMPTY, POLYGON ((0 0, 0 1, 1 1, 1 0, 0 0), (0 0.5, 0.5 0.1, 1 0.5, 0 0.5)))"),
+        (
+            "gc_mixed",
+            "GEOMETRYCOLLECTION (POINT EMPTY, LINESTRING EMPTY, POLYGON ((0 0, 0 1, 1 1, 1 0, 0 0), (0 0.5, 0.5 0.1, 1 0.5, 0 0.5)))",
+        ),
         // Degenerate line - GEOS makeValid collapses it to a point.
         ("line_degenerate", "LINESTRING (0 0, 0 0)"),
         // Self-crossing line - GEOS makeValid returns lines unchanged.
@@ -503,7 +570,10 @@ fn make_valid_fixtures() -> Vec<(&'static str, &'static str)> {
         // Ring vertex-on-edge T-junction (GEOS TestValid2 Test 22): the
         // closing vertex (110 140) lies on edge (60 90)-(160 190). GEOS
         // nodes the touch: outer lobe with the inner lobe as a hole.
-        ("ring_tjunction", "POLYGON ((110 140, 110 50, 60 50, 60 90, 160 190, 20 110, 20 20, 200 20, 110 140))"),
+        (
+            "ring_tjunction",
+            "POLYGON ((110 140, 110 50, 60 50, 60 90, 160 190, 20 110, 20 20, 200 20, 110 140))",
+        ),
     ]
 }
 
@@ -540,8 +610,20 @@ fn compare_geos_makevalid() {
 
     let cfgs = [
         ("auto", MakeValidConfig::default()),
-        ("structure", MakeValidConfig { poly_method: PolyMethod::Structure, ..Default::default() }),
-        ("arrange", MakeValidConfig { poly_method: PolyMethod::Arrange, ..Default::default() }),
+        (
+            "structure",
+            MakeValidConfig {
+                poly_method: PolyMethod::Structure,
+                ..Default::default()
+            },
+        ),
+        (
+            "arrange",
+            MakeValidConfig {
+                poly_method: PolyMethod::Arrange,
+                ..Default::default()
+            },
+        ),
     ];
 
     let mut total = 0;
@@ -565,7 +647,11 @@ fn compare_geos_makevalid() {
     if !failures.is_empty() {
         panic!(
             "GEOS oracle mismatches:\n{}",
-            failures.iter().map(|f| format!("  - {f}")).collect::<Vec<_>>().join("\n")
+            failures
+                .iter()
+                .map(|f| format!("  - {f}"))
+                .collect::<Vec<_>>()
+                .join("\n")
         );
     }
 }

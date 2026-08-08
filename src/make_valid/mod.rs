@@ -12,22 +12,22 @@
 //! - [`MakeValid::make_valid`] - repair with default config
 //! - [`MakeValid::make_valid_with_config`] - repair with custom config
 
-use geo::{
-    Coord, CoordNum, GeoFloat, Geometry, GeometryCollection, Line, LineString,
-    MultiLineString, MultiPoint, MultiPolygon, Point, Polygon, Rect, Triangle, Winding,
-};
 use crate::util::{point_in_ring_exclusive_even_odd, shoelace_abs_sum};
+use geo::{
+    Coord, CoordNum, GeoFloat, Geometry, GeometryCollection, Line, LineString, MultiLineString,
+    MultiPoint, MultiPolygon, Point, Polygon, Rect, Triangle, Winding,
+};
 
-use alloc::vec::Vec;
 use crate::core::MakeValidConfig;
 #[cfg(any(feature = "arrange", feature = "structure"))]
 use crate::core::PolyMethod;
-use crate::noding::{remove_consecutive_duplicates, NodingFloat};
+use crate::noding::{NodingFloat, remove_consecutive_duplicates};
 use crate::validation::edges::{edges_intersect_general, edges_vertex_on_edge};
 use crate::validation::impls::{
     check_line_components_intersect, check_linestring_self_intersection, segments_collinear_overlap,
 };
 use crate::validation::{GeoValidation, ValidationResult};
+use alloc::vec::Vec;
 use log::warn;
 
 /// Trait for repairing invalid geometries.
@@ -475,26 +475,26 @@ impl<T: GeoFloat> MakeValid for Rect<T> {
     type Scalar = T;
 
     fn make_valid_with_config(&self, _config: &MakeValidConfig) -> Geometry<T> {
-            let min_ok = self.min().x.is_finite() && self.min().y.is_finite();
-            let max_ok = self.max().x.is_finite() && self.max().y.is_finite();
-            if min_ok && max_ok {
-                // Degenerate (zero-area) rect → empty
-                if (self.max().x - self.min().x).abs() < T::epsilon()
-                    || (self.max().y - self.min().y).abs() < T::epsilon()
-                {
-                    empty_geom()
-                } else {
-                    Geometry::Rect(*self)
-                }
-            } else {
-                warn!(
-                    "Rect::make_valid: NaN coordinate ({:?}, {:?})",
-                    self.min(),
-                    self.max()
-                );
+        let min_ok = self.min().x.is_finite() && self.min().y.is_finite();
+        let max_ok = self.max().x.is_finite() && self.max().y.is_finite();
+        if min_ok && max_ok {
+            // Degenerate (zero-area) rect → empty
+            if (self.max().x - self.min().x).abs() < T::epsilon()
+                || (self.max().y - self.min().y).abs() < T::epsilon()
+            {
                 empty_geom()
+            } else {
+                Geometry::Rect(*self)
             }
+        } else {
+            warn!(
+                "Rect::make_valid: NaN coordinate ({:?}, {:?})",
+                self.min(),
+                self.max()
+            );
+            empty_geom()
         }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -506,13 +506,13 @@ mod multipolygon;
 mod polygon;
 mod strip;
 
-pub use polygon::is_valid_with_geo;
-pub(crate) use polygon::enforce_ogc_winding;
-pub(crate) use polygon::snap_cannot_represent;
 #[cfg(any(feature = "arrange", feature = "structure"))]
 pub use multipolygon::drop_nested_components;
+pub(crate) use polygon::enforce_ogc_winding;
+pub use polygon::is_valid_with_geo;
 #[cfg(any(feature = "arrange", feature = "structure"))]
 pub use polygon::make_valid_owned;
+pub(crate) use polygon::snap_cannot_represent;
 pub use strip::strip_degenerate_test;
 
 #[cfg(any(feature = "arrange", feature = "structure"))]

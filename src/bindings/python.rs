@@ -36,9 +36,9 @@
 //! **QGIS integration:** See `qgis/qgis_geo_repair.py` for a complete
 //! processing script (batched WKB streaming, memory O(1)).
 
-use alloc::vec::Vec;
 use alloc::string::String;
 use alloc::string::ToString;
+use alloc::vec::Vec;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
@@ -171,7 +171,11 @@ fn geo_repair_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
 ///     WKB bytes of the repaired geometry.
 #[pyfunction]
 #[pyo3(signature = (wkb, method = None, keep_collapsed = None))]
-fn repair_wkb(wkb: Vec<u8>, method: Option<&str>, keep_collapsed: Option<bool>) -> PyResult<Vec<u8>> {
+fn repair_wkb(
+    wkb: Vec<u8>,
+    method: Option<&str>,
+    keep_collapsed: Option<bool>,
+) -> PyResult<Vec<u8>> {
     let config = make_config(method, keep_collapsed);
     let geom = parse_wkb(&wkb)?;
     let fixed = repair_one(geom, &config);

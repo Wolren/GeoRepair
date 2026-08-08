@@ -7,11 +7,9 @@
 //!
 //! See validation/mod.rs for the module map.
 
-
-
-use alloc::vec::Vec;
-use alloc::string::String;
 use crate::validation::core::*;
+use alloc::string::String;
+use alloc::vec::Vec;
 use geo::{Coord, Line, LineString, MultiLineString, MultiPoint, Point, Rect, Triangle};
 
 impl GeoValidation for Point<f64> {
@@ -154,7 +152,8 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
         let dx = a2.x - a1.x;
         let dy = a2.y - a1.y;
         let f = dx * (c2.y - a1.y) - dy * (c2.x - a1.x);
-        let margin = 32.0 * f64::EPSILON * ((dx * (c2.y - a1.y)).abs() + (dy * (c2.x - a1.x)).abs());
+        let margin =
+            32.0 * f64::EPSILON * ((dx * (c2.y - a1.y)).abs() + (dy * (c2.x - a1.x)).abs());
         if f.abs() > eps + margin {
             continue;
         }
@@ -163,15 +162,7 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
         }
     }
     // Closed line: first and last segments may touch only at the closure vertex.
-    if closed
-        && segments_collinear_overlap(
-            coords[n - 1],
-            coords[n],
-            coords[0],
-            coords[1],
-            eps,
-        )
-    {
+    if closed && segments_collinear_overlap(coords[n - 1], coords[n], coords[0], coords[1], eps) {
         return true;
     }
 
@@ -245,8 +236,16 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
                 for i in 0..n {
                     let a1 = coords[i];
                     let a2 = coords[i + 1];
-                    let (lo_x, hi_x) = if a1.x < a2.x { (a1.x, a2.x) } else { (a2.x, a1.x) };
-                    let (lo_y, hi_y) = if a1.y < a2.y { (a1.y, a2.y) } else { (a2.y, a1.y) };
+                    let (lo_x, hi_x) = if a1.x < a2.x {
+                        (a1.x, a2.x)
+                    } else {
+                        (a2.x, a1.x)
+                    };
+                    let (lo_y, hi_y) = if a1.y < a2.y {
+                        (a1.y, a2.y)
+                    } else {
+                        (a2.y, a1.y)
+                    };
                     let query = rstar::AABB::from_corners([lo_x, lo_y], [hi_x, hi_y]);
                     let found = tree.locate_in_envelope_intersecting_int(query, |c| {
                         let j = c.idx;

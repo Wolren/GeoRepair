@@ -7,20 +7,15 @@
 //!
 //! See validation/mod.rs for the module map.
 
-
-
-use alloc::vec::Vec;
 use crate::validation::core::*;
-use geo::{Coord};
+use alloc::vec::Vec;
+use geo::Coord;
 
 pub(crate) fn ring_has_non_finite(ring: &[Coord<f64>]) -> bool {
     ring.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
 }
 
-pub fn check_ring_validity(
-    ring: &[Coord<f64>],
-    is_exterior: bool,
-) -> Vec<GeometryValidationError> {
+pub fn check_ring_validity(ring: &[Coord<f64>], is_exterior: bool) -> Vec<GeometryValidationError> {
     let mut errors = Vec::new();
 
     let interior_n = ring.len().saturating_sub(1);
@@ -285,8 +280,10 @@ pub(crate) fn point_in_ring_exclusive(pt: Coord<f64>, ring: &[Coord<f64>]) -> bo
             let max_x = p1.x.max(p2.x);
             let min_y = p1.y.min(p2.y);
             let max_y = p1.y.max(p2.y);
-            if pt.x >= min_x - 1e-12 && pt.x <= max_x + 1e-12
-                && pt.y >= min_y - 1e-12 && pt.y <= max_y + 1e-12
+            if pt.x >= min_x - 1e-12
+                && pt.x <= max_x + 1e-12
+                && pt.y >= min_y - 1e-12
+                && pt.y <= max_y + 1e-12
             {
                 return false;
             }

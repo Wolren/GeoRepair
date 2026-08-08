@@ -1,10 +1,8 @@
 //! SIMD predicate test battery.
 
-
-use alloc::vec::Vec;
 #[cfg(test)]
 use super::*;
-
+use alloc::vec::Vec;
 
 // ============================================================================
 // Tests (platform-independent)
@@ -318,5 +316,4 @@ mod tests {
             "point should be outside"
         );
     }
-
 }

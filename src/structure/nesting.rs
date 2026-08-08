@@ -4,13 +4,11 @@
 //! Content is verbatim - no behavior changes; items are re-exported by
 //! structure/mod.rs so `crate::structure::X` paths keep resolving.
 
-
-
-use alloc::vec::Vec;
-use geo::{Coord, LineString, Polygon, Geometry, Point, Winding};
 use crate::core::MakeValidConfig;
-use rstar::{AABB, RTree, RTreeObject};
 use crate::util;
+use alloc::vec::Vec;
+use geo::{Coord, Geometry, LineString, Point, Polygon, Winding};
+use rstar::{AABB, RTree, RTreeObject};
 
 /// True if the polygon's linework has a PROPER self-crossing (interior-interior
 /// intersection). Shared endpoints (hole touching shell at a vertex — GEOS
@@ -43,7 +41,10 @@ pub fn has_proper_self_crossing(p: &geo::Polygon<f64>) -> bool {
         return false;
     }
     let bbox = crate::simd::aabb_minmax_simd(&coords);
-    let scale = (bbox.1 - bbox.0).abs().max((bbox.3 - bbox.2).abs()).max(1.0);
+    let scale = (bbox.1 - bbox.0)
+        .abs()
+        .max((bbox.3 - bbox.2).abs())
+        .max(1.0);
     let eps = crate::core::EPS * scale;
     crate::structure::sweep::has_proper_self_crossing_sweep(&coords, &ring_offsets, eps)
 }
@@ -59,7 +60,10 @@ fn point_in_ring_exclusive(pt: Coord<f64>, ring: &[Coord<f64>]) -> bool {
 /// shell boundary. Boundary-touching holes (all vertices exactly on the
 /// shell, e.g. CGAL square_hole_rhombus) return false. Used to route
 /// crossing holes to the arrange fallback (see fix_polygon).
-pub(crate) fn hole_vertex_strictly_outside(hole: &LineString<f64>, shell: &LineString<f64>) -> bool {
+pub(crate) fn hole_vertex_strictly_outside(
+    hole: &LineString<f64>,
+    shell: &LineString<f64>,
+) -> bool {
     let ring = shell.0.as_slice();
     if ring.len() < 4 {
         return false;
@@ -110,9 +114,7 @@ pub(crate) fn all_vertices_inside_ring(inner: &[Coord<f64>], outer: &[Coord<f64>
     if inner.len() < 4 || outer.len() < 4 {
         return false;
     }
-    inner
-        .iter()
-        .all(|pt| point_in_ring_exclusive(*pt, outer))
+    inner.iter().all(|pt| point_in_ring_exclusive(*pt, outer))
 }
 
 /// Check if two bounding boxes overlap.
@@ -129,7 +131,9 @@ pub(crate) fn bboxes_overlap(a: (f64, f64, f64, f64), b: (f64, f64, f64, f64)) -
 /// - `islands`: holes at depth 2+ become separate polygons, with their own
 ///   sub-holes (depth 3) as interior rings. Depth alternates: even depths are
 ///   separate polygons (islands/positive space), odd depths are holes (negative space).
-pub(crate) fn resolve_nesting(holes: &[LineString<f64>]) -> (Vec<LineString<f64>>, Vec<Polygon<f64>>) {
+pub(crate) fn resolve_nesting(
+    holes: &[LineString<f64>],
+) -> (Vec<LineString<f64>>, Vec<Polygon<f64>>) {
     if holes.len() <= 1 {
         return (holes.to_vec(), Vec::new());
     }

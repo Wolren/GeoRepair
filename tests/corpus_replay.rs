@@ -27,7 +27,10 @@ fn replay_wkb(bytes: &[u8], label: &str) {
             Ok(g) => g,
             Err(_) => panic!("make_valid panicked on {label} in mode {method:?}"),
         };
-        assert!(out.validate().valid, "invalid output on {label} in mode {method:?}: {out:?}");
+        assert!(
+            out.validate().valid,
+            "invalid output on {label} in mode {method:?}: {out:?}"
+        );
     }
 }
 
@@ -49,7 +52,10 @@ fn replay_wkt(text: &str, label: &str) {
             Ok(g) => g,
             Err(_) => panic!("make_valid panicked on {label} in mode {method:?}"),
         };
-        assert!(out.validate().valid, "invalid output on {label} in mode {method:?}: {out:?}");
+        assert!(
+            out.validate().valid,
+            "invalid output on {label} in mode {method:?}: {out:?}"
+        );
     }
 }
 
@@ -67,10 +73,16 @@ fn replay_all_corpus_seeds() {
             let name = p.file_name().unwrap().to_string_lossy().to_string();
             if name.ends_with(".bin") {
                 let bytes = std::fs::read(&p).expect("read seed");
-                replay_wkb(&bytes, &format!("{}/{}", dir.file_name().unwrap().to_string_lossy(), name));
+                replay_wkb(
+                    &bytes,
+                    &format!("{}/{}", dir.file_name().unwrap().to_string_lossy(), name),
+                );
             } else if name.ends_with(".wkt") {
                 let text = std::fs::read_to_string(&p).expect("read seed");
-                replay_wkt(&text, &format!("{}/{}", dir.file_name().unwrap().to_string_lossy(), name));
+                replay_wkt(
+                    &text,
+                    &format!("{}/{}", dir.file_name().unwrap().to_string_lossy(), name),
+                );
             }
             n += 1;
         }

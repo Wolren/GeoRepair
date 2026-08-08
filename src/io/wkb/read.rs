@@ -1,8 +1,7 @@
 //! WKB reader: single-pass parsing with EWKB flag/SRID/Z-M handling.
 
-
-use alloc::vec::Vec;
 use super::*;
+use alloc::vec::Vec;
 #[cfg(feature = "std")]
 use std::io::Read;
 
@@ -391,4 +390,3 @@ pub fn read_wkb_concat(buf: &[u8]) -> Result<Vec<Geometry<f64>>, WkbError> {
     }
     Ok(geoms)
 }
-

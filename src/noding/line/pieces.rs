@@ -13,10 +13,10 @@ use rustc_hash::FxHashSet;
 
 use crate::validation::sweep::{radix_sort_keys_tls, sortable_u64};
 
-use super::classify::classify;
 use super::Hit;
-use super::NodeEnt;
 use super::NO_FAMILY;
+use super::NodeEnt;
+use super::classify::classify;
 
 impl<'a> super::LineNoder<'a> {
     pub(super) fn test_pair(&mut self, i: usize, j: usize) {
@@ -32,16 +32,34 @@ impl<'a> super::LineNoder<'a> {
             }
             Hit::Collinear => {
                 self.near_collinear = true;
-                self.nodes.push(NodeEnt { seg: i as u32, pt: b1 });
-                self.nodes.push(NodeEnt { seg: i as u32, pt: b2 });
-                self.nodes.push(NodeEnt { seg: j as u32, pt: a1 });
-                self.nodes.push(NodeEnt { seg: j as u32, pt: a2 });
+                self.nodes.push(NodeEnt {
+                    seg: i as u32,
+                    pt: b1,
+                });
+                self.nodes.push(NodeEnt {
+                    seg: i as u32,
+                    pt: b2,
+                });
+                self.nodes.push(NodeEnt {
+                    seg: j as u32,
+                    pt: a1,
+                });
+                self.nodes.push(NodeEnt {
+                    seg: j as u32,
+                    pt: a2,
+                });
             }
             Hit::VertexOnEdge(v) => {
                 if v == a1 || v == a2 {
-                    self.nodes.push(NodeEnt { seg: j as u32, pt: v });
+                    self.nodes.push(NodeEnt {
+                        seg: j as u32,
+                        pt: v,
+                    });
                 } else {
-                    self.nodes.push(NodeEnt { seg: i as u32, pt: v });
+                    self.nodes.push(NodeEnt {
+                        seg: i as u32,
+                        pt: v,
+                    });
                 }
             }
         }
@@ -118,7 +136,13 @@ impl<'a> super::LineNoder<'a> {
         // Canonical per cluster: the first point in the sort order
         // (deterministic). When a cluster contains an original vertex the
         // vertex sorts first among equal-x points and wins the canonical.
-        let mut canon: Vec<Coord<f64>> = vec![Coord { x: f64::NAN, y: f64::NAN }; total];
+        let mut canon: Vec<Coord<f64>> = vec![
+            Coord {
+                x: f64::NAN,
+                y: f64::NAN
+            };
+            total
+        ];
         let mut has: Vec<bool> = vec![false; total];
         for (i, &(pt, _, _)) in pts.iter().enumerate() {
             let r = find(&mut parent, i as u32) as usize;
@@ -248,7 +272,10 @@ impl<'a> super::LineNoder<'a> {
         out
     }
 
-    pub(super) fn dedup_pieces(&self, pieces: Vec<(Coord<f64>, Coord<f64>, u32)>) -> Vec<(Coord<f64>, Coord<f64>, u32)> {
+    pub(super) fn dedup_pieces(
+        &self,
+        pieces: Vec<(Coord<f64>, Coord<f64>, u32)>,
+    ) -> Vec<(Coord<f64>, Coord<f64>, u32)> {
         let mut seen: FxHashSet<(u64, u64, u64, u64)> = FxHashSet::default();
         let mut out: Vec<(Coord<f64>, Coord<f64>, u32)> = Vec::with_capacity(pieces.len());
         for (s, e, f) in pieces {
@@ -303,7 +330,8 @@ impl<'a> super::LineNoder<'a> {
                 if pieces[i].2 != NO_FAMILY && pieces[i].2 == pieces[j].2 {
                     continue;
                 }
-                if crate::validation::impls::segments_intersect_any(a1, a2, b1, b2, self.eps, false) {
+                if crate::validation::impls::segments_intersect_any(a1, a2, b1, b2, self.eps, false)
+                {
                     dead[j] = true;
                     break;
                 }
@@ -324,7 +352,10 @@ impl<'a> super::LineNoder<'a> {
     // Phase 6: reconnection through degree-2 vertices
     // ---------------------------------------------------------------------
 
-    pub(super) fn reconnect(&self, pieces: Vec<(Coord<f64>, Coord<f64>, u32)>) -> Vec<Vec<Coord<f64>>> {
+    pub(super) fn reconnect(
+        &self,
+        pieces: Vec<(Coord<f64>, Coord<f64>, u32)>,
+    ) -> Vec<Vec<Coord<f64>>> {
         let m = pieces.len();
         let mut ends: FxHashMap<(u64, u64), Vec<(u32, bool)>> = FxHashMap::default();
         for (i, &(s, e, _)) in pieces.iter().enumerate() {
@@ -355,7 +386,9 @@ impl<'a> super::LineNoder<'a> {
                 if cands.len() != 2 {
                     break;
                 }
-                let other = cands.iter().find(|(q, _)| *q as usize != cur && !used[*q as usize]);
+                let other = cands
+                    .iter()
+                    .find(|(q, _)| *q as usize != cur && !used[*q as usize]);
                 let Some(&(q, is_start)) = other else { break };
                 let fv = if is_start {
                     pieces[q as usize].1

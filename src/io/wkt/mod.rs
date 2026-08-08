@@ -39,23 +39,36 @@
 //! assert_eq!(geom, parsed_again);
 //! ```
 
-
 use alloc::string::String;
+use core::fmt;
 use geo::{
     Coord, Geometry, GeometryCollection, LineString, MultiLineString, MultiPoint, MultiPolygon,
     Point, Polygon,
 };
-use core::fmt;
 
 /// Errors that can occur during WKT parsing.
 #[derive(Debug)]
 pub enum WktError {
-    ParseError { pos: usize, message: String },
-    InvalidNumber { pos: usize, value: String },
-    UnknownGeometryType { pos: usize, type_name: String },
-    TrailingCharacters { pos: usize },
+    ParseError {
+        pos: usize,
+        message: String,
+    },
+    InvalidNumber {
+        pos: usize,
+        value: String,
+    },
+    UnknownGeometryType {
+        pos: usize,
+        type_name: String,
+    },
+    TrailingCharacters {
+        pos: usize,
+    },
     EmptyInput,
-    UnsupportedDimension { pos: usize, modifier: String },
+    UnsupportedDimension {
+        pos: usize,
+        modifier: String,
+    },
     #[cfg(feature = "std")]
     IoError(std::io::Error),
 }
@@ -96,13 +109,13 @@ impl std::error::Error for WktError {}
 // ---------------------------------------------------------------------------
 
 mod read;
-mod write;
 #[cfg(test)]
 mod tests;
+mod write;
 
-pub use read::{infer_wkt_type, read_wkt};
 #[cfg(feature = "std")]
 pub use read::read_wkt_from;
+pub use read::{infer_wkt_type, read_wkt};
 pub use write::write_wkt;
 #[cfg(feature = "std")]
 pub use write::write_wkt_to;

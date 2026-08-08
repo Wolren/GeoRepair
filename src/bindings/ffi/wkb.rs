@@ -1,16 +1,13 @@
 //! WKB single-geometry API (extracted from bindings/ffi.rs 2026-08-07; verbatim).
 
-
-
-use alloc::vec::Vec;
 use super::types::*;
 use super::util::*;
-use std::ffi::CString;
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use crate::core::MakeValidConfig;
 use crate::make_valid::MakeValid;
 use crate::validation::GeoValidation;
-
+use alloc::vec::Vec;
+use std::ffi::CString;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
 /// Repair a geometry from WKB using default configuration.
 ///
@@ -36,7 +33,9 @@ pub unsafe extern "C" fn geo_repair_make_valid(
         }
     })) {
         Ok(r) => r,
-        Err(_) => GeoRepairResult::error(GeoRepairErrorCode::Panic, "internal error: repair panicked"),
+        Err(_) => {
+            GeoRepairResult::error(GeoRepairErrorCode::Panic, "internal error: repair panicked")
+        }
     }
 }
 
@@ -69,7 +68,9 @@ pub unsafe extern "C" fn geo_repair_make_valid_with_config(
         }
     })) {
         Ok(r) => r,
-        Err(_) => GeoRepairResult::error(GeoRepairErrorCode::Panic, "internal error: repair panicked"),
+        Err(_) => {
+            GeoRepairResult::error(GeoRepairErrorCode::Panic, "internal error: repair panicked")
+        }
     }
 }
 
@@ -105,7 +106,9 @@ pub unsafe extern "C" fn geo_repair_make_valid_with_config_full(
         }
     })) {
         Ok(r) => r,
-        Err(_) => GeoRepairResult::error(GeoRepairErrorCode::Panic, "internal error: repair panicked"),
+        Err(_) => {
+            GeoRepairResult::error(GeoRepairErrorCode::Panic, "internal error: repair panicked")
+        }
     }
 }
 
@@ -160,7 +163,10 @@ pub unsafe extern "C" fn geo_repair_validate(
         }
     })) {
         Ok(r) => r,
-        Err(_) => GeoRepairResult::error(GeoRepairErrorCode::Panic, "internal error: validation panicked"),
+        Err(_) => GeoRepairResult::error(
+            GeoRepairErrorCode::Panic,
+            "internal error: validation panicked",
+        ),
     }
 }
 
@@ -231,7 +237,10 @@ pub unsafe extern "C" fn geo_repair_validate_and_fix(
         }
     })) {
         Ok(r) => r,
-        Err(_) => GeoRepairResult::error(GeoRepairErrorCode::Panic, "internal error: validate_and_fix panicked"),
+        Err(_) => GeoRepairResult::error(
+            GeoRepairErrorCode::Panic,
+            "internal error: validate_and_fix panicked",
+        ),
     }
 }
 
@@ -284,7 +293,10 @@ pub unsafe extern "C" fn geo_repair_validate_and_fix_with_config(
         }
     })) {
         Ok(r) => r,
-        Err(_) => GeoRepairResult::error(GeoRepairErrorCode::Panic, "internal error: validate_and_fix panicked"),
+        Err(_) => GeoRepairResult::error(
+            GeoRepairErrorCode::Panic,
+            "internal error: validate_and_fix panicked",
+        ),
     }
 }
 
@@ -292,7 +304,10 @@ pub unsafe extern "C" fn geo_repair_validate_and_fix_with_config(
 // WKB: batch
 // ---------------------------------------------------------------------------
 
-pub(crate) fn repair_batch_sequential(inputs: &[GeoRepairWkbBuffer], config: &MakeValidConfig) -> Vec<GeoRepairResult> {
+pub(crate) fn repair_batch_sequential(
+    inputs: &[GeoRepairWkbBuffer],
+    config: &MakeValidConfig,
+) -> Vec<GeoRepairResult> {
     inputs
         .iter()
         .map(|buf| {

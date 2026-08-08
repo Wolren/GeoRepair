@@ -3,7 +3,6 @@
 //! Eliminates sliver geometries and near-degenerate artifacts by snapping
 //! coordinates to a fixed-precision grid.
 
-
 use alloc::vec::Vec;
 use geo::{Coord, Line};
 

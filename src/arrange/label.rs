@@ -1,5 +1,5 @@
-use rustc_hash::FxHashSet;
 use alloc::collections::VecDeque;
+use rustc_hash::FxHashSet;
 
 use geo::Coord;
 use spade::handles::{FixedFaceHandle, InnerTag};

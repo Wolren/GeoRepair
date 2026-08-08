@@ -431,9 +431,6 @@ pub mod dd;
 pub mod feature;
 /// Geometry I/O: WKB, binary format, and format-dispatch helpers.
 pub mod io;
-/// WASM browser fetch (`wasm` feature; wasm32 targets only).
-#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
-pub mod wasm;
 /// Geometry repair implementation via the [`MakeValid`] trait.
 pub mod make_valid;
 /// Ring orientation utilities (CW/CCW winding).
@@ -443,6 +440,9 @@ pub mod snap;
 pub(crate) mod util;
 /// OGC Simple Features geometry validation predicates.
 pub mod validation;
+/// WASM browser fetch (`wasm` feature; wasm32 targets only).
+#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
+pub mod wasm;
 /// Z/M coordinate value preservation through the repair pipeline.
 pub mod zm;
 
@@ -454,12 +454,12 @@ pub mod interop;
 #[cfg(feature = "arrange")]
 /// CDT-based polygon repair for complex topologies (Arrange strategy).
 pub mod arrange;
+/// Tolerance-based repeated-point removal (GEOS RepeatedPointRemover parity).
+pub mod cleanup;
 /// Segment noding: intersection detection, snap-rounding, and validation.
 pub mod noding;
 /// Geometry precision reduction with topology preservation.
 pub mod reduce;
-/// Tolerance-based repeated-point removal (GEOS RepeatedPointRemover parity).
-pub mod cleanup;
 #[cfg(feature = "structure")]
 /// GEOS-compatible fast-path polygon repair via planar graph extraction.
 pub mod structure;
@@ -481,6 +481,8 @@ pub mod parallel;
 /// measured slower and removed (see `simd/mod.rs`).
 pub mod simd;
 
+/// Tolerance-based repeated-point removal.
+pub use cleanup::{remove_repeated_coords, remove_repeated_points};
 /// Repair configuration, error types, and polygon method selection.
 pub use core::{MakeValidConfig, MakeValidError, PolyMethod};
 /// Coordinate reference system wrapper.
@@ -493,9 +495,10 @@ pub use io::{
     write_wkt,
 };
 #[cfg(feature = "std")]
-pub use io::{diagnose_file, load, load_bin, load_bin_stream, read_wkb_from, read_wkt_from, repair_file, save, write_wkb_to, write_wkt_to};
-/// Tolerance-based repeated-point removal.
-pub use cleanup::{remove_repeated_coords, remove_repeated_points};
+pub use io::{
+    diagnose_file, load, load_bin, load_bin_stream, read_wkb_from, read_wkt_from, repair_file,
+    save, write_wkb_to, write_wkt_to,
+};
 /// Trait for repairing invalid geometries.
 pub use make_valid::MakeValid;
 #[cfg(any(feature = "arrange", feature = "structure"))]
@@ -521,7 +524,12 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 /// Prints timing breakdown and pass rates to stderr.
 // Native-only: it times with `std::time::Instant`, which is not
 // implemented on wasm32-unknown-unknown (panics on call).
-#[cfg(all(feature = "arrange", feature = "structure", feature = "std", not(target_arch = "wasm32")))]
+#[cfg(all(
+    feature = "arrange",
+    feature = "structure",
+    feature = "std",
+    not(target_arch = "wasm32")
+))]
 pub fn profile_structure_fastpath(polys: &[geo::Polygon<f64>], sample: usize) {
     use geo::LinesIter;
     use std::time::Instant;

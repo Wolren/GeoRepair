@@ -669,7 +669,10 @@ fn test_geometrycollection_filters_empty() {
         } else {
             panic!("expected Point at [0], got {:?}", rgc.0[0]);
         }
-        assert_eq!(rgc.0[1], Geometry::Line(Line::new(Point::new(0.0, 0.0), Point::new(1.0, 1.0))));
+        assert_eq!(
+            rgc.0[1],
+            Geometry::Line(Line::new(Point::new(0.0, 0.0), Point::new(1.0, 1.0)))
+        );
     } else {
         panic!("expected GeometryCollection, got {:?}", result);
     }
@@ -1101,7 +1104,10 @@ fn test_validate_and_fix_multipoint() {
         Point::new(3.0, 4.0),
     ]);
     let (result, geom) = mp.validate_and_fix();
-    assert!(result.valid, "multipoint with NaN should be valid (POINT EMPTY)");
+    assert!(
+        result.valid,
+        "multipoint with NaN should be valid (POINT EMPTY)"
+    );
     assert_geometry_valid(&geom);
     assert_not_empty(&geom);
 }

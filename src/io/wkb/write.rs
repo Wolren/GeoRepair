@@ -1,8 +1,7 @@
 //! WKB writer: OGC + EWKB encoders and size estimation.
 
-
-use alloc::vec::Vec;
 use super::*;
+use alloc::vec::Vec;
 #[cfg(feature = "std")]
 use std::io::{self, Write};
 
@@ -190,9 +189,8 @@ fn write_coords_le_bulk(buf: &mut Vec<u8>, coords: &[Coord<f64>]) {
     if coords.is_empty() {
         return;
     }
-    let raw: &[u8] = unsafe {
-        core::slice::from_raw_parts(coords.as_ptr() as *const u8, coords.len() * 16)
-    };
+    let raw: &[u8] =
+        unsafe { core::slice::from_raw_parts(coords.as_ptr() as *const u8, coords.len() * 16) };
     buf.extend_from_slice(raw);
 }
 
@@ -296,11 +294,46 @@ fn write_geometry(geom: &Geometry<f64>, buf: &mut Vec<u8>, le: bool) {
             write_u32(buf, WKB_POLYGON, le);
             write_u32(buf, 1, le);
             write_u32(buf, 5, le);
-            write_coord(buf, &Coord { x: r.min().x, y: r.min().y }, le);
-            write_coord(buf, &Coord { x: r.max().x, y: r.min().y }, le);
-            write_coord(buf, &Coord { x: r.max().x, y: r.max().y }, le);
-            write_coord(buf, &Coord { x: r.min().x, y: r.max().y }, le);
-            write_coord(buf, &Coord { x: r.min().x, y: r.min().y }, le);
+            write_coord(
+                buf,
+                &Coord {
+                    x: r.min().x,
+                    y: r.min().y,
+                },
+                le,
+            );
+            write_coord(
+                buf,
+                &Coord {
+                    x: r.max().x,
+                    y: r.min().y,
+                },
+                le,
+            );
+            write_coord(
+                buf,
+                &Coord {
+                    x: r.max().x,
+                    y: r.max().y,
+                },
+                le,
+            );
+            write_coord(
+                buf,
+                &Coord {
+                    x: r.min().x,
+                    y: r.max().y,
+                },
+                le,
+            );
+            write_coord(
+                buf,
+                &Coord {
+                    x: r.min().x,
+                    y: r.min().y,
+                },
+                le,
+            );
         }
         Triangle(t) => {
             write_u32(buf, WKB_POLYGON, le);
@@ -517,11 +550,26 @@ fn write_geometry_ewkb(
             write_u32(buf, 1, le);
             write_u32(buf, 5, le);
             let corners = [
-                Coord { x: r.min().x, y: r.min().y },
-                Coord { x: r.max().x, y: r.min().y },
-                Coord { x: r.max().x, y: r.max().y },
-                Coord { x: r.min().x, y: r.max().y },
-                Coord { x: r.min().x, y: r.min().y },
+                Coord {
+                    x: r.min().x,
+                    y: r.min().y,
+                },
+                Coord {
+                    x: r.max().x,
+                    y: r.min().y,
+                },
+                Coord {
+                    x: r.max().x,
+                    y: r.max().y,
+                },
+                Coord {
+                    x: r.min().x,
+                    y: r.max().y,
+                },
+                Coord {
+                    x: r.min().x,
+                    y: r.min().y,
+                },
             ];
             for c in &corners {
                 write_coord_ewkb(buf, c, dims, extra, offset, le);

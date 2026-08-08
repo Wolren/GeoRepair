@@ -9,12 +9,10 @@
 //! round-tripping and in [`MakeValidConfig`](crate::MakeValidConfig) for
 //! CRS-aware tolerance adjustment.
 
-
-
-use alloc::string::ToString;
-use alloc::string::String;
 #[cfg(feature = "proj")]
 use crate::core::MakeValidError;
+use alloc::string::String;
+use alloc::string::ToString;
 #[cfg(feature = "proj")]
 use geo::Geometry;
 

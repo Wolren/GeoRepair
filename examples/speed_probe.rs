@@ -5,10 +5,13 @@ use geo_repair::parallel::par_fix_polygon_batch_owned;
 use geo_repair::validation::GeoValidation;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 
-#[cfg_attr(feature = "hotpath", hotpath::main(
-    format = "json-pretty",
-    output_path = "target/profiling/hotpath_report.json"
-))]
+#[cfg_attr(
+    feature = "hotpath",
+    hotpath::main(
+        format = "json-pretty",
+        output_path = "target/profiling/hotpath_report.json"
+    )
+)]
 fn main() {
     let polys = geo_repair::io::load_bin("benches/real_world/data_0.bin").expect("load");
     let n_total = polys.len();

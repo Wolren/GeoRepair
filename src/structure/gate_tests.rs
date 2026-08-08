@@ -12,10 +12,7 @@ mod gate_completeness {
     use geo::{Coord, LineString, Polygon};
 
     fn ring(coords: &[(f64, f64)]) -> LineString<f64> {
-        let mut v: Vec<Coord<f64>> = coords
-            .iter()
-            .map(|&(x, y)| Coord { x, y })
-            .collect();
+        let mut v: Vec<Coord<f64>> = coords.iter().map(|&(x, y)| Coord { x, y }).collect();
         v.push(v[0]);
         LineString::new(v)
     }
@@ -25,7 +22,11 @@ mod gate_completeness {
         for i in 0..n {
             let a = 2.0 * std::f64::consts::PI * i as f64 / n as f64;
             let (x, y) = (r * a.cos(), r * a.sin());
-            v.push(if ccw { Coord { x, y } } else { Coord { x: -x, y } });
+            v.push(if ccw {
+                Coord { x, y }
+            } else {
+                Coord { x: -x, y }
+            });
         }
         v.push(v[0]);
         Polygon::new(LineString::new(v), Vec::new())
@@ -36,7 +37,10 @@ mod gate_completeness {
         for i in 0..n {
             let a = 2.0 * std::f64::consts::PI * i as f64 / n as f64;
             let r = if i % 3 == 0 { 100.0 } else { 50.0 };
-            v.push(Coord { x: r * a.cos(), y: r * a.sin() });
+            v.push(Coord {
+                x: r * a.cos(),
+                y: r * a.sin(),
+            });
         }
         v.push(v[0]);
         Polygon::new(LineString::new(v), Vec::new())
@@ -45,13 +49,18 @@ mod gate_completeness {
     fn spaghetti(n: usize, seed: u64) -> Polygon<f64> {
         let mut s = seed;
         let mut next = move || {
-            s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            s = s
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             (s >> 33) as u32
         };
         let span = (n as f64).sqrt().ceil() as i64;
         let (mut x, mut y) = (0i64, 0i64);
         let mut v = Vec::with_capacity(n + 1);
-        v.push(Coord { x: x as f64, y: y as f64 });
+        v.push(Coord {
+            x: x as f64,
+            y: y as f64,
+        });
         for _ in 1..n {
             match next() % 4 {
                 0 => x += 1,
@@ -61,7 +70,10 @@ mod gate_completeness {
             }
             x = x.rem_euclid(span);
             y = y.rem_euclid(span);
-            v.push(Coord { x: x as f64, y: y as f64 });
+            v.push(Coord {
+                x: x as f64,
+                y: y as f64,
+            });
         }
         v.push(v[0]);
         Polygon::new(LineString::new(v), Vec::new())
@@ -141,7 +153,10 @@ mod gate_completeness {
         for ((ax, ay), (bx, by)) in edges {
             for i in 0..k {
                 let t = i as f64 / k as f64;
-                v.push(Coord { x: ax + (bx - ax) * t, y: ay + (by - ay) * t });
+                v.push(Coord {
+                    x: ax + (bx - ax) * t,
+                    y: ay + (by - ay) * t,
+                });
             }
         }
         v.push(v[0]);
@@ -152,10 +167,18 @@ mod gate_completeness {
         // Big shell, micro ring inside: the poly-global eps would swamp
         // the micro ring's tolerance - the gate must use per-ring eps.
         Polygon::new(
-            ring(&[(-5.0e6, -5.0e6), (-5.0e6, 5.0e6), (5.0e6, 5.0e6), (5.0e6, -5.0e6)]),
-            vec![
-                ring(&[(-1.0e-9, -1.0e-9), (-1.0e-9, 1.0e-9), (1.0e-9, 1.0e-9), (1.0e-9, -1.0e-9)]),
-            ],
+            ring(&[
+                (-5.0e6, -5.0e6),
+                (-5.0e6, 5.0e6),
+                (5.0e6, 5.0e6),
+                (5.0e6, -5.0e6),
+            ]),
+            vec![ring(&[
+                (-1.0e-9, -1.0e-9),
+                (-1.0e-9, 1.0e-9),
+                (1.0e-9, 1.0e-9),
+                (1.0e-9, -1.0e-9),
+            ])],
         )
     }
 
@@ -187,10 +210,19 @@ mod gate_completeness {
         // invariant_mixed_fp_in_same_ring perm=1, keep_collapsed=true).
         cases.push(Polygon::new(
             LineString::new(vec![
-                Coord { x: f64::MAX, y: f64::MIN },
-                Coord { x: f64::MIN_POSITIVE, y: -f64::MIN_POSITIVE },
+                Coord {
+                    x: f64::MAX,
+                    y: f64::MIN,
+                },
+                Coord {
+                    x: f64::MIN_POSITIVE,
+                    y: -f64::MIN_POSITIVE,
+                },
                 Coord { x: 0.0, y: 0.0 },
-                Coord { x: f64::MAX, y: f64::MIN },
+                Coord {
+                    x: f64::MAX,
+                    y: f64::MIN,
+                },
             ]),
             Vec::new(),
         ));
@@ -200,11 +232,23 @@ mod gate_completeness {
         // (fuzz_inprocess_loop, 2026-08-07).
         cases.push(Polygon::new(
             LineString::new(vec![
-                Coord { x: 0.0, y: 5.411379623889514e-305 },
-                Coord { x: 2.0, y: 4.779275733397475e-58 },
-                Coord { x: 5.0, y: 5.117669874566563e-307 },
+                Coord {
+                    x: 0.0,
+                    y: 5.411379623889514e-305,
+                },
+                Coord {
+                    x: 2.0,
+                    y: 4.779275733397475e-58,
+                },
+                Coord {
+                    x: 5.0,
+                    y: 5.117669874566563e-307,
+                },
                 Coord { x: 0.0, y: 0.0 },
-                Coord { x: 0.0, y: 5.411379623889514e-305 },
+                Coord {
+                    x: 0.0,
+                    y: 5.411379623889514e-305,
+                },
             ]),
             Vec::new(),
         ));
@@ -215,18 +259,34 @@ mod gate_completeness {
         cases.push(Polygon::new(
             LineString::new(vec![
                 Coord { x: 5e-9, y: 9e-9 },
-                Coord { x: -736.3, y: 678.1 },
-                Coord { x: 16172637.6, y: 6.773626999899899e-264 },
+                Coord {
+                    x: -736.3,
+                    y: 678.1,
+                },
+                Coord {
+                    x: 16172637.6,
+                    y: 6.773626999899899e-264,
+                },
                 Coord { x: 9e-9, y: -9e-9 },
-                Coord { x: 219.2, y: 1.1749363827356277e-161 },
-                Coord { x: 5e-9, y: 8.869032762944698e-9 },
+                Coord {
+                    x: 219.2,
+                    y: 1.1749363827356277e-161,
+                },
+                Coord {
+                    x: 5e-9,
+                    y: 8.869032762944698e-9,
+                },
                 Coord { x: 5e-9, y: 9e-9 },
             ]),
             Vec::new(),
         ));
 
         for (i, poly) in cases.iter().enumerate() {
-            let out = crate::structure::fix_polygon_owned(poly.clone(), &MakeValidConfig::default(), None);
+            let out = crate::structure::fix_polygon_owned(
+                poly.clone(),
+                &MakeValidConfig::default(),
+                None,
+            );
             match out {
                 crate::structure::FixOutcome::Fast(g) => {
                     let (g, ok) = enforce_ogc_winding(g);
@@ -275,10 +335,9 @@ mod gate_completeness {
         );
         let v = poly.validate();
         assert!(
-            v.errors.iter().any(|e| matches!(
-                e,
-                crate::validation::GeometryValidationError::PinchPoint
-            )),
+            v.errors
+                .iter()
+                .any(|e| matches!(e, crate::validation::GeometryValidationError::PinchPoint)),
             "validator did not flag the -0.0 pinch: {:?}",
             v.errors
         );

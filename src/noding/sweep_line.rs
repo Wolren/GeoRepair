@@ -6,7 +6,6 @@
 //! future event so that crossing segments are swapped in the active set,
 //! ensuring all subsequent intersections are found.
 
-
 use alloc::vec::Vec;
 use rustc_hash::FxHashSet;
 

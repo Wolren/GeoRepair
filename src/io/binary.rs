@@ -18,8 +18,8 @@
 //! This format is designed for bulk transfer from GDAL/QGIS and is not
 //! an OGC standard. For portable interchange, use WKB.
 
-use alloc::vec::Vec;
 use alloc::string::String;
+use alloc::vec::Vec;
 use std::fs::File;
 use std::io::Read;
 use std::io::Write;

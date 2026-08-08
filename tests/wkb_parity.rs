@@ -7,10 +7,13 @@
 //! This is a pure test-oracle dependency: the crate's own readers stay
 //! canonical (the external wkb crate is banned from the production path).
 
-use geo::{Coord, Geometry, GeometryCollection, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
-use geo_traits::to_geo::ToGeoGeometry;
+use geo::{
+    Coord, Geometry, GeometryCollection, LineString, MultiLineString, MultiPoint, MultiPolygon,
+    Point, Polygon,
+};
 use geo_repair::io::wkb::{read_ewkb, read_wkb, write_wkb};
-use wkb::writer::{write_geometry, WriteOptions};
+use geo_traits::to_geo::ToGeoGeometry;
+use wkb::writer::{WriteOptions, write_geometry};
 
 fn coord_eq(a: &Coord<f64>, b: &Coord<f64>) -> bool {
     let x = a.x.to_bits() == b.x.to_bits() || (a.x.is_nan() && b.x.is_nan());
@@ -25,7 +28,10 @@ fn ls_eq(a: &LineString<f64>, b: &LineString<f64>) -> bool {
 fn poly_eq(a: &Polygon<f64>, b: &Polygon<f64>) -> bool {
     ls_eq(&a.exterior(), &b.exterior())
         && a.interiors().len() == b.interiors().len()
-        && a.interiors().iter().zip(b.interiors()).all(|(x, y)| ls_eq(x, y))
+        && a.interiors()
+            .iter()
+            .zip(b.interiors())
+            .all(|(x, y)| ls_eq(x, y))
 }
 
 fn geom_eq(a: &Geometry<f64>, b: &Geometry<f64>) -> bool {
@@ -79,15 +85,33 @@ fn corpus() -> Vec<Geometry<f64>> {
         Geometry::Point(Point::new(f64::NAN, 5.0)),
         Geometry::LineString(LineString::new(vec![
             Coord { x: 0.0, y: 0.0 },
-            Coord { x: 1e-310, y: 1e-310 },
+            Coord {
+                x: 1e-310,
+                y: 1e-310,
+            },
             Coord { x: 3.0, y: 3.0 },
             Coord { x: 3.0, y: 3.0 },
             Coord { x: 0.0, y: 0.0 },
         ])),
         Geometry::LineString(LineString::new(vec![])),
-        Geometry::Polygon(poly(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0), (0.0, 0.0)], &[])),
         Geometry::Polygon(poly(
-            &[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0), (0.0, 0.0)],
+            &[
+                (0.0, 0.0),
+                (10.0, 0.0),
+                (10.0, 10.0),
+                (0.0, 10.0),
+                (0.0, 0.0),
+            ],
+            &[],
+        )),
+        Geometry::Polygon(poly(
+            &[
+                (0.0, 0.0),
+                (10.0, 0.0),
+                (10.0, 10.0),
+                (0.0, 10.0),
+                (0.0, 0.0),
+            ],
             &[
                 &[(2.0, 2.0), (2.0, 3.0), (3.0, 3.0), (3.0, 2.0), (2.0, 2.0)],
                 &[(6.0, 6.0), (6.0, 7.0), (7.0, 7.0), (7.0, 6.0), (6.0, 6.0)],
@@ -105,12 +129,27 @@ fn corpus() -> Vec<Geometry<f64>> {
             LineString::new(vec![]),
         ])),
         Geometry::MultiPolygon(MultiPolygon::new(vec![
-            poly(&[(0.0, 0.0), (5.0, 0.0), (5.0, 5.0), (0.0, 5.0), (0.0, 0.0)], &[]),
-            poly(&[(20.0, 20.0), (25.0, 20.0), (25.0, 25.0), (20.0, 25.0), (20.0, 20.0)], &[]),
+            poly(
+                &[(0.0, 0.0), (5.0, 0.0), (5.0, 5.0), (0.0, 5.0), (0.0, 0.0)],
+                &[],
+            ),
+            poly(
+                &[
+                    (20.0, 20.0),
+                    (25.0, 20.0),
+                    (25.0, 25.0),
+                    (20.0, 25.0),
+                    (20.0, 20.0),
+                ],
+                &[],
+            ),
         ])),
         Geometry::GeometryCollection(GeometryCollection(vec![
             Geometry::Point(Point::new(1.0, 2.0)),
-            Geometry::Polygon(poly(&[(0.0, 0.0), (3.0, 0.0), (3.0, 3.0), (0.0, 3.0), (0.0, 0.0)], &[])),
+            Geometry::Polygon(poly(
+                &[(0.0, 0.0), (3.0, 0.0), (3.0, 3.0), (0.0, 3.0), (0.0, 0.0)],
+                &[],
+            )),
             Geometry::LineString(LineString::new(vec![])),
         ])),
         Geometry::GeometryCollection(GeometryCollection(vec![])),
@@ -129,8 +168,14 @@ fn ewkb_z_and_srid_parity() {
     }
     let ours = our_parse(&pt_z);
     let theirs = their_parse(&pt_z);
-    assert!(geom_eq(&ours, &theirs), "POINT Z parity: ours {ours:?} theirs {theirs:?}");
-    assert!(matches!(ours, Geometry::Point(_)), "POINT Z must project to 2D");
+    assert!(
+        geom_eq(&ours, &theirs),
+        "POINT Z parity: ours {ours:?} theirs {theirs:?}"
+    );
+    assert!(
+        matches!(ours, Geometry::Point(_)),
+        "POINT Z must project to 2D"
+    );
 
     // POLYGON Z with SRID: 01 03 00 00 a0 (0x20000003 | 0x80000000 = 0xa0000003)
     // | srid u32 | ring count u32 | coord count u32 | x y z x y z ...
@@ -146,7 +191,10 @@ fn ewkb_z_and_srid_parity() {
     }
     let ours = our_parse(&poly_z);
     let theirs = their_parse(&poly_z);
-    assert!(geom_eq(&ours, &theirs), "POLYGON Z SRID parity: ours {ours:?} theirs {theirs:?}");
+    assert!(
+        geom_eq(&ours, &theirs),
+        "POLYGON Z SRID parity: ours {ours:?} theirs {theirs:?}"
+    );
     let ewkb = read_ewkb(&poly_z).expect("our EWKB reader keeps SRID");
     assert_eq!(ewkb.srid, Some(4326), "SRID must survive read_ewkb");
 }

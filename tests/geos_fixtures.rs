@@ -626,7 +626,11 @@ fn geos_gc_all_empty() {
     // (assert_eq is unusable on NaN coords - NaN != NaN - check structure.)
     match &result {
         Geometry::GeometryCollection(gc) => {
-            assert_eq!(gc.0.len(), 1, "expected exactly the empty point, got {result:?}");
+            assert_eq!(
+                gc.0.len(),
+                1,
+                "expected exactly the empty point, got {result:?}"
+            );
             match &gc.0[0] {
                 Geometry::Point(p) => {
                     assert!(

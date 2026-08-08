@@ -14,8 +14,8 @@ use geo_repair::bindings::ffi::{
     GeoRepairErrorCode, GeoRepairResult, GeoRepairStringResult, GeoRepairWkbBuffer,
     geo_repair_free_batch_result, geo_repair_free_result, geo_repair_free_string_result,
     geo_repair_is_valid, geo_repair_is_valid_wkt, geo_repair_make_valid,
-    geo_repair_make_valid_batch, geo_repair_make_valid_wkt, geo_repair_make_valid_wkt_with_config,
-    geo_repair_make_valid_with_config, geo_repair_validate, geo_repair_validate_and_fix,
+    geo_repair_make_valid_batch, geo_repair_make_valid_with_config, geo_repair_make_valid_wkt,
+    geo_repair_make_valid_wkt_with_config, geo_repair_validate, geo_repair_validate_and_fix,
     geo_repair_validate_and_fix_with_config, geo_repair_validate_and_fix_wkt,
     geo_repair_validate_reason, geo_repair_validate_wkt, geo_repair_version,
 };
@@ -127,9 +127,8 @@ fn make_valid_preserves_valid_input() {
 fn make_valid_with_config_methods() {
     let bt = bowtie_wkb();
     for (method, expected_code) in [(1u8, 0u8), (2u8, 0u8)] {
-        let mut res: GeoRepairResult = unsafe {
-            geo_repair_make_valid_with_config(bt.as_ptr(), bt.len(), false, method)
-        };
+        let mut res: GeoRepairResult =
+            unsafe { geo_repair_make_valid_with_config(bt.as_ptr(), bt.len(), false, method) };
         assert!(res.success, "method {method} failed: {:?}", res.error_code);
         let _ = expected_code;
         let out = unsafe { result_wkb(&res) };
@@ -147,7 +146,8 @@ fn make_valid_null_and_garbage_are_errors() {
     unsafe { geo_repair_free_result(&mut res) };
 
     let garbage = [0x01u8, 0x02, 0x03];
-    let mut res: GeoRepairResult = unsafe { geo_repair_make_valid(garbage.as_ptr(), garbage.len()) };
+    let mut res: GeoRepairResult =
+        unsafe { geo_repair_make_valid(garbage.as_ptr(), garbage.len()) };
     assert!(!res.success);
     assert_eq!(res.error_code, GeoRepairErrorCode::Parse);
     unsafe { geo_repair_free_result(&mut res) };
@@ -200,8 +200,14 @@ fn validate_reason_is_validate() {
     let mut b: GeoRepairResult = unsafe { geo_repair_validate_reason(bt.as_ptr(), bt.len()) };
     assert_eq!(a.success, b.success);
     assert_eq!(a.error_code, b.error_code);
-    let msg_a = unsafe { CStr::from_ptr(a.error_msg) }.to_str().unwrap().to_string();
-    let msg_b = unsafe { CStr::from_ptr(b.error_msg) }.to_str().unwrap().to_string();
+    let msg_a = unsafe { CStr::from_ptr(a.error_msg) }
+        .to_str()
+        .unwrap()
+        .to_string();
+    let msg_b = unsafe { CStr::from_ptr(b.error_msg) }
+        .to_str()
+        .unwrap()
+        .to_string();
     assert_eq!(msg_a, msg_b);
     unsafe {
         geo_repair_free_result(&mut a);
@@ -240,9 +246,8 @@ fn validate_and_fix_valid_passes_through() {
 #[test]
 fn validate_and_fix_with_config() {
     let bt = bowtie_wkb();
-    let mut res: GeoRepairResult = unsafe {
-        geo_repair_validate_and_fix_with_config(bt.as_ptr(), bt.len(), false, 1)
-    };
+    let mut res: GeoRepairResult =
+        unsafe { geo_repair_validate_and_fix_with_config(bt.as_ptr(), bt.len(), false, 1) };
     assert!(res.success);
     let out = unsafe { result_wkb(&res) };
     assert!(is_valid_wkb_bytes(&out));
@@ -256,8 +261,7 @@ fn validate_and_fix_with_config() {
 #[test]
 fn wkt_make_valid_roundtrip() {
     let bt = CString::new("POLYGON((0 0, 5 5, 5 0, 0 5, 0 0))").unwrap();
-    let mut res: GeoRepairStringResult =
-        unsafe { geo_repair_make_valid_wkt(bt.as_ptr()) };
+    let mut res: GeoRepairStringResult = unsafe { geo_repair_make_valid_wkt(bt.as_ptr()) };
     assert!(res.success);
     assert_eq!(res.error_code, GeoRepairErrorCode::None);
     let out = unsafe { string_result_data(&res) };
@@ -309,8 +313,7 @@ fn wkt_validate() {
 #[test]
 fn wkt_validate_and_fix() {
     let bt = CString::new("POLYGON((0 0, 5 5, 5 0, 0 5, 0 0))").unwrap();
-    let mut res: GeoRepairStringResult =
-        unsafe { geo_repair_validate_and_fix_wkt(bt.as_ptr()) };
+    let mut res: GeoRepairStringResult = unsafe { geo_repair_validate_and_fix_wkt(bt.as_ptr()) };
     assert!(res.success);
     assert_eq!(res.error_code, GeoRepairErrorCode::InvalidGeometry);
     let out = unsafe { string_result_data(&res) };
@@ -349,12 +352,22 @@ fn batch_sequential_and_parallel_agree() {
     let bt = bowtie_wkb();
     let garbage = vec![0x01u8, 0x02, 0x03];
     let inputs = [
-        GeoRepairWkbBuffer { data: sq.as_ptr(), len: sq.len() },
-        GeoRepairWkbBuffer { data: bt.as_ptr(), len: bt.len() },
-        GeoRepairWkbBuffer { data: garbage.as_ptr(), len: garbage.len() },
+        GeoRepairWkbBuffer {
+            data: sq.as_ptr(),
+            len: sq.len(),
+        },
+        GeoRepairWkbBuffer {
+            data: bt.as_ptr(),
+            len: bt.len(),
+        },
+        GeoRepairWkbBuffer {
+            data: garbage.as_ptr(),
+            len: garbage.len(),
+        },
     ];
     for parallel in [0, 1] {
-        let mut res = unsafe { geo_repair_make_valid_batch(inputs.as_ptr(), inputs.len(), parallel) };
+        let mut res =
+            unsafe { geo_repair_make_valid_batch(inputs.as_ptr(), inputs.len(), parallel) };
         assert!(res.success, "batch failed: {:?}", res.error_code);
         assert_eq!(res.count, 3);
         assert!(!res.items.is_null());
@@ -394,7 +407,10 @@ fn batch_empty_is_ok() {
 #[test]
 fn free_batch_result_is_double_free_safe() {
     let sq = square_wkb();
-    let inputs = [GeoRepairWkbBuffer { data: sq.as_ptr(), len: sq.len() }];
+    let inputs = [GeoRepairWkbBuffer {
+        data: sq.as_ptr(),
+        len: sq.len(),
+    }];
     let mut res = unsafe { geo_repair_make_valid_batch(inputs.as_ptr(), inputs.len(), 0) };
     assert!(res.success);
     unsafe {

@@ -2,7 +2,6 @@
 //! XOR the new faces into the accumulated area, remove the built boundary,
 //! and repeat until nothing remains (even-odd rule, GEOS MakeValidPoly.cpp).
 
-
 use alloc::vec::Vec;
 use geo::{Coord, Line, MultiPolygon, Polygon};
 
@@ -24,12 +23,12 @@ pub fn single_pass_fix(poly: &Polygon<f64>) -> Option<MultiPolygon<f64>> {
     // SP_MAX_EDGES the all-rings R-tree noding outweighs the boolean
     // pipeline (measured 168 ms/poly on 200k-edge monsters vs ~36 ms) —
     // return None so the caller's boolean pipeline handles the giants.
-    let n_edges: usize = poly
-        .exterior()
-        .0
-        .len()
-        .saturating_sub(1)
-        + poly.interiors().iter().map(|h| h.0.len().saturating_sub(1)).sum::<usize>();
+    let n_edges: usize = poly.exterior().0.len().saturating_sub(1)
+        + poly
+            .interiors()
+            .iter()
+            .map(|h| h.0.len().saturating_sub(1))
+            .sum::<usize>();
     if n_edges > crate::core::SP_MAX_EDGES {
         return None;
     }
@@ -37,7 +36,9 @@ pub fn single_pass_fix(poly: &Polygon<f64>) -> Option<MultiPolygon<f64>> {
     // 1. Collect + clean all ring linework (shell first, then holes).
     let mut edges: Vec<Line<f64>> = Vec::new();
     for ring in core::iter::once(poly.exterior()).chain(poly.interiors()) {
-        let Some(coords) = basic_cleanup(ring) else { continue };
+        let Some(coords) = basic_cleanup(ring) else {
+            continue;
+        };
         if coords.len() < 4 {
             continue;
         }
@@ -84,7 +85,6 @@ pub fn single_pass_fix(poly: &Polygon<f64>) -> Option<MultiPolygon<f64>> {
     }
     Some(mp)
 }
-
 
 /// GEOS MakeValidPoly::buildArea loop: repeatedly BuildArea the remaining
 /// cut edges, XOR into the accumulated area, and remove the built boundary
@@ -146,7 +146,10 @@ pub fn make_valid_poly_symdiff(cut_edges: &[Line<f64>]) -> Vec<Polygon<f64>> {
             for (i, p) in new_area.0.iter().enumerate() {
                 let a = p.unsigned_area();
                 total += a;
-                eprintln!("   new_area[{i}]: area={a:.4} holes={}", p.interiors().len());
+                eprintln!(
+                    "   new_area[{i}]: area={a:.4} holes={}",
+                    p.interiors().len()
+                );
             }
             eprintln!("   new_area total = {total:.4}");
         }
@@ -213,18 +216,10 @@ fn symdiff_polygons(a: &[Polygon<f64>], b: &[Polygon<f64>]) -> Vec<Polygon<f64>>
         use geo::Area;
         eprintln!("   XOR: a={} polys, b={} polys", a.len(), b.len());
         for (i, q) in a.iter().enumerate() {
-            eprintln!(
-                "     a[{i}]: area={:.4} fp={:?}",
-                q.unsigned_area(),
-                fp(q)
-            );
+            eprintln!("     a[{i}]: area={:.4} fp={:?}", q.unsigned_area(), fp(q));
         }
         for (i, p) in b.iter().enumerate() {
-            eprintln!(
-                "     b[{i}]: area={:.4} fp={:?}",
-                p.unsigned_area(),
-                fp(p)
-            );
+            eprintln!("     b[{i}]: area={:.4} fp={:?}", p.unsigned_area(), fp(p));
         }
     }
     let b_set: Vec<Vec<(u64, u64)>> = b.iter().map(fp).collect();

@@ -76,8 +76,7 @@ const FAMILY_IN_SWEEP_LIMIT: usize = 64;
 /// Outcome of the lean per-pair test (mirrors the validator's predicate
 /// chain: fast-FP first, robust escalation, collinear, vertex-on-edge,
 /// shared endpoint).
-#[derive(Clone, Copy)]
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 enum Hit {
     /// No intersection per the validator's predicates.
     None,
@@ -390,7 +389,10 @@ impl<'a> LineNoder<'a> {
                 if e.2 == m as u32 {
                     continue;
                 }
-                self.nodes.push(NodeEnt { seg: m as u32, pt: e.1 });
+                self.nodes.push(NodeEnt {
+                    seg: m as u32,
+                    pt: e.1,
+                });
             }
         }
     }
@@ -495,7 +497,10 @@ impl<'a> LineNoder<'a> {
         if !removed.is_empty() {
             let mut by_family: FxHashMap<u32, Vec<u32>> = FxHashMap::default();
             for &i in &removed {
-                by_family.entry(self.family[i as usize]).or_default().push(i);
+                by_family
+                    .entry(self.family[i as usize])
+                    .or_default()
+                    .push(i);
             }
             // Large-family members vs sweep members.
             for (_, members) in by_family.iter() {

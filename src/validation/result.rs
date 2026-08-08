@@ -7,12 +7,10 @@
 //!
 //! See validation/mod.rs for the module map.
 
-
-use alloc::vec::Vec;
+use super::errors::*;
 use alloc::string::String;
 use alloc::string::ToString;
-use super::errors::*;
-
+use alloc::vec::Vec;
 
 /// Result of an OGC validity check.
 ///

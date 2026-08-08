@@ -4,8 +4,8 @@
 //! a WKT geometry in the first column and ignores additional attribute
 //! columns (the `Vec<Geometry>` return type cannot carry attributes).
 
-use alloc::vec::Vec;
 use alloc::string::String;
+use alloc::vec::Vec;
 use std::fs;
 
 use geo::Geometry;
@@ -37,7 +37,9 @@ pub fn load_csv(path: &str) -> Result<Vec<Geometry<f64>>, String> {
 
 /// Save geometries to a CSV file, one WKT geometry per row.
 pub fn save_csv(path: &str, geoms: &[Geometry<f64>]) -> Result<(), String> {
-    let mut wtr = csv::WriterBuilder::new().has_headers(false).from_writer(Vec::new());
+    let mut wtr = csv::WriterBuilder::new()
+        .has_headers(false)
+        .from_writer(Vec::new());
     for g in geoms {
         wtr.write_record([write_wkt(g)])
             .map_err(|e| format!("{path}: {e}"))?;

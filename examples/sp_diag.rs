@@ -70,7 +70,8 @@ fn main() {
         })
         .unwrap();
     let n_holes = biggest.interiors().len();
-    let n_edges = biggest.exterior().0.len() + biggest.interiors().iter().map(|h| h.0.len()).sum::<usize>();
+    let n_edges =
+        biggest.exterior().0.len() + biggest.interiors().iter().map(|h| h.0.len()).sum::<usize>();
     println!("\nbiggest: {} verts total, {} holes", n_edges, n_holes);
     let t0 = std::time::Instant::now();
     let shell_edges = geo_repair::structure::fix_ring::edges_from_coords(&biggest.exterior().0);

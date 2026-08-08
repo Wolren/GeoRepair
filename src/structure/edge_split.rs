@@ -1,20 +1,18 @@
 //! Edge splitting at intersection points: R-tree / sweep-line / brute-force
 //! strategies chosen by topology, with parametric intersection math.
 
-
 use alloc::vec::Vec;
 use geo::{Coord, Line};
 use smallvec::SmallVec;
 
-use rustc_hash::FxHashMap;
 use rstar::{AABB, RTree, RTreeObject};
+use rustc_hash::FxHashMap;
 
 use crate::core;
 use crate::orient::{orient2d, orient2d_fast};
 
 /// Per-edge split points: parametric position + intersection coordinate.
 type SplitPoint = SmallVec<[(f64, Coord<f64>); 2]>;
-
 
 /// ---------------------------------------------------------------------------
 /// Edge splitting at intersection points
@@ -101,7 +99,9 @@ pub fn split_edges(edges: &[Line<f64>]) -> Vec<Line<f64>> {
             for i in 0..n {
                 let e = edges[i];
                 let mut pts = ::core::mem::take(&mut split_points[i]);
-                pts.sort_by(|(a, _), (b, _)| a.partial_cmp(b).unwrap_or(::core::cmp::Ordering::Equal));
+                pts.sort_by(|(a, _), (b, _)| {
+                    a.partial_cmp(b).unwrap_or(::core::cmp::Ordering::Equal)
+                });
                 pts.dedup_by(|(a, _), (b, _)| (*a - *b).abs() < eps_param);
                 let mut prev_pt = e.start;
                 for &(_, pt) in &pts {

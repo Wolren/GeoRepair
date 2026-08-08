@@ -14,10 +14,9 @@
 //! `XMLHttpRequest` is unavailable (e.g. the Node wasm-bindgen-test
 //! harness, which has no browser globals).
 
-
-use alloc::vec::Vec;
 use alloc::string::String;
 use alloc::string::ToString;
+use alloc::vec::Vec;
 use geo::Geometry;
 
 /// Fetch a URL as raw bytes with a synchronous XMLHttpRequest.
@@ -32,7 +31,8 @@ pub fn fetch_bytes(url: &str) -> Result<Vec<u8>, String> {
     xhr.set_response_type(web_sys::XmlHttpRequestResponseType::Arraybuffer);
     xhr.open_with_async("GET", url, false)
         .map_err(|e| format!("fetch_bytes: XHR open: {e:?}"))?;
-    xhr.send().map_err(|e| format!("fetch_bytes: XHR send: {e:?}"))?;
+    xhr.send()
+        .map_err(|e| format!("fetch_bytes: XHR send: {e:?}"))?;
     let status = xhr
         .status()
         .map_err(|e| format!("fetch_bytes: XHR status: {e:?}"))?;
@@ -66,7 +66,8 @@ pub fn fetch_geometry(url: &str) -> Result<Geometry<f64>, String> {
     if bytes.len() >= 1 && (bytes[0] == 0x00 || bytes[0] == 0x01) {
         crate::io::wkb::read_wkb(&bytes).map_err(|e| format!("fetch_geometry: WKB parse: {e}"))
     } else {
-        let text = std::str::from_utf8(&bytes).map_err(|e| format!("fetch_geometry: not UTF-8: {e}"))?;
+        let text =
+            std::str::from_utf8(&bytes).map_err(|e| format!("fetch_geometry: not UTF-8: {e}"))?;
         crate::io::wkt::read_wkt(text).map_err(|e| format!("fetch_geometry: WKT parse: {e}"))
     }
 }

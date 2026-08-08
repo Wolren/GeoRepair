@@ -5,7 +5,6 @@
 //! snapping. Supports multiple precision models and automatic retry with
 //! progressively coarser grids.
 
-
 use alloc::vec::Vec;
 use geo::{
     Coord, Geometry, GeometryCollection, LineString, MultiLineString, MultiPoint, MultiPolygon,

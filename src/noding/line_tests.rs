@@ -12,8 +12,8 @@ use geo::{Coord, Geometry, LineString, MultiLineString};
 
 use crate::make_valid::MakeValid;
 use crate::noding::line::node_line;
-use crate::validation::impls::check_linestring_self_intersection;
 use crate::validation::GeoValidation;
+use crate::validation::impls::check_linestring_self_intersection;
 
 fn c(x: f64, y: f64) -> Coord<f64> {
     Coord { x, y }
@@ -70,7 +70,11 @@ fn node_ok_closed(pairs: &[(f64, f64)]) -> Vec<Vec<Coord<f64>>> {
 #[test]
 fn figure8_crossing() {
     let chains = node_ok_closed(&[(0.0, 0.0), (10.0, 10.0), (10.0, 0.0), (0.0, 10.0)]);
-    assert!(chains.len() >= 4, "expected >= 4 arcs, got {}", chains.len());
+    assert!(
+        chains.len() >= 4,
+        "expected >= 4 arcs, got {}",
+        chains.len()
+    );
     // The crossing node (5,5) is a degree-4 junction: every arc ends or
     // starts there (one arc per piece around the junction).
     let mut touch = 0;
@@ -125,8 +129,10 @@ fn t_junction_vertex_on_edge() {
     // degree 3).
     assert_eq!(chains.len(), 3, "expected 3 chains, got {chains:?}");
     for ch in &chains {
-        if (ch[0].x - 5.0).abs() < 1e-12 && (ch[0].y - 0.0).abs() < 1e-12
-            && (ch[1].x - 5.0).abs() < 1e-12 && (ch[1].y - 10.0).abs() < 1e-12
+        if (ch[0].x - 5.0).abs() < 1e-12
+            && (ch[0].y - 0.0).abs() < 1e-12
+            && (ch[1].x - 5.0).abs() < 1e-12
+            && (ch[1].y - 10.0).abs() < 1e-12
         {
             assert_eq!(ch.len(), 2, "vertical must be whole: {ch:?}");
         }
@@ -139,7 +145,13 @@ fn t_junction_vertex_on_edge() {
 /// make_valid output must be valid.
 #[test]
 fn vertex_revisit_make_valid_ok() {
-    let cs = coords(&[(0.0, 0.0), (10.0, 0.0), (0.0, 10.0), (10.0, 0.0), (20.0, 0.0)]);
+    let cs = coords(&[
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (0.0, 10.0),
+        (10.0, 0.0),
+        (20.0, 0.0),
+    ]);
     let g = Geometry::LineString(LineString::new(cs));
     let out = g.make_valid();
     assert!(out.is_valid(), "make_valid output must be valid");
@@ -197,7 +209,10 @@ fn collinear_overlap_bench_shape() {
     let chains = node_ok(&pairs);
     assert_eq!(chains.len(), 1, "expected one chain, got {chains:?}");
     let ch = &chains[0];
-    assert!((ch[0].x - 0.0).abs() < 1e-9, "chain must start at 0: {ch:?}");
+    assert!(
+        (ch[0].x - 0.0).abs() < 1e-9,
+        "chain must start at 0: {ch:?}"
+    );
     let last = ch[ch.len() - 1].x;
     assert!((last - 500.0).abs() < 1e-9, "chain must end at 500: {ch:?}");
     // The chain must cover the span without gaps: every consecutive pair
@@ -252,7 +267,13 @@ fn lissajous_retrace_resolved() {
 /// (never NotSimple).
 #[test]
 fn make_valid_line_contract() {
-    let cs = coords(&[(0.0, 0.0), (10.0, 10.0), (10.0, 0.0), (0.0, 10.0), (0.0, 0.0)]);
+    let cs = coords(&[
+        (0.0, 0.0),
+        (10.0, 10.0),
+        (10.0, 0.0),
+        (0.0, 10.0),
+        (0.0, 0.0),
+    ]);
     let g = Geometry::LineString(LineString::new(cs));
     let out = g.make_valid();
     assert!(out.is_valid(), "make_valid output must be valid");

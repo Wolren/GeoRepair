@@ -18,7 +18,6 @@
 //! - [`read_wkb_from`] — reads WKB from any `io::Read` source
 //! - [`read_wkb_concat`] — parses concatenated WKB sequence
 
-
 use alloc::vec::Vec;
 use core::fmt;
 
@@ -33,9 +32,17 @@ pub enum WkbError {
     UnexpectedEof,
     InvalidByteOrder(u8),
     UnknownTypeCode(u32),
-    UnexpectedGeometryType { expected: &'static str, code: u32 },
-    UnsupportedDimension { actual_dims: u8 },
-    TrailingBytes { consumed: usize, total: usize },
+    UnexpectedGeometryType {
+        expected: &'static str,
+        code: u32,
+    },
+    UnsupportedDimension {
+        actual_dims: u8,
+    },
+    TrailingBytes {
+        consumed: usize,
+        total: usize,
+    },
     #[cfg(feature = "std")]
     IoError(std::io::Error),
 }
@@ -174,18 +181,15 @@ const WKB_SRID_FLAG: u32 = 0x20000000;
 
 // ---------------------------------------------------------------------------
 
-
 mod read;
-mod write;
 #[cfg(test)]
 mod tests;
+mod write;
 
-pub use read::{read_ewkb, read_wkb, read_wkb_concat};
 #[cfg(feature = "std")]
 #[cfg(feature = "std")]
 pub use read::read_wkb_from;
-pub use write::{
-    estimate_wkb_size, write_ewkb, write_wkb, write_wkb_with_opts,
-};
+pub use read::{read_ewkb, read_wkb, read_wkb_concat};
 #[cfg(feature = "std")]
 pub use write::write_wkb_to;
+pub use write::{estimate_wkb_size, write_ewkb, write_wkb, write_wkb_with_opts};

@@ -30,16 +30,27 @@ fn test_fuzz_nestedholes_seed1() {
     let result = mp.make_valid_with_config(&MakeValidConfig::default());
     eprintln!("result type: {:?}", std::mem::discriminant(&result));
     let validation = result.validate();
-    eprintln!("valid: {}, errors: {:?}", validation.valid, validation.errors);
+    eprintln!(
+        "valid: {}, errors: {:?}",
+        validation.valid, validation.errors
+    );
     if !validation.valid {
         if let Geometry::MultiPolygon(mp) = &result {
             for (i, p) in mp.0.iter().enumerate() {
-                eprintln!("  poly[{}]: nv={}, holes={}, area={:?}",
-                    i, p.exterior().0.len(), p.interiors().len(),
-                    p.exterior().winding_order());
+                eprintln!(
+                    "  poly[{}]: nv={}, holes={}, area={:?}",
+                    i,
+                    p.exterior().0.len(),
+                    p.interiors().len(),
+                    p.exterior().winding_order()
+                );
             }
         }
     }
     let valid = validation.valid;
-    assert!(valid, "NestedHoles regression: {:?}", result.validate().errors);
+    assert!(
+        valid,
+        "NestedHoles regression: {:?}",
+        result.validate().errors
+    );
 }

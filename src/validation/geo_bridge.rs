@@ -19,8 +19,6 @@
 //! duplicates) are omitted from the geo view; they remain visible through
 //! the plain [`validate`](crate::validate) API.
 
-
-
 use alloc::boxed::Box;
 use geo::Geometry;
 use geo::algorithm::validation::{
@@ -84,10 +82,12 @@ pub fn map_geo_invalid(
             _ => None,
         },
         Geometry::Line(_) => match err {
-            E::ZeroLengthLine(_) => Some(InvalidGeometry::InvalidLine(InvalidLine::IdenticalCoords)),
-            E::CoordinateNaN => {
-                Some(InvalidGeometry::InvalidLine(InvalidLine::NonFiniteCoord(CoordIndex(0))))
+            E::ZeroLengthLine(_) => {
+                Some(InvalidGeometry::InvalidLine(InvalidLine::IdenticalCoords))
             }
+            E::CoordinateNaN => Some(InvalidGeometry::InvalidLine(InvalidLine::NonFiniteCoord(
+                CoordIndex(0),
+            ))),
             _ => None,
         },
         Geometry::LineString(_) => match err {
@@ -97,19 +97,20 @@ pub fn map_geo_invalid(
             _ => None,
         },
         Geometry::Polygon(_) => match err {
-            E::CoordinateNaN => Some(InvalidGeometry::InvalidPolygon(InvalidPolygon::NonFiniteCoord(
-                RingRole::Exterior,
-                CoordIndex(0),
-            ))),
+            E::CoordinateNaN => Some(InvalidGeometry::InvalidPolygon(
+                InvalidPolygon::NonFiniteCoord(RingRole::Exterior, CoordIndex(0)),
+            )),
             E::RingTooFewPoints { .. } => Some(InvalidGeometry::InvalidPolygon(
                 InvalidPolygon::TooFewPointsInRing(RingRole::Exterior),
             )),
-            E::SelfIntersection => Some(InvalidGeometry::InvalidPolygon(InvalidPolygon::SelfIntersection(
-                RingRole::Exterior,
-            ))),
-            E::HoleOutsideShell | E::DisconnectedInteriorRing => Some(InvalidGeometry::InvalidPolygon(
-                InvalidPolygon::InteriorRingNotContainedInExteriorRing(RingRole::Interior(0)),
+            E::SelfIntersection => Some(InvalidGeometry::InvalidPolygon(
+                InvalidPolygon::SelfIntersection(RingRole::Exterior),
             )),
+            E::HoleOutsideShell | E::DisconnectedInteriorRing => {
+                Some(InvalidGeometry::InvalidPolygon(
+                    InvalidPolygon::InteriorRingNotContainedInExteriorRing(RingRole::Interior(0)),
+                ))
+            }
             _ => None,
         },
         _ => None,
@@ -127,7 +128,13 @@ mod tests {
 
     #[test]
     fn valid_polygon_reports_nothing() {
-        let geometry = poly(vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0), (0.0, 0.0)]);
+        let geometry = poly(vec![
+            (0.0, 0.0),
+            (10.0, 0.0),
+            (10.0, 10.0),
+            (0.0, 10.0),
+            (0.0, 0.0),
+        ]);
         let adapter = GeoRepairValidation(&geometry);
         assert!(adapter.is_valid());
         assert!(adapter.validation_errors().is_empty());
@@ -182,11 +189,17 @@ mod tests {
 
         // geo's own engine: exact-only, accepts.
         use geo::algorithm::validation::Validation as GeoValidation;
-        assert!(geometry.is_valid(), "geo exact validator accepts this input");
+        assert!(
+            geometry.is_valid(),
+            "geo exact validator accepts this input"
+        );
 
         // geo_repair engine through the bridge: accepts too (adaptive bound).
         let adapter = GeoRepairValidation(&geometry);
-        assert!(adapter.is_valid(), "near-parallel separated edges are valid");
+        assert!(
+            adapter.is_valid(),
+            "near-parallel separated edges are valid"
+        );
     }
 
     #[test]
@@ -219,13 +232,21 @@ mod tests {
         // rule table includes ring orientation); geo has no orientation rule
         // in its InvalidPolygon taxonomy, so the adapter must stay silent
         // rather than fabricate a wrong geo error.
-        let geometry = poly(vec![(0.0, 0.0), (0.0, 10.0), (10.0, 10.0), (10.0, 0.0), (0.0, 0.0)]);
+        let geometry = poly(vec![
+            (0.0, 0.0),
+            (0.0, 10.0),
+            (10.0, 10.0),
+            (10.0, 0.0),
+            (0.0, 0.0),
+        ]);
         let result = validate(&geometry);
         assert!(!result.valid);
-        assert!(result
-            .errors
-            .iter()
-            .any(|e| matches!(e, GeometryValidationError::WrongOrientation)));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| matches!(e, GeometryValidationError::WrongOrientation))
+        );
 
         use geo::algorithm::validation::Validation as GeoValidation;
         assert!(geometry.is_valid(), "geo has no orientation rule");
