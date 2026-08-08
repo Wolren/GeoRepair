@@ -55,40 +55,29 @@ Validity agreement with GEOS: 100% (0/0 disagreements, 2026-08-07).
 
 ### Why large valid inputs are slower
 
-The big-O is honest: the validator is a radix-sorted sweep, O(n log n), the
-same asymptotics as GEOS; the gap is the per-vertex constant. A valid
-5000-vertex polygon's `make_valid` spends ~148 µs (serial) as ~112 µs
-(76%) fast-path gate (duplicate scan + chains + grid), the rest winding +
-overhead; the full exit certification is ~230 µs and is off the fast path.
-GEOS runs fast-FP orientation with robust escalation at exact-zero
-tolerance; GeoRepair validates at the eps-class (1e-12 x scale, adaptive
-32-ulp margins) by design: the validator, the gate, and the noder share
-one tolerance so repair output is certifiable by construction, where
-GEOS's own `makeValid` can ship geometry its `isValid` rejects (lines
-pass through non-simple unchanged; noding happens at tolerance while
-checks run exact-zero). The eps-class is stricter on borderline cases by
-design - the XML suite baselines 213 GEOS-valid verdicts we reject under
-it - while the 1.58M real-world dataset currently agrees with GEOS 0/0
-(winding-agnostic). The price is the valid-input
-constant: exact-zero predicates are cheaper, and our valid-polygon path
-still makes ~6-7 passes over the coords vs GEOS's ~2 (the parallel rows
-are memory-bandwidth-bound, so the throughput gap ~2.8x is wider than the
-serial gap ~1.9x). Full tradeoff analysis: `docs/BENCHMARKS.md`.
+Same asymptotics as GEOS (radix sweep, O(n log n)); the gap is constants.
+GeoRepair validates at the eps-class (1e-12 x scale): the validator, the
+gate, and the noder share one tolerance, so repair output is certifiable
+by construction - GEOS's own `makeValid` can ship geometry its `isValid`
+rejects. That contract is why the valid rows lose: tolerance predicates
+cost more than GEOS's exact-zero ones, and the valid-polygon path makes
+~6-7 passes over the coords vs GEOS's ~2 (a valid 5000-vertex polygon:
+~148 µs serial vs GEOS ~78 µs; the parallel rows are bandwidth-bound, so
+the throughput gap ~2.8x is wider than the serial ~1.9x). The eps-class
+is stricter than GEOS only on borderline inputs (213 baselined XML
+divergences, mostly the OGC winding contract); the 1.58M real-world
+dataset agrees with GEOS 0/0 (winding-agnostic). Details:
+`docs/BENCHMARKS.md`.
 
 Lines carry one deliberate extra cost: the valid-or-empty contract.
 `make_valid` never ships a non-simple line - GEOS passes non-simple lines
-through unchanged (verified against GeometryFixer.cpp: it strips repeated
-points and clones; its `makeValid` is a no-op for line noding) - so every
-valid line pays an O(n) simplicity check (revisit hash + adjacent
-collinear scan + sweep). The GEOS reference for the invalid-line rows is
-therefore `UnaryUnion` (the operation GEOS users actually call to fix
-linework), not `makeValid`. The check's first implementation was 30-35x
-GEOS isSimple (an rstar bulk_load that costs ~1 µs/item); the sweep cut
-that to ~7x, and the 2026-08-07 pass (single-orient adjacent fast path,
-x-sorted-input radix skip, lean pair predicate with vertex-on-edge-gated
-escalation, escalated-only revisit checks replacing the flat hash) cut it
-to ~2.4x (valid ls 500v: 4.3 -> 1.33 µs). Full stage breakdown:
-`docs/BENCHMARKS.md`.
+through unchanged (its `makeValid` is a no-op for line noding, verified
+against GeometryFixer.cpp) - so every valid line pays an O(n) simplicity
+check. The GEOS reference for the invalid-line rows is therefore
+`UnaryUnion` (the operation GEOS users actually call to fix linework),
+not `makeValid`. The check went 30-35x GEOS isSimple (rstar bulk_load) ->
+~7x (radix sweep) -> ~2.4x (2026-08-07 lean pass); valid ls 500v: 4.3 ->
+1.33 µs. Details: `docs/BENCHMARKS.md`.
 
 ### Synthetic benchmarks
 
@@ -154,12 +143,13 @@ cannot trace to a source file. Full GEOS setup: `benches/AGENTS.md`.
 1. **GEOS comparison is against conda-forge MSVC GEOS** (serial per-call,
    no LTO, no mimalloc) - a static LLVM-built GEOS would improve the GEOS
    side of every table.
-2. **Validator strictness is deliberate:** exact predicates plus one
-   relative 32-ulp collinear gate (`src/validation/mod.rs`). On the 1.58M
-   dataset this flags 0 polys GEOS doesn't (100% agreement, 2026-08-07);
-   the -0.0 product-form crossing bug that once inflated counts to 2,298
-   was fixed 2026-08-03. Repair ships only validator-clean geometry and
-   degrades to an empty GeometryCollection otherwise.
+2. **Validator strictness is deliberate:** eps-class predicates (1e-12 x
+   scale tolerance, fast-FP-first with robust escalation). On the 1.58M
+   real-world dataset it agrees with GEOS 0/0 (winding-agnostic); it
+   diverges on borderline inputs (213 baselined XML cases, mostly the OGC
+   winding contract - `docs/BENCHMARKS.md`). Repair ships only
+   validator-clean geometry and degrades to an empty GeometryCollection
+   otherwise.
 3. **W/12 pool-saturation floor:** the parallel batch fills all 12 workers
    with giants; nested intra-poly rayon finds no idle threads in-batch
    (Amdahl-bound; standalone the parallel check measures 96 -> 53 ms).
