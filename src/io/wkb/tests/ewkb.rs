@@ -696,7 +696,6 @@ fn non_ogc_variants_roundtrip_wkb() {
     // Big-endian variants too.
     let opts = WriteOptions {
         endianness: Endianness::BigEndian,
-        ..Default::default()
     };
     let back = read_wkb(&write_wkb_with_opts(&rect, &opts)).unwrap();
     assert!(matches!(back, Geometry::Polygon(_)));

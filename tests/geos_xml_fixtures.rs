@@ -1,4 +1,4 @@
-use geo::{Coord, Geometry, LineString, Point, Polygon};
+use geo::{Coord, Geometry, Point, Polygon};
 use geo_repair::MakeValid;
 use geo_repair::validation::GeoValidation;
 
@@ -97,7 +97,11 @@ fn xml_multilinestring_case1() {
 /// Flatten a geometry to (line coordinate lists, point coordinates) so a
 /// GEOS GC grouping (MULTILINESTRING instead of separate LINESTRINGs,
 /// component order) does not hide a real content difference.
-fn flatten_gc(g: &Geometry<f64>) -> (Vec<Vec<(f64, f64)>>, Vec<(f64, f64)>) {
+type RingBits = Vec<(i64, i64)>;
+type PolyBits = (RingBits, Vec<RingBits>);
+type RingCoords = Vec<(f64, f64)>;
+
+fn flatten_gc(g: &Geometry<f64>) -> (Vec<RingCoords>, RingCoords) {
     let mut lines = Vec::new();
     let mut points = Vec::new();
     fn walk(g: &Geometry<f64>, lines: &mut Vec<Vec<(f64, f64)>>, points: &mut Vec<(f64, f64)>) {
@@ -200,7 +204,7 @@ fn ring_fp(ring: &[Coord<f64>]) -> Vec<(i64, i64)> {
 }
 
 /// Polygon fingerprint: (shell fp, sorted hole fps).
-fn poly_fp(p: &Polygon<f64>) -> (Vec<(i64, i64)>, Vec<Vec<(i64, i64)>>) {
+fn poly_fp(p: &Polygon<f64>) -> PolyBits {
     let ext = ring_fp(&p.exterior().0);
     let mut holes: Vec<Vec<(i64, i64)>> = p.interiors().iter().map(|h| ring_fp(&h.0)).collect();
     holes.sort_unstable();
@@ -210,7 +214,7 @@ fn poly_fp(p: &Polygon<f64>) -> (Vec<(i64, i64)>, Vec<Vec<(i64, i64)>>) {
 /// All polygon fingerprints of a geometry (Polygon / MultiPolygon /
 /// GeometryCollection-recursing), sorted - a winding/rotation/order-
 /// insensitive shape signature.
-fn poly_fp_set(g: &Geometry<f64>) -> Vec<(Vec<(i64, i64)>, Vec<Vec<(i64, i64)>>)> {
+fn poly_fp_set(g: &Geometry<f64>) -> Vec<PolyBits> {
     let mut acc = Vec::new();
     match g {
         Geometry::Polygon(p) => acc.push(poly_fp(p)),
@@ -458,6 +462,10 @@ fn geos_makevalid_test1_issue265_polygon() {
         Geometry::Polygon(p) => p.unsigned_area(),
         other => panic!("issue-265 expected polygon output, got {other:?}"),
     };
+    // Reference area from the XML fixture; the literal keeps the
+    // source digits even though f64 rounds them (allow: the test
+    // compares with tolerance).
+    #[allow(clippy::excessive_precision)]
     let geos_area = 34.749988580488314_f64;
     let scale = geos_area.abs().max(1.0);
     assert!(

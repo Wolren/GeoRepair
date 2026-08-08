@@ -4,10 +4,6 @@
 #[cfg(test)]
 use super::*;
 
-use super::*;
-
-use super::*;
-
 #[test]
 fn roundtrip_point_le() {
     let g = Geometry::Point(Point::new(1.0, 2.0));

@@ -7,6 +7,7 @@ use geo::{Coord, Geometry, LineString, Polygon};
 use geo_repair::validation::{GeoValidation, GeometryValidationError};
 use geo_repair::{MakeValidConfig, PolyMethod};
 
+#[allow(dead_code)]
 /// GEOS IsValidOp parity for the line family (verified against the GEOS XML
 /// corpus and geosop): a LineString is valid iff coordinates are finite and
 /// the component has >= 2 DISTINCT points. Simplicity (NotSimple) does NOT
@@ -41,6 +42,7 @@ pub fn line_family_geos_valid(g: &Geometry<f64>) -> bool {
     }
 }
 
+#[allow(dead_code)]
 /// Assert the geometry is OGC-valid (using our Shewchuk-based validator).
 /// For the line family the OGC/GEOS rule is applied: NotSimple does not
 /// invalidate (our validator is stricter and flags it).
@@ -67,6 +69,7 @@ pub fn non_simple_only(g: &Geometry<f64>) -> bool {
             .all(|e| matches!(e, GeometryValidationError::NotSimple))
 }
 
+#[allow(dead_code)]
 /// Assert the geometry is OGC-valid AND all polygon rings
 /// follow OGC orientation (exterior CCW, interiors CW).
 pub fn assert_valid_ogc(g: &Geometry<f64>) {
@@ -74,6 +77,7 @@ pub fn assert_valid_ogc(g: &Geometry<f64>) {
     assert_ogc_oriented(g);
 }
 
+#[allow(dead_code)]
 /// Assert the geometry is non-empty (not an empty collection).
 pub fn assert_not_empty(g: &Geometry<f64>) {
     let empty = match g {
@@ -180,6 +184,7 @@ fn assert_polygon_orientation(poly: &Polygon<f64>) {
     }
 }
 
+#[allow(dead_code)]
 /// Assert the result is an empty GeometryCollection or other empty multi-type.
 pub fn assert_is_empty(g: &Geometry<f64>) {
     let empty = match g {
@@ -218,6 +223,7 @@ pub fn geometry_type_name(g: &Geometry<f64>) -> &'static str {
 }
 
 /// Create an Auto config.
+#[allow(dead_code)]
 pub fn cfg_auto() -> MakeValidConfig {
     MakeValidConfig {
         poly_method: PolyMethod::Auto,

@@ -4,6 +4,10 @@
 
 use geo::{Coord, Geometry, LineString, Point, Polygon};
 
+fn sample_point() -> Geometry<f64> {
+    Geometry::Point(Point::new(1.5, 2.5))
+}
+
 fn sample_polygon() -> Geometry<f64> {
     Geometry::Polygon(Polygon::new(
         LineString::from(vec![
@@ -22,10 +26,6 @@ fn sample_polygon() -> Geometry<f64> {
             Point::new(1.0, 1.0),
         ])],
     ))
-}
-
-fn sample_point() -> Geometry<f64> {
-    Geometry::Point(Point::new(1.5, 2.5))
 }
 
 #[cfg(feature = "io-csv")]
@@ -105,7 +105,7 @@ mod shp_tests {
         if let Geometry::Polygon(p) = &loaded[0] {
             assert_eq!(p.exterior().0.len(), 6);
             // The hole ring is preserved as an inner ring by the writer.
-            assert!(p.interiors().len() >= 1);
+            assert!(!p.interiors().is_empty());
         } else {
             panic!("expected polygon");
         }

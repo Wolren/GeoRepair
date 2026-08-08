@@ -1,4 +1,4 @@
-use geo::{Coord, Geometry, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
+use geo::{Coord, Geometry, LineString, Point, Polygon};
 use geo_repair::io::wkb::{read_wkb, write_wkb};
 use geo_repair::io::wkt::{read_wkt, write_wkt};
 use geo_repair::validation::GeoValidation;
@@ -196,14 +196,14 @@ fn roundtrip_and_idempotence_probe() {
         if (next() & 3) == 0 && text.len() > 4 {
             text.truncate((next() as usize) % text.len());
         }
-        if text.len() <= 4096 {
-            if let Ok(g) = read_wkt(&text) {
-                parsed += 1;
-                for p in check(&g, "wkt") {
-                    failures += 1;
-                    if failures <= 8 {
-                        println!("FAIL(wkt): {p} text={text:?}");
-                    }
+        if text.len() <= 4096
+            && let Ok(g) = read_wkt(&text)
+        {
+            parsed += 1;
+            for p in check(&g, "wkt") {
+                failures += 1;
+                if failures <= 8 {
+                    println!("FAIL(wkt): {p} text={text:?}");
                 }
             }
         }

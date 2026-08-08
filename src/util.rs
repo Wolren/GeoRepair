@@ -133,79 +133,6 @@ pub(crate) fn ring_interior_probe(ring: &[Coord<f64>]) -> Option<Coord<f64>> {
     None
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_shoelace_sum_ccw() {
-        let ring = vec![
-            Coord { x: 0.0, y: 0.0 },
-            Coord { x: 1.0, y: 0.0 },
-            Coord { x: 1.0, y: 1.0 },
-            Coord { x: 0.0, y: 1.0 },
-            Coord { x: 0.0, y: 0.0 },
-        ];
-        let sum = shoelace_sum(&ring);
-        assert!(sum > 0.0);
-        assert!((sum - 2.0).abs() < 1e-12);
-    }
-
-    #[test]
-    fn test_shoelace_sum_cw() {
-        let ring = vec![
-            Coord { x: 0.0, y: 0.0 },
-            Coord { x: 0.0, y: 1.0 },
-            Coord { x: 1.0, y: 1.0 },
-            Coord { x: 1.0, y: 0.0 },
-            Coord { x: 0.0, y: 0.0 },
-        ];
-        let sum = shoelace_sum(&ring);
-        assert!(sum < 0.0);
-        assert!((sum + 2.0).abs() < 1e-12);
-    }
-
-    #[test]
-    fn test_robust_is_ccw_ccw() {
-        let ring = vec![
-            Coord { x: 0.0, y: 0.0 },
-            Coord { x: 1.0, y: 0.0 },
-            Coord { x: 1.0, y: 1.0 },
-            Coord { x: 0.0, y: 1.0 },
-            Coord { x: 0.0, y: 0.0 },
-        ];
-        assert!(robust_is_ccw(&ring));
-    }
-
-    #[test]
-    fn test_robust_is_ccw_cw() {
-        let ring = vec![
-            Coord { x: 0.0, y: 0.0 },
-            Coord { x: 0.0, y: 1.0 },
-            Coord { x: 1.0, y: 1.0 },
-            Coord { x: 1.0, y: 0.0 },
-            Coord { x: 0.0, y: 0.0 },
-        ];
-        assert!(!robust_is_ccw(&ring));
-    }
-
-    #[test]
-    fn test_robust_is_ccw_extreme_fp() {
-        // Ring with coords spanning 1e12 to 1e-12 — shoelace can flip
-        let ring = vec![
-            Coord { x: 0.0, y: 0.0 },
-            Coord { x: 1e12, y: 0.0 },
-            Coord { x: 1e12, y: 1e-12 },
-            Coord { x: 0.0, y: 1e-12 },
-            Coord { x: 0.0, y: 0.0 },
-        ];
-        // Should be CCW regardless of fp extremes
-        assert!(robust_is_ccw(&ring));
-    }
-}
-
-/// Absolute shoelace area of a closed ring (closure vertex optional).
-/// Canonical copy - was duplicated in make_valid.rs, structure/merge.rs and
 /// structure/subtract.rs.
 pub(crate) fn shoelace_abs_sum(coords: &[Coord<f64>]) -> f64 {
     let n = coords.len();
@@ -522,5 +449,76 @@ impl ProfileClock {
     }
     pub(crate) fn ns(&self) -> u64 {
         0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_shoelace_sum_ccw() {
+        let ring = vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 1.0, y: 0.0 },
+            Coord { x: 1.0, y: 1.0 },
+            Coord { x: 0.0, y: 1.0 },
+            Coord { x: 0.0, y: 0.0 },
+        ];
+        let sum = shoelace_sum(&ring);
+        assert!(sum > 0.0);
+        assert!((sum - 2.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_shoelace_sum_cw() {
+        let ring = vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 0.0, y: 1.0 },
+            Coord { x: 1.0, y: 1.0 },
+            Coord { x: 1.0, y: 0.0 },
+            Coord { x: 0.0, y: 0.0 },
+        ];
+        let sum = shoelace_sum(&ring);
+        assert!(sum < 0.0);
+        assert!((sum + 2.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_robust_is_ccw_ccw() {
+        let ring = vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 1.0, y: 0.0 },
+            Coord { x: 1.0, y: 1.0 },
+            Coord { x: 0.0, y: 1.0 },
+            Coord { x: 0.0, y: 0.0 },
+        ];
+        assert!(robust_is_ccw(&ring));
+    }
+
+    #[test]
+    fn test_robust_is_ccw_cw() {
+        let ring = vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 0.0, y: 1.0 },
+            Coord { x: 1.0, y: 1.0 },
+            Coord { x: 1.0, y: 0.0 },
+            Coord { x: 0.0, y: 0.0 },
+        ];
+        assert!(!robust_is_ccw(&ring));
+    }
+
+    #[test]
+    fn test_robust_is_ccw_extreme_fp() {
+        // Ring with coords spanning 1e12 to 1e-12 — shoelace can flip
+        let ring = vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 1e12, y: 0.0 },
+            Coord { x: 1e12, y: 1e-12 },
+            Coord { x: 0.0, y: 1e-12 },
+            Coord { x: 0.0, y: 0.0 },
+        ];
+        // Should be CCW regardless of fp extremes
+        assert!(robust_is_ccw(&ring));
     }
 }

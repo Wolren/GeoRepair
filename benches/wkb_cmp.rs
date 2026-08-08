@@ -9,9 +9,7 @@
 
 use std::time::Instant;
 
-use geo::{Coord, Geometry, LineString, Polygon};
-use geo_repair::io::load_bin;
-use geo_traits::GeometryTrait;
+use geo::{Geometry, LineString, Polygon};
 use geo_traits::to_geo::ToGeoGeometry;
 
 const DATASET: &str = "benches/real_world/data_0.bin";

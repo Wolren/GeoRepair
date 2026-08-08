@@ -8,10 +8,9 @@
 //! Assertions are strict: exact output type, component count, validity,
 //! OGC winding order. No "it should be non-empty" soft passes.
 
-use geo::BooleanOps;
 use geo::{
     Coord, Geometry, GeometryCollection, Line, LineString, MultiLineString, MultiPoint,
-    MultiPolygon, Point, Polygon, Rect, Triangle,
+    MultiPolygon, Point, Polygon, Rect,
 };
 use geo_repair::validation::GeoValidation;
 use geo_repair::{MakeValid, MakeValidConfig};
@@ -332,15 +331,12 @@ fn jts_hole_backtrack_collapse_removed() {
         assert_valid_ogc(&result);
         assert_not_empty(&result);
         // The zero-area hole must be removed — output should have no holes
-        match &result {
-            Geometry::Polygon(p) => {
-                assert!(
-                    p.interiors().is_empty(),
-                    "zero-area backtrack hole should be removed"
-                );
-            }
-            _ => {} // may be MultiPolygon in some strategies; that's ok
-        }
+        if let Geometry::Polygon(p) = &result {
+            assert!(
+                p.interiors().is_empty(),
+                "zero-area backtrack hole should be removed"
+            );
+        } // may be MultiPolygon in some strategies; that's ok
     }
 }
 
@@ -1237,21 +1233,18 @@ fn linestring_mixed_nan_and_valid_filters_cleanly() {
     assert_valid_ogc(&result);
     assert_not_empty(&result);
     // Should produce a linestring with valid-only coords
-    match &result {
-        Geometry::LineString(l) => {
+    if let Geometry::LineString(l) = &result {
+        assert!(
+            l.0.len() >= 2,
+            "filtered linestring should have >= 2 coords"
+        );
+        for c in &l.0 {
             assert!(
-                l.0.len() >= 2,
-                "filtered linestring should have >= 2 coords"
+                c.x.is_finite() && c.y.is_finite(),
+                "all coords must be finite after repair"
             );
-            for c in &l.0 {
-                assert!(
-                    c.x.is_finite() && c.y.is_finite(),
-                    "all coords must be finite after repair"
-                );
-            }
         }
-        _ => {} // could collapse to Point, that's ok
-    }
+    } // could collapse to Point, that's ok
 }
 
 // =========================================================================
@@ -1277,12 +1270,9 @@ fn multipoint_deduplicates_exact_matches() {
         Point::new(0.0, 0.0),
     ]);
     let result = mp.make_valid_with_config(&cfg_auto());
-    match &result {
-        Geometry::MultiPoint(mp) => {
-            assert_eq!(mp.0.len(), 2, "duplicates should be removed");
-        }
-        _ => {} // could unwrap to single point
-    }
+    if let Geometry::MultiPoint(mp) = &result {
+        assert_eq!(mp.0.len(), 2, "duplicates should be removed");
+    } // could unwrap to single point
     assert_valid_ogc(&result);
 }
 

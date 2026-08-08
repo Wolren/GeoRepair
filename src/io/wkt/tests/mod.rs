@@ -3,10 +3,6 @@
 
 #[cfg(test)]
 use super::*;
-
-use super::*;
-
-use super::*;
 use crate::io::{load, save};
 use geo::{Coord, Geometry, LineString, Polygon};
 use std::time::Instant;

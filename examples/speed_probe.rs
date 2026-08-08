@@ -2,8 +2,7 @@
 //! print wall time. Skips the slow 2298-poly profile section of the bench.
 
 use geo_repair::parallel::par_fix_polygon_batch_owned;
-use geo_repair::validation::GeoValidation;
-use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
+use geo_repair::{MakeValidConfig, PolyMethod};
 
 #[cfg_attr(
     feature = "hotpath",

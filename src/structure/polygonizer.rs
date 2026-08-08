@@ -434,7 +434,7 @@ mod tests {
         let polys = polygonize(&lines);
         assert!(!polys.is_empty());
         assert!(polys[0].is_valid());
-        let has_hole = polys.iter().any(|p| p.interiors().len() >= 1);
+        let has_hole = polys.iter().any(|p| !p.interiors().is_empty());
         assert!(has_hole);
     }
 

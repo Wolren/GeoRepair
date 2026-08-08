@@ -16,10 +16,6 @@ fn ring_area(ring: &LineString<f64>) -> f64 {
     a.abs() * 0.5
 }
 
-fn total_area(rings: &[LineString<f64>]) -> f64 {
-    rings.iter().map(ring_area).sum()
-}
-
 fn poly_total_area(polys: &[Polygon<f64>]) -> f64 {
     use geo::Area;
     polys.iter().map(|p| p.unsigned_area()).sum()

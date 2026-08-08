@@ -15,9 +15,7 @@
 //! documented baseline (see VALIDATOR_DIVERGENCE_BASELINE). If the repair
 //! fails, or GEOS says invalid and we accept, the case FAILS.
 
-use geo::{
-    Coord, Geometry, Line, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon,
-};
+use geo::{Coord, Geometry, Line, LineString, MultiLineString, MultiPolygon, Polygon};
 use geo_repair::structure::build_area::build_area;
 use geo_repair::validation::{GeoValidation, GeometryValidationError};
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
@@ -50,7 +48,7 @@ fn parse_wkt(s: &str) -> Option<Geometry<f64>> {
 fn hex_to_bytes(s: &str) -> Option<Vec<u8>> {
     let cleaned: String = s.chars().filter(|c| !c.is_whitespace()).collect();
     if cleaned.is_empty()
-        || cleaned.len() % 2 != 0
+        || !cleaned.len().is_multiple_of(2)
         || !cleaned.chars().all(|c| c.is_ascii_hexdigit())
     {
         return None;
@@ -219,10 +217,7 @@ fn record_divergence_reason(geom: &Geometry<f64>) -> String {
         .first()
         .map(|e| {
             let s = format!("{e:?}");
-            s.split(|c: char| c == '(' || c == ' ' || c == '{')
-                .next()
-                .unwrap_or(&s)
-                .to_string()
+            s.split(['(', ' ', '{']).next().unwrap_or(&s).to_string()
         })
         .unwrap_or_else(|| "unknown".to_string());
     let mut guard = DIVERGENCE_REASONS.lock().expect("divergence tally lock");
@@ -806,7 +801,7 @@ fn component_count(g: &Geometry<f64>) -> usize {
     }
 }
 
-fn run_all_geos_xml_tests() -> Vec<(
+type XmlCaseRow = (
     String,
     usize,
     usize,
@@ -815,7 +810,9 @@ fn run_all_geos_xml_tests() -> Vec<(
     usize,
     usize,
     Vec<String>,
-)> {
+);
+
+fn run_all_geos_xml_tests() -> Vec<XmlCaseRow> {
     let mut results = Vec::new();
     let dir = Path::new("tests/geos_xml");
     if !dir.is_dir() {
@@ -942,7 +939,7 @@ fn run_all_geos_xml_tests() -> Vec<(
                     "makevalid" => {
                         case_dispatched = true;
                         // GEOS exact-output oracle: type + area + component count
-                        let (ok, why) = run_make_valid_compare(geom, &expected, &cfg, &case.desc);
+                        let (ok, why) = run_make_valid_compare(geom, expected, &cfg, &case.desc);
                         if !ok {
                             failures.push(format!("{} op='{}' {why}", case.desc.trim(), op_name));
                         }
@@ -953,9 +950,9 @@ fn run_all_geos_xml_tests() -> Vec<(
                         let (ok, why) = if case.desc.contains("self_touching_multipolygons")
                             || case.desc.contains("checkerboard")
                         {
-                            run_build_area_divergence(geom, &expected, &case.desc)
+                            run_build_area_divergence(geom, expected, &case.desc)
                         } else {
-                            run_build_area_compare(geom, &expected)
+                            run_build_area_compare(geom, expected)
                         };
                         if !ok {
                             failures.push(format!("{} op='{}' {why}", case.desc.trim(), op_name));

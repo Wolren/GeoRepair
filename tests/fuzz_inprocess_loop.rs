@@ -37,7 +37,7 @@ fn fuzz_inprocess_mutation_loop() {
     };
 
     let run_one = |data: &[u8]| {
-        if data.len() < 32 || data.len() > 16 * 64 || data.len() % 16 != 0 {
+        if data.len() < 32 || data.len() > 16 * 64 || !data.len().is_multiple_of(16) {
             return;
         }
         let mut coords: Vec<Coord<f64>> = Vec::with_capacity(data.len() / 16 + 1);
@@ -63,13 +63,10 @@ fn fuzz_inprocess_mutation_loop() {
             let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 poly.make_valid_with_config(&cfg)
             }));
-            match out {
-                Ok(g) => {
-                    if !g.validate().valid {
-                        panic!("invalid output: {g:?} from input poly {poly:?} method {method:?}");
-                    }
-                }
-                Err(_) => {}
+            if let Ok(g) = out
+                && !g.validate().valid
+            {
+                panic!("invalid output: {g:?} from input poly {poly:?} method {method:?}");
             }
         }
     };

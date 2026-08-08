@@ -159,7 +159,7 @@ fn polygonize_mp(mp: &MultiPolygon<f64>) -> Option<MultiPolygon<f64>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use geo::{Area, Coord, LineString};
+    use geo::{Coord, LineString};
 
     fn make_shell() -> Polygon<f64> {
         Polygon::new(

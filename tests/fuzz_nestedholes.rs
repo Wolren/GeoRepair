@@ -34,17 +34,17 @@ fn test_fuzz_nestedholes_seed1() {
         "valid: {}, errors: {:?}",
         validation.valid, validation.errors
     );
-    if !validation.valid {
-        if let Geometry::MultiPolygon(mp) = &result {
-            for (i, p) in mp.0.iter().enumerate() {
-                eprintln!(
-                    "  poly[{}]: nv={}, holes={}, area={:?}",
-                    i,
-                    p.exterior().0.len(),
-                    p.interiors().len(),
-                    p.exterior().winding_order()
-                );
-            }
+    if !validation.valid
+        && let Geometry::MultiPolygon(mp) = &result
+    {
+        for (i, p) in mp.0.iter().enumerate() {
+            eprintln!(
+                "  poly[{}]: nv={}, holes={}, area={:?}",
+                i,
+                p.exterior().0.len(),
+                p.interiors().len(),
+                p.exterior().winding_order()
+            );
         }
     }
     let valid = validation.valid;
