@@ -19,7 +19,23 @@ pub(crate) fn robust_is_ccw(ring: &[Coord<f64>]) -> bool {
     if ring.len() < 4 {
         return false;
     }
-    // Find the vertex with minimum x (rightmost if tie: minimum y too)
+    robust_is_ccw_at(ring, min_x_vertex(ring))
+}
+
+/// CCW verdict plus the extremal vertex index (min x, tie min y) in one
+/// pass - the caller can re-verify a possibly-reversed ring with
+/// [`robust_is_ccw_at`] without re-searching (winding fusion, 2026-08-08).
+pub(crate) fn robust_is_ccw_with_index(ring: &[Coord<f64>]) -> (bool, usize) {
+    let idx = min_x_vertex(ring);
+    (robust_is_ccw_at(ring, idx), idx)
+}
+
+/// The extremal vertex index used by [`robust_is_ccw`]: minimum x, tie
+/// minimum y, candidate at index 0 (the closure point for closed rings).
+pub(crate) fn min_x_vertex(ring: &[Coord<f64>]) -> usize {
+    if ring.len() < 4 {
+        return 0;
+    }
     let interior_n = ring.len() - 1;
     let mut min_idx = 0;
     let mut min_x = ring[0].x;
@@ -32,6 +48,17 @@ pub(crate) fn robust_is_ccw(ring: &[Coord<f64>]) -> bool {
             min_idx = i;
         }
     }
+    min_idx
+}
+
+/// Shewchuk orient2d at a pre-located extremal vertex (see
+/// [`min_x_vertex`]): the search is skipped, the verdict is identical.
+/// Collinear extremal vertex → shoelace fallback (Shewchuk gives 0).
+pub(crate) fn robust_is_ccw_at(ring: &[Coord<f64>], min_idx: usize) -> bool {
+    if ring.len() < 4 {
+        return false;
+    }
+    let interior_n = ring.len() - 1;
     let prev = if min_idx == 0 {
         &ring[interior_n - 1]
     } else {
@@ -39,19 +66,17 @@ pub(crate) fn robust_is_ccw(ring: &[Coord<f64>]) -> bool {
     };
     let curr = &ring[min_idx];
     let next = &ring[(min_idx + 1) % interior_n];
-    // orient2d > 0 means CCW for extremal vertex with min x
-        let orient = robust::orient2d(
-            robust::Coord { x: prev.x, y: prev.y },
-            robust::Coord { x: curr.x, y: curr.y },
-            robust::Coord { x: next.x, y: next.y },
-        );
-        // Collinear extremal vertex → shoelace fallback (Shewchuk gives 0)
-        if orient.abs() <= 1e-15 {
-            shoelace_sum(ring) > 0.0
-        } else {
-            orient > 0.0
-        }
+    let orient = robust::orient2d(
+        robust::Coord { x: prev.x, y: prev.y },
+        robust::Coord { x: curr.x, y: curr.y },
+        robust::Coord { x: next.x, y: next.y },
+    );
+    if orient.abs() <= 1e-15 {
+        shoelace_sum(ring) > 0.0
+    } else {
+        orient > 0.0
     }
+}
 
 /// A point strictly inside the ring: midpoint of the first non-degenerate
 /// edge, nudged toward the ring interior by a relative epsilon (1e-9 of the

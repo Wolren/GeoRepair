@@ -64,11 +64,11 @@ not a validity gap.
 | valid polygon 4v | 0.088 | 0.244 | 2.78x |
 | valid polygon 10v | 0.193 | 0.358 | 1.85x |
 | valid polygon 50v | 0.463 | 0.418 | 0.90x |
-| valid polygon 100v | 0.794 | 0.639 | 0.80x |
-| valid polygon 500v | 2.591 | 1.498 | 0.58x |
-| valid polygon 1000v | 4.466 | 2.487 | 0.56x |
-| valid polygon 5000v | 26.78 | 9.716 | 0.36x |
-| valid polygon 10000v | 55.56 | 18.38 | 0.33x |
+| valid polygon 100v | 0.590 | 0.483 | 0.82x |
+| valid polygon 500v | 2.177 | 1.379 | 0.63x |
+| valid polygon 1000v | 3.916 | 2.725 | 0.70x |
+| valid polygon 5000v | 25.67 | 9.267 | 0.36x |
+| valid polygon 10000v | 55.56 | 17.46 | 0.31x |
 | invalid bowtie 4v | 0.867 | 18.88 | 21.78x |
 | invalid bowtie 50v | 8.022 | 68.95 | 8.59x |
 | invalid bowtie 100v | 29.39 | 135.3 | 4.60x |
@@ -210,9 +210,9 @@ classes, in order of size:
 1. **Valid polygons >= 50v (0.33-0.90x).** Serial make_valid on a
    5000-vertex valid polygon is ~148 us vs GEOS's ~78 us; the parallel
    rows are memory-bandwidth-bound and the ratio widens with size (our
-   path makes ~6-7 passes over the coords, GEOS's IsValidOp ~2). The
-   pass count is structural (basic form, NaN, line collect, chains,
-   grid, winding x2); see the stage breakdown below.
+   path makes ~5-6 passes over the coords, GEOS's IsValidOp ~2). The
+   pass count is structural (fused basic-form+sub-ULP+envelope scan,
+   line collect, chains, grid, winding); see the stage breakdown below.
 2. **Valid ls >= 10v (0.42-0.58x).** The eps-class contract price:
    tolerance predicates (eps computation, padded bboxes, margins) vs
    GEOS isSimple's exact-zero pipeline. Serial gap is ~1.5-1.9x, not the
@@ -313,7 +313,7 @@ duplicate scan (bit-exact open-addressing table; the FxHashSet version
 was ~60 us, the table ~45 us - the scan is memory-bound, both are) and
 the chain/grid pair machinery. The throughput rows are worse than these
 serial numbers suggest because the parallel batch is
-memory-bandwidth-bound: our path reads the coords ~6-7 times, GEOS
+memory-bandwidth-bound: our path reads the coords ~5-6 times, GEOS
 IsValidOp ~2, and the ratio widens with size (valid polygon 5000v
 throughput 0.36x, serial ~1.9x).
 

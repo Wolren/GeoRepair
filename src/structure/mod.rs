@@ -124,19 +124,35 @@ pub(crate) fn fix_polygon_owned(
 /// classes.
 #[cfg(feature = "arrange")]
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
-fn fast_path_check(poly: &Polygon<f64>, ext_scale: Option<f64>) -> bool {
+fn fast_path_check(poly: &Polygon<f64>, _ext_scale: Option<f64>) -> bool {
     let total_verts: usize =
         poly.exterior().0.len() + poly.interiors().iter().map(|h| h.0.len()).sum::<usize>();
     if total_verts == 0 || poly.exterior().0.len() < 4 {
         return false;
     }
-    if !crate::arrange::poly_has_basic_form(poly)
+    // Basic form + sub-ULP edges + the global envelope bbox in ONE pass
+    // over the coords (measured 2026-08-08: the separate sub-ULP and
+    // envelope scans cost ~15-20 us on a 5000-vertex ring).
+    let mut bbox = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+    let mut sub_ulp = false;
+    let mut acc = crate::arrange::GateAccum {
+        lines: None,
+        bbox: Some(&mut bbox),
+        sub_ulp: Some(&mut sub_ulp),
+    };
+    if !crate::arrange::ring_is_plausible(poly.exterior(), &mut acc) {
+        return false;
+    }
+    for hole in poly.interiors() {
+        if !crate::arrange::ring_is_plausible(hole, &mut acc) {
+            return false;
+        }
+    }
+    if sub_ulp {
         // Sub-ULP edge check: an edge shorter than EPSILON * bbox_scale
         // (mixed-magnitude rings, e.g. 1e8 coords with 1e-8 spikes) makes
         // proper-crossing detection blind - collinear overlap is invisible.
         // Such inputs are invalid anyway; route them to the full repair.
-        || crate::arrange::has_sub_ulp_edge(poly, ext_scale)
-    {
         return false;
     }
     // Absolute envelope degeneracy - the validator's own rule: a geometry
@@ -146,25 +162,8 @@ fn fast_path_check(poly: &Polygon<f64>, ext_scale: Option<f64>) -> bool {
     // at its own scale), so this class needs its own check or the Fast
     // path ships a polygon the validator rejects (fuzz_inprocess_loop
     // micro-sliver, 2026-08-07).
-    {
-        let mut min_x = f64::MAX;
-        let mut max_x = f64::MIN;
-        let mut min_y = f64::MAX;
-        let mut max_y = f64::MIN;
-        for c in poly
-            .exterior()
-            .0
-            .iter()
-            .chain(poly.interiors().iter().flat_map(|h| h.0.iter()))
-        {
-            min_x = min_x.min(c.x);
-            max_x = max_x.max(c.x);
-            min_y = min_y.min(c.y);
-            max_y = max_y.max(c.y);
-        }
-        if (max_x - min_x).abs() < f64::EPSILON || (max_y - min_y).abs() < f64::EPSILON {
-            return false;
-        }
+    if (bbox.1 - bbox.0).abs() < f64::EPSILON || (bbox.3 - bbox.2).abs() < f64::EPSILON {
+        return false;
     }
     // Duplicated rings (hole == shell, hole == hole): the pair sweeps
     // cannot see identical rings (no proper crossings, no touches that
@@ -226,7 +225,7 @@ fn fast_path_check(poly: &Polygon<f64>, ext_scale: Option<f64>) -> bool {
         } else {
             Geometry::MultiPolygon(mp)
         };
-        let g = crate::make_valid::enforce_ogc_winding(geom);
+        let g = crate::make_valid::enforce_ogc_winding(geom).0;
         if crate::make_valid::is_valid_with_geo(&g) {
             return FixOutcome::Repaired(g);
         }

@@ -34,9 +34,9 @@ impl GeoValidation for Polygon<f64> {
             return ValidationResult::invalid(errors);
         }
 
-        if !check_orientation(&self.exterior().0) {
-            errors.push(GeometryValidationError::WrongOrientation);
-        }
+        // Ring orientation is part of check_ring_validity's verdict (the
+        // OGC winding contract) - no separate extremal-search pass
+        // (2026-08-08).
 
         if self.interiors().is_empty() {
             if errors.is_empty() {
@@ -57,9 +57,6 @@ impl GeoValidation for Polygon<f64> {
             if !hole_errors.is_empty() {
                 errors.extend(hole_errors);
                 continue;
-            }
-            if check_orientation(&hole.0) {
-                errors.push(GeometryValidationError::WrongOrientation);
             }
         }
 

@@ -229,12 +229,12 @@ mod gate_completeness {
             let out = crate::structure::fix_polygon_owned(poly.clone(), &MakeValidConfig::default(), None);
             match out {
                 crate::structure::FixOutcome::Fast(g) => {
-                    let g = enforce_ogc_winding(g);
+                    let (g, ok) = enforce_ogc_winding(g);
                     // The production contract: Fast + orientation-ok must be
                     // validator-clean (the arms check orientation AFTER
                     // re-winding; rings in the exact-orient ~0 zone route to
                     // arrange there - e.g. case 31, the extreme triangle).
-                    if crate::make_valid::ogc_orientation_ok(&g) {
+                    if ok {
                         assert!(
                             is_valid_with_geo(&g),
                             "case {i}: Fast shipped a polygon the validator rejects"
@@ -250,5 +250,37 @@ mod gate_completeness {
                 crate::structure::FixOutcome::Unconsumed(_) => {}
             }
         }
+    }
+
+    #[test]
+    fn gate_rejects_negative_zero_pinch() {
+        // A (-0.0, y) / (+0.0, y) non-adjacent vertex pair is a pinch: the
+        // validator's key normalization (c.x + 0.0).to_bits() treats the
+        // two zeros as the same vertex. The gate's duplicate scan must
+        // agree or the Fast path ships a polygon the exit validator
+        // rejects (found by audit 2026-08-08; the fuzz never generated
+        // the sign-flipped pair).
+        let mut coords = vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 10.0, y: 0.0 },
+            Coord { x: -0.0, y: 0.0 },
+            Coord { x: 10.0, y: 10.0 },
+            Coord { x: 0.0, y: 10.0 },
+        ];
+        coords.push(coords[0]);
+        let poly = Polygon::new(LineString::new(coords), Vec::new());
+        assert!(
+            !crate::arrange::poly_has_basic_form(&poly),
+            "gate accepted a -0.0/+0.0 pinch the validator rejects"
+        );
+        let v = poly.validate();
+        assert!(
+            v.errors.iter().any(|e| matches!(
+                e,
+                crate::validation::GeometryValidationError::PinchPoint
+            )),
+            "validator did not flag the -0.0 pinch: {:?}",
+            v.errors
+        );
     }
 }

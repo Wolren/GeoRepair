@@ -38,12 +38,12 @@ impl MakeValid for MultiPolygon<f64> {
             return Geometry::MultiPolygon(MultiPolygon::new(Vec::new()));
         }
         if shells.len() == 1 {
-            return enforce_ogc_winding(Geometry::Polygon(shells.pop().expect("len==1 verified")));
+            return enforce_ogc_winding(Geometry::Polygon(shells.pop().expect("len==1 verified"))).0;
         }
         let mp = MultiPolygon::new(shells);
         // Fast-path: already valid, return unchanged (idempotency)
         if is_valid_with_geo(&Geometry::MultiPolygon(mp.clone())) {
-            return enforce_ogc_winding(Geometry::MultiPolygon(mp));
+            return enforce_ogc_winding(Geometry::MultiPolygon(mp)).0;
         }
         // Even-parent filter: prevent NestedHoles from unary_union by removing
         // shells that are fully contained inside larger shells.
@@ -53,21 +53,21 @@ impl MakeValid for MultiPolygon<f64> {
                         empty_geom::<f64>()
                     } else {
                         // Keep MultiPolygon type for multi input
-                        enforce_ogc_winding(Geometry::MultiPolygon(filtered))
+                        enforce_ogc_winding(Geometry::MultiPolygon(filtered)).0
                     };
                 }
         let mp = filtered;
                 // Check if shells have overlapping bboxes - if not, unary_union is overkill
                 let shells_overlap = shells_have_overlapping_bboxes(&mp);
                 let result = if !shells_overlap {
-                    enforce_ogc_winding(Geometry::MultiPolygon(mp))
+                    enforce_ogc_winding(Geometry::MultiPolygon(mp)).0
                 } else {
                     let unioned = geo::algorithm::bool_ops::unary_union(&mp);
                     // Accept if valid AND no vertex containment (partial overlap w/o edge crossing)
                     if is_valid_with_geo(&Geometry::MultiPolygon(unioned.clone()))
                         && !shells_have_vertex_inside(&unioned)
                     {
-                        enforce_ogc_winding(Geometry::MultiPolygon(unioned))
+                        enforce_ogc_winding(Geometry::MultiPolygon(unioned)).0
                     } else {
                         warn!("MultiPolygon: unary_union invalid, retrying with precision reduction");
                         let scales = [1e-8, 1e-6, 1e-4, 1e-2];
@@ -78,11 +78,11 @@ impl MakeValid for MultiPolygon<f64> {
                             let re_valid = is_valid_with_geo(&Geometry::MultiPolygon(re_union.clone()))
                                 && !shells_have_vertex_inside(&re_union);
                             if re_valid {
-                                best = Some(enforce_ogc_winding(Geometry::MultiPolygon(re_union)));
+                                best = Some(enforce_ogc_winding(Geometry::MultiPolygon(re_union)).0);
                                 break;
                             }
                             if best.is_none() {
-                                best = Some(enforce_ogc_winding(Geometry::MultiPolygon(re_union)));
+                                best = Some(enforce_ogc_winding(Geometry::MultiPolygon(re_union)).0);
                             }
                         }
                         // If all retries failed, clean union output with drop_nested_components
@@ -157,7 +157,7 @@ impl MakeValid for Geometry<f64> {
 pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
     if mp.0.len() <= 1 {
         return if mp.0.is_empty() { empty_geom::<f64>() }
-               else { enforce_ogc_winding(Geometry::Polygon(mp.0.into_iter().next().unwrap())) };
+               else { enforce_ogc_winding(Geometry::Polygon(mp.0.into_iter().next().unwrap())).0 };
     }
     let mut with_area: Vec<(Polygon<f64>, f64)> = mp.0.into_iter()
         .map(|p| { let a = shoelace_abs_sum(&p.exterior().0); (p, a) })
@@ -233,7 +233,7 @@ pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
     if kept.is_empty() { return empty_geom::<f64>(); }
     let kept_len = kept.len();
     if kept_len == 1 {
-        return enforce_ogc_winding(Geometry::Polygon(kept.into_iter().next().unwrap()));
+        return enforce_ogc_winding(Geometry::Polygon(kept.into_iter().next().unwrap())).0;
     }
     let mp_kept = MultiPolygon::new(kept);
     // If the components are already valid (disjoint or vertex-touching only -
@@ -249,7 +249,7 @@ pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
     // which re-expanded faces into edge-sharing components → SelfIntersection
     // (measured: 3 valid comps → 4 comps with SI on seed a27dfba6).
     if geo::algorithm::Validation::is_valid(&mp_kept) {
-        return enforce_ogc_winding(Geometry::MultiPolygon(mp_kept));
+        return enforce_ogc_winding(Geometry::MultiPolygon(mp_kept)).0;
     }
     // Edge-sharing case: containment didn't reduce components.
     // Try polygonizer fallback to split edge-sharing components.
@@ -276,9 +276,9 @@ pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
         return empty_geom::<f64>();
     }
     if valid.len() == 1 {
-        return enforce_ogc_winding(Geometry::Polygon(valid.into_iter().next().unwrap()));
+        return enforce_ogc_winding(Geometry::Polygon(valid.into_iter().next().unwrap())).0;
     }
-    enforce_ogc_winding(Geometry::MultiPolygon(MultiPolygon::new(valid)))
+    enforce_ogc_winding(Geometry::MultiPolygon(MultiPolygon::new(valid))).0
 }
 
 /// Polygonizer fallback for edge-sharing MultiPolygon components
