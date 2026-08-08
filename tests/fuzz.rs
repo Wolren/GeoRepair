@@ -2647,15 +2647,20 @@ proptest! {
             }
             let out_area = total_polygon_area(&result);
             if is_valid_input {
-                // Valid input: repair must be EXACT (area preserved to fp noise).
+                // Valid input: repair must be EXACT (area preserved to fp
+                // noise). The reference is geo's union, which itself carries
+                // ~1e-6-relative triangulation fp error - measured: a single
+                // triangle's union came in 1.3e-6 below its shoelace area
+                // (regression 5c8c8b72). The 1e-5 band is fp headroom, not
+                // repair slack.
                 let scale = geo_union.abs().max(1.0);
                 assert!(
-                    out_area >= geo_union - 1e-6 * scale,
+                    out_area >= geo_union - 1e-5 * scale,
                     "valid input area destroyed: {geo_union:.6} -> {out_area:.6} (cfg={:?}, in={mp:?})",
                     cfg.poly_method
                 );
                 assert!(
-                    out_area <= geo_union + 1e-6 * scale,
+                    out_area <= geo_union + 1e-5 * scale,
                     "valid input area invented: {geo_union:.6} -> {out_area:.6} (cfg={:?}, in={mp:?})",
                     cfg.poly_method
                 );
