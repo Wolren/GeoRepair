@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 // ============================================================================
 
 #[cfg(test)]
-mod tests {
+mod platform_tests {
     use super::*;
 
     #[test]

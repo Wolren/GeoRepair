@@ -11,10 +11,8 @@
 //! Skips (with a warning) when geosop is not on PATH or the conda GEOS
 //! install is absent - CI without GEOS still runs the rest of the suite.
 
-use geo::{Area, Coord, Geometry, LineString, MultiLineString, MultiPolygon, Point, Polygon};
-use geo_repair::validation::GeoValidation;
+use geo::{Area, Coord, Geometry, LineString, MultiLineString, Point, Polygon};
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::process::Command;
 use wkt::ToWkt;
@@ -112,8 +110,8 @@ fn geos_is_valid(geosop: &PathBuf, wkt: &str) -> Option<bool> {
 /// Normalize a ring to a canonical coordinate-set fingerprint:
 /// rotation/reversal/closure-insensitive. Coordinates are quantized to
 /// 1e-9 RELATIVE precision first: our repair paths can legitimately move a
-/// vertex by fp noise (~1e-10 relative, e.g. boolean-op intersection points
-/// - measured: GEOS keeps hole vertex 0.5 0.1, we emit 0.5 0.09999999962747
+/// vertex by fp noise (~1e-10 relative, e.g. boolean-op intersection points;
+/// measured: GEOS keeps hole vertex 0.5 0.1, we emit 0.5 0.09999999962747
 /// on the same input). Quantizing absorbs that noise while keeping real
 /// coordinate differences visible.
 fn ring_fingerprint(ring: &[Coord<f64>]) -> Vec<(i64, i64)> {
@@ -146,7 +144,10 @@ fn output_is_empty(g: &Geometry<f64>) -> bool {
 }
 
 /// Normalize a polygon: exterior + holes as sorted fingerprint sets.
-fn poly_fingerprint(p: &Polygon<f64>) -> (Vec<(i64, i64)>, Vec<Vec<(i64, i64)>>) {
+type RingBits = Vec<(i64, i64)>;
+type PolyBits = (RingBits, Vec<RingBits>);
+
+fn poly_fingerprint(p: &Polygon<f64>) -> PolyBits {
     let ext = ring_fingerprint(&p.exterior().0);
     let mut holes: Vec<Vec<(i64, i64)>> = p
         .interiors()
@@ -167,8 +168,8 @@ fn normalized_equivalent(a: &Geometry<f64>, b: &Geometry<f64>, tol: f64) -> bool
     if (area_a - area_b).abs() > tol * scale {
         return false;
     }
-    let mut fa: Vec<(Vec<(i64, i64)>, Vec<Vec<(i64, i64)>>)> = Vec::new();
-    let mut fb: Vec<(Vec<(i64, i64)>, Vec<Vec<(i64, i64)>>)> = Vec::new();
+    let mut fa: Vec<PolyBits> = Vec::new();
+    let mut fb: Vec<PolyBits> = Vec::new();
     for g in [a, b] {
         let mut acc = Vec::new();
         match g {
@@ -194,7 +195,7 @@ fn normalized_equivalent(a: &Geometry<f64>, b: &Geometry<f64>, tol: f64) -> bool
             _ => {}
         }
         acc.sort_unstable();
-        if g as *const _ == a as *const _ {
+        if std::ptr::eq(g, a) {
             fa = acc;
         } else {
             fb = acc;
@@ -225,13 +226,8 @@ fn component_count(g: &Geometry<f64>) -> usize {
 fn significant_component_count(g: &Geometry<f64>, total: f64) -> usize {
     let rel = |a: f64| a >= 1e-8 * total.abs().max(1.0);
     match g {
-        Geometry::Polygon(p) => {
-            if rel(p.unsigned_area()) {
-                1
-            } else {
-                0
-            }
-        }
+        Geometry::Polygon(p) if rel(p.unsigned_area()) => 1,
+        Geometry::Polygon(_) => 0,
         Geometry::MultiPolygon(mp) => mp.0.iter().filter(|p| rel(p.unsigned_area())).count(),
         _ => 0,
     }
@@ -276,7 +272,6 @@ fn type_family_match(a: &Geometry<f64>, b: &Geometry<f64>) -> bool {
 // ---------------------------------------------------------------------------
 
 struct CompareResult {
-    name: String,
     ok: bool,
     detail: String,
 }
@@ -291,7 +286,6 @@ fn compare_one(
         Ok(g) => g,
         Err(e) => {
             return CompareResult {
-                name: name.into(),
                 ok: false,
                 detail: format!("input WKT unparseable: {e}"),
             };
@@ -314,8 +308,7 @@ fn compare_one(
             Some(v) => v,
             None => {
                 return CompareResult {
-                    name: name.into(),
-                    ok: false,
+                            ok: false,
                     detail: "could not determine OUR output validity (geosop parse failure; oracle broken)".into(),
                 };
             }
@@ -326,7 +319,6 @@ fn compare_one(
         Some(w) => w,
         None => {
             return CompareResult {
-                name: name.into(),
                 ok: false,
                 detail: "geosop failed to produce output".into(),
             };
@@ -336,7 +328,6 @@ fn compare_one(
         Some(g) => g,
         None => {
             return CompareResult {
-                name: name.into(),
                 ok: false,
                 detail: format!("GEOS WKT unparseable: {geos_wkt}"),
             };
@@ -350,7 +341,6 @@ fn compare_one(
         Some(v) => v,
         None => {
             return CompareResult {
-                name: name.into(),
                 ok: false,
                 detail:
                     "could not determine GEOS output validity (geosop parse failure; oracle broken)"
@@ -362,14 +352,12 @@ fn compare_one(
     // 1. both valid (or both empty for degenerate input)
     if !our_valid {
         return CompareResult {
-            name: name.into(),
             ok: false,
             detail: "our output invalid".into(),
         };
     }
     if !geos_valid {
         return CompareResult {
-            name: name.into(),
             ok: false,
             detail: "GEOS output invalid (oracle broken?)".into(),
         };
@@ -380,7 +368,6 @@ fn compare_one(
     // while GEOS emits Polygon). Area-only classes skip the type check.
     if !area_only_fixtures().contains(&name) && !type_family_match(&ours, &geos) {
         return CompareResult {
-            name: name.into(),
             ok: false,
             detail: format!(
                 "type mismatch: ours={} geos={}",
@@ -401,7 +388,6 @@ fn compare_one(
     let geos_sig = significant_component_count(&geos, total_poly_area(&geos));
     if !area_only_fixtures().contains(&name) && our_sig != geos_sig {
         return CompareResult {
-            name: name.into(),
             ok: false,
             detail: format!(
                 "component count: ours={our_count} (sig {our_sig}) geos={geos_count} (sig {geos_sig})"
@@ -416,7 +402,6 @@ fn compare_one(
     if !area_only_fixtures().contains(&name) {
         if (our_area - geos_area).abs() > 1e-6 * scale {
             return CompareResult {
-                name: name.into(),
                 ok: false,
                 detail: format!("area: ours={our_area:.8} geos={geos_area:.8}"),
             };
@@ -444,7 +429,6 @@ fn compare_one(
         };
         if !ok {
             return CompareResult {
-                name: name.into(),
                 ok: false,
                 detail: format!("area-only class mismatch: ours={our_area:.8} geos={geos_area:.8}"),
             };
@@ -454,17 +438,15 @@ fn compare_one(
     // skipped for the documented area-only divergence classes.
     if !area_only_fixtures().contains(&name) && !normalized_equivalent(&ours, &geos, 1e-6) {
         return CompareResult {
-            name: name.into(),
             ok: false,
             detail: format!(
                 "normalized geometry differs (area matches): ours={} geos={}",
-                ToWkt::to_wkt(&ours).to_string(),
-                ToWkt::to_wkt(&geos).to_string()
+                ToWkt::to_wkt(&ours),
+                ToWkt::to_wkt(&geos)
             ),
         };
     }
     CompareResult {
-        name: name.into(),
         ok: true,
         detail: format!(
             "area {our_area:.4} = GEOS {geos_area:.4}, {our_count} comps{}",

@@ -51,8 +51,6 @@ struct IsValidParityCase {
     our_class: Option<GeometryValidationError>,
     /// GEOS's error class for documentation.
     geos_class: &'static str,
-    /// Notes on class deltas / orientation shadowing.
-    note: &'static str,
 }
 
 const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
@@ -63,7 +61,7 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         geos_valid: false,
         our_class: Some(GeometryValidationError::CoordinateNaN),
         geos_class: "eInvalidCoordinate",
-        note: "",
+        // note:
     },
     // test<29> - Inf coordinate
     IsValidParityCase {
@@ -72,7 +70,7 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         geos_valid: false,
         our_class: Some(GeometryValidationError::CoordinateNaN),
         geos_class: "eInvalidCoordinate",
-        note: "",
+        // note:
     },
     // test<2> - tiny hole outside shell
     IsValidParityCase {
@@ -81,7 +79,7 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         geos_valid: false,
         our_class: Some(GeometryValidationError::HoleOutsideShell),
         geos_class: "eHoleOutsideShell",
-        note: "",
+        // note:
     },
     // test<3> - ticket 588: GEOS-valid; we reject (CW ring) and repair. The
     // reversed ring is covered by geos_isvalidop_ticket588_reversed below.
@@ -91,7 +89,7 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         geos_valid: true,
         our_class: None,
         geos_class: "",
-        note: "masked: WrongOrientation + repair",
+        // note: masked: WrongOrientation + repair
     },
     // test<4> - JTS PR 737 LINEARING self-crossing (parsed as LineString)
     IsValidParityCase {
@@ -100,7 +98,7 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         geos_valid: false,
         our_class: Some(GeometryValidationError::NotSimple),
         geos_class: "eRingSelfIntersection",
-        note: "line family: GEOS eRingSelfIntersection, ours NotSimple",
+        // note: line family: GEOS eRingSelfIntersection, ours NotSimple
     },
     // test<5> - valid MP
     IsValidParityCase {
@@ -109,7 +107,7 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         geos_valid: true,
         our_class: None,
         geos_class: "",
-        note: "",
+        // note:
     },
     // test<6> - disconnected interior; structural class shadowed by
     // WrongOrientation on the mis-oriented fixture - oriented variant is
@@ -121,7 +119,7 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         geos_valid: false,
         our_class: Some(GeometryValidationError::WrongOrientation),
         geos_class: "eDisconnectedInterior",
-        note: "orientation-shadowed; oriented variant = gap fixed",
+        // note: orientation-shadowed; oriented variant = gap fixed
     },
     // test<7> - simple square, CW in the fixture: masked
     IsValidParityCase {
@@ -130,7 +128,7 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         geos_valid: true,
         our_class: None,
         geos_class: "",
-        note: "masked: WrongOrientation + repair",
+        // note: masked: WrongOrientation + repair
     },
     // test<8> - bowtie
     IsValidParityCase {
@@ -139,7 +137,7 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         geos_valid: false,
         our_class: Some(GeometryValidationError::SelfIntersection),
         geos_class: "eSelfIntersection",
-        note: "",
+        // note:
     },
     // test<22> - inverted polygon: GEOS eRingSelfIntersection, ours PinchPoint
     IsValidParityCase {
@@ -148,7 +146,7 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         geos_valid: false,
         our_class: Some(GeometryValidationError::PinchPoint),
         geos_class: "eRingSelfIntersection",
-        note: "non-consecutive vertex revisit",
+        // note: non-consecutive vertex revisit
     },
     // test<9> - polygon with hole, CW fixture: masked
     IsValidParityCase {
@@ -157,7 +155,7 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         geos_valid: true,
         our_class: None,
         geos_class: "",
-        note: "masked: WrongOrientation + repair",
+        // note: masked: WrongOrientation + repair
     },
     // test<10> - hole touching shell at a vertex: valid
     IsValidParityCase {
@@ -166,7 +164,7 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         geos_valid: true,
         our_class: None,
         geos_class: "",
-        note: "",
+        // note:
     },
     // test<11> - hole properly crossing the shell: GEOS eSelfIntersection,
     // ours HoleOutsideShell (the hole genuinely pokes out)
@@ -176,7 +174,7 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         geos_valid: false,
         our_class: Some(GeometryValidationError::HoleOutsideShell),
         geos_class: "eSelfIntersection",
-        note: "hole pokes outside thin shell",
+        // note: hole pokes outside thin shell
     },
     // test<12> - disconnected interior; orientation-shadowed, oriented = gap fixed
     IsValidParityCase {
@@ -185,7 +183,7 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         geos_valid: false,
         our_class: Some(GeometryValidationError::WrongOrientation),
         geos_class: "eDisconnectedInterior",
-        note: "orientation-shadowed; oriented variant = gap fixed",
+        // note: orientation-shadowed; oriented variant = gap fixed
     },
     // test<13> - MP touch at vertices, CW fixture: masked
     IsValidParityCase {
@@ -194,7 +192,7 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         geos_valid: true,
         our_class: None,
         geos_class: "",
-        note: "masked: WrongOrientation + repair",
+        // note: masked: WrongOrientation + repair
     },
     // test<14> - MP touch at segments: valid
     IsValidParityCase {
@@ -203,7 +201,7 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         geos_valid: true,
         our_class: None,
         geos_class: "",
-        note: "",
+        // note:
     },
     // test<15> - nested shells (all vertices touch): orientation-shadowed;
     // oriented variant = KNOWN GAP
@@ -213,7 +211,7 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         geos_valid: false,
         our_class: Some(GeometryValidationError::WrongOrientation),
         geos_class: "eNestedShells",
-        note: "orientation-shadowed; oriented variant = KNOWN GAP",
+        // note: orientation-shadowed; oriented variant = KNOWN GAP
     },
     // test<16> - MP hole touch vertices, CW fixture: masked
     IsValidParityCase {
@@ -222,7 +220,7 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         geos_valid: true,
         our_class: None,
         geos_class: "",
-        note: "masked: WrongOrientation + repair",
+        // note: masked: WrongOrientation + repair
     },
     // test<17> - multiple holes touching at one point, CW fixture: masked
     IsValidParityCase {
@@ -231,7 +229,7 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         geos_valid: true,
         our_class: None,
         geos_class: "",
-        note: "masked: WrongOrientation + repair",
+        // note: masked: WrongOrientation + repair
     },
     // test<18> - hole outside shell all-touch: GEOS eHoleOutsideShell, ours
     // DisconnectedInteriorRing (touching at >= 2 shell points)
@@ -241,7 +239,7 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         geos_valid: false,
         our_class: Some(GeometryValidationError::DisconnectedInteriorRing),
         geos_class: "eHoleOutsideShell",
-        note: "hole double-touch reads as disconnected interior",
+        // note: hole double-touch reads as disconnected interior
     },
     // test<19> - hole outside shell double-touch: same delta
     IsValidParityCase {
@@ -250,7 +248,7 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         geos_valid: false,
         our_class: Some(GeometryValidationError::DisconnectedInteriorRing),
         geos_class: "eHoleOutsideShell",
-        note: "hole double-touch reads as disconnected interior",
+        // note: hole double-touch reads as disconnected interior
     },
     // test<20> - nested holes: orientation-shadowed; oriented variant now
     // REJECTED as DisconnectedInteriorRing (touch-cycle fires first; class
@@ -261,7 +259,7 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         geos_valid: false,
         our_class: Some(GeometryValidationError::WrongOrientation),
         geos_class: "eNestedHoles",
-        note: "orientation-shadowed; oriented variant = gap fixed",
+        // note: orientation-shadowed; oriented variant = gap fixed
     },
     // test<21> - MP hole overlap crossing: orientation-shadowed; oriented = gap fixed
     IsValidParityCase {
@@ -270,7 +268,7 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         geos_valid: false,
         our_class: Some(GeometryValidationError::WrongOrientation),
         geos_class: "eSelfIntersection",
-        note: "orientation-shadowed; oriented variant = gap fixed",
+        // note: orientation-shadowed; oriented variant = gap fixed
     },
     // test<23> - zero-length line
     IsValidParityCase {
@@ -279,7 +277,7 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         geos_valid: false,
         our_class: Some(GeometryValidationError::RepeatedPoint),
         geos_class: "(no class asserted)",
-        note: "",
+        // note:
     },
     // test<24> - linear ring triangle: valid
     IsValidParityCase {
@@ -288,7 +286,7 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         geos_valid: true,
         our_class: None,
         geos_class: "",
-        note: "",
+        // note:
     },
     // test<26> - linear ring bowtie: line family, ours NotSimple
     IsValidParityCase {
@@ -297,7 +295,7 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         geos_valid: false,
         our_class: Some(GeometryValidationError::NotSimple),
         geos_class: "eRingSelfIntersection",
-        note: "line family",
+        // note: line family
     },
     // test<27> - same polygon as test<22>
     IsValidParityCase {
@@ -306,7 +304,7 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         geos_valid: false,
         our_class: Some(GeometryValidationError::PinchPoint),
         geos_class: "eRingSelfIntersection",
-        note: "non-consecutive vertex revisit",
+        // note: non-consecutive vertex revisit
     },
     // test<28> - self-intersecting polygon
     IsValidParityCase {
@@ -315,13 +313,12 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         geos_valid: false,
         our_class: Some(GeometryValidationError::SelfIntersection),
         geos_class: "eSelfIntersection",
-        note: "",
+        // note:
     },
 ];
 
 /// Even-odd (set-theoretic) area of polygon parts: shell minus holes.
 fn even_odd_area(g: &Geometry<f64>) -> f64 {
-    use geo::Area;
     fn ring_area(ring: &[Coord<f64>]) -> f64 {
         let mut s = 0.0;
         for i in 0..ring.len().saturating_sub(1) {

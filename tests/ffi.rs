@@ -20,7 +20,7 @@ use geo_repair::bindings::ffi::{
     geo_repair_validate_reason, geo_repair_validate_wkt, geo_repair_version,
 };
 use geo_repair::io::wkb::{read_wkb, write_wkb};
-use geo_repair::io::wkt::{read_wkt, write_wkt};
+use geo_repair::io::wkt::read_wkt;
 use geo_repair::validation::GeoValidation;
 use std::ffi::{CStr, CString};
 use std::ptr;
@@ -47,12 +47,19 @@ fn bowtie_wkb() -> Vec<u8> {
 
 /// SAFETY: the result must own a valid WKB buffer (success == true).
 unsafe fn result_wkb(res: &GeoRepairResult) -> Vec<u8> {
-    std::slice::from_raw_parts(res.wkb_data, res.wkb_len).to_vec()
+    // SAFETY: the FFI contract hands back a valid (ptr, len) pair for
+    // the duration of the call; the result is copied out immediately.
+    unsafe { std::slice::from_raw_parts(res.wkb_data, res.wkb_len) }.to_vec()
 }
 
 /// SAFETY: the string result must own a valid data string (success == true).
 unsafe fn string_result_data(res: &GeoRepairStringResult) -> String {
-    CStr::from_ptr(res.data).to_str().unwrap().to_string()
+    // SAFETY: the FFI contract returns a valid NUL-terminated string
+    // pointer for the duration of the call.
+    unsafe { CStr::from_ptr(res.data) }
+        .to_str()
+        .unwrap()
+        .to_string()
 }
 
 fn is_valid_wkb_bytes(wkb: &[u8]) -> bool {
@@ -350,7 +357,7 @@ fn free_string_result_is_double_free_safe() {
 fn batch_sequential_and_parallel_agree() {
     let sq = square_wkb();
     let bt = bowtie_wkb();
-    let garbage = vec![0x01u8, 0x02, 0x03];
+    let garbage = [0x01u8, 0x02, 0x03];
     let inputs = [
         GeoRepairWkbBuffer {
             data: sq.as_ptr(),

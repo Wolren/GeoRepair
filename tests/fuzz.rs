@@ -175,6 +175,7 @@ fn assert_valid_ogc(g: &Geometry<f64>) {
     assert_ogc_oriented(g);
 }
 
+#[allow(dead_code)]
 fn assert_idempotent(g: &Geometry<f64>, config: &MakeValidConfig) {
     let first = g.make_valid_with_config(config);
     let second = first.make_valid_with_config(config);
@@ -246,6 +247,7 @@ fn cfg_all() -> Vec<MakeValidConfig> {
     vec![auto, auto_keep, arrange, structure]
 }
 
+#[allow(dead_code)]
 fn cfg_all_methods() -> Vec<MakeValidConfig> {
     let auto = MakeValidConfig {
         poly_method: PolyMethod::Auto,
@@ -291,6 +293,7 @@ fn coord_int() -> impl Strategy<Value = Coord<f64>> {
 }
 
 /// Coordinates spanning multiple orders of magnitude (stress fp precision)
+#[allow(dead_code)]
 fn coord_mixed_magnitude() -> impl Strategy<Value = Coord<f64>> {
     (coord_range(-1e6..=1e6), coord_range(-1e-6..=1e-6)).prop_map(|(c1, c2)| {
         if (0..100).next().unwrap_or(0) < 50 {
@@ -328,6 +331,7 @@ fn polygon_points(
 
 /// Strategy that generates a mix of valid and invalid rings by
 /// sometimes reversing the winding and sometimes not.
+#[allow(dead_code)]
 fn ring_strategy(
     n: usize,
     range: std::ops::RangeInclusive<f64>,
@@ -465,7 +469,7 @@ proptest! {
         for cfg in &cfg_all() {
             let result = poly.make_valid_with_config(cfg);
             if was_valid {
-                let ok = &result == &Geometry::Polygon(poly.clone())
+                let ok = result == Geometry::Polygon(poly.clone())
                     || match (&result, Geometry::Polygon(poly.clone())) {
                         (Geometry::Polygon(rp), Geometry::Polygon(op)) => {
                             let mut rv = rp.exterior().0.clone();
@@ -480,10 +484,11 @@ proptest! {
                         "valid polygon produced invalid output: {:?}", result.validate().errors);
                 }
             }
-            if result.is_valid() && !is_empty(&result) {
-                if let Geometry::Polygon(p) = &result {
-                    assert_polygon_rings(p, "simple_polygon");
-                }
+            if result.is_valid()
+                && !is_empty(&result)
+                && let Geometry::Polygon(p) = &result
+            {
+                assert_polygon_rings(p, "simple_polygon");
             }
         }
     }
@@ -667,7 +672,7 @@ proptest! {
     #[test]
     fn invariant_figure_eight_crossing(
         scale in 1.0f64..100.0f64,
-        eps in 0.1f64..10.0f64,
+        _eps in 0.1f64..10.0f64,
     ) {
         // Triangle (0,0)-(s,0)-(s/2,s) crossing triangle (s/2,0)-(0,s)-(s,s)
         // with crossing point at (s/2, s/2) - not a shared vertex.
@@ -1238,7 +1243,7 @@ proptest! {
         dup_pos in 0usize..6usize,
     ) {
         if base.is_empty() || dup_pos >= base.len() { return Ok(()); }
-        let mut ring: Vec<Coord<f64>> = base.iter().copied().collect();
+        let mut ring: Vec<Coord<f64>> = base.to_vec();
         // Insert a duplicate at position dup_pos
         ring.insert(dup_pos, ring[dup_pos]);
         if ring.len() >= 3 && ring.first() != ring.last() { ring.push(ring[0]); }
@@ -1313,7 +1318,7 @@ proptest! {
         let mut ring = coords;
         if ring.len() >= 3 && ring.first() != ring.last() { ring.push(ring[0]); }
         let poly = Polygon::new(LineString::new(ring), Vec::new());
-        let auto_valid = poly.make_valid_with_config(&cfg_auto()).validate().valid;
+        let _auto_valid = poly.make_valid_with_config(&cfg_auto()).validate().valid;
         let arrange_valid = poly.make_valid_with_config(
             &MakeValidConfig { poly_method: PolyMethod::Arrange, ..Default::default() }
         ).validate().valid;
@@ -1491,18 +1496,18 @@ proptest! {
         let poly = Polygon::new(LineString::new(ring), Vec::new());
         for cfg in &cfg_all() {
             let result = poly.make_valid_with_config(cfg);
-            if let Geometry::Polygon(p) = &result {
-                if result.is_valid() {
-                    let ext = p.exterior();
-                    if ext.0.len() >= 4 {
-                        let ccw = ext.winding_order() == Some(WindingOrder::CounterClockwise);
-                        assert!(ccw, "winding: exterior must be CCW after valid repair");
-                    }
-                    for (i, hole) in p.interiors().iter().enumerate() {
-                        if hole.0.len() >= 4 {
-                            let cw = hole.winding_order() == Some(WindingOrder::Clockwise);
-                            assert!(cw, "winding: hole {i} must be CW after valid repair");
-                        }
+            if let Geometry::Polygon(p) = &result
+                && result.is_valid()
+            {
+                let ext = p.exterior();
+                if ext.0.len() >= 4 {
+                    let ccw = ext.winding_order() == Some(WindingOrder::CounterClockwise);
+                    assert!(ccw, "winding: exterior must be CCW after valid repair");
+                }
+                for (i, hole) in p.interiors().iter().enumerate() {
+                    if hole.0.len() >= 4 {
+                        let cw = hole.winding_order() == Some(WindingOrder::Clockwise);
+                        assert!(cw, "winding: hole {i} must be CW after valid repair");
                     }
                 }
             }
@@ -1532,11 +1537,12 @@ proptest! {
         let poly = Polygon::new(LineString::new(ring), Vec::new());
         for cfg in &cfg_all() {
             let result = poly.make_valid_with_config(cfg);
-            if let Geometry::Polygon(p) = &result {
-                if result.is_valid() && p.exterior().0.len() >= 4 {
-                    let ccw = p.exterior().winding_order() == Some(WindingOrder::CounterClockwise);
-                    assert!(ccw, "exterior must be CCW after repair regardless of input winding");
-                }
+            if let Geometry::Polygon(p) = &result
+                && result.is_valid()
+                && p.exterior().0.len() >= 4
+            {
+                let ccw = p.exterior().winding_order() == Some(WindingOrder::CounterClockwise);
+                assert!(ccw, "exterior must be CCW after repair regardless of input winding");
             }
         }
     }
@@ -1919,8 +1925,8 @@ proptest! {
         let holes: Vec<LineString<f64>> = (0..n_holes).map(|i| {
             let frac = (i as f64 + 0.5) / (n_holes as f64);
             let h = s * 0.03;
-            let cx = s * 0.1 + (frac * 0.8).max(0.0).min(0.8) * s;
-            let cy = s * 0.1 + ((i as f64 * 0.2371).fract() * 0.8).max(0.0).min(0.8) * s;
+            let cx = s * 0.1 + (frac * 0.8).clamp(0.0, 0.8) * s;
+            let cy = s * 0.1 + ((i as f64 * 0.2371).fract() * 0.8).clamp(0.0, 0.8) * s;
             LineString::new(vec![
                 Coord { x: cx - h, y: cy - h }, Coord { x: cx + h, y: cy - h },
                 Coord { x: cx + h, y: cy + h }, Coord { x: cx - h, y: cy + h },
@@ -2525,8 +2531,9 @@ proptest! {
 mod diag_all_methods_fail {
     use geo::{Coord, Geometry, LineString, Polygon};
     use geo_repair::validation::GeoValidation;
-    use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
+    use geo_repair::{MakeValid, MakeValidConfig};
 
+    #[allow(dead_code)]
     fn assert_valid_soft(g: &Geometry<f64>) -> bool {
         let r = g.validate();
         r.valid

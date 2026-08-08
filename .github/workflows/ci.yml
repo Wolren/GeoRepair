@@ -236,17 +236,22 @@ jobs:
         shell: cmd
         run: tests\c\build_test_windows.bat
 
-  clippy:
+  # Lint gate: rustfmt + clippy on ALL targets (lib, tests, benches,
+  # examples) under the full non-GEOS feature set. --all-targets matches
+  # the geo ecosystem's gate (geo, wkt run it) - the CI feature set is the
+  # one the test job uses, so every target that ships gets linted.
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
         with:
           toolchain: stable
-          components: clippy
-      - run: cargo clippy --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,ffi"
-        env:
-          RUSTFLAGS: -Dwarnings
+          components: rustfmt, clippy
+      - name: Format check
+        run: cargo fmt --all -- --check
+      - name: Clippy (all targets)
+        run: cargo clippy --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,ffi" --all-targets -- -D warnings
 
   rustdoc:
     runs-on: ubuntu-latest
@@ -258,6 +263,39 @@ jobs:
       - run: cargo doc --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,ffi,serde"
         env:
           RUSTDOCFLAGS: -D warnings
+
+  # docs.rs build gate (the wkt crate's practice): the
+  # [package.metadata.docs.rs] feature set must actually build. The
+  # publish path only discovers a broken docs.rs config at release time;
+  # this catches it at commit time. Nightly, because docs.rs builds on
+  # nightly. cargo-docs-rs reads the metadata's all-features=false +
+  # pinned feature list, so simd-portable and bench-geos-system never
+  # leak into the docs build.
+  docs-rs:
+    runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: -Dwarnings
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # nightly
+        with:
+          toolchain: nightly
+      - uses: dtolnay/install@a75ae3c3a13004d4d2db69b04946c7f7687bda91  # cargo-docs-rs
+      - run: cargo docs-rs
+
+  # Static-GEOS gate: the bench-geos feature (geos-src cmake static
+  # build) is untested anywhere - CI only exercised bench-geos-system
+  # (the geos crate's CI runs both). A broken cmake/static linkage
+  # otherwise ships silently until a hermetic user hits it.
+  geos-static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
+        with:
+          toolchain: stable
+      - run: sudo apt-get update && sudo apt-get install -y cmake
+      - run: cargo check --features "arrange,structure,parallel,simd,validate,bench-geos"
 
   # Semver gate: a minor/patch bump must never silently break the public
   # API. `check-release` compares the working tree against the latest

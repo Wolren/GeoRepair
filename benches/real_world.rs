@@ -35,15 +35,8 @@ use std::io::Write;
 use std::path::Path;
 use std::time::Instant;
 
-#[cfg(any(
-    feature = "bench-geos",
-    feature = "bench-geos-system",
-    not(feature = "parallel")
-))]
-use geo::Geometry;
-use geo::{Coord, Polygon};
+use geo::{Coord, Geometry, Polygon};
 use geo_repair::GeoValidation;
-use geo_repair::arrange::validate_polygon;
 use geo_repair::dd::{dd_call_count, reset_dd_count};
 use geo_repair::io::load_bin;
 use geo_repair::orient::orient2d;

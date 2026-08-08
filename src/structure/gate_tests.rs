@@ -5,10 +5,9 @@ mod gate_completeness {
     //! OGC re-winding, because the Fast path now SKIPS that validator
     //! (2026-08-07). A gate/validator divergence here ships invalid output.
 
-    use super::*;
+    use crate::MakeValidConfig;
     use crate::make_valid::{enforce_ogc_winding, is_valid_with_geo};
     use crate::validation::GeoValidation;
-    use crate::{MakeValidConfig, PolyMethod};
     use geo::{Coord, LineString, Polygon};
 
     fn ring(coords: &[(f64, f64)]) -> LineString<f64> {

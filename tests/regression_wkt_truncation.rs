@@ -61,8 +61,8 @@ fn truncated_wkt_never_panics() {
 #[test]
 fn wkt_ring_order_and_empty_rings() {
     // Two distinct holes: their order is meaningful data.
-    let two_holes = "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (1 1, 1 2, 2 2, 2 1, 1 1), (5 5, 5 7, 7 7, 7 5, 5 5))";
-    for text in [two_holes] {
+    let text = "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (1 1, 1 2, 2 2, 2 1, 1 1), (5 5, 5 7, 7 7, 7 5, 5 5))";
+    {
         let g = read_wkt(text).expect("parse");
         let g2 = read_wkt(&write_wkt(&g)).expect("reparse");
         assert_eq!(

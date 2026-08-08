@@ -101,7 +101,6 @@ where
 mod tests {
     use super::*;
     use geo::{Geometry, LineString, Polygon};
-    use geo_traits::GeometryTrait;
 
     fn bowtie() -> Polygon<f64> {
         // Self-intersecting quad: (0,0) (10,10) (0,10) (10,0).

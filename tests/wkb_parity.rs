@@ -26,7 +26,7 @@ fn ls_eq(a: &LineString<f64>, b: &LineString<f64>) -> bool {
 }
 
 fn poly_eq(a: &Polygon<f64>, b: &Polygon<f64>) -> bool {
-    ls_eq(&a.exterior(), &b.exterior())
+    ls_eq(a.exterior(), b.exterior())
         && a.interiors().len() == b.interiors().len()
         && a.interiors()
             .iter()
