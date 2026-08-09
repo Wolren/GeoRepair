@@ -783,10 +783,14 @@ fn bench_line(label: &str, g: &Geometry<f64>, batch: usize, cfg: &MakeValidConfi
 /// a committed baseline.
 fn gate_filtered(label: &str) -> bool {
     match std::env::var("BENCH_SUBSET") {
-        Ok(sub) => sub
-            .split(',')
-            .map(str::trim)
-            .any(|p| !p.is_empty() && label.starts_with(p)),
+        Ok(sub) => {
+            // Collapse whitespace so padded labels ('invalid bowtie  50v')
+            // match subset entries ('invalid bowtie 50v').
+            let norm_label: String = label.split_whitespace().collect::<Vec<_>>().join(" ");
+            sub.split(',')
+                .map(str::trim)
+                .any(|p| !p.is_empty() && norm_label.starts_with(p))
+        }
         Err(_) => true,
     }
 }

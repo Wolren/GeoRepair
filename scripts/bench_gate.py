@@ -22,6 +22,8 @@ import sys
 
 # Curated regression-sensitive cases. The parallel column is the measured
 # quantity; sub-multi-µs rows are excluded (Rayon dispatch noise).
+# Labels use the CURRENT bench row names (ladder tops per family,
+# 2026-08-09: every family now has a size ladder reaching >=1000v).
 CASE_PREFIXES = [
     "valid polygon 1000v",
     "valid polygon 5000v",
@@ -30,26 +32,50 @@ CASE_PREFIXES = [
     "invalid bowtie 50v",
     "invalid bowtie 100v",
     "invalid bowtie 500v",
+    "invalid bowtie 1000v",
     "spaghetti 500v",
-    "self-touch poly",
+    "spaghetti 2000v",
+    "self-touch 1000v",
+    "collapsed 1000v",
+    "near-collinear 1000v",
+    "large coord 1e12 1000v",
+    "star poly 1000v",
     "valid ls 100v",
     "valid ls 500v",
-    "collinear ls 500v",
-    "duped ls 100v",
-    "dense self ls 500v",
+    "valid ls 1000v",
+    "collinear ls 1000v",
+    "zigzag ls 1000v",
+    "spiral ls 1000v",
+    "self-int ls 1000v",
+    "dense self ls 1000v",
+    "duped ls 1000v",
+    "mls 500x3v",
+    "self-int mls 500x4v",
+    "star-burst 1000sp",
+    "collinear ov 1000seg",
+    "x-scale 1000v",
+    "ringing 1000v",
     "lissajous 2000v",
-    "mls 50x3v",
-    "self-int mls 50x4v",
-    "hole hier 50h",
-    "overlap mp 50sh",
+    "spoke 1000sp",
+    "star-comb 1000sp",
+    "hole hier 100h",
+    "overlap mp 100sh",
     "dense grid 10x10=100",
     "dense grid 20x20=400",
-    "sliver 500v",
+    "dense grid 30x30=900",
+    "sliver 1000v",
+    "arrange valid 1000v",
 ]
 
 # Absolute floor (µs) below which a case is not gated: sub-µs rows are
 # dispatch-noise territory.
 FLOOR_US = 1.0
+
+
+def norm(label: str) -> str:
+    """Collapse whitespace runs so padded bench labels ('invalid bowtie  50v')
+    match the subset entries ('invalid bowtie 50v')."""
+    return " ".join(label.split())
 
 
 def run_bench() -> str:
@@ -81,7 +107,7 @@ def main() -> int:
         if not line:
             continue
         rec = json.loads(line)
-        rows[rec["label"]] = rec
+        rows[norm(rec["label"])] = rec
 
     baseline_path = args.baseline
     if not os.path.exists(baseline_path):

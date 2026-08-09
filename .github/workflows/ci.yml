@@ -174,7 +174,7 @@ jobs:
       - name: Synthetic bench subset (gate)
         run: cargo bench --features arrange,structure,parallel,simd --bench bench
         env:
-          BENCH_SUBSET: "valid polygon 1000v,valid polygon 5000v,valid polygon 10000v,invalid bowtie 4v,invalid bowtie 50v,invalid bowtie 100v,invalid bowtie 500v,spaghetti 500v,self-touch poly,valid ls 100v,valid ls 500v,collinear ls 500v,duped ls 100v,dense self ls 500v,lissajous 2000v,mls 50x3v,self-int mls 50x4v,hole hier 50h,overlap mp 50sh,dense grid 10x10=100,dense grid 20x20=400,sliver 500v"
+          BENCH_SUBSET: "valid polygon 1000v,valid polygon 5000v,valid polygon 10000v,invalid bowtie 4v,invalid bowtie 50v,invalid bowtie 100v,invalid bowtie 500v,invalid bowtie 1000v,spaghetti 500v,spaghetti 2000v,self-touch 1000v,collapsed 1000v,near-collinear 1000v,large coord 1e12 1000v,star poly 1000v,valid ls 100v,valid ls 500v,valid ls 1000v,collinear ls 1000v,zigzag ls 1000v,spiral ls 1000v,self-int ls 1000v,dense self ls 1000v,duped ls 1000v,mls 500x3v,self-int mls 500x4v,star-burst 1000sp,collinear ov 1000seg,x-scale 1000v,ringing 1000v,lissajous 2000v,spoke 1000sp,star-comb 1000sp,hole hier 100h,overlap mp 100sh,dense grid 10x10=100,dense grid 20x20=400,dense grid 30x30=900,sliver 1000v,arrange valid 1000v"
           BENCH_JSON: target/bench_gate.json
       - name: Compare against baseline
         run: python scripts/bench_gate.py --json target/bench_gate.json --baseline benches/bench_baseline.json
