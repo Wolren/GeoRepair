@@ -2,8 +2,8 @@
 //! OGC winding helpers.
 
 use super::*;
-use alloc::vec::Vec;
 use crate::noding::remove_consecutive_duplicates;
+use alloc::vec::Vec;
 
 pub(super) fn has_nan(g: &Geometry<f64>) -> bool {
     use geo::CoordsIter;
