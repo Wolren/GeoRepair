@@ -1,9 +1,0 @@
-{
-  "dense grid 10x10=100": 48.0615,
-  "dense grid 20x20=400": 485.086,
-  "invalid bowtie 4v": 0.6916640000000001,
-  "lissajous 2000v": 174.53599999999997,
-  "mls 50x3v": 2.83716,
-  "self-int mls 50x4v": 29.839,
-  "valid polygon 10000v": 46.5709
-}
