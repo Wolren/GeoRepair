@@ -65,7 +65,7 @@ use log::warn;
 /// per polygon, the dominant per-poly cost on the 1.58M-poly full pass).
 pub fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geometry<f64>> {
     match fix_polygon_owned(poly.clone(), config, None) {
-        FixOutcome::Fast(g) | FixOutcome::Repaired(g) => Some(g),
+        FixOutcome::Fast(g, _, _) | FixOutcome::Repaired(g) => Some(g),
         FixOutcome::Unconsumed(_) => None,
     }
 }
@@ -78,7 +78,7 @@ pub(crate) enum FixOutcome {
     /// Input polygon moved straight into the output — validated by the
     /// fast-path gates: >=4 coords, no sub-ULP edges, no self-intersections,
     /// valid holes, spread >= EPS * scale (checked by the caller), NaN-free.
-    Fast(Geometry<f64>),
+    Fast(Geometry<f64>, f64, f64),
     /// Rebuilt geometry (repair / fallback paths).
     Repaired(Geometry<f64>),
     /// Structure repair produced nothing; the polygon is returned
@@ -104,9 +104,11 @@ pub(crate) fn fix_polygon_owned(
     let _t_fp = util::ProfileClock::start();
     #[cfg(feature = "arrange")]
     {
-        if fast_path_check(&poly, ext_scale) {
+        let mut min_abs = f64::INFINITY;
+        let mut max_abs = 0.0f64;
+        if fast_path_check(&poly, ext_scale, &mut min_abs, &mut max_abs) {
             PROFILE_FP_NS.fetch_add(_t_fp.ns(), Ordering::Relaxed);
-            return FixOutcome::Fast(Geometry::Polygon(poly));
+            return FixOutcome::Fast(Geometry::Polygon(poly), min_abs, max_abs);
         }
     }
     PROFILE_FP_NS.fetch_add(_t_fp.ns(), Ordering::Relaxed);
@@ -124,21 +126,32 @@ pub(crate) fn fix_polygon_owned(
     /// classes.
     #[cfg(feature = "arrange")]
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
-    fn fast_path_check(poly: &Polygon<f64>, _ext_scale: Option<f64>) -> bool {
+    fn fast_path_check(
+        poly: &Polygon<f64>,
+        _ext_scale: Option<f64>,
+        min_abs: &mut f64,
+        max_abs: &mut f64,
+    ) -> bool {
         let total_verts: usize =
             poly.exterior().0.len() + poly.interiors().iter().map(|h| h.0.len()).sum::<usize>();
         if total_verts == 0 || poly.exterior().0.len() < 4 {
             return false;
         }
-        // Basic form + sub-ULP edges + the global envelope bbox in ONE pass
-        // over the coords (measured 2026-08-08: the separate sub-ULP and
-        // envelope scans cost ~15-20 us on a 5000-vertex ring).
+        // Basic form + sub-ULP edges + the global envelope bbox + the
+        // extreme-magnitude min/max-abs extrema in ONE pass over the
+        // coords (measured 2026-08-08: the separate sub-ULP and
+        // envelope scans cost ~15-20 us on a 5000-vertex ring). The
+        // extrema ride out with the Fast outcome so the caller's
+        // extreme-span gate (crash-65111cd0 guard, 2026-08-09) does
+        // not re-scan the same coords.
         let mut bbox = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
         let mut sub_ulp = false;
         let mut acc = crate::arrange::GateAccum {
             lines: None,
             bbox: Some(&mut bbox),
             sub_ulp: Some(&mut sub_ulp),
+            min_abs: Some(min_abs),
+            max_abs: Some(max_abs),
         };
         if !crate::arrange::ring_is_plausible(poly.exterior(), &mut acc) {
             return false;
@@ -187,18 +200,34 @@ pub(crate) fn fix_polygon_owned(
                 )
                 .is_empty()
         } else {
-            // Very large rings: the validator IS the gate - one radix sweep
-            // that covers every class the exit validator would re-check
-            // (ring simplicity incl. eps-collinear + T-junctions, hole ring
-            // validity, hole containment/nesting, duplicates). Orientation
-            // errors are filtered: the fast path re-winds after the gate, and
-            // winding is the only normalization a simple polygon needs.
-            use crate::validation::{GeoValidation, GeometryValidationError};
-            let r = poly.validate();
-            r.valid
-                || r.errors
+            // Very large rings: the radix ring pass (proper crossings +
+            // eps-collinear + T-junctions - the classes the R-tree sweep
+            // missed) plus the cheap inclusive hole gate. The full
+            // validator is NOT used here: its orientation-only
+            // continuation re-runs the tree-based hole pass on every
+            // shell whose winding is wrong - on the all-CW real dataset
+            // that is ~11ms per giant ring (measured 2026-08-09: the
+            // 1,164 big rings cost +12.8s cumulative in the full pass,
+            // ~1.1s wall). Ring simplicity + hole validity + containment
+            // is the same certification the small-ring branch performs;
+            // the fast path re-winds afterwards and the exit validator
+            // covers the final verdict.
+            use crate::validation::GeometryValidationError;
+            if crate::validation::check_ring_validity(poly.exterior().0.as_slice(), true)
+                .iter()
+                .any(|e| !matches!(e, GeometryValidationError::WrongOrientation))
+            {
+                return false;
+            }
+            for hole in poly.interiors() {
+                if crate::validation::check_ring_validity(&hole.0, false)
                     .iter()
-                    .all(|e| matches!(e, GeometryValidationError::WrongOrientation))
+                    .any(|e| !matches!(e, GeometryValidationError::WrongOrientation))
+                {
+                    return false;
+                }
+            }
+            crate::arrange::holes_are_valid_inclusive(poly)
         }
     }
 
