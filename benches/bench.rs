@@ -425,21 +425,6 @@ fn make_self_touching_polygon() -> Polygon<f64> {
     )
 }
 
-fn make_nearly_collinear_polygon() -> Polygon<f64> {
-    // Shewchuk classic stress case: nearly-collinear vertices
-    // small perturbation from collinear stresses orient2d adaptive precision
-    Polygon::new(
-        LineString::new(vec![
-            Coord { x: -0.01, y: -0.59 },
-            Coord { x: 0.01, y: 0.57 },
-            Coord { x: 5000.0, y: 0.0 }, // long edge to create large bounding box
-            Coord { x: 0.0, y: -0.01 },
-            Coord { x: -0.01, y: -0.59 },
-        ]),
-        Vec::new(),
-    )
-}
-
 fn make_collapsed_polygon() -> Polygon<f64> {
     // Shell with a backtrack edge — partial zero area, tests collapsed output
     Polygon::new(
