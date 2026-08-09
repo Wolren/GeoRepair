@@ -11,6 +11,7 @@ benches/real_world/*
 # The wheel's package init (re-exports the extension module) must be
 # committed and shipped despite the *.py rule above.
 !python/geo_repair/__init__.py
+!scripts/readme_bench_table.py
 patches/
 # cargo-fuzz build artifacts (corpus/ is committed)
 fuzz/target/

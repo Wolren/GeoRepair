@@ -145,6 +145,10 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y libgeos-dev
       - name: Synthetic bench (serial vs parallel sweep)
         run: cargo bench --bench bench
+        env:
+          BENCH_JSON: target/bench_full.json
+      - name: README synthetic table coverage gate
+        run: python scripts/readme_bench_table.py --check target/bench_full.json
       - name: Real-world sample bench (alaska subset, Structure vs GEOS)
         run: cargo bench --features "arrange,structure,parallel,simd,bench-geos-system,io-gpkg" --bench real_world -- --fast
         env:

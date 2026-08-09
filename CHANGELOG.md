@@ -5,6 +5,39 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.4] - 2026-08-09
+
+### Changed
+
+- Valid-input fast path: the plausibility gate now records each ring's
+  extremal index, so OGC winding is an O(1) orient + conditional reversal
+  and `strip_degenerate` + the NaN tail are skipped for certified
+  results. Valid polygon 5000v: 27.2 to 19.0-19.3 us (1.74x vs GEOS).
+- Pinch-table scratch buffer moved to a thread-local (no 256-512 KB
+  alloc+memset per polygon on the fast path).
+- Synthetic bench: GEOS reference now routes by geometry class (lines to
+  UnaryUnion, polygons/MultiPolygons to makeValid). The label-prefix
+  routing had silently swapped the MP rows to UnaryUnion (~46x cheaper
+  on overlapping shells), collapsing dense-grid ratios to 4-16x; they
+  are back to 190-281x.
+- Synthetic bench: full size ladders (91 to 133 rows). Every family now
+  reaches at least 1000 vertices (or the equivalent shell/part/hole
+  count) so size-scaling regressions are measurable; arrange ladder
+  extended to 100/500/1000v.
+- README: internal-monologue sections removed; the full 133-row
+  synthetic table is restored and gated in CI
+  (`scripts/readme_bench_table.py --check` fails when any bench row is
+  missing from the README table).
+
+## [0.14.3] - 2026-08-09
+
+### Changed
+
+- Fast-path regression fix: the LARGE-ring certifier no longer runs the
+  full validator's continuation and the extreme-span extrema are fused
+  into the gate accumulator (full pass 5.76-6.06s to 3.75-3.80s, 0
+  invalid on the real-world set).
+
 ## [0.14.2] - 2026-08-07
 
 ### Added

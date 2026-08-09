@@ -65,7 +65,7 @@ use log::warn;
 /// per polygon, the dominant per-poly cost on the 1.58M-poly full pass).
 pub fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geometry<f64>> {
     match fix_polygon_owned(poly.clone(), config, None) {
-        FixOutcome::Fast(g, _, _) | FixOutcome::Repaired(g) => Some(g),
+        FixOutcome::Fast(g, _, _, _) | FixOutcome::Repaired(g) => Some(g),
         FixOutcome::Unconsumed(_) => None,
     }
 }
@@ -78,7 +78,11 @@ pub(crate) enum FixOutcome {
     /// Input polygon moved straight into the output — validated by the
     /// fast-path gates: >=4 coords, no sub-ULP edges, no self-intersections,
     /// valid holes, spread >= EPS * scale (checked by the caller), NaN-free.
-    Fast(Geometry<f64>, f64, f64),
+    /// The last field is the per-ring min-x extremal index recorded during
+    /// the gate's plausibility pass (exterior first, then holes, matching
+    /// enforce_ogc_winding's ring order) so the caller's OGC winding
+    /// normalization skips its own O(n) search (2026-08-09).
+    Fast(Geometry<f64>, f64, f64, Vec<usize>),
     /// Rebuilt geometry (repair / fallback paths).
     Repaired(Geometry<f64>),
     /// Structure repair produced nothing; the polygon is returned
@@ -106,9 +110,13 @@ pub(crate) fn fix_polygon_owned(
     {
         let mut min_abs = f64::INFINITY;
         let mut max_abs = 0.0f64;
-        if fast_path_check(&poly, ext_scale, &mut min_abs, &mut max_abs) {
+        // Per-ring min-x extremal indices from the plausibility pass —
+        // the caller's winding normalization consumes them instead of
+        // re-searching (2026-08-09). Ring order: exterior, then holes.
+        let mut extremal: Vec<usize> = Vec::new();
+        if fast_path_check(&poly, ext_scale, &mut min_abs, &mut max_abs, &mut extremal) {
             PROFILE_FP_NS.fetch_add(_t_fp.ns(), Ordering::Relaxed);
-            return FixOutcome::Fast(Geometry::Polygon(poly), min_abs, max_abs);
+            return FixOutcome::Fast(Geometry::Polygon(poly), min_abs, max_abs, extremal);
         }
     }
     PROFILE_FP_NS.fetch_add(_t_fp.ns(), Ordering::Relaxed);
@@ -131,6 +139,7 @@ pub(crate) fn fix_polygon_owned(
         _ext_scale: Option<f64>,
         min_abs: &mut f64,
         max_abs: &mut f64,
+        extremal: &mut Vec<usize>,
     ) -> bool {
         let total_verts: usize =
             poly.exterior().0.len() + poly.interiors().iter().map(|h| h.0.len()).sum::<usize>();
@@ -146,12 +155,20 @@ pub(crate) fn fix_polygon_owned(
         // not re-scan the same coords.
         let mut bbox = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
         let mut sub_ulp = false;
+        // Lines ride out of the plausibility pass for rings above the
+        // small-ring threshold (the stack SmallVec stays for <= 32) - one
+        // fewer full pass over the coords on the mid-size valid-polygon
+        // path (measured 2026-08-09: the separate poly.lines_iter()
+        // collect cost a full pass; the plausible loop already walks
+        // every window).
+        let mut lines: Vec<Line<f64>> = Vec::new();
         let mut acc = crate::arrange::GateAccum {
-            lines: None,
+            lines: (total_verts > crate::core::SMALL_RING_LINES).then_some(&mut lines),
             bbox: Some(&mut bbox),
             sub_ulp: Some(&mut sub_ulp),
             min_abs: Some(min_abs),
             max_abs: Some(max_abs),
+            extremal: Some(extremal),
         };
         if !crate::arrange::ring_is_plausible(poly.exterior(), &mut acc) {
             return false;
@@ -190,15 +207,29 @@ pub(crate) fn fix_polygon_owned(
             // SmallVec: ~95.6% of the real-world dataset has <= 32 vertices, so
             // the line collection stays on the stack and skips the heap
             // allocation entirely; larger rings spill to the heap transparently.
-            let lines: SmallVec<[Line<f64>; crate::core::SMALL_RING_LINES]> =
-                poly.lines_iter().collect();
-            !lines.is_empty()
-                && crate::arrange::prep::has_no_intersections(&lines)
-                && crate::validation::holes::check_holes_valid(
-                    poly.exterior().0.as_slice(),
-                    poly.interiors(),
-                )
-                .is_empty()
+            // The nan_ok variant is safe: ring_is_plausible verified every
+            // coordinate finite before the lines were collected.
+            if total_verts <= core::SMALL_RING_LINES {
+                let lines: SmallVec<[Line<f64>; crate::core::SMALL_RING_LINES]> =
+                    poly.lines_iter().collect();
+                !lines.is_empty()
+                    && crate::arrange::prep::has_no_intersections_nan_ok(&lines)
+                    && crate::validation::holes::check_holes_valid(
+                        poly.exterior().0.as_slice(),
+                        poly.interiors(),
+                    )
+                    .is_empty()
+            } else {
+                // Mid-size rings: the lines were collected by the
+                // plausibility pass above (acc.lines).
+                !lines.is_empty()
+                    && crate::arrange::prep::has_no_intersections_nan_ok(&lines)
+                    && crate::validation::holes::check_holes_valid(
+                        poly.exterior().0.as_slice(),
+                        poly.interiors(),
+                    )
+                    .is_empty()
+            }
         } else {
             // Very large rings: the radix ring pass (proper crossings +
             // eps-collinear + T-junctions - the classes the R-tree sweep

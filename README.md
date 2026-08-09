@@ -53,74 +53,152 @@ concurrently via Rayon, geometries built via CoordSeq direct construction
 
 Validity agreement with GEOS: 100% (0/0 disagreements, 2026-08-07).
 
-### Why large valid inputs are slower
-
-Same asymptotics as GEOS (radix sweep, O(n log n)); the gap is constants.
-GeoRepair validates at the eps-class (1e-12 x scale): the validator, the
-gate, and the noder share one tolerance, so repair output is certifiable
-by construction - GEOS's own `makeValid` can ship geometry its `isValid`
-rejects. That contract is why the valid rows lose: tolerance predicates
-cost more than GEOS's exact-zero ones, and the valid-polygon path makes
-~5-6 passes over the coords vs GEOS's ~2 (a valid 5000-vertex polygon:
-~148 µs serial vs GEOS ~78 µs; the parallel rows are bandwidth-bound, so
-the throughput gap ~2.8x is wider than the serial ~1.9x). The eps-class
-is stricter than GEOS only on borderline inputs (213 baselined XML
-divergences, mostly the OGC winding contract); the 1.58M real-world
-dataset agrees with GEOS 0/0 (winding-agnostic). Details:
-`docs/BENCHMARKS.md`.
-
-Lines carry one deliberate extra cost: the valid-or-empty contract.
-`make_valid` never ships a non-simple line - GEOS passes non-simple lines
-through unchanged (its `makeValid` is a no-op for line noding, verified
-against GeometryFixer.cpp) - so every valid line pays an O(n) simplicity
-check. The GEOS reference for the invalid-line rows is therefore
-`UnaryUnion` (the operation GEOS users actually call to fix linework),
-not `makeValid`. The check went 30-35x GEOS isSimple (rstar bulk_load) ->
-~7x (radix sweep) -> ~2.4x (2026-08-07 lean pass); valid ls 500v: 4.3 ->
-1.33 µs. Details: `docs/BENCHMARKS.md`.
-
 ### Synthetic benchmarks
 
-Full tables and methodology: `docs/BENCHMARKS.md`. Representative rows (µs,
-parallel batch; ratio = GEOS / GeoRepair, >1 means we win). Note: the
-legacy "invalid star 100v" row is mislabelled - geosop isValid confirms
-the star generator produces VALID geometry at every size (2026-08-07); it
-measures a valid spiky polygon, not invalid repair. Genuine invalid-at-
-scale coverage is the bowtie and spaghetti rows:
+Full table, parallel batch (µs); ratio = GEOS / GeoRepair, >1 means
+we win. Methodology: `docs/BENCHMARKS.md`. Regenerate:
+`python scripts/readme_bench_table.py --update <bench.json>`; CI gate:
+`python scripts/readme_bench_table.py --check <bench.json>`.
 
 | Benchmark | GeoRepair | GEOS | Ratio |
 |-----------|----------:|-----:|------:|
-| invalid bowtie 4v | 0.87 | 18.9 | 22x |
-| invalid bowtie 50v | 8.0 | 68.9 | 8.6x |
-| invalid bowtie 100v | 29.4 | 135 | 4.6x |
-| invalid bowtie 500v | 62.1 | 507 | 8.2x |
-| spaghetti 500v | 4631 | 3001 | 0.65x |
-| collapsed poly | 0.61 | 10.5 | 17x |
-| overlap mp 50sh | 22.3 | 230 | 10x |
-| dense grid 20x20=400 | 500 | 2114 | 4.2x |
-| hole hier 50h | 22.2 | 27.7 | 1.25x |
-| valid polygon 5000v | 25.7 | 9.3 | 0.36x |
-| valid ls 500v | 1.33 | 0.56 | 0.42x |
-| dense self ls 500v | 1.46 | 120 | 82x |
-| lissajous 5000v | 597 | 5392 | 9.0x |
-| collinear ov 500seg | 60 | 535 | 8.9x |
-| star-comb 500sp | 75.6 | 688 | 9.1x |
-| star-burst 500sp | 11.1 | 36413 | 3290x |
-| spoke 500sp | 10.2 | 38841 | 3820x |
-| mls 50x3v | 2.99 | 31.3 | 10x |
+| valid polygon 4v | 0.069 | 0.252 | 3.6x |
+| valid polygon 10v | 0.141 | 0.318 | 2.3x |
+| valid polygon 50v | 0.349 | 0.421 | 1.2x |
+| valid polygon 100v | 0.539 | 0.589 | 1.1x |
+| valid polygon 500v | 2.1 | 1.2 | 0.59x |
+| valid polygon 1000v | 3.9 | 2.1 | 0.55x |
+| valid polygon 5000v | 20.5 | 9.4 | 0.46x |
+| valid polygon 10000v | 39.0 | 16.9 | 0.43x |
+| invalid bowtie 4v | 0.64 | 17.6 | 27x |
+| invalid bowtie 50v | 6.2 | 60.6 | 9.7x |
+| invalid bowtie 100v | 24.2 | 117 | 4.8x |
+| invalid bowtie 500v | 54.6 | 488 | 8.9x |
+| invalid bowtie 1000v | 114 | 967 | 8.5x |
+| star poly 100v | 7.5 | 7.1 | 0.94x |
+| star poly 500v | 531 | 110 | 0.21x |
+| star poly 1000v | 246 | 268 | 1.1x |
+| spaghetti 500v | 4693 | 2521 | 0.54x |
+| spaghetti 2000v | 32307 | 16113 | 0.50x |
+| self-touch 100v | 0.672 | 0.805 | 1.2x |
+| self-touch 500v | 2.2 | 1.6 | 0.75x |
+| self-touch 1000v | 4.5 | 3.4 | 0.77x |
+| collapsed 100v | 19.5 | 119 | 6.1x |
+| collapsed 500v | 86.9 | 487 | 5.6x |
+| collapsed 1000v | 172 | 921 | 5.3x |
+| near-collinear 100v | 63.6 | 166 | 2.6x |
+| near-collinear 500v | 755 | 1066 | 1.4x |
+| near-collinear 1000v | 2631 | 2622 | 1.00x |
+| large coord 1e12 100v | 0.733 | 0.486 | 0.66x |
+| large coord 1e12 500v | 8.1 | 1.4 | 0.17x |
+| large coord 1e12 1000v | 33.1 | 2.6 | 0.08x |
+| valid line | 0.009 | 0.04 | 4.4x |
+| zero-length line | 0.007 | 0.252 | 38x |
+| valid ls 4v | 0.026 | 0.042 | 1.6x |
+| valid ls 10v | 0.056 | 0.05 | 0.88x |
+| valid ls 50v | 0.145 | 0.071 | 0.49x |
+| valid ls 100v | 0.282 | 0.121 | 0.43x |
+| valid ls 500v | 1.2 | 0.536 | 0.45x |
+| valid ls 1000v | 2.6 | 2.6 | 0.97x |
+| collinear ls 4v | 0.029 | 0.523 | 18x |
+| collinear ls 10v | 0.075 | 0.549 | 7.3x |
+| collinear ls 50v | 0.237 | 0.66 | 2.8x |
+| collinear ls 100v | 0.443 | 0.983 | 2.2x |
+| collinear ls 500v | 1.8 | 2.1 | 1.1x |
+| collinear ls 1000v | 3.8 | 7.8 | 2.0x |
+| zigzag ls 10v | 0.061 | 1.3 | 21x |
+| zigzag ls 50v | 0.162 | 4.7 | 29x |
+| zigzag ls 100v | 0.296 | 10.6 | 36x |
+| zigzag ls 500v | 1.7 | 62.1 | 38x |
+| zigzag ls 1000v | 2.9 | 122 | 41x |
+| spiral ls 10v | 0.063 | 0.836 | 13x |
+| spiral ls 50v | 0.52 | 4.3 | 8.4x |
+| spiral ls 100v | 1.3 | 15.7 | 12x |
+| spiral ls 500v | 112 | 526 | 4.7x |
+| spiral ls 1000v | 384 | 1807 | 4.7x |
+| self-int ls 100v | 5.5 | 2.5 | 0.45x |
+| self-int ls 500v | 84.2 | 3.9 | 0.05x |
+| self-int ls 1000v | 330 | 6.8 | 0.02x |
+| dense self ls 10v | 0.058 | 1.3 | 22x |
+| dense self ls 50v | 0.155 | 5.4 | 35x |
+| dense self ls 100v | 0.304 | 13.5 | 44x |
+| dense self ls 500v | 1.6 | 127 | 80x |
+| dense self ls 1000v | 2.5 | 361 | 147x |
+| duped ls 100v | 0.286 | 0.692 | 2.4x |
+| duped ls 500v | 0.936 | 1.6 | 1.7x |
+| duped ls 1000v | 2.2 | 3.6 | 1.6x |
+| mls 50x3v | 2.8 | 32.3 | 12x |
+| mls 250x3v | 15.8 | 132 | 8.4x |
+| mls 500x3v | 38.3 | 257 | 6.7x |
+| self-int mls 50x4v | 29.7 | 74.4 | 2.5x |
+| self-int mls 250x4v | 191 | 435 | 2.3x |
+| self-int mls 500x4v | 520 | 1091 | 2.1x |
+| star-burst 10sp | 2.5 | 14.5 | 5.7x |
+| star-burst 50sp | 0.677 | 258 | 381x |
+| star-burst 100sp | 1.3 | 1115 | 867x |
+| star-burst 500sp | 7.0 | 35180 | 5038x |
+| star-burst 1000sp | 16.8 | 185213 | 11035x |
+| collinear ov 10seg | 0.976 | 11.7 | 12x |
+| collinear ov 50seg | 6.6 | 55.4 | 8.4x |
+| collinear ov 100seg | 12.7 | 104 | 8.2x |
+| collinear ov 500seg | 52.7 | 534 | 10x |
+| collinear ov 1000seg | 112 | 1094 | 9.7x |
+| x-scale 10v | 1.7 | 20.0 | 12x |
+| x-scale 50v | 49.3 | 376 | 7.6x |
+| x-scale 100v | 234 | 1541 | 6.6x |
+| x-scale 500v | 16886 | 53173 | 3.1x |
+| x-scale 1000v | 1719 | 320188 | 186x |
+| ringing 100v | 11.7 | 60.8 | 5.2x |
+| ringing 500v | 44.1 | 344 | 7.8x |
+| ringing 1000v | 123 | 1009 | 8.2x |
+| hilbert 256v | 35.0 | 165 | 4.7x |
+| hilbert 1024v | 308 | 1212 | 3.9x |
+| lissajous 200v | 19.6 | 142 | 7.2x |
+| lissajous 500v | 42.4 | 382 | 9.0x |
+| lissajous 1000v | 79.4 | 723 | 9.1x |
+| lissajous 2000v | 170 | 1583 | 9.3x |
+| lissajous 5000v | 504 | 4929 | 9.8x |
+| lissajous 7:4 500v | 33.6 | 46.8 | 1.4x |
+| spoke 10sp | 2.4 | 14.0 | 5.8x |
+| spoke 50sp | 0.774 | 266 | 343x |
+| spoke 100sp | 1.3 | 1102 | 816x |
+| spoke 500sp | 8.6 | 36076 | 4194x |
+| spoke 1000sp | 20.7 | 188121 | 9095x |
+| star-comb 20sp | 0.195 | 2.6 | 13x |
+| star-comb 100sp | 2.9 | 32.5 | 11x |
+| star-comb 500sp | 73.9 | 672 | 9.1x |
+| star-comb 1000sp | 698 | 2694 | 3.9x |
+| hole hier 5h | 1.5 | 1.9 | 1.2x |
+| hole hier 20h | 5.5 | 8.4 | 1.5x |
+| hole hier 50h | 21.9 | 22.2 | 1.0x |
+| hole hier 100h | 45.6 | 52.2 | 1.1x |
+| overlap mp 5sh | 1.8 | 408 | 224x |
+| overlap mp 20sh | 6.8 | 2428 | 356x |
+| overlap mp 50sh | 21.3 | 6635 | 311x |
+| overlap mp 100sh | 49.4 | 13849 | 280x |
+| dense grid 5x5=25 | 8.0 | 1655 | 206x |
+| dense grid 10x10=100 | 42.1 | 11513 | 273x |
+| dense grid 20x20=400 | 459 | 99563 | 217x |
+| dense grid 30x30=900 | 1899 | 361528 | 190x |
+| sliver 100v | 1.5 | 2.2 | 1.4x |
+| sliver 500v | 11.1 | 14.4 | 1.3x |
+| sliver 1000v | 16.1 | 25.9 | 1.6x |
+| arrange valid 4v | 0.059 | 0.258 | 4.4x |
+| arrange valid 10v | 0.1 | 0.333 | 3.3x |
+| arrange valid 50v | 0.689 | 0.462 | 0.67x |
+| arrange valid 100v | 0.902 | 0.539 | 0.60x |
+| arrange valid 500v | 3.7 | 1.4 | 0.38x |
+| arrange valid 1000v | 8.0 | 4.0 | 0.50x |
+| arrange bowtie 4v | 1.2 | 14.9 | 13x |
+| arrange bowtie 100v | 32.3 | 101 | 3.1x |
+| arrange star 10sp | 2.2 | 13.3 | 6.0x |
+| arrange star 50sp | 1.1 | 251 | 234x |
+| arrange star 100sp | 1.4 | 1040 | 733x |
+| arrange star 500sp | 7.1 | 36466 | 5126x |
 
-Pattern: GeoRepair wins on invalid repair and MultiPolygon unification:
-dense grids 4.2-14x, overlaps 6.9-10x, bowties 4.6-22x at every size,
-collinear-overlap families ~9x, and the line-repair family (zigzag,
-spoke, star-burst, dense-self, lissajous) 5-3,800x - the star-burst and
-spoke rows hit GEOS's quadratic worst cases. GEOS wins on large valid
-polygons (0.33-0.90x) and valid ls >= 10v (0.42-0.58x) on the eps-class
-constant (diagnosis above), on dense invalid rings (spaghetti 0.65x: the
-noding leaves violations that force a snap-round + boolean fallback
-chain; measured 2232 violations on a 500-edge walk), and two noise-level
-rows (invalid star 100v 0.89x - a valid spiky polygon; collinear ls 500v
-0.84x). Sub-µs rows fluctuate with Rayon dispatch overhead.
-
+### Run benchmarks
+### Run benchmarks
+### Run benchmarks
 ### Run benchmarks
 
 ```shell
@@ -130,11 +208,11 @@ GEOS_VERSION=3.14.1 cargo bench --features bench-geos-system,arrange,structure,p
 GEOS_LIB_DIR='D:\Miniconda\Library\lib' GEOS_INCLUDE_DIR='D:\Miniconda\Library\include' \
 GEOS_VERSION=3.14.1 cargo bench --features bench-geos-system,arrange,structure,parallel,simd --bench bench
 
-# CI regression gate (no GEOS; curated subset vs benches/bench_baseline.json)
+# CI regression gate (no GEOS; fixed subset vs benches/bench_baseline.json)
 python scripts/bench_gate.py
 ```
 
-Measurement rules that matter: always take the settled second run
+Measurement rules: always take the settled second run
 (first-run-after-build is inflated ~18%); never trust a bench binary you
 cannot trace to a source file. Full GEOS setup: `benches/AGENTS.md`.
 
@@ -144,7 +222,7 @@ cannot trace to a source file. Full GEOS setup: `benches/AGENTS.md`.
    no LTO, no mimalloc) - a static LLVM-built GEOS would improve the GEOS
    side of every table.
 2. **Validator strictness is deliberate:** eps-class predicates (1e-12 x
-   scale tolerance, fast-FP-first with robust escalation). On the 1.58M
+   scale tolerance, fast-FP-first with exact escalation). On the 1.58M
    real-world dataset it agrees with GEOS 0/0 (winding-agnostic); it
    diverges on borderline inputs (213 baselined XML cases, mostly the OGC
    winding contract - `docs/BENCHMARKS.md`). Repair ships only
@@ -152,14 +230,15 @@ cannot trace to a source file. Full GEOS setup: `benches/AGENTS.md`.
    otherwise.
 3. **W/12 pool-saturation floor:** the parallel batch fills all 12 workers
    with giants; nested intra-poly rayon finds no idle threads in-batch
-   (Amdahl-bound; standalone the parallel check measures 96 -> 53 ms).
+   (Amdahl-bound; standalone the parallel check measures 96 ms vs 53 ms in-batch).
 4. **Giants (>4,096 ring edges) route to the boolean pipeline** - on a
    200k-edge giant single-pass noding costs 168 ms vs 36 ms for the
    boolean path (`SP_MAX_EDGES` in `src/core/mod.rs`).
-5. **Mass-overlap repairs are the slowest synthetic class** (~0.57 ms/poly
-   at dense grid 20x20) but stay ~195x faster than GEOS on the same shapes.
+5. **Mass-overlap repairs are the slowest synthetic class** (~0.46 ms/poly
+   at dense grid 20x20) but stay ~230x faster than GEOS makeValid on the
+   same shapes.
 6. **Python bindings: `tests/test_python.py` covers the WKT surface**
-   (18 tests); GeoJSON bindings were removed by design.
+   (18 tests); GeoJSON bindings were removed deliberately.
 7. **`simd-portable` is nightly-only** (3 E0554 on stable, expected);
    hand-written AVX2 beyond the bbox scan measured slower than
    auto-vectorized scalar (point_in_ring 8.4x, is_ring_ccw 2.8x), and
@@ -240,7 +319,7 @@ geometries and parallel batches:
 
 ```bash
 cargo build --release --features ffi
-# -> target/release/geo_repair.{dll,so,dylib} + libgeo_repair.a + include/geo_repair.h
+# output: target/release/geo_repair.{dll,so,dylib} + libgeo_repair.a + include/geo_repair.h
 ```
 
 ```c

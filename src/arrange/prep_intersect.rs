@@ -73,17 +73,20 @@ impl MonoChain {
     }
 }
 
-fn build_mono_chains(lines: &[Line<f64>]) -> Vec<MonoChain> {
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+fn build_mono_chains(lines: &[Line<f64>]) -> (Vec<MonoChain>, (f64, f64, f64, f64)) {
     let n = lines.len();
     if n == 0 {
-        return vec![];
+        return (vec![], (f64::MAX, f64::MIN, f64::MAX, f64::MIN));
     }
 
     // Ring boundaries are detected inline (segment start != previous
     // segment end) - no separate pass. The per-ring scale-relative eps is
     // likewise computed from a running ring bbox at the ring's end and
     // stamped on its chains (measured 2026-08-07: the old pre-scan cost
-    // ~15 us on a 5000-vertex ring).
+    // ~15 us on a 5000-vertex ring). The GLOBAL bbox over all chains is
+    // accumulated here too, so the grid path does not re-scan the chains
+    // (measured 2026-08-09: one fewer pass on the valid-polygon path).
 
     let l0 = &lines[0];
     let dx = l0.end.x - l0.start.x;
@@ -94,6 +97,10 @@ fn build_mono_chains(lines: &[Line<f64>]) -> Vec<MonoChain> {
     let mut max_x = l0.start.x.max(l0.end.x);
     let mut min_y = l0.start.y.min(l0.end.y);
     let mut max_y = l0.start.y.max(l0.end.y);
+    let mut gmin_x = min_x;
+    let mut gmax_x = max_x;
+    let mut gmin_y = min_y;
+    let mut gmax_y = max_y;
 
     let mut ring_min_x = min_x;
     let mut ring_max_x = max_x;
@@ -110,6 +117,10 @@ fn build_mono_chains(lines: &[Line<f64>]) -> Vec<MonoChain> {
         max_x = max_x.max(line.start.x).max(line.end.x);
         min_y = min_y.min(line.start.y).min(line.end.y);
         max_y = max_y.max(line.start.y).max(line.end.y);
+        gmin_x = gmin_x.min(min_x);
+        gmax_x = gmax_x.max(max_x);
+        gmin_y = gmin_y.min(min_y);
+        gmax_y = gmax_y.max(max_y);
         ring_min_x = ring_min_x.min(line.start.x).min(line.end.x);
         ring_max_x = ring_max_x.max(line.start.x).max(line.end.x);
         ring_min_y = ring_min_y.min(line.start.y).min(line.end.y);
@@ -174,9 +185,10 @@ fn build_mono_chains(lines: &[Line<f64>]) -> Vec<MonoChain> {
     for mc in chains[ring_chain_start..].iter_mut() {
         mc.ring_eps = eps;
     }
-    chains
+    (chains, (gmin_x, gmax_x, gmin_y, gmax_y))
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn rec_overlaps(
     lines: &[Line<f64>],
     mc1: &MonoChain,
@@ -369,6 +381,7 @@ impl RTreeObject for ChainEnv {
     }
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn has_no_intersections(lines: &[Line<f64>]) -> bool {
     let n = lines.len();
     if n == 0 {
@@ -383,6 +396,21 @@ pub fn has_no_intersections(lines: &[Line<f64>]) -> bool {
             return false;
         }
     }
+    has_no_intersections_nan_ok(lines)
+}
+
+/// `has_no_intersections` for line arrays whose finiteness was already
+/// verified by the caller (the fast-path gate's `ring_is_plausible` scan
+/// checks every coordinate before collecting the lines). Saves one full
+/// pass over the lines on the valid-polygon path (measured 2026-08-09:
+/// the NaN scan is a redundant ~1-2 us on a 5000-vertex ring - and one
+/// less pass of memory traffic on the bandwidth-bound parallel rows).
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+pub fn has_no_intersections_nan_ok(lines: &[Line<f64>]) -> bool {
+    let n = lines.len();
+    if n == 0 {
+        return true;
+    }
 
     // Small-ring fast path: direct O(n²) pairwise sweep with no allocations.
     // The monotone-chain + grid + R-tree machinery below allocates multiple
@@ -396,10 +424,10 @@ pub fn has_no_intersections(lines: &[Line<f64>]) -> bool {
         return has_no_intersections_small(lines);
     }
 
-    let chains = build_mono_chains(lines);
+    let (chains, global_bbox) = build_mono_chains(lines);
 
     // Try fast grid path; fall back to R-tree if any cell gets too dense
-    let grid_result = has_no_intersections_grid(&chains, lines);
+    let grid_result = has_no_intersections_grid(&chains, lines, global_bbox);
     if let Some(result) = grid_result {
         return result;
     }
@@ -476,19 +504,15 @@ pub fn has_no_intersections(lines: &[Line<f64>]) -> bool {
 }
 
 /// Fast grid path for `has_no_intersections`. Returns `None` if the grid is
-/// too dense, triggering the R-tree fallback.
-fn has_no_intersections_grid(chains: &[MonoChain], lines: &[Line<f64>]) -> Option<bool> {
+/// too dense, triggering the R-tree fallback. The global bbox comes from
+/// `build_mono_chains` (no re-scan of the chains).
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+fn has_no_intersections_grid(
+    chains: &[MonoChain],
+    lines: &[Line<f64>],
+    (min_x, max_x, min_y, max_y): (f64, f64, f64, f64),
+) -> Option<bool> {
     let nc = chains.len();
-    let mut min_x = f64::MAX;
-    let mut max_x = f64::MIN;
-    let mut min_y = f64::MAX;
-    let mut max_y = f64::MIN;
-    for mc in chains {
-        min_x = min_x.min(mc.min_x);
-        max_x = max_x.max(mc.max_x);
-        min_y = min_y.min(mc.min_y);
-        max_y = max_y.max(mc.max_y);
-    }
     let scale = (max_x - min_x).max(max_y - min_y);
     if scale <= 0.0 {
         return Some(true);
@@ -517,11 +541,36 @@ fn has_no_intersections_grid(chains: &[MonoChain], lines: &[Line<f64>]) -> Optio
         }
     }
 
+    // Per-cell pair tests with GLOBAL pair dedup: a chain pair (i, j) that
+    // co-occurs in several cells (convex rings: every chain spans most
+    // cells) was tested once PER cell - measured 2026-08-09 via hotpath:
+    // rec_overlaps got 2.5M calls on the valid-polygon rows, ~198% of
+    // wall, and a 5000-vertex circle's chain pairs were tested 4-9x
+    // redundantly. compute_overlaps is deterministic and context-free, so
+    // testing each pair once is decision-identical. Bit j of tested[i]
+    // marks pair (i, j) done (cell contents are ascending in chain index,
+    // so i < j always). The bitset is safe only when chain indices fit
+    // u64: convex rings (the redundant-pair class) have ~4-8 chains;
+    // complex rings with nc > 64 keep the per-cell behavior (their chains
+    // are small and span few cells, so the redundancy is bounded anyway).
+    // A mask of j >= 64 would silently skip pairs - never dedup by global
+    // index without this guard.
+    let mut tested: Vec<u64> = Vec::new();
+    if nc <= 64 {
+        tested = vec![0; nc.max(1)];
+    }
     for cell in &cell_chains {
         for ii in 0..cell.len() {
-            let mc1 = &chains[cell[ii]];
-            for jj in (ii + 1)..cell.len() {
-                if compute_overlaps(lines, mc1, &chains[cell[jj]]) {
+            let i = cell[ii];
+            let mc1 = &chains[i];
+            for &j in &cell[ii + 1..] {
+                if !tested.is_empty() {
+                    if tested[i] >> j & 1 == 1 {
+                        continue;
+                    }
+                    tested[i] |= 1 << j;
+                }
+                if compute_overlaps(lines, mc1, &chains[j]) {
                     return Some(false);
                 }
             }
