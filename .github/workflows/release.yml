@@ -51,6 +51,7 @@ jobs:
       - name: Build wheel
         run: maturin build --release --features python
       - name: Test wheel
+        shell: bash
         run: |
           pip install --force-reinstall target/wheels/*.whl
           pytest tests/test_python.py -q
