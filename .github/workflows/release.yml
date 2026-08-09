@@ -167,10 +167,11 @@ jobs:
             cp include/geo_repair.h dist/
             (cd dist && tar czf "../geo-repair-$ver-linux-x86_64.tar.gz" .)
           fi
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v4
+      - name: Upload C lib artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v4
         with:
           name: c-lib-${{ matrix.name }}
-          path: geo-repair-*.tar.gz
+          path: geo-repair-*
           if-no-files-found: error
 
   github-release:
