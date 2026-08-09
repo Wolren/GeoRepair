@@ -122,7 +122,7 @@ rayon = { version = "1.12", optional = true }
 geos = { version = "11.1", optional = true, default-features = false, features = ["v3_8_0"] }
 mimalloc = { version = "0.1", default-features = false, optional = true }
 pyo3 = { version = "0.29", features = ["extension-module", "abi3-py38"], optional = true }
-hotpath = { version = "0.22", optional = true }
+hotpath = { version = "0.23", optional = true }
 # Bundled SQLite compiles C - no WASM toolchain can build it. The io-gpkg
 # feature stays a plain dep: marker; on wasm32 the dep simply does not
 # exist and the module is gated out in src/io/mod.rs.
