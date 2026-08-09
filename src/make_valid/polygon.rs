@@ -2,6 +2,7 @@
 //! OGC winding enforcement, and reduction fallbacks.
 
 use super::strip::{enforce_ccw, enforce_cw, has_nan, strip_degenerate};
+use super::strip::{enforce_ccw_with_idx, enforce_cw_with_idx};
 use super::*;
 
 #[cfg(any(feature = "arrange", feature = "structure"))]
@@ -115,16 +116,25 @@ impl MakeValid for Polygon<f64> {
                 // geo::BooleanOps) can assert on degenerate inputs; a foreign
                 // library panic must degrade to empty, never crash the host.
                 #[cfg(feature = "std")]
-                let repaired = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    make_valid_impl(self, self, config, coords[0])
-                }))
-                .unwrap_or_else(|_| {
-                    warn!("make_valid panicked on polygon; returning empty geometry");
-                    empty_geom::<f64>()
-                });
+                let (repaired, certified) =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        make_valid_impl(self, self, config, coords[0])
+                    }))
+                    .unwrap_or_else(|_| {
+                        warn!("make_valid panicked on polygon; returning empty geometry");
+                        (empty_geom::<f64>(), false)
+                    });
                 #[cfg(not(feature = "std"))]
-                let repaired = make_valid_impl(self, self, config, coords[0]);
-                let result = strip_degenerate(repaired);
+                let (repaired, certified) = make_valid_impl(self, self, config, coords[0]);
+                // certified == true means the fast-path gate fully certified
+                // the result (finite, non-degenerate, collinear-free) and
+                // winding was normalized - strip_degenerate would only
+                // re-walk the same coords (2026-08-09).
+                let result = if certified {
+                    repaired
+                } else {
+                    strip_degenerate(repaired)
+                };
                 if config.keep_collapsed
                     && matches!(&result, Geometry::GeometryCollection(gc) if gc.0.is_empty())
                 {
@@ -193,7 +203,10 @@ impl MakeValid for Polygon<f64> {
             LineString::new(c)
         };
         let cleaned = Polygon::new(ext_ring, int_clean);
-        let result = strip_degenerate(make_valid_impl(self, &cleaned, config, first_valid));
+        let (repaired, _) = make_valid_impl(self, &cleaned, config, first_valid);
+        // The cleaned polygon is not gate-certified (it went through the
+        // NaN-filter path), so strip always runs here.
+        let result = strip_degenerate(repaired);
         if config.keep_collapsed
             && matches!(&result, Geometry::GeometryCollection(gc) if gc.0.is_empty())
         {
@@ -334,7 +347,7 @@ pub(super) fn make_valid_impl(
     poly: &Polygon<f64>,
     config: &MakeValidConfig,
     _first_valid: Coord<f64>,
-) -> Geometry<f64> {
+) -> (Geometry<f64>, bool) {
     // NaN/Inf bail: the two callers in this module (the clean fast path and
     // the NaN-filtered path in make_valid_with_config) both guarantee
     // NaN-free input before calling, so this is a debug-only guard — the
@@ -344,8 +357,8 @@ pub(super) fn make_valid_impl(
         !has_nan_or_infinite(poly),
         "make_valid_impl requires NaN-free input"
     );
-    let result = match config.poly_method {
-        PolyMethod::Arrange => arrange_chain(poly, config),
+    let (result, certified) = match config.poly_method {
+        PolyMethod::Arrange => (arrange_chain(poly, config), false),
         PolyMethod::Structure => {
             let st = structure_fix_owned(poly.clone(), config, None);
             match st {
@@ -354,16 +367,18 @@ pub(super) fn make_valid_impl(
                 // exit validator would re-run the same sweep. The
                 // winding-invariant checks survive re-winding, and the
                 // re-wound orientation is OGC-correct by construction.
-                crate::structure::FixOutcome::Fast(g, min_abs, max_abs) => {
+                crate::structure::FixOutcome::Fast(g, min_abs, max_abs, extrema) => {
                     // The gate certifies the winding-invariant checks;
                     // orientation is the only property the re-wind can
                     // invalidate (extreme-magnitude rings in the
                     // exact-orient ~0 zone - fuzz
                     // invariant_mixed_fp_in_same_ring). Verify comes
                     // from the enforce pass's extremal indices (no
-                    // re-search - winding fusion, 2026-08-08);
+                    // re-search - winding fusion, 2026-08-08); the
+                    // extremal indices themselves come from the gate's
+                    // plausibility pass (no re-search, 2026-08-09);
                     // ambiguous orientation routes to arrange.
-                    let (g_norm, ok) = enforce_ogc_winding(g);
+                    let (g_norm, ok) = enforce_ogc_winding_with_extrema(g, Some(&extrema));
                     if ok {
                         // Same extreme-span gate as Auto: the fast-path
                         // plausibility sweep can miss self-intersections
@@ -380,15 +395,20 @@ pub(super) fn make_valid_impl(
                                 "Structure mode: fast-path extreme-magnitude output invalid, \
                                  retrying with CDT arrange"
                             );
-                            arrange_chain(poly, config)
+                            (arrange_chain(poly, config), false)
                         } else {
-                            g_norm
+                            // Gate-certified AND wound: strip_degenerate
+                            // and the has_nan tail are redundant re-walks
+                            // (the gate already proved finiteness,
+                            // non-degeneracy, collinear-free rings) -
+                            // the certified flag skips them (2026-08-09).
+                            (g_norm, true)
                         }
                     } else {
                         warn!(
                             "Structure mode: fast-path orientation ambiguous, retrying with CDT arrange"
                         );
-                        arrange_chain(poly, config)
+                        (arrange_chain(poly, config), false)
                     }
                 }
                 crate::structure::FixOutcome::Repaired(g) => {
@@ -402,15 +422,15 @@ pub(super) fn make_valid_impl(
                     // into a MultiPolygon).
                     let g_norm = enforce_ogc_winding(g).0;
                     if is_valid_with_geo(&g_norm) {
-                        g_norm
+                        (g_norm, false)
                     } else {
                         warn!("Structure mode: fix output invalid, retrying with CDT arrange");
-                        arrange_chain(poly, config)
+                        (arrange_chain(poly, config), false)
                     }
                 }
                 crate::structure::FixOutcome::Unconsumed(p) => {
                     warn!("Structure mode: fix failed, retrying with CDT arrange");
-                    arrange_chain(&p, config)
+                    (arrange_chain(&p, config), false)
                 }
             }
         }
@@ -418,8 +438,8 @@ pub(super) fn make_valid_impl(
             match structure_fix_owned(poly.clone(), config, None) {
                 // Fast: complete-certifier gate (2026-08-07) - same
                 // argument as the Structure arm above.
-                crate::structure::FixOutcome::Fast(g, min_abs, max_abs) => {
-                    let (g_norm, ok) = enforce_ogc_winding(g);
+                crate::structure::FixOutcome::Fast(g, min_abs, max_abs, extrema) => {
+                    let (g_norm, ok) = enforce_ogc_winding_with_extrema(g, Some(&extrema));
                     if ok {
                         // The fast-path plausibility sweep can miss
                         // self-intersections when the ring mixes subnormal
@@ -441,15 +461,16 @@ pub(super) fn make_valid_impl(
                             warn!(
                                 "Auto mode: fast-path extreme-magnitude output invalid,                                  falling back to CDT arrange"
                             );
-                            arrange_chain(poly, config)
+                            (arrange_chain(poly, config), false)
                         } else {
-                            g_norm
+                            // Gate-certified + wound: skip strip/has_nan.
+                            (g_norm, true)
                         }
                     } else {
                         warn!(
                             "Auto mode: fast-path orientation ambiguous, falling back to CDT arrange"
                         );
-                        arrange_chain(poly, config)
+                        (arrange_chain(poly, config), false)
                     }
                 }
                 crate::structure::FixOutcome::Repaired(r) => {
@@ -482,15 +503,15 @@ pub(super) fn make_valid_impl(
                         );
                     }
                     if is_valid_with_geo(&r_norm) {
-                        r_norm
+                        (r_norm, false)
                     } else {
                         warn!("Auto mode: structure_fix invalid, falling back to CDT arrange");
-                        arrange_chain(poly, config)
+                        (arrange_chain(poly, config), false)
                     }
                 }
                 crate::structure::FixOutcome::Unconsumed(p) => {
                     warn!("Auto mode: structure_fix failed, falling back to CDT arrange");
-                    arrange_chain(&p, config)
+                    (arrange_chain(&p, config), false)
                 }
             }
         }
@@ -498,10 +519,10 @@ pub(super) fn make_valid_impl(
     // Every dispatch outcome is already OGC-wound (each arm winds
     // before returning), so the old re-wind here was a full no-op
     // pass over every ring - removed 2026-08-08.
-    if has_nan(&result) {
-        empty_geom::<f64>()
+    if !certified && has_nan(&result) {
+        (empty_geom::<f64>(), false)
     } else {
-        result
+        (result, certified)
     }
 }
 
@@ -530,8 +551,8 @@ pub(super) fn make_valid_impl_owned(
         !has_nan_or_infinite(&poly),
         "make_valid_impl_owned requires NaN-free input"
     );
-    let result = match config.poly_method {
-        PolyMethod::Arrange => arrange_chain(&poly, config),
+    let (result, verified) = match config.poly_method {
+        PolyMethod::Arrange => (arrange_chain(&poly, config), false),
         PolyMethod::Structure => {
             #[cfg(feature = "structure")]
             {
@@ -540,10 +561,12 @@ pub(super) fn make_valid_impl_owned(
                     // non-degenerate by the gates — winding is the only normalization
                     // needed, and it cannot introduce NaNs. Skip has_nan/strip. The
                     // gate certifies the winding-invariant checks; verify the re-wound
-                    // orientation O(n) (extreme-magnitude rings can sit in the
+                    // orientation O(1) (extreme-magnitude rings can sit in the
                     // exact-orient ~0 zone, fuzz invariant_mixed_fp_in_same_ring).
-                    crate::structure::FixOutcome::Fast(g, _, _) => {
-                        let (g, ok) = enforce_ogc_winding(g);
+                    // The extremal indices come from the gate's plausibility pass
+                    // (no re-search, 2026-08-09).
+                    crate::structure::FixOutcome::Fast(g, _, _, extrema) => {
+                        let (g, ok) = enforce_ogc_winding_with_extrema(g, Some(&extrema));
                         if ok {
                             return (g, true);
                         }
@@ -558,10 +581,10 @@ pub(super) fn make_valid_impl_owned(
                         }
                         return (g, false);
                     }
-                    crate::structure::FixOutcome::Repaired(g) => g,
+                    crate::structure::FixOutcome::Repaired(g) => (g, false),
                     crate::structure::FixOutcome::Unconsumed(p) => {
                         warn!("Structure mode: fix failed, retrying with CDT arrange");
-                        arrange_chain(&p, config)
+                        (arrange_chain(&p, config), false)
                     }
                 }
             }
@@ -570,16 +593,23 @@ pub(super) fn make_valid_impl_owned(
                 warn!(
                     "PolyMethod::Structure selected but 'structure' feature is not enabled. Enable the 'structure' feature in Cargo.toml to use Structure mode."
                 );
-                arrange_chain(&poly, config)
+                (arrange_chain(&poly, config), false)
             }
         }
-        PolyMethod::Auto => make_valid_impl(&poly, &poly, config, _first_valid),
+        PolyMethod::Auto => {
+            let (g, v) = make_valid_impl(&poly, &poly, config, _first_valid);
+            (g, v)
+        }
     };
-    let result = enforce_ogc_winding(result).0;
-    if has_nan(&result) {
-        (empty_geom::<f64>(), true)
+    if !verified {
+        let result = enforce_ogc_winding(result).0;
+        if has_nan(&result) {
+            (empty_geom::<f64>(), true)
+        } else {
+            (result, false)
+        }
     } else {
-        (result, false)
+        (result, true)
     }
 }
 
@@ -725,21 +755,48 @@ pub fn make_valid_owned(poly: Polygon<f64>, config: &MakeValidConfig) -> Geometr
 /// indices: the verify's per-ring extremal SEARCH is not re-run (the
 /// orient and the rare ~0-zone shoelace fallback are recomputed fresh, so
 /// the verdict is identical - winding fusion, 2026-08-08).
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(crate) fn enforce_ogc_winding(g: Geometry<f64>) -> (Geometry<f64>, bool) {
+    enforce_ogc_winding_with_extrema(g, None)
+}
+
+/// [`enforce_ogc_winding`] with per-ring extremal indices already located
+/// by the fast-path gate's plausibility pass (2026-08-09): the O(n)
+/// min-x searches are skipped. `extrema` must follow the ring order
+/// exterior, then holes — exactly what the gate pushes. When the slice
+/// length mismatches (defensive; can only happen on a caller bug) the
+/// per-ring search falls back per ring.
+pub(crate) fn enforce_ogc_winding_with_extrema(
+    g: Geometry<f64>,
+    extrema: Option<&[usize]>,
+) -> (Geometry<f64>, bool) {
     match g {
         Geometry::Polygon(p) => {
             let (ext, mut holes) = p.into_inner();
-            let (ext, ext_idx, ext_rev) = enforce_ccw(ext);
+            let hole_cnt = holes.len();
+            let extrema_ok = extrema.is_some_and(|ex| ex.len() == 1 + hole_cnt);
+            let (ext, ext_idx, ext_rev) = if extrema_ok {
+                enforce_ccw_with_idx(ext, extrema.unwrap()[0])
+            } else {
+                enforce_ccw(ext)
+            };
             let mut ok = winding_ok(&ext.0, ext_idx, ext_rev, true);
-            for h in holes.iter_mut() {
+            for (k, h) in holes.iter_mut().enumerate() {
                 let owned = core::mem::replace(h, geo::LineString::new(Vec::new()));
-                let (hw, h_idx, h_rev) = enforce_cw(owned);
+                let (hw, h_idx, h_rev) = if extrema_ok {
+                    enforce_cw_with_idx(owned, extrema.unwrap()[1 + k])
+                } else {
+                    enforce_cw(owned)
+                };
                 ok &= winding_ok(&hw.0, h_idx, h_rev, false);
                 *h = hw;
             }
             (Geometry::Polygon(Polygon::new(ext, holes)), ok)
         }
         Geometry::MultiPolygon(mp) => {
+            // Extrema are per-polygon; a Fast outcome is always a single
+            // polygon (the gate runs per polygon), so MultiPolygon here
+            // means a repair result - search per ring.
             let mut ok = true;
             let polys: Vec<Polygon<f64>> =
                 mp.0.into_iter()

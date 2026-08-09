@@ -21,7 +21,7 @@ use geo::{
 use crate::core::MakeValidConfig;
 #[cfg(any(feature = "arrange", feature = "structure"))]
 use crate::core::PolyMethod;
-use crate::noding::{NodingFloat, remove_consecutive_duplicates};
+use crate::noding::NodingFloat;
 use crate::validation::edges::{edges_intersect_general, edges_vertex_on_edge};
 use crate::validation::impls::{
     check_line_components_intersect, check_linestring_self_intersection, segments_collinear_overlap,
@@ -181,18 +181,25 @@ impl<T: NodingFloat> MakeValid for LineString<T> {
     type Scalar = T;
 
     fn make_valid_with_config(&self, _config: &MakeValidConfig) -> Geometry<T> {
-        let coords: Vec<Coord<T>> = self
-            .0
-            .iter()
-            .copied()
-            .filter(|c| c.x.is_finite() && c.y.is_finite())
-            .collect();
-        if coords.is_empty() {
-            warn!("LineString::make_valid: all coords filtered (NaN/Inf)");
-            return empty_geom();
+        // ONE pass: finite filter + consecutive-duplicate removal fused
+        // (the old two-step collect + remove_consecutive_duplicates paid
+        // two Vecs and two walks for every line - measured 2026-08-09, the
+        // valid-ls wrapper was ~1/3 of the 500v row). Semantics identical:
+        // dropping NaN coords first, then dedup of consecutive equals.
+        let mut deduped: Vec<Coord<T>> = Vec::with_capacity(self.0.len());
+        let mut prev: Option<Coord<T>> = None;
+        for c in &self.0 {
+            if !c.x.is_finite() || !c.y.is_finite() {
+                continue;
+            }
+            if prev == Some(*c) {
+                continue;
+            }
+            deduped.push(*c);
+            prev = Some(*c);
         }
-        let deduped = remove_consecutive_duplicates(&coords);
         if deduped.is_empty() {
+            warn!("LineString::make_valid: all coords filtered (NaN/Inf)");
             return empty_geom();
         }
         if deduped.len() == 1 {

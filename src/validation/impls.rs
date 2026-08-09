@@ -118,6 +118,7 @@ impl GeoValidation for LineString<f64> {
 /// (out-and-back backtracking). Adjacent segments may touch ONLY at their
 /// shared vertex; a closed line's first and last segments may touch ONLY at
 /// the closure vertex.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool {
     let n = coords.len() - 1;
     if n < 2 {
@@ -200,6 +201,11 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
         }
         false
     };
+    // Pairwise only for small n. Measured 2026-08-09: raising this to 512
+    // was a disaster (valid ls 500v 1.3 -> 81 us parallel) - the loop has
+    // n^2/2 pairs (~6.5 ns/pair for the lean predicate) while the radix
+    // sweep tests only the small x-overlap active set (~25-60x fewer
+    // pair tests at n=500). The sweep's 32-line floor is the crossover.
     if n <= 32 {
         for i in 0..n {
             for j in i + 2..n {

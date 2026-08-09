@@ -82,6 +82,7 @@ fn snap_or_push_grid(
 }
 
 pub(crate) use super::prep_intersect::has_no_intersections;
+pub(crate) use super::prep_intersect::has_no_intersections_nan_ok;
 pub(crate) fn odd_even_filter(lines: &mut Vec<Line<f64>>) {
     for line in lines.iter_mut() {
         if coord_greater(line.start, line.end) {

@@ -126,6 +126,7 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, _config: &MakeValidConfig) -> Geo
         sub_ulp: None,
         min_abs: None,
         max_abs: None,
+        extremal: None,
     };
     if !ring_is_plausible(poly.exterior(), &mut acc) {
         return fix_from_poly_lines(poly);
@@ -320,6 +321,7 @@ pub fn validate_polygon(poly: &Polygon<f64>) -> bool {
         sub_ulp: None,
         min_abs: None,
         max_abs: None,
+        extremal: None,
     };
     if !ring_is_plausible(poly.exterior(), &mut acc) {
         return false;
@@ -575,6 +577,12 @@ pub(crate) struct GateAccum<'a> {
     pub sub_ulp: Option<&'a mut bool>,
     pub min_abs: Option<&'a mut f64>,
     pub max_abs: Option<&'a mut f64>,
+    /// Per-ring min-x extremal index (tie min-y, strict <, candidate 0,
+    /// interior range [1..n)) recorded by [`ring_is_plausible`] so the
+    /// caller's OGC winding normalization skips its own search. The ring
+    /// order matches the gate's iteration: exterior first, then holes.
+    /// None in non-gate callers (no recording, no overhead).
+    pub extremal: Option<&'a mut Vec<usize>>,
 }
 
 impl GateAccum<'_> {
@@ -585,6 +593,7 @@ impl GateAccum<'_> {
             sub_ulp: None,
             min_abs: None,
             max_abs: None,
+            extremal: None,
         }
     }
 }
@@ -598,17 +607,125 @@ impl GateAccum<'_> {
 /// fused here (measured 2026-08-08: the envelope + sub-ULP passes cost
 /// ~15-20 us on a 5000-vertex ring). Kept as ONE function so the gate's
 /// verdict cannot drift from `poly_has_basic_form`'s.
+/// Thread-local scratch for the pinch-dup table in [`ring_is_plausible`]:
+/// the per-call allocation of the 256-512KB slots buffer (plus its
+/// memset) was ~5 µs/polygon of the parallel valid-polygon cost
+/// (measured 2026-08-09: Exp-2 with the table disabled saved 5 µs at
+/// 5000v; the alloc+memset is the bulk of it). With TLS the slots buffer
+/// is reused per thread and only the tiny used-bitmap (cap/64 u64s) is
+/// cleared per call. Mirrors SWEEP_SCRATCH in validation/sweep.rs.
+#[derive(Default)]
+struct PinchScratch {
+    /// Occupancy bitmap: word k bit b = slot (k*64+b) inserted this call.
+    used: Vec<u64>,
+    /// -0.0-normalized (x,y) bit keys, linear probing.
+    slots: Vec<(u64, u64)>,
+}
+
+#[cfg(feature = "std")]
+thread_local! {
+    static PINCH_SCRATCH: core::cell::RefCell<PinchScratch> =
+        core::cell::RefCell::new(PinchScratch::default());
+}
+
+/// Run a closure against the pinch-table scratch. With `std` the buffers
+/// are thread-local (no realloc between rings); without it a fresh
+/// default scratch is allocated per call (no_std has no TLS).
+#[cfg(feature = "std")]
+fn with_pinch_scratch<R>(f: impl FnOnce(&mut PinchScratch) -> R) -> R {
+    PINCH_SCRATCH.with(|s| f(&mut s.borrow_mut()))
+}
+
+#[cfg(not(feature = "std"))]
+fn with_pinch_scratch<R>(f: impl FnOnce(&mut PinchScratch) -> R) -> R {
+    f(&mut PinchScratch::default())
+}
+
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(crate) fn ring_is_plausible(ring: &geo::LineString<f64>, acc: &mut GateAccum) -> bool {
     let coords = &ring.0;
     if coords.len() < 4 || coords.first() != coords.last() {
         return false;
     }
-    for w in coords.windows(2) {
+    let n = coords.len() - 1;
+    // Pinch (non-adjacent duplicate) table for n > 32, populated INSIDE
+    // the windows loop - the standalone first_pinch_dup pass cost a full
+    // second scan over the ring on every gate call (measured 2026-08-09:
+    // ~35-45 us on a 5000-vertex ring; the fused version pays the same
+    // table misses but only walks the coords once). TLS scratch: the
+    // slots buffer is reused across calls; only the used bitmap (cap/64
+    // u64s) is cleared per ring.
+    if n > 32 {
+        let cap = n.next_power_of_two() * 2;
+        return with_pinch_scratch(|s| {
+            if s.slots.len() < cap {
+                s.slots.resize(cap, (0, 0));
+                s.used.clear();
+                s.used.resize(cap / 64, 0);
+            } else {
+                for w in s.used.iter_mut() {
+                    *w = 0;
+                }
+            }
+            plausible_body(coords, n, acc, &mut s.used, &mut s.slots, cap)
+        });
+    }
+    plausible_body(coords, n, acc, &mut [], &mut [], 0)
+}
+
+/// The shared windows loop of [`ring_is_plausible`]. `used`/`slots`/
+/// `table_cap` are the pinch table (empty slice = small-ring mode).
+fn plausible_body(
+    coords: &[geo::Coord<f64>],
+    n: usize,
+    acc: &mut GateAccum,
+    used: &mut [u64],
+    slots: &mut [(u64, u64)],
+    table_cap: usize,
+) -> bool {
+    // Extremal recording (min-x, tie min-y, strict <, candidate 0,
+    // interior range [1..n)) — matches min_x_vertex in util.rs EXACTLY so
+    // the caller's winding normalization can skip its own search. Only
+    // tracked when the caller asked (gate path); None = no overhead.
+    let track_ext = acc.extremal.is_some();
+    let mut ext_min_x = coords[0].x;
+    let mut ext_min_y = coords[0].y;
+    let mut ext_idx = 0usize;
+    for (i, w) in coords.windows(2).enumerate() {
         // Adjacent duplicates AND non-finite coords (the gate's
         // separate NaN scan is folded here - measured 2026-08-07: one
         // fewer full pass over the ring on the valid-polygon path).
         if w[0] == w[1] || !w[0].x.is_finite() || !w[0].y.is_finite() {
             return false;
+        }
+        if track_ext && i >= 1 {
+            // w[0] is coords[i]; the closure coord (index n) never
+            // appears as w[0], and index 0 is the default candidate.
+            let c = w[0];
+            if c.x < ext_min_x || (c.x == ext_min_x && c.y < ext_min_y) {
+                ext_min_x = c.x;
+                ext_min_y = c.y;
+                ext_idx = i;
+            }
+        }
+        if table_cap > 0 {
+            let kx = (w[0].x + 0.0).to_bits();
+            let ky = (w[0].y + 0.0).to_bits();
+            let h = (kx ^ ky.rotate_left(32)) as usize & (table_cap - 1);
+            let mut k = h;
+            loop {
+                let wbit = k / 64;
+                let b = k % 64;
+                if used[wbit] & (1 << b) == 0 {
+                    used[wbit] |= 1 << b;
+                    slots[k] = (kx, ky);
+                    break;
+                }
+                if slots[k] == (kx, ky) {
+                    return false;
+                }
+                k = (k + 1) & (table_cap - 1);
+            }
         }
         if let Some(l) = acc.lines.as_deref_mut() {
             l.push(geo::Line::new(w[0], w[1]));
@@ -652,15 +769,14 @@ pub(crate) fn ring_is_plausible(ring: &geo::LineString<f64>, acc: &mut GateAccum
             *max_abs = (*max_abs).max(w[0].x.abs()).max(w[0].y.abs());
         }
     }
-    let n = coords.len() - 1;
-    // Non-adjacent duplicate (pinch) scan: shared helper with the exit
-    // validator, -0.0-normalized keys (the old raw-to_bits keys diverged:
-    // a (-0.0, y) / (+0.0, y) pinch passed the gate but the validator
-    // flagged PinchPoint - 2026-08-08), custom table on large rings
-    // (measured 2026-08-07: the FxHashSet pass was ~60 us on a
-    // 5000-vertex ring; the direct-addressed table is ~3x cheaper).
-    if crate::validation::ring::first_pinch_dup(&coords[..n]).is_some() {
+    // Small rings: the standalone O(n^2) pinch scan (no allocation).
+    if n <= 32 && crate::validation::ring::first_pinch_dup(&coords[..n]).is_some() {
         return false;
+    }
+    if track_ext
+        && let Some(v) = acc.extremal.as_deref_mut()
+    {
+        v.push(ext_idx);
     }
     true
 }

@@ -295,7 +295,10 @@ repair pipeline's central guarantee.
 ## Stage breakdown (valid 5000-vertex polygon, serial)
 
 Measured 2026-08-07 (evening, lean-predicate + gate-fusion pass) with a
-throwaway stage probe (deleted after the run).
+throwaway stage probe (deleted after the run). The 2026-08-09 way to get
+this decomposition is the `hotpath` feature on the synthetic bench — see
+"Profiling the benchmark" below; the manual probe remains the source for
+TRUE per-item numbers (hotpath inflates per-call costs).
 
 | Stage | Time | Share |
 |-------|-----:|------:|
@@ -386,3 +389,29 @@ the 1 us floor are exempt as dispatch noise). The first run on a new
 environment records the baseline instead of failing; commit the uploaded
 artifact. This gate exists because CI was green during the valid-line
 regression above - tests alone do not measure performance.
+
+## Profiling the benchmark (hotpath-first, 2026-08-09)
+
+Any per-function timing question starts with the `hotpath` feature, not
+hand-edited short-circuits:
+
+```bash
+rm -f target/profiling/bench_hotpath_report.json   # stale-report trap
+cargo bench --features hotpath,bench-geos-system,arrange,structure,parallel,simd \
+  --bench bench --no-run
+ls -lat target/release/deps/bench-*.exe | head -3   # run the NEWEST (stale-binaries accumulate)
+BENCH_SUBSET='valid polygon' ./target/release/deps/<newest>.exe
+# report → target/profiling/bench_hotpath_report.json (writes at EXIT)
+```
+
+The bench main carries `hotpath::main(...)` with its own output path
+(speed_probe uses `hotpath_report.json`). Measured gate stages:
+`fast_path_check`, `ring_is_plausible`, `has_no_intersections(_nan_ok)`,
+`build_mono_chains`, `has_no_intersections_grid`, `rec_overlaps`,
+`enforce_ogc_winding`, `enforce_ccw/cw`, `strip_degenerate`,
+`check_linestring_self_intersection`. hotpath INFLATES per-call costs
+(~1-25 us/call) - the report ranks stages (relative structure), it does
+not measure them. 2026-08-09 finding: `rec_overlaps` dominates the
+mid-size valid-polygon rows (2.5M calls, ~198% of wall); the grid path
+tests each chain pair once per shared cell, so a convex ring's pairs are
+tested 4-9x redundantly. AGENTS.md carries the full workflow.

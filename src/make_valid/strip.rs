@@ -3,6 +3,7 @@
 
 use super::*;
 use alloc::vec::Vec;
+use crate::noding::remove_consecutive_duplicates;
 
 pub(super) fn has_nan(g: &Geometry<f64>) -> bool {
     use geo::CoordsIter;
@@ -52,6 +53,7 @@ pub fn strip_degenerate_test(g: Geometry<f64>) -> Geometry<f64> {
     strip_degenerate(g)
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(super) fn strip_degenerate(g: Geometry<f64>) -> Geometry<f64> {
     match g {
         Geometry::Polygon(p) => {
@@ -219,6 +221,7 @@ pub(super) fn strip_degenerate(g: Geometry<f64>) -> Geometry<f64> {
     }
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(super) fn enforce_ccw(mut ring: LineString<f64>) -> (LineString<f64>, usize, bool) {
     // Use Shewchuk's orient2d (adaptive precision) on the extremal vertex
     // to determine winding order. The shoelace sum in geo's winding_order()
@@ -240,8 +243,37 @@ pub(super) fn enforce_ccw(mut ring: LineString<f64>) -> (LineString<f64>, usize,
     (ring, idx, reversed)
 }
 
+/// Variant of [`enforce_ccw`] with the extremal index already located by
+/// the fast-path gate's plausibility pass (2026-08-09): the O(n)
+/// `min_x_vertex` search is skipped, everything else is identical.
+pub(super) fn enforce_ccw_with_idx(
+    mut ring: LineString<f64>,
+    idx: usize,
+) -> (LineString<f64>, usize, bool) {
+    let is_ccw = crate::util::robust_is_ccw_at(&ring.0, idx);
+    let reversed = !is_ccw;
+    if reversed {
+        ring.0.reverse();
+    }
+    (ring, idx, reversed)
+}
+
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(super) fn enforce_cw(mut ring: LineString<f64>) -> (LineString<f64>, usize, bool) {
     let (is_ccw, idx) = crate::util::robust_is_ccw_with_index(&ring.0);
+    let reversed = is_ccw;
+    if reversed {
+        ring.0.reverse();
+    }
+    (ring, idx, reversed)
+}
+
+/// Variant of [`enforce_cw`] with the extremal index already located.
+pub(super) fn enforce_cw_with_idx(
+    mut ring: LineString<f64>,
+    idx: usize,
+) -> (LineString<f64>, usize, bool) {
+    let is_ccw = crate::util::robust_is_ccw_at(&ring.0, idx);
     let reversed = is_ccw;
     if reversed {
         ring.0.reverse();
