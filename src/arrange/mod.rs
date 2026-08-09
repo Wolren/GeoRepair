@@ -124,6 +124,8 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, _config: &MakeValidConfig) -> Geo
         lines: Some(&mut lines),
         bbox: None,
         sub_ulp: None,
+        min_abs: None,
+        max_abs: None,
     };
     if !ring_is_plausible(poly.exterior(), &mut acc) {
         return fix_from_poly_lines(poly);
@@ -316,6 +318,8 @@ pub fn validate_polygon(poly: &Polygon<f64>) -> bool {
         lines: Some(&mut lines),
         bbox: None,
         sub_ulp: None,
+        min_abs: None,
+        max_abs: None,
     };
     if !ring_is_plausible(poly.exterior(), &mut acc) {
         return false;
@@ -569,6 +573,8 @@ pub(crate) struct GateAccum<'a> {
     pub lines: Option<&'a mut Vec<geo::Line<f64>>>,
     pub bbox: Option<&'a mut (f64, f64, f64, f64)>,
     pub sub_ulp: Option<&'a mut bool>,
+    pub min_abs: Option<&'a mut f64>,
+    pub max_abs: Option<&'a mut f64>,
 }
 
 impl GateAccum<'_> {
@@ -577,6 +583,8 @@ impl GateAccum<'_> {
             lines: None,
             bbox: None,
             sub_ulp: None,
+            min_abs: None,
+            max_abs: None,
         }
     }
 }
@@ -629,6 +637,19 @@ pub(crate) fn ring_is_plausible(ring: &geo::LineString<f64>, acc: &mut GateAccum
             if eps > 0.0 && dx.max(dy) < eps {
                 *sub = true;
             }
+        }
+        if let Some(min_abs) = acc.min_abs.as_deref_mut() {
+            let ax = w[0].x.abs();
+            let ay = w[0].y.abs();
+            if ax != 0.0 {
+                *min_abs = (*min_abs).min(ax);
+            }
+            if ay != 0.0 {
+                *min_abs = (*min_abs).min(ay);
+            }
+        }
+        if let Some(max_abs) = acc.max_abs.as_deref_mut() {
+            *max_abs = (*max_abs).max(w[0].x.abs()).max(w[0].y.abs());
         }
     }
     let n = coords.len() - 1;

@@ -287,7 +287,7 @@ mod gate_completeness {
                 None,
             );
             match out {
-                crate::structure::FixOutcome::Fast(g) => {
+                crate::structure::FixOutcome::Fast(g, _, _) => {
                     let (g, ok) = enforce_ogc_winding(g);
                     // The production contract: Fast + orientation-ok must be
                     // validator-clean (the arms check orientation AFTER
