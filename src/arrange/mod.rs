@@ -773,9 +773,7 @@ fn plausible_body(
     if n <= 32 && crate::validation::ring::first_pinch_dup(&coords[..n]).is_some() {
         return false;
     }
-    if track_ext
-        && let Some(v) = acc.extremal.as_deref_mut()
-    {
+    if track_ext && let Some(v) = acc.extremal.as_deref_mut() {
         v.push(ext_idx);
     }
     true

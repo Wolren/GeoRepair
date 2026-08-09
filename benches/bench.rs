@@ -931,12 +931,7 @@ fn main() {
     // Invalid bowtie at scale: same bowtie with subdivided edges, 50/100/
     // 500/1000 vertices (the user's explicit ask 2026-08-07 - the bench
     // only had the 4v bowtie, which never stressed the repair at scale).
-    for &(n, batch) in &[
-        (50usize, 5000usize),
-        (100, 2000),
-        (500, 200),
-        (1000, 100),
-    ] {
+    for &(n, batch) in &[(50usize, 5000usize), (100, 2000), (500, 200), (1000, 100)] {
         let poly = make_bowtie_n(n);
         let polys: Vec<Polygon<f64>> = (0..batch)
             .map(|i| {
@@ -1095,7 +1090,13 @@ fn main() {
     }
 
     // Convoluted: spiral (tightly wound)
-    for &(n, batch) in &[(10, 50000usize), (50, 10000), (100, 5000), (500, 1000), (1000, 500)] {
+    for &(n, batch) in &[
+        (10, 50000usize),
+        (50, 10000),
+        (100, 5000),
+        (500, 1000),
+        (1000, 500),
+    ] {
         let mut coords = Vec::new();
         for i in 0..n {
             let t = i as f64 * 0.5;
@@ -1185,7 +1186,13 @@ fn main() {
     }
 
     // Extreme mixed scale: alternates 1e12 and 1e-12 coords — tests epsilon robustness
-    for &(n, batch) in &[(10usize, 50000usize), (50, 1000), (100, 100), (500, 50), (1000, 20)] {
+    for &(n, batch) in &[
+        (10usize, 50000usize),
+        (50, 1000),
+        (100, 100),
+        (500, 50),
+        (1000, 20),
+    ] {
         let g = make_extreme_mixed_scale(n);
         bench_line(&format!("x-scale {}v", n), &g, batch, &cfg);
     }
@@ -1224,7 +1231,13 @@ fn main() {
     }
 
     // Spoke wheel: all edges converge at origin — stresses noding at common point
-    for &(spokes, batch) in &[(10usize, 50000usize), (50, 5000), (100, 500), (500, 50), (1000, 25)] {
+    for &(spokes, batch) in &[
+        (10usize, 50000usize),
+        (50, 5000),
+        (100, 500),
+        (500, 50),
+        (1000, 25),
+    ] {
         let g = make_spoke_wheel(spokes, 1000.0);
         bench_line(&format!("spoke {}sp", spokes), &g, batch, &cfg);
     }
