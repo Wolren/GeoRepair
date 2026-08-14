@@ -147,7 +147,7 @@ wasm-bindgen-test = "0.3"
 # getrandom 0.3 rejects wasm32-unknown-unknown unless the js backend is
 # enabled; proptest/rand pull it transitively as dev-deps and cargo builds
 # every declared dev-dependency for a test target, even unused ones.
-getrandom = { version = "0.3", features = ["wasm_js"] }
+getrandom = { version = "0.4", features = ["wasm_js"] }
 
 [lib]
 name = "geo_repair"
