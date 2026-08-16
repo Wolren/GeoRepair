@@ -317,3 +317,183 @@ mod platform_tests {
         );
     }
 }
+
+// ============================================================================
+// Shuffle-transpose kernel verification + head-to-head microbench
+// ============================================================================
+
+#[cfg(all(
+    not(feature = "simd-portable"),
+    target_arch = "x86_64",
+    feature = "std"
+))]
+mod shuffle_kernels {
+    use super::*;
+    use alloc::vec::Vec;
+    use std::hint::black_box;
+    use std::time::Instant;
+
+    fn pseudo_coords(n: usize) -> Vec<Coord<f64>> {
+        (0..n)
+            .map(|i| Coord {
+                x: ((i * 7919) % 4093) as f64 * 0.05 - 100.0,
+                y: ((i * 104729) % 3571) as f64 * 0.07 + 40.0,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn aabb_avx_bit_exact_vs_scalar() {
+        if !std::arch::is_x86_feature_detected!("avx") {
+            return;
+        }
+        let coords = pseudo_coords(10_000);
+        let scalar = {
+            let (mut mnx, mut mxx, mut mny, mut mxy) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+            for c in &coords {
+                mnx = mnx.min(c.x);
+                mxx = mxx.max(c.x);
+                mny = mny.min(c.y);
+                mxy = mxy.max(c.y);
+            }
+            (mnx, mxx, mny, mxy)
+        };
+        let simd = unsafe { super::super::fallback::aabb_minmax_avx(&coords) };
+        assert_eq!(simd.0.to_bits(), scalar.0.to_bits());
+        assert_eq!(simd.1.to_bits(), scalar.1.to_bits());
+        assert_eq!(simd.2.to_bits(), scalar.2.to_bits());
+        assert_eq!(simd.3.to_bits(), scalar.3.to_bits());
+    }
+
+    /// Informational head-to-head timings, no assertions (CI-safe).
+    /// Run with: cargo test --release --lib simd:: -- --nocapture
+    ///
+    /// Verdicts (2026-08-16, i5-12400F, rustc 1.97):
+    /// - aabb shuffle-transpose AVX kernel: ~4x vs scalar (wired into
+    ///   aabb_minmax_simd, used by the repair paths).
+    /// - orient2d batch-of-4: raw shuffle AVX2 kernel ~1.17x faster,
+    ///   but runtime dispatch + non-inlinable target_feature boundary
+    ///   cost ~0.8ns/call on a ~3ns kernel -> net 0.90x LOSS. Kept
+    ///   scalar (inlinable into the pair predicates).
+    #[test]
+    fn microbench_kernels() {
+        let coords = pseudo_coords(100_000);
+        let mut rng_state = 0x243f6a8885a308d3u64;
+        let mut next = || {
+            rng_state ^= rng_state << 13;
+            rng_state ^= rng_state >> 7;
+            rng_state ^= rng_state << 17;
+            ((rng_state >> 11) as f64 / (1u64 << 53) as f64) * 2000.0 - 1000.0
+        };
+        // aabb: scalar vs shuffle-AVX
+        let t = Instant::now();
+        let mut acc = 0.0f64;
+        for _ in 0..200 {
+            let (a, b, c, d) = black_box(aabb_minmax_simd(&coords));
+            acc += a + b + c + d;
+        }
+        let disp_us = t.elapsed().as_micros() as f64 / 200.0;
+        let t = Instant::now();
+        let mut acc2 = 0.0f64;
+        for _ in 0..200 {
+            let (mut mnx, mut mxx, mut mny, mut mxy) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+            for c in &coords {
+                mnx = mnx.min(c.x);
+                mxx = mxx.max(c.x);
+                mny = mny.min(c.y);
+                mxy = mxy.max(c.y);
+            }
+            acc2 += mnx + mxx + mny + mxy;
+        }
+        let scalar_us = t.elapsed().as_micros() as f64 / 200.0;
+        println!(
+            "aabb 100k coords: scalar {scalar_us:.2} us, avx-dispatch {disp_us:.2} us ({:.2}x)",
+            scalar_us / disp_us
+        );
+        black_box((acc, acc2));
+
+        // orient2d batch: scalar vs avx2-dispatch. Inputs rotate through a
+        // table (call sites build fresh arrays per pair - loop-invariant
+        // inputs would let LLVM collapse the scalar side of the bench).
+        type Triad = ([Coord<f64>; 4], [Coord<f64>; 4], [Coord<f64>; 4]);
+        let mut table: Vec<Triad> = Vec::new();
+        for _ in 0..64 {
+            let pa = [
+                Coord {
+                    x: next(),
+                    y: next(),
+                },
+                Coord {
+                    x: next(),
+                    y: next(),
+                },
+                Coord {
+                    x: next(),
+                    y: next(),
+                },
+                Coord {
+                    x: next(),
+                    y: next(),
+                },
+            ];
+            let pb = [
+                Coord {
+                    x: next(),
+                    y: next(),
+                },
+                Coord {
+                    x: next(),
+                    y: next(),
+                },
+                Coord {
+                    x: next(),
+                    y: next(),
+                },
+                Coord {
+                    x: next(),
+                    y: next(),
+                },
+            ];
+            let pc = [
+                Coord {
+                    x: next(),
+                    y: next(),
+                },
+                Coord {
+                    x: next(),
+                    y: next(),
+                },
+                Coord {
+                    x: next(),
+                    y: next(),
+                },
+                Coord {
+                    x: next(),
+                    y: next(),
+                },
+            ];
+            table.push((pa, pb, pc));
+        }
+        let t = Instant::now();
+        let mut acc = 0.0f64;
+        for i in 0..2_000_000 {
+            let (pa, pb, pc) = &table[i & 63];
+            let o = black_box(orient2d_batch_4(pa, pb, pc));
+            acc += o[0] + o[1] + o[2] + o[3];
+        }
+        let disp_us = t.elapsed().as_micros() as f64;
+        let t = Instant::now();
+        let mut acc2 = 0.0f64;
+        for i in 0..2_000_000 {
+            let (pa, pb, pc) = &table[i & 63];
+            let o = black_box(scalar_orient2d_batch(pa, pb, pc));
+            acc2 += o[0] + o[1] + o[2] + o[3];
+        }
+        let scalar_us = t.elapsed().as_micros() as f64;
+        println!(
+            "orient2d x4: scalar {scalar_us:.0} us/2M, avx2-dispatch {disp_us:.0} us/2M ({:.2}x)",
+            scalar_us / disp_us
+        );
+        black_box((acc, acc2));
+    }
+}

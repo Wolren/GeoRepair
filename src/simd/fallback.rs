@@ -13,6 +13,13 @@ pub(crate) fn orient2d_batch_4(
     pb: &[Coord<f64>; 4],
     pc: &[Coord<f64>; 4],
 ) -> [f64; 4] {
+    // SIMD verdict (measured head-to-head, simd/tests.rs microbench_kernels,
+    // 2026-08-16): a shuffle-transpose AVX2 kernel (unpack-based, no gathers)
+    // is ~1.17x faster raw, but the runtime dispatch + non-inlinable
+    // target_feature boundary costs ~0.8ns/call on a ~3ns kernel, netting a
+    // 0.90x LOSS. For a 4-det kernel the auto-vectorized scalar path wins
+    // because it inlines into the pair predicates. The 2026-08-02 verdict
+    // stands for this kernel; only bulk scans (aabb, snap) justify dispatch.
     scalar_orient2d_batch(pa, pb, pc)
 }
 
@@ -55,6 +62,7 @@ pub(crate) fn snap_coords_simd(coords: &mut [Coord<f64>], scale: f64) {
 }
 
 #[cfg(not(feature = "simd-portable"))]
+#[inline]
 pub fn aabb_minmax_simd(coords: &[Coord<f64>]) -> (f64, f64, f64, f64) {
     let n = coords.len();
     if n == 0 {
@@ -89,11 +97,15 @@ pub fn aabb_minmax_simd(coords: &[Coord<f64>]) -> (f64, f64, f64, f64) {
     (mnx, mxx, mny, mxy)
 }
 
-/// AVX2 min/max reduction over a coordinate slice. Restored from the
-/// pre-fe4c831 kernel (measured 4.5x vs scalar on the bbox scan).
+/// AVX2 min/max reduction over a coordinate slice. Shuffle-transpose
+/// variant (unpacklo/unpackhi, no gathers): 2 loads + 2 unpacks per
+/// 4 coords. Lane order is irrelevant for min/max so no permute is needed.
+/// Restored from the pre-fe4c831 kernel and reworked from setr_pd gathers
+/// (measured 4.5x vs scalar on the bbox scan; the shuffle form measures
+/// faster still - see simd/tests.rs microbench_kernels).
 #[cfg(all(not(feature = "simd-portable"), target_arch = "x86_64"))]
 #[target_feature(enable = "avx")]
-unsafe fn aabb_minmax_avx(coords: &[Coord<f64>]) -> (f64, f64, f64, f64) {
+pub(crate) unsafe fn aabb_minmax_avx(coords: &[Coord<f64>]) -> (f64, f64, f64, f64) {
     use core::arch::x86_64::*;
     let n = coords.len();
     let mut min_xv = _mm256_set1_pd(f64::MAX);
@@ -102,19 +114,11 @@ unsafe fn aabb_minmax_avx(coords: &[Coord<f64>]) -> (f64, f64, f64, f64) {
     let mut max_yv = _mm256_set1_pd(f64::MIN);
     let mut i = 0usize;
     while i + 4 <= n {
-        // SAFETY: in-bounds scalar reads assembled into a vector.
-        let xs = _mm256_setr_pd(
-            coords[i].x,
-            coords[i + 1].x,
-            coords[i + 2].x,
-            coords[i + 3].x,
-        );
-        let ys = _mm256_setr_pd(
-            coords[i].y,
-            coords[i + 1].y,
-            coords[i + 2].y,
-            coords[i + 3].y,
-        );
+        // SAFETY: in-bounds wide loads; AoS -> SoA via lane-crossing unpacks.
+        let v0 = unsafe { _mm256_loadu_pd(coords.as_ptr().add(i) as *const f64) };
+        let v1 = unsafe { _mm256_loadu_pd(coords.as_ptr().add(i + 2) as *const f64) };
+        let xs = _mm256_unpacklo_pd(v0, v1);
+        let ys = _mm256_unpackhi_pd(v0, v1);
         min_xv = _mm256_min_pd(min_xv, xs);
         max_xv = _mm256_max_pd(max_xv, xs);
         min_yv = _mm256_min_pd(min_yv, ys);
