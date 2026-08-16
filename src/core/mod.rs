@@ -24,43 +24,81 @@ pub(crate) const EPS: f64 = 1e-12;
 /// Epsilon for parametric (t/u) intersection comparisons.
 pub(crate) const EPS_PARAM: f64 = 1e-14;
 
-/// Vertex count threshold above which grid-based spatial indexing is used
-/// instead of brute-force O(n²) checks for self-intersection detection
-/// and edge splitting. At n=2000 the brute-force 2M pair checks completes
-/// in ~5ms for most geometries, well below the cost of grid construction.
-pub(crate) const GRID_THRESHOLD_N: usize = 2000;
-/// Edge-split dispatch: below this, the O(n^2) pair loop is the fastest
-/// option; at or above it the R-tree / sweep-line noding wins. Measured
-/// 2026-08-07: a 500-edge bowtie took 3.29 ms through the bruteforce
-/// (250k exact pair tests) vs ~260 us via the indexed paths; a 100-edge
-/// bowtie was faster bruteforce (173 us vs 337 us rtree bulk_load) - the
-/// crossover sits near 128, so the old 2000-edge gate was a 5-60x
-/// latency tax on mid-size repairs.
-pub(crate) const SPLIT_BRUTEFORCE_MAX_N: usize = 128;
-
-/// Maximum total vertices for the fast-path validity check in fix_polygon.
-/// Larger polygons fall through to the full repair pipeline.
-pub(crate) const FAST_PATH_MAX_VERTS: usize = 50000;
-
-/// Total line count below which `has_no_intersections` uses a direct O(n²)
-/// pairwise sweep instead of the monotone-chain + grid + R-tree machinery.
-/// Measured on the 1.58M-poly real-world dataset: 95.6% of polygons have
-/// <= 32 vertices, and the chain path costs 1.295 µs/poly there — ~10x the
-/// cost of an allocation-free pairwise check. For n <= 32 the pairwise
-/// sweep is at most 496 pairs * 4 orient2d = ~2000 orientation tests.
+/// Compile-time stack capacity for the small-ring fast paths: the
+/// `SmallVec` inline buffers in the structure gate and the fixed-size
+/// `ring_of` array in `arrange::prep_intersect`. `Tuning::small_ring_lines`
+/// defaults to this value; runtime values above it only widen the
+/// line-collection dispatch (SmallVec spills to the heap), while the
+/// fixed-array paths clamp at this constant.
 pub const SMALL_RING_LINES: usize = 32;
 
 /// Snap scale factor for integer-keyed graph construction.
 pub(crate) const SNAP_SCALE: f64 = 1e8;
 
-/// Single-pass repair routing threshold: total ring edges above this skip
-/// the single-pass noding+BuildArea path and fall through to the boolean
-/// pipeline. Measured on the real-world dataset (2026-08-02): single-pass
-/// costs 0.03 ms/poly (<64 edges), 1.7 ms/poly (64-4096 edges) but 168 ms
-/// per poly on the 418 giants (>=4096 edges, up to 200k) — the R-tree
-/// noding of all rings together outweighs the boolean pipeline there
-/// (~36 ms). Below the threshold single-pass is both faster and simpler.
-pub(crate) const SP_MAX_EDGES: usize = 4096;
+/// Performance dispatch thresholds for the repair pipeline.
+///
+/// Every field is a measured routing decision (see the per-field docs).
+/// Defaults match the constants the crate shipped before they became
+/// tunable; the values are coupled to the shape distribution of the input
+/// dataset, so change them only when you have benchmarked your workload.
+///
+/// Set per-call on [`MakeValidConfig::tuning`]; the public leaf helpers
+/// that take no config (e.g. `arrange::validate_polygon`) use the
+/// defaults.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Tuning {
+    /// Vertex count threshold above which grid-based spatial indexing is
+    /// used instead of brute-force O(n²) checks for self-intersection
+    /// detection and edge splitting. At n=2000 the brute-force 2M pair
+    /// checks completes in ~5ms for most geometries, well below the cost
+    /// of grid construction.
+    pub grid_threshold_n: usize,
+    /// Edge-split dispatch: below this, the O(n^2) pair loop is the fastest
+    /// option; at or above it the R-tree / sweep-line noding wins. Measured
+    /// 2026-08-07: a 500-edge bowtie took 3.29 ms through the bruteforce
+    /// (250k exact pair tests) vs ~260 us via the indexed paths; a 100-edge
+    /// bowtie was faster bruteforce (173 us vs 337 us rtree bulk_load) - the
+    /// crossover sits near 128, so the old 2000-edge gate was a 5-60x
+    /// latency tax on mid-size repairs.
+    pub split_bruteforce_max_n: usize,
+    /// Edge-split rebuild dispatch: above this edge count the per-edge
+    /// split-point reconstruction runs in parallel; below it the serial
+    /// loop's lower dispatch overhead wins (the serial rebuild was ~30ms
+    /// of the 71ms noding on a 260k-edge shell).
+    pub split_rebuild_parallel_min: usize,
+    /// Maximum total vertices for the fast-path validity check in
+    /// `structure::fix_polygon`. Larger polygons fall through to the full
+    /// repair pipeline.
+    pub fast_path_max_verts: usize,
+    /// Small-ring dispatch threshold: inputs at or below this vertex count
+    /// use the allocation-free pairwise sweep and stack buffers. Values
+    /// above the compile-time [`SMALL_RING_LINES`] constant only widen the
+    /// line-collection dispatch; the fixed-array paths clamp at the
+    /// constant.
+    pub small_ring_lines: usize,
+    /// Single-pass repair routing threshold: total ring edges above this
+    /// skip the single-pass noding + BuildArea path and fall through to
+    /// the boolean pipeline. Measured on the real-world dataset
+    /// (2026-08-02): single-pass costs 0.03 ms/poly (<64 edges),
+    /// 1.7 ms/poly (64-4096 edges) but 168 ms per poly on the 418 giants
+    /// (>=4096 edges, up to 200k) - the R-tree noding of all rings
+    /// together outweighs the boolean pipeline there (~36 ms). Below the
+    /// threshold single-pass is both faster and simpler.
+    pub sp_max_edges: usize,
+}
+
+impl Default for Tuning {
+    fn default() -> Self {
+        Self {
+            grid_threshold_n: 2000,
+            split_bruteforce_max_n: 128,
+            split_rebuild_parallel_min: 128,
+            fast_path_max_verts: 50_000,
+            small_ring_lines: SMALL_RING_LINES,
+            sp_max_edges: 4096,
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Config
@@ -83,6 +121,7 @@ pub(crate) const SP_MAX_EDGES: usize = 4096;
 /// //   fill_rule: FillRule::EvenOdd,
 /// //   crs: None,
 /// //   target_crs: None,
+/// //   tuning: Tuning::default(),
 /// ```
 #[derive(Clone, Debug)]
 pub struct MakeValidConfig {
@@ -110,6 +149,12 @@ pub struct MakeValidConfig {
     /// When set, geometries are transformed to this CRS after repair
     /// via PROJ (requires the `proj` feature).
     pub target_crs: Option<Crs>,
+
+    /// Performance dispatch thresholds for the repair pipeline.
+    ///
+    /// Default: [`Tuning::default()`] (the crate's measured routing
+    /// decisions). See [`Tuning`] for the per-threshold rationale.
+    pub tuning: Tuning,
 }
 
 impl Default for MakeValidConfig {
@@ -120,6 +165,7 @@ impl Default for MakeValidConfig {
             fill_rule: FillRule::EvenOdd,
             crs: None,
             target_crs: None,
+            tuning: Tuning::default(),
         }
     }
 }

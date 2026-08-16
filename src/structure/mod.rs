@@ -52,7 +52,6 @@ use ::core::sync::atomic::Ordering;
 use geo::{Geometry, Line, LineString, LinesIter, Polygon};
 use smallvec::SmallVec;
 
-use crate::core;
 use crate::core::MakeValidConfig;
 use crate::util;
 use log::warn;
@@ -114,7 +113,14 @@ pub(crate) fn fix_polygon_owned(
         // the caller's winding normalization consumes them instead of
         // re-searching (2026-08-09). Ring order: exterior, then holes.
         let mut extremal: Vec<usize> = Vec::new();
-        if fast_path_check(&poly, ext_scale, &mut min_abs, &mut max_abs, &mut extremal) {
+        if fast_path_check(
+            &poly,
+            ext_scale,
+            &config.tuning,
+            &mut min_abs,
+            &mut max_abs,
+            &mut extremal,
+        ) {
             PROFILE_FP_NS.fetch_add(_t_fp.ns(), Ordering::Relaxed);
             return FixOutcome::Fast(Geometry::Polygon(poly), min_abs, max_abs, extremal);
         }
@@ -137,6 +143,7 @@ pub(crate) fn fix_polygon_owned(
     fn fast_path_check(
         poly: &Polygon<f64>,
         _ext_scale: Option<f64>,
+        tuning: &crate::core::Tuning,
         min_abs: &mut f64,
         max_abs: &mut f64,
         extremal: &mut Vec<usize>,
@@ -163,7 +170,7 @@ pub(crate) fn fix_polygon_owned(
         // every window).
         let mut lines: Vec<Line<f64>> = Vec::new();
         let mut acc = crate::arrange::GateAccum {
-            lines: (total_verts > crate::core::SMALL_RING_LINES).then_some(&mut lines),
+            lines: (total_verts > tuning.small_ring_lines).then_some(&mut lines),
             bbox: Some(&mut bbox),
             sub_ulp: Some(&mut sub_ulp),
             min_abs: Some(min_abs),
@@ -203,17 +210,17 @@ pub(crate) fn fix_polygon_owned(
         if crate::validation::has_duplicate_rings(&interiors, poly.exterior().0.as_slice()) {
             return false;
         }
-        if total_verts <= core::FAST_PATH_MAX_VERTS {
+        if total_verts <= tuning.fast_path_max_verts {
             // SmallVec: ~95.6% of the real-world dataset has <= 32 vertices, so
             // the line collection stays on the stack and skips the heap
             // allocation entirely; larger rings spill to the heap transparently.
             // The nan_ok variant is safe: ring_is_plausible verified every
             // coordinate finite before the lines were collected.
-            if total_verts <= core::SMALL_RING_LINES {
+            if total_verts <= tuning.small_ring_lines {
                 let lines: SmallVec<[Line<f64>; crate::core::SMALL_RING_LINES]> =
                     poly.lines_iter().collect();
                 !lines.is_empty()
-                    && crate::arrange::prep::has_no_intersections_nan_ok(&lines)
+                    && crate::arrange::prep::has_no_intersections_nan_ok_tuned(&lines, tuning)
                     && crate::validation::holes::check_holes_valid(
                         poly.exterior().0.as_slice(),
                         poly.interiors(),
@@ -223,7 +230,7 @@ pub(crate) fn fix_polygon_owned(
                 // Mid-size rings: the lines were collected by the
                 // plausibility pass above (acc.lines).
                 !lines.is_empty()
-                    && crate::arrange::prep::has_no_intersections_nan_ok(&lines)
+                    && crate::arrange::prep::has_no_intersections_nan_ok_tuned(&lines, tuning)
                     && crate::validation::holes::check_holes_valid(
                         poly.exterior().0.as_slice(),
                         poly.interiors(),
@@ -279,7 +286,7 @@ pub(crate) fn fix_polygon_owned(
     if crate::make_valid::snap_cannot_represent(&poly) {
         return FixOutcome::Unconsumed(poly);
     }
-    if let Some(mp) = crate::structure::symdiff::single_pass_fix(&poly) {
+    if let Some(mp) = crate::structure::symdiff::single_pass_fix_tuned(&poly, &config.tuning) {
         // GEOS type semantics: a single-component result keeps the input
         // polygon type; multiple components become MultiPolygon.
         let geom = if mp.0.len() == 1 {
@@ -338,7 +345,8 @@ pub(crate) fn fix_polygon_owned(
         let (shell_res, holes) = rayon::join(
             || {
                 let _t = util::ProfileClock::start();
-                let shell_polys = match fix_ring::repair_ring(poly.exterior()) {
+                let shell_polys = match fix_ring::repair_ring_tuned(poly.exterior(), &config.tuning)
+                {
                     Some(polys) => polys,
                     None => return None,
                 };
@@ -364,10 +372,14 @@ pub(crate) fn fix_polygon_owned(
                         if !bboxes_overlap(shell_bbox, hole_bbox) {
                             return vec![h.clone()];
                         }
-                        if !fix_ring::has_self_intersections_with_bbox(&h.0, hole_bbox) {
+                        if !fix_ring::has_self_intersections_with_bbox_tuned(
+                            &h.0,
+                            hole_bbox,
+                            &config.tuning,
+                        ) {
                             return vec![h.clone()];
                         }
-                        fix_ring::repair_ring(h)
+                        fix_ring::repair_ring_tuned(h, &config.tuning)
                             .map(|polys| polys.into_iter().map(|p| p.exterior().clone()).collect())
                             .unwrap_or_else(|| vec![h.clone()])
                     })
@@ -401,7 +413,7 @@ pub(crate) fn fix_polygon_owned(
     #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
     let (valid_shells, hole_rings_cw) = {
         let _t_sr = util::ProfileClock::start();
-        let shell_polys = match fix_ring::repair_ring(poly.exterior()) {
+        let shell_polys = match fix_ring::repair_ring_tuned(poly.exterior(), &config.tuning) {
             Some(polys) => polys,
             None => {
                 warn!("Structure: shell ring repair failed, falling back to CDT arrange");
@@ -442,11 +454,15 @@ pub(crate) fn fix_polygon_owned(
                     hole_rings.push(ensure_cw(h.clone()));
                     continue;
                 }
-                if !fix_ring::has_self_intersections_with_bbox(&h.0, hole_bbox) {
+                if !fix_ring::has_self_intersections_with_bbox_tuned(
+                    &h.0,
+                    hole_bbox,
+                    &config.tuning,
+                ) {
                     hole_rings.push(ensure_cw(h.clone()));
                     continue;
                 }
-                if let Some(polys) = fix_ring::repair_ring(h) {
+                if let Some(polys) = fix_ring::repair_ring_tuned(h, &config.tuning) {
                     hole_rings.extend(polys.into_iter().map(|p| p.exterior().clone()));
                 } else {
                     hole_rings.push(ensure_cw(h.clone()));

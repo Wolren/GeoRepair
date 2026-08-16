@@ -383,6 +383,16 @@ impl RTreeObject for ChainEnv {
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn has_no_intersections(lines: &[Line<f64>]) -> bool {
+    has_no_intersections_tuned(lines, &crate::core::Tuning::default())
+}
+
+/// Tuned variant of [`has_no_intersections`]: the repair pipeline threads
+/// the caller's [`crate::core::Tuning`] through the small-ring dispatch.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+pub(crate) fn has_no_intersections_tuned(
+    lines: &[Line<f64>],
+    tuning: &crate::core::Tuning,
+) -> bool {
     let n = lines.len();
     if n == 0 {
         return true;
@@ -396,7 +406,7 @@ pub fn has_no_intersections(lines: &[Line<f64>]) -> bool {
             return false;
         }
     }
-    has_no_intersections_nan_ok(lines)
+    has_no_intersections_nan_ok_tuned(lines, tuning)
 }
 
 /// `has_no_intersections` for line arrays whose finiteness was already
@@ -407,6 +417,15 @@ pub fn has_no_intersections(lines: &[Line<f64>]) -> bool {
 /// less pass of memory traffic on the bandwidth-bound parallel rows).
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn has_no_intersections_nan_ok(lines: &[Line<f64>]) -> bool {
+    has_no_intersections_nan_ok_tuned(lines, &crate::core::Tuning::default())
+}
+
+/// Tuned variant of [`has_no_intersections_nan_ok`].
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+pub(crate) fn has_no_intersections_nan_ok_tuned(
+    lines: &[Line<f64>],
+    tuning: &crate::core::Tuning,
+) -> bool {
     let n = lines.len();
     if n == 0 {
         return true;
@@ -420,7 +439,9 @@ pub fn has_no_intersections_nan_ok(lines: &[Line<f64>]) -> bool {
     // matches the chain leaf (rec_overlaps): strict proper crossing via
     // orient2d sign flips plus the full same-ring predicate, skipping
     // adjacent edges and testing the closing pair within each ring.
-    if n <= crate::core::SMALL_RING_LINES {
+    // The dispatch clamps at the compile-time SMALL_RING_LINES: the
+    // small-ring path uses a fixed-size stack array sized by that constant.
+    if n <= crate::core::SMALL_RING_LINES.min(tuning.small_ring_lines) {
         return has_no_intersections_small(lines);
     }
 

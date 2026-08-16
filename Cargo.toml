@@ -26,7 +26,7 @@ all-features = false
 features = ["std", "arrange", "structure", "parallel", "simd", "validate", "mimalloc", "io-all", "io-gpkg", "serde", "geo-traits"]
 
 [features]
-default = ["std", "arrange", "structure", "parallel", "simd", "validate", "mimalloc", "io-gpkg"]
+default = ["std", "arrange", "structure", "parallel", "validate", "mimalloc", "io-gpkg"]
 
 # no_std support: disable `std` feature to build without file I/O,
 # alloc-only. WKB parsing, geometry validation, and repair work
@@ -42,9 +42,11 @@ structure = ["simd", "rstar", "arrange"]
 validate = ["rstar"]
 parallel = ["dep:rayon", "geo/multithreading", "std"]
 # SIMD acceleration
-# - `simd`: retained for backward compatibility. Stable builds use scalar
-#   kernels that LLVM auto-vectorizes — hand-written AVX2 intrinsics were
-#   measured slower on AoS coordinate data and removed (see src/simd/mod.rs).
+# - `simd`: retained for backward compatibility and explicitly OUT of the
+#   default feature set - it gates nothing on stable (the kernels are
+#   compiled unconditionally and LLVM auto-vectorizes them; hand-written
+#   AVX2 intrinsics were measured slower on AoS coordinate data and
+#   removed, see src/simd/mod.rs).
 # - `simd-portable`: `core::simd` on all platforms (requires nightly)
 simd = []
 simd-portable = []
@@ -191,9 +193,12 @@ codegen-units = 1
 panic = "abort"
 
 [package.metadata.cargo-semver-checks.lints]
-# 0.14.2: GeoRepairResult (C FFI result struct, ffi feature) gained the
-# error_code field and reordered error_msg. Deliberate ABI evolution - the
-# contract is include/geo_repair.h, consumers recompile against the header,
-# and the struct is only exposed behind the ffi feature. Version stays on
-# the 0.14.2 line per the release plan.
+# Deliberate breaking changes on the 0.x line, documented here:
+# - 0.14.2: GeoRepairResult (C FFI result struct, ffi feature) gained the
+#   error_code field and reordered error_msg. Deliberate ABI evolution - the
+#   contract is include/geo_repair.h, consumers recompile against the header,
+#   and the struct is only exposed behind the ffi feature.
+# - 0.14.5: MakeValidConfig gained the `tuning` field (performance dispatch
+#   thresholds). Deliberate: struct-literal construction is the only break,
+#   `..Default::default()` (the documented pattern) is unaffected.
 constructible_struct_adds_field = "allow"

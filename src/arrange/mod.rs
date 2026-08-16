@@ -73,7 +73,7 @@ fn build_cdt_safe(
     }
 }
 
-pub(crate) fn fix_polygon(poly: &Polygon<f64>, _config: &MakeValidConfig) -> Geometry<f64> {
+pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Geometry<f64> {
     // Sub-ULP gate FIRST (before poly_has_basic_form): mixed-magnitude rings
     // (1e8 + 1e-9 coords) have sub-precision spikes that fail basic form
     // (consecutive duplicates) AND poison the CDT with crossing triangles
@@ -107,7 +107,7 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, _config: &MakeValidConfig) -> Geo
         // overflow). Fall through to the normal path instead.
         let collapsed = Polygon::new(ext, holes);
         if collapsed.exterior().0.len() != poly.exterior().0.len() {
-            return fix_polygon(&collapsed, _config);
+            return fix_polygon(&collapsed, config);
         }
     }
     // Basic form + line collection in ONE pass (the separate `collect`
@@ -139,7 +139,10 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, _config: &MakeValidConfig) -> Geo
     if lines.is_empty() {
         return empty();
     }
-    if prep::has_no_intersections(&lines) && holes_are_valid(poly) && holes_contained_cheap(poly) {
+    if prep::has_no_intersections_tuned(&lines, &config.tuning)
+        && holes_are_valid(poly)
+        && holes_contained_cheap(poly, &config.tuning)
+    {
         return Geometry::Polygon(poly.clone());
     }
     // Fallback: if intersection check false-positives (known fp precision issue
@@ -244,7 +247,7 @@ pub(crate) fn boolean_difference_catch(
 /// poking through the shell top via two touch vertices), routing arrange's
 /// passthrough into the gate -> empty. The first-vertex probe alone cannot
 /// see the poke; this closes it.
-pub(crate) fn holes_contained_cheap(poly: &Polygon<f64>) -> bool {
+pub(crate) fn holes_contained_cheap(poly: &Polygon<f64>, tuning: &crate::core::Tuning) -> bool {
     let shell = poly.exterior();
     if shell.0.len() < 3 {
         return false;
@@ -259,7 +262,7 @@ pub(crate) fn holes_contained_cheap(poly: &Polygon<f64>) -> bool {
     let scale = (sx1 - sx0).abs().max((sy1 - sy0).abs()).max(1.0);
     // f64 slack so a vertex exactly on the shell bbox does not trip.
     let eps = 8.0 * f64::EPSILON * scale;
-    let small = shell.0.len() <= crate::core::SMALL_RING_LINES;
+    let small = shell.0.len() <= tuning.small_ring_lines;
     for hole in poly.interiors() {
         let (mut hx0, mut hy0, mut hx1, mut hy1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
         for c in &hole.0 {
@@ -344,7 +347,7 @@ pub fn validate_polygon(poly: &Polygon<f64>) -> bool {
     if poly.interiors().is_empty() {
         return true;
     }
-    holes_are_valid_inclusive(poly) && holes_contained_cheap(poly)
+    holes_are_valid_inclusive(poly) && holes_contained_cheap(poly, &crate::core::Tuning::default())
 }
 
 /// Lightweight check: hole containment + nesting.

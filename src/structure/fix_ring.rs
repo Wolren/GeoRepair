@@ -12,13 +12,23 @@ use crate::util::ProfileClock;
 use log::warn;
 
 pub use crate::structure::edge_split::split_edges;
-use crate::structure::edge_split::{intersect_param, lerp};
+use crate::structure::edge_split::{intersect_param, lerp, split_edges_tuned};
 pub use crate::structure::symdiff::{
     edges_from_coords, make_valid_poly_symdiff, single_pass_fix, symdiff_test,
 };
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn repair_ring(ring: &LineString<f64>) -> Option<Vec<Polygon<f64>>> {
+    repair_ring_tuned(ring, &core::Tuning::default())
+}
+
+/// Tuned variant of [`repair_ring`]: the repair pipeline threads the
+/// caller's [`core::Tuning`] through the dispatch thresholds.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+pub(crate) fn repair_ring_tuned(
+    ring: &LineString<f64>,
+    tuning: &core::Tuning,
+) -> Option<Vec<Polygon<f64>>> {
     let mut coords = basic_cleanup(ring)?;
     if coords.len() < 4 {
         return None;
@@ -56,7 +66,7 @@ pub fn repair_ring(ring: &LineString<f64>) -> Option<Vec<Polygon<f64>>> {
         return None;
     }
 
-    if !has_self_intersections(&coords) {
+    if !has_self_intersections_tuned(&coords, tuning) {
         return Some(vec![Polygon::new(LineString::new(coords), Vec::new())]);
     }
 
@@ -66,7 +76,7 @@ pub fn repair_ring(ring: &LineString<f64>) -> Option<Vec<Polygon<f64>>> {
     // crossing leaves a still-self-intersecting remainder — accepting it drops
     // whole lobes of area (measured: 2334 → 112, 95% loss). Verify the split
     // results are actually clean before returning them.
-    if let Some(rings) = try_fast_fix(&coords) {
+    if let Some(rings) = try_fast_fix_tuned(&coords, tuning) {
         let cleaned: Vec<Polygon<f64>> = rings
             .into_iter()
             .filter_map(|r| basic_cleanup(&r).map(|c| Polygon::new(LineString::new(c), Vec::new())))
@@ -75,7 +85,7 @@ pub fn repair_ring(ring: &LineString<f64>) -> Option<Vec<Polygon<f64>>> {
         if !cleaned.is_empty()
             && cleaned
                 .iter()
-                .all(|p| !has_self_intersections(&p.exterior().0))
+                .all(|p| !has_self_intersections_tuned(&p.exterior().0, tuning))
         {
             return Some(cleaned);
         }
@@ -83,7 +93,7 @@ pub fn repair_ring(ring: &LineString<f64>) -> Option<Vec<Polygon<f64>>> {
 
     // Full graph-based fix (GEOS MakeValidPoly: node → BuildArea → even-parent).
     // Returns polygons WITH structural holes — do not flatten to exterior rings.
-    if let Some(polys) = fix_self_intersecting(&coords) {
+    if let Some(polys) = fix_self_intersecting_tuned(&coords, tuning) {
         let cleaned: Vec<Polygon<f64>> = polys
             .into_iter()
             .filter(|p| p.exterior().0.len() >= 4)
@@ -248,17 +258,27 @@ pub(crate) fn is_collinear_ring(coords: &[Coord<f64>]) -> bool {
 }
 
 pub fn has_self_intersections(coords: &[Coord<f64>]) -> bool {
-    has_self_intersections_impl(coords, None)
+    has_self_intersections_tuned(coords, &core::Tuning::default())
 }
 
-pub(crate) fn has_self_intersections_with_bbox(
+/// Tuned variant of [`has_self_intersections`] (no bbox hint).
+pub(crate) fn has_self_intersections_tuned(coords: &[Coord<f64>], tuning: &core::Tuning) -> bool {
+    has_self_intersections_impl(coords, None, tuning)
+}
+
+pub(crate) fn has_self_intersections_with_bbox_tuned(
     coords: &[Coord<f64>],
     bbox: (f64, f64, f64, f64),
+    tuning: &core::Tuning,
 ) -> bool {
-    has_self_intersections_impl(coords, Some(bbox))
+    has_self_intersections_impl(coords, Some(bbox), tuning)
 }
 
-fn has_self_intersections_impl(coords: &[Coord<f64>], bbox: Option<(f64, f64, f64, f64)>) -> bool {
+fn has_self_intersections_impl(
+    coords: &[Coord<f64>],
+    bbox: Option<(f64, f64, f64, f64)>,
+    tuning: &core::Tuning,
+) -> bool {
     let n = coords.len();
     if n < 4 {
         return false;
@@ -280,7 +300,7 @@ fn has_self_intersections_impl(coords: &[Coord<f64>], bbox: Option<(f64, f64, f6
     let coord_scale = (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
     let eps = core::EPS * coord_scale;
 
-    if n > core::GRID_THRESHOLD_N {
+    if n > tuning.grid_threshold_n {
         return super::sweep::has_self_intersections(coords, eps);
     }
 
@@ -479,6 +499,14 @@ pub(crate) fn split_ring_at_intersection(
 /// split successfully.  Returns `None` if the fix is too complex for the fast
 /// path (caller should fall through to the full `fix_self_intersecting`).
 pub fn try_fast_fix(coords: &[Coord<f64>]) -> Option<Vec<LineString<f64>>> {
+    try_fast_fix_tuned(coords, &core::Tuning::default())
+}
+
+/// Tuned variant of [`try_fast_fix`].
+pub(crate) fn try_fast_fix_tuned(
+    coords: &[Coord<f64>],
+    tuning: &core::Tuning,
+) -> Option<Vec<LineString<f64>>> {
     let n = coords.len();
     if n < 4 {
         return None;
@@ -493,7 +521,7 @@ pub fn try_fast_fix(coords: &[Coord<f64>]) -> Option<Vec<LineString<f64>>> {
     let coord_scale = (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
     let eps = core::EPS * coord_scale;
 
-    let pair = if n > core::GRID_THRESHOLD_N {
+    let pair = if n > tuning.grid_threshold_n {
         super::sweep::find_first_intersection(coords, eps)?
     } else {
         find_first_intersection_bruteforce(coords, eps)?
@@ -505,7 +533,7 @@ pub fn try_fast_fix(coords: &[Coord<f64>]) -> Option<Vec<LineString<f64>>> {
     // but the area is partitioned wrong (measured: 5609 → 116, 98% loss).
     // Verify no second crossing exists before accepting.
     let (i0, j0, _) = pair;
-    let second = if n > core::GRID_THRESHOLD_N {
+    let second = if n > tuning.grid_threshold_n {
         super::sweep::find_second_intersection(coords, eps, i0, j0)
     } else {
         find_second_intersection_bruteforce(coords, eps, i0, j0)
@@ -568,10 +596,19 @@ fn find_first_intersection_bruteforce(
 /// ---------------------------------------------------------------------------
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn fix_self_intersecting(coords: &[Coord<f64>]) -> Option<Vec<Polygon<f64>>> {
+    fix_self_intersecting_tuned(coords, &core::Tuning::default())
+}
+
+/// Tuned variant of [`fix_self_intersecting`].
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+pub(crate) fn fix_self_intersecting_tuned(
+    coords: &[Coord<f64>],
+    tuning: &core::Tuning,
+) -> Option<Vec<Polygon<f64>>> {
     let _t = ProfileClock::start();
     let coords = collapse_sub_ulp_vertices(coords, false);
     let edges = edges_from_coords(&coords);
-    let mut noded = split_edges(&edges);
+    let mut noded = split_edges_tuned(&edges, tuning);
     if noded.is_empty() {
         return None;
     }

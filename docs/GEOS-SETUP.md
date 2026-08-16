@@ -19,10 +19,10 @@ Two features control GEOS linking:
 
 ```powershell
 # System GEOS (faster — uses conda's LLVM build)
-$env:GEOS_LIB_DIR = "C:\Users\Wildbot\miniconda3\Library\lib"
-$env:GEOS_INCLUDE_DIR = "C:\Users\Wildbot\miniconda3\Library\include"
+$env:GEOS_LIB_DIR = "D:\Miniconda\Library\lib"
+$env:GEOS_INCLUDE_DIR = "D:\Miniconda\Library\include"
 $env:GEOS_VERSION = "3.14.1"
-$env:Path = "C:\Users\Wildbot\miniconda3\Library\bin;$env:Path"
+$env:Path = "D:\Miniconda\Library\bin;$env:Path"
 cargo bench --features bench-geos-system,arrange,structure,parallel,simd,io-shp --bench real_world
 
 # Static-built GEOS (slower — MSVC, no LTO)
@@ -49,6 +49,7 @@ cargo clippy --features arrange,structure,parallel,simd,validate -- -D warnings
 
 # Full CI check
 cargo check --all-features
+```
 
 ## Build and install Python wheel for QGIS
 
@@ -58,8 +59,8 @@ QGIS (OSGeo4W) uses Python at `C:\Users\Wildbot\AppData\Local\Programs\OSGeo4W\a
 # Build wheel
 & "C:\Users\Wildbot\AppData\Local\Programs\OSGeo4W\apps\Python312\python.exe" -m maturin build --release --features python
 
-# Install into QGIS Python (force reinstall)
-& "C:\Users\Wildbot\AppData\Local\Programs\OSGeo4W\apps\Python312\python.exe" -m pip install target\wheels\geo_repair-0.2.0-cp312-cp312-win_amd64.whl --force-reinstall
+# Install into QGIS Python (force reinstall; the wheel version follows Cargo.toml)
+& "C:\Users\Wildbot\AppData\Local\Programs\OSGeo4W\apps\Python312\python.exe" -m pip install target\wheels\geo_repair-*.whl --force-reinstall
 
 # Copy QGIS processing script
 Copy-Item -Path qgis\qgis_geo_repair.py -Destination "$env:APPDATA\QGIS\QGIS3\profiles\default\processing\scripts\" -Force

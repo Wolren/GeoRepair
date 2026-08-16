@@ -64,6 +64,7 @@ pub(crate) fn make_config(
             None
         },
         target_crs: None,
+        tuning: crate::core::Tuning::default(),
     }
 }
 

@@ -18,3 +18,9 @@ fuzz/target/
 fuzz/artifacts/
 fuzz/coverage/
 /dist/
+
+# Agent/instruction files must never be tracked
+AGENTS.md
+CLAUDE.md
+.cursorrules
+.hermes/
