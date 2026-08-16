@@ -19,6 +19,15 @@ use super::fix_ring::{basic_cleanup, collapse_sub_ulp_vertices, is_collinear_rin
 /// Returns `None` when the linework cannot be closed into faces (the caller
 /// falls back to the multi-stage boolean pipeline).
 pub fn single_pass_fix(poly: &Polygon<f64>) -> Option<MultiPolygon<f64>> {
+    single_pass_fix_tuned(poly, &crate::core::Tuning::default())
+}
+
+/// Tuned variant of [`single_pass_fix`]: the repair pipeline threads the
+/// caller's [`crate::core::Tuning`] through the dispatch thresholds.
+pub(crate) fn single_pass_fix_tuned(
+    poly: &Polygon<f64>,
+    tuning: &crate::core::Tuning,
+) -> Option<MultiPolygon<f64>> {
     // Routing gate: count total ring edges first (cheap O(n) scan). Above
     // SP_MAX_EDGES the all-rings R-tree noding outweighs the boolean
     // pipeline (measured 168 ms/poly on 200k-edge monsters vs ~36 ms) —
@@ -29,7 +38,7 @@ pub fn single_pass_fix(poly: &Polygon<f64>) -> Option<MultiPolygon<f64>> {
             .iter()
             .map(|h| h.0.len().saturating_sub(1))
             .sum::<usize>();
-    if n_edges > crate::core::SP_MAX_EDGES {
+    if n_edges > tuning.sp_max_edges {
         return None;
     }
 
@@ -56,7 +65,7 @@ pub fn single_pass_fix(poly: &Polygon<f64>) -> Option<MultiPolygon<f64>> {
     }
 
     // 2. Node everything together (R-tree/sweep-line, parametric splits).
-    let mut noded = crate::structure::edge_split::split_edges(&edges);
+    let mut noded = crate::structure::edge_split::split_edges_tuned(&edges, tuning);
     if noded.is_empty() {
         return None;
     }

@@ -6,8 +6,8 @@ OGC geometry repair and validation for Rust. Passes the GEOS XML validation suit
 
 [![crate](https://img.shields.io/crates/v/geo-repair.svg)](https://crates.io/crates/geo-repair)
 [![docs](https://docs.rs/geo-repair/badge.svg)](https://docs.rs/geo-repair)
-![MSRV](https://img.shields.io/badge/rustc-1.85+-ab6000.svg)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://github.com/georust/geo-repair?tab=License-1-ov-file)
+![MSRV](https://img.shields.io/badge/rustc-1.88+-ab6000.svg)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://github.com/Wolren/GeoRepair?tab=License-1-ov-file)
 [![Status](https://img.shields.io/badge/status-experimental-orange.svg)]()
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20Wolren-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/wolren)
 
@@ -212,7 +212,7 @@ python scripts/bench_gate.py
 
 Measurement rules: always take the settled second run
 (first-run-after-build is inflated ~18%); never trust a bench binary you
-cannot trace to a source file. Full GEOS setup: `benches/AGENTS.md`.
+cannot trace to a source file. Full GEOS setup: `docs/GEOS-SETUP.md`.
 
 ## Limitations
 
@@ -344,7 +344,7 @@ macOS are attached to every GitHub release. Full API reference:
 | `arrange` | CDT-based polygon repair (requires `spade`) | yes |
 | `structure` | Structure-based fast path repair | yes |
 | `parallel` | Rayon parallel processing (non-WASM) | yes |
-| `simd` | Runtime-dispatched AVX2 bbox kernel (the one SIMD kernel that beat auto-vectorized scalar, 4.5x); all other kernels auto-vectorized scalar | yes |
+| `simd` | No-op on stable (kernels compiled unconditionally, LLVM auto-vectorized; hand-written AVX2 measured slower, kept only for the nightly `simd-portable` path) | no |
 | `validate` | OGC validation predicates | yes |
 | `mimalloc` | Use mimalloc global allocator | yes |
 | `std` | Standard library + file I/O. Disable for no_std builds. | yes |

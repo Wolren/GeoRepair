@@ -187,7 +187,7 @@
 //! | `arrange` | CDT-based polygon repair (requires `spade`) | yes |
 //! | `structure` | Structure-based fast-path repair | yes |
 //! | `parallel` | Rayon parallel processing (non-WASM) | yes |
-//! | `simd` | Retained for compatibility; stable builds use auto-vectorized scalar kernels (hand-written AVX2 measured slower) | yes |
+//! | `simd` | No-op on stable (kernels compiled unconditionally, LLVM auto-vectorized; hand-written AVX2 measured slower, kept only for the nightly `simd-portable` path) | no |
 //! | `simd-portable` | Portable SIMD via `core::simd` (nightly) | no |
 //! | `validate` | OGC validation predicates | yes |
 //! | `memmap` | Memory-mapped binary file loading | no* |
@@ -484,7 +484,7 @@ pub mod simd;
 /// Tolerance-based repeated-point removal.
 pub use cleanup::{remove_repeated_coords, remove_repeated_points};
 /// Repair configuration, error types, and polygon method selection.
-pub use core::{MakeValidConfig, MakeValidError, PolyMethod};
+pub use core::{MakeValidConfig, MakeValidError, PolyMethod, Tuning};
 /// Coordinate reference system wrapper.
 pub use crs::Crs;
 /// A feature combining geometry with optional attributes and CRS.

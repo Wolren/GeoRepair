@@ -37,6 +37,13 @@ fn should_use_sweepline(edges: &[Line<f64>], n: usize) -> bool {
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn split_edges(edges: &[Line<f64>]) -> Vec<Line<f64>> {
+    split_edges_tuned(edges, &core::Tuning::default())
+}
+
+/// Tuned variant of [`split_edges`]: the repair pipeline threads the
+/// caller's [`core::Tuning`] through the dispatch thresholds.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+pub(crate) fn split_edges_tuned(edges: &[Line<f64>], tuning: &core::Tuning) -> Vec<Line<f64>> {
     let n = edges.len();
     let mut split_points: Vec<SplitPoint> = vec![SmallVec::new(); n];
 
@@ -50,7 +57,7 @@ pub fn split_edges(edges: &[Line<f64>]) -> Vec<Line<f64>> {
     let coord_scale = (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
     let eps = core::EPS * coord_scale;
 
-    if n > core::SPLIT_BRUTEFORCE_MAX_N {
+    if n > tuning.split_bruteforce_max_n {
         if should_use_sweepline(edges, n) {
             split_edges_sweepline(edges, &mut split_points, eps);
         } else {
@@ -65,7 +72,7 @@ pub fn split_edges(edges: &[Line<f64>]) -> Vec<Line<f64>> {
     // then rebuild the sub-lines. Parallelized for large inputs (the serial
     // rebuild was ~30ms of the 71ms noding on a 260k-edge shell); below the
     // threshold the serial loop's lower dispatch overhead wins.
-    if n > 128 {
+    if n > tuning.split_rebuild_parallel_min {
         #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
         {
             use rayon::prelude::*;
