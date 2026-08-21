@@ -2,6 +2,13 @@ use alloc::vec::Vec;
 use geo::Line;
 use rstar::{AABB, RTree, RTreeObject};
 
+use crate::validation::sweep::{radix_sort_keys_tls, sortable_u64};
+
+/// Active-set limit for the edge-level spiky-ring sweep; beyond it the
+/// input is dense and belongs on the grid/R-tree path (same rationale as
+/// the line noder's limit).
+const EDGE_SWEEP_ACTIVE_LIMIT: usize = 512;
+
 /// Robust orientation of one line pair against another, batched as a single
 /// 4-wide SIMD call: [o(li, lj.start), o(li, lj.end), o(lj, li.start),
 /// o(lj, li.end)]. Sign-identical to four separate `orient2d` calls: the
@@ -447,6 +454,22 @@ pub(crate) fn has_no_intersections_nan_ok_tuned(
 
     let (chains, global_bbox) = build_mono_chains(lines);
 
+    // Spiky-ring dispatch: a ring whose chains are nearly all single edges
+    // (quadrant flips every vertex or two - star/radial shapes) defeats the
+    // chain machinery. The grid co-locates each long radial edge in many
+    // cells and pays O(cells^2/2) pair tests to find the few true bbox-
+    // overlapping pairs; an x-radix sweep over the raw EDGES finds the same
+    // pairs directly (measured: star poly 500v = 63,603 grid cell-pair
+    // tests vs 5,272 sweep tests, 12x). The sweep uses the SAME per-pair
+    // predicate chain as rec_overlaps' leaf (proper crossing + same-ring
+    // full predicate), so the verdict is decision-identical.
+    if nc_is_spiky(&chains, tuning)
+        && let Some(result) = has_no_intersections_edge_sweep(lines)
+    {
+        return result;
+        // Sweep bailed (dense active set) - fall through to the grid/rtree.
+    }
+
     // Try fast grid path; fall back to R-tree if any cell gets too dense
     let grid_result = has_no_intersections_grid(&chains, lines, global_bbox);
     if let Some(result) = grid_result {
@@ -522,6 +545,153 @@ pub(crate) fn has_no_intersections_nan_ok_tuned(
         }
     }
     true
+}
+
+/// Spiky-chain detector: the fraction of chains that hold exactly one edge.
+/// Star/radial rings flip quadrant at nearly every vertex, so nearly every
+/// chain is a single edge; smooth rings produce few long chains. `frac` is
+/// the Tuning threshold (default 0.8). Floor of 128 chains: below that the
+/// grid is small and cheap regardless of shape (measured: star poly 100v,
+/// 92 chains - the sweep's setup cost more than the 10x10 grid it replaced),
+/// so the sweep only engages where the grid's pair explosion is real.
+fn nc_is_spiky(chains: &[MonoChain], tuning: &crate::core::Tuning) -> bool {
+    if chains.len() < 128 || chains.len() > tuning.spiky_max_chains {
+        return false;
+    }
+    let ones = chains.iter().filter(|mc| mc.end - mc.start == 1).count();
+    (ones as f64) >= tuning.spiky_chain_frac * (chains.len() as f64)
+}
+
+/// Edge-level x-radix sweep for spiky rings: sort edges by padded lo_x, keep
+/// an active set of x-overlapping edges, y-gate each candidate pair, then run
+/// the SAME predicate chain as rec_overlaps' leaf. Returns None when the
+/// active set explodes (dense inputs belong on the R-tree path).
+///
+/// Pair semantics mirror rec_overlaps exactly:
+/// - proper crossing via orient4/segments_properly_cross,
+/// - same-ring pairs escalate to lean_pair_intersects with the ring's own
+///   eps (proper crossing + eps-collinear overlap + vertex-on-edge),
+/// - same-ring adjacent edges skipped, closing pair NOT skipped,
+/// - cross-ring pairs: proper crossings only.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+fn has_no_intersections_edge_sweep(lines: &[Line<f64>]) -> Option<bool> {
+    let n = lines.len();
+
+    // Ring ids + per-ring eps, identical to build_mono_chains' rule.
+    let mut ring_of = vec![0u32; n];
+    let mut nrings = 1u32;
+    for i in 1..n {
+        if lines[i].start != lines[i - 1].end {
+            nrings += 1;
+        }
+        ring_of[i] = nrings - 1;
+    }
+    let mut min_x = vec![f64::MAX; nrings as usize];
+    let mut max_x = vec![f64::MIN; nrings as usize];
+    let mut min_y = vec![f64::MAX; nrings as usize];
+    let mut max_y = vec![f64::MIN; nrings as usize];
+    for (i, l) in lines.iter().enumerate() {
+        let r = ring_of[i] as usize;
+        min_x[r] = min_x[r].min(l.start.x.min(l.end.x));
+        max_x[r] = max_x[r].max(l.start.x.max(l.end.x));
+        min_y[r] = min_y[r].min(l.start.y.min(l.end.y));
+        max_y[r] = max_y[r].max(l.start.y.max(l.end.y));
+    }
+    let ring_eps: Vec<f64> = (0..nrings as usize)
+        .map(|r| {
+            let scale = (max_x[r] - min_x[r])
+                .abs()
+                .max((max_y[r] - min_y[r]).abs())
+                .max(1.0);
+            1e-12 * scale
+        })
+        .collect();
+
+    // Spans + radix keys (sortable lo_x padded by the edge's own extent -
+    // same padding formula as validation::sweep so sub-extent separations
+    // still co-locate).
+    let mut spans: Vec<[f64; 4]> = Vec::with_capacity(n);
+    let mut keys: Vec<u64> = Vec::with_capacity(n);
+    let mut order: Vec<u32> = Vec::with_capacity(n);
+    for l in lines {
+        let (lo_x, hi_x) = if l.start.x < l.end.x {
+            (l.start.x, l.end.x)
+        } else {
+            (l.end.x, l.start.x)
+        };
+        let (lo_y, hi_y) = if l.start.y < l.end.y {
+            (l.start.y, l.end.y)
+        } else {
+            (l.end.y, l.start.y)
+        };
+        let ext = (hi_x - lo_x).abs().max((hi_y - lo_y).abs()).max(1.0) * 1e-10;
+        keys.push(sortable_u64(lo_x - ext));
+        order.push(0);
+        spans.push([lo_x - ext, hi_x + ext, lo_y - ext, hi_y + ext]);
+    }
+
+    // Already sorted? (x-monotone-ish input) skip the radix pass.
+    let mut sorted = true;
+    for i in 1..n {
+        if keys[i] < keys[i - 1] {
+            sorted = false;
+            break;
+        }
+    }
+    if sorted {
+        for (i, o) in order.iter_mut().enumerate() {
+            *o = i as u32;
+        }
+    } else {
+        radix_sort_keys_tls(&mut keys, &mut order);
+    }
+
+    let mut active: Vec<u32> = Vec::with_capacity(64);
+    for &oi in &order {
+        let j = oi as usize;
+        if active.len() > EDGE_SWEEP_ACTIVE_LIMIT {
+            return None;
+        }
+        active.retain(|&p| spans[p as usize][1] >= spans[j][0]);
+        let sj = &spans[j];
+        let lj = &lines[j];
+        let rj = ring_of[j];
+        for &p in &active {
+            let t = &spans[p as usize];
+            if t[3] < sj[2] || t[2] > sj[3] {
+                continue;
+            }
+            let i = p as usize;
+            let li = &lines[i];
+            let ri = ring_of[i];
+            // Adjacent same-ring edges share a vertex: only collinear overlap
+            // beyond it matters; the shared-vertex touch is legal. The closing
+            // pair (first vs last) is NOT adjacent under this rule and stays
+            // tested - matches rec_overlaps/check_ring_validity.
+            if ri == rj && (j == i + 1 || j + 1 == i) {
+                continue;
+            }
+            if segments_properly_cross(li, lj) {
+                return Some(false);
+            }
+            if ri == rj {
+                let eps = ring_eps[ri as usize];
+                let mut ambiguous = false;
+                if crate::validation::edges::lean_pair_intersects(
+                    li.start,
+                    li.end,
+                    lj.start,
+                    lj.end,
+                    eps,
+                    &mut ambiguous,
+                ) {
+                    return Some(false);
+                }
+            }
+        }
+        active.push(oi);
+    }
+    Some(true)
 }
 
 /// Fast grid path for `has_no_intersections`. Returns `None` if the grid is

@@ -85,6 +85,23 @@ pub struct Tuning {
     /// together outweighs the boolean pipeline there (~36 ms). Below the
     /// threshold single-pass is both faster and simpler.
     pub sp_max_edges: usize,
+    /// Fraction of chains-of-length-1 above which a ring is "spiky" and
+    /// routes to the edge-level radix sweep instead of the monotone-chain
+    /// grid. Spiky rings (star poly: r alternating every 3rd vertex)
+    /// shatter into ~n single-edge chains; the grid then co-locates each
+    /// long radial edge in many cells and pays O(cells^2/2) pair tests -
+    /// measured 63,603 cell-pair tests on star poly 500v vs 5,272 for the
+    /// x-sweep over the same edges (12x). Smooth rings (circle: 4 long
+    /// chains) keep the chain machinery.
+    pub spiky_chain_frac: f64,
+    /// Upper chain-count bound for the spiky sweep. Past it the ring is big
+    /// enough that the grid goes dense (>64 per cell) and falls through to
+    /// the R-tree, whose O(n log n) bulk load beats the sweep's O(n^1.5)
+    /// active-set scan (measured: star poly 1000v, 992 chains - grid dense,
+    /// R-tree row 247 us vs sweep 494 us). The sweep's window is the middle
+    /// band: too many chains for the small-grid floor, too few for the
+    /// density fallback.
+    pub spiky_max_chains: usize,
 }
 
 impl Default for Tuning {
@@ -96,6 +113,8 @@ impl Default for Tuning {
             fast_path_max_verts: 50_000,
             small_ring_lines: SMALL_RING_LINES,
             sp_max_edges: 4096,
+            spiky_chain_frac: 0.8,
+            spiky_max_chains: 640,
         }
     }
 }
