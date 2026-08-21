@@ -90,7 +90,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
         with:
           toolchain: stable
-      - uses: actions/setup-python@8549b9f8f590ad24eab7482f36f6e1e24d34597b  # v7
+      - uses: actions/setup-python@751276eafca55f10f252026015f43c488f2322ba  # v7
         with:
           python-version: "3.13"
       - run: pip install maturin pytest
