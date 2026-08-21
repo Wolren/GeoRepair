@@ -56,6 +56,7 @@ use alloc::vec::Vec;
 use geo::Coord;
 
 use rustc_hash::FxHashMap;
+use smallvec::SmallVec;
 
 use crate::validation::impls::segments_collinear_overlap;
 use crate::validation::sweep::{radix_sort_keys_tls, sortable_u64};
@@ -70,8 +71,30 @@ const NO_SEG: u32 = u32::MAX;
 const SWEEP_ACTIVE_LIMIT: usize = 512;
 /// Families larger than this are removed from the 2-D sweep (their members
 /// span long x-ranges and would pin the active set open); cross-family
-/// pairs are tested directly instead.
+/// pairs are tested directly instead - pruned by line geometry, see
+/// `LineNoder::test_family_pair`.
 const FAMILY_IN_SWEEP_LIMIT: usize = 64;
+/// Family-pair pruning (test_family_pair): |sin| below this treats the two
+/// reference lines as parallel.
+const FAMILY_PARALLEL_SIN: f64 = 1e-12;
+/// Family-pair pruning: |sin| below this keeps the exhaustive pairwise
+/// scan - the crossing point P of near-parallel lines drifts by
+/// (32-ulp offset deviation)/sin along the lines, which swamps the span
+/// filter's precision budget.
+const FAMILY_SHALLOW_SIN: f64 = 1e-6;
+/// Family-pair pruning, parallel branch: reference lines farther apart
+/// than this (x scale) cannot produce a node. The validator flags
+/// collinear overlap only within 64 EPS x len (~1.4e-14 x scale) and
+/// vertex-on-edge within 1e-12 x len; family members deviate from their
+/// reference line by at most the 32-ulp offset merge (~7e-15 x scale),
+/// so past this bound every member pair classifies None/Shared.
+const FAMILY_PARALLEL_SKIP_DIST: f64 = 1e-9;
+/// Family-pair pruning, crossing branch: span-filter padding as a
+/// multiple of eps. Covers the worst legal drift of a true member-pair
+/// crossing from the reference crossing point ((32-ulp deviation)/sin at
+/// the FAMILY_SHALLOW_SIN floor ~ 7e-9 x scale) with margin; eps is
+/// 1e-12 x scale, so the pad is 1e-7 x scale.
+const FAMILY_SPAN_PAD_EPS: f64 = 1e5;
 
 /// Outcome of the lean per-pair test (mirrors the validator's predicate
 /// chain: fast-FP first, robust escalation, collinear, vertex-on-edge,
@@ -120,6 +143,9 @@ pub(crate) struct LineNoder<'a> {
     splits: Vec<Vec<Coord<f64>>>,
     /// Cluster canonical lookup for piece-endpoint snapping.
     canon_map: FxHashMap<(u64, u64), Coord<f64>>,
+    /// Members of each REMOVED family (size > FAMILY_IN_SWEEP_LIMIT),
+    /// populated in `sweep_pass` and consumed by `test_family_pair`.
+    family_members: FxHashMap<u32, Vec<u32>>,
 }
 
 /// Node a non-simple line into simple chains. Returns `None` when the
@@ -182,6 +208,7 @@ impl<'a> LineNoder<'a> {
             near_collinear: false,
             splits: vec![Vec::new(); n],
             canon_map: FxHashMap::default(),
+            family_members: FxHashMap::default(),
         }
     }
 
@@ -486,24 +513,20 @@ impl<'a> LineNoder<'a> {
         // of other large families. Same-family pairs are already noded by
         // the 1-D pass, so removed members are grouped by family and only
         // cross-family pairs are tested - an all-collinear input must not
-        // pay an O(F^2) same-family scan.
-        let mut removed: Vec<u32> = Vec::new();
+        // pay an O(F^2) same-family scan. Cross-family products go through
+        // test_family_pair's line-geometry pruning.
+        let mut by_family: FxHashMap<u32, Vec<u32>> = FxHashMap::default();
         for i in 0..self.n {
             let f = self.family[i];
             if f != NO_FAMILY && self.family_size[f as usize] > FAMILY_IN_SWEEP_LIMIT {
-                removed.push(i as u32);
+                by_family.entry(f).or_default().push(i as u32);
             }
         }
-        if !removed.is_empty() {
-            let mut by_family: FxHashMap<u32, Vec<u32>> = FxHashMap::default();
-            for &i in &removed {
-                by_family
-                    .entry(self.family[i as usize])
-                    .or_default()
-                    .push(i);
-            }
+        if !by_family.is_empty() {
+            self.family_members = by_family;
             // Large-family members vs sweep members.
-            for members in by_family.values() {
+            let removed_lists: Vec<Vec<u32>> = self.family_members.values().cloned().collect();
+            for members in &removed_lists {
                 for &i in members {
                     let i = i as usize;
                     for &s in &sweep_ids {
@@ -514,25 +537,133 @@ impl<'a> LineNoder<'a> {
                     }
                 }
             }
-            // Cross-family removed-vs-removed pairs.
-            let fams: Vec<u32> = by_family.keys().copied().collect();
+            // Cross-family removed-vs-removed pairs. Line-geometry pruning
+            // (test_family_pair): parallel families beyond the flag
+            // distance and non-parallel families whose members cannot
+            // reach the reference crossing point collapse to zero or a
+            // few hundred pair tests instead of |F1| x |F2|.
+            let fams: Vec<u32> = self.family_members.keys().copied().collect();
             for (k, &f1) in fams.iter().enumerate() {
-                let m1 = &by_family[&f1];
                 for &f2 in &fams[k + 1..] {
-                    let m2 = &by_family[&f2];
-                    for &i in m1 {
-                        let i = i as usize;
-                        for &j in m2 {
-                            let j = j as usize;
-                            if self.bbox_gate(i, j) {
-                                self.test_pair(i, j);
-                            }
-                        }
-                    }
+                    self.test_family_pair(f1, f2);
                 }
             }
         }
         Some(())
+    }
+
+    /// Cross-family pair test with line-geometry pruning. Two exact-
+    /// collinear families interact only through line geometry:
+    ///
+    /// - Parallel reference lines (|sin| below FAMILY_PARALLEL_SIN):
+    ///   every member of F1 is collinear-or-nearly so with every member
+    ///   of F2; when the reference lines are farther apart than
+    ///   FAMILY_PARALLEL_SKIP_DIST x scale no pair can classify
+    ///   Collinear/VertexOnEdge (the validator's own flag distances are
+    ///   64 EPS x len and 1e-12 x len, both far inside the bound), and a
+    ///   proper crossing between distinct parallel lines is impossible.
+    ///   The whole F1 x F2 product collapses to zero pair tests.
+    /// - Intersecting reference lines (|sin| >= FAMILY_SHALLOW_SIN): the
+    ///   two lines meet in exactly one point P. A member-pair node must
+    ///   lie within its members' spans, and every member's span sits on
+    ///   its reference line, so any real node lies at P up to FP drift
+    ///   ((32-ulp offset merge deviation)/sin). Members whose span does
+    ///   NOT contain P (+ FAMILY_SPAN_PAD_EPS x eps) cannot reach P, so
+    ///   only span-containing members are tested pairwise. On the
+    ///   figure-8 class this cuts ~250k pair tests to a few hundred.
+    ///
+    /// Shallow angles (FAMILY_SHALLOW_SIN <= |sin| below ~1e-3) keep the
+    /// exhaustive scan: the P drift budget grows as 1/sin and would need
+    /// a pad comparable to the spans themselves.
+    fn test_family_pair(&mut self, f1: u32, f2: u32) {
+        // Reference segments: first member of each family (insertion
+        // order - deterministic for a given input). Clone the two member
+        // lists up front: test_pair mutates self.nodes/splits, so live
+        // borrows of self.family_members cannot span the pair loop.
+        let m1: Vec<u32> = self.family_members[&f1].clone();
+        let m2: Vec<u32> = self.family_members[&f2].clone();
+        let r1 = m1[0] as usize;
+        let r2 = m2[0] as usize;
+        let d1x = self.b[r1].x - self.a[r1].x;
+        let d1y = self.b[r1].y - self.a[r1].y;
+        let d2x = self.b[r2].x - self.a[r2].x;
+        let d2y = self.b[r2].y - self.a[r2].y;
+        let l1 = (d1x * d1x + d1y * d1y).sqrt();
+        let l2 = (d2x * d2x + d2y * d2y).sqrt();
+        if l1 == 0.0 || l2 == 0.0 {
+            for &i in &m1 {
+                for &j in &m2 {
+                    if self.bbox_gate(i as usize, j as usize) {
+                        self.test_pair(i as usize, j as usize);
+                    }
+                }
+            }
+            return;
+        }
+        let cross = d1x * d2y - d1y * d2x;
+        let sin_abs = cross.abs() / (l1 * l2);
+        if sin_abs < FAMILY_SHALLOW_SIN {
+            // Parallel-to-shallow: only the parallel branch can prune.
+            if sin_abs < FAMILY_PARALLEL_SIN {
+                let wx = self.a[r2].x - self.a[r1].x;
+                let wy = self.a[r2].y - self.a[r1].y;
+                let dist = (wx * d1y - wy * d1x).abs() / l1;
+                if dist > FAMILY_PARALLEL_SKIP_DIST * self.scale {
+                    return;
+                }
+            }
+            for &i in &m1 {
+                for &j in &m2 {
+                    if self.bbox_gate(i as usize, j as usize) {
+                        self.test_pair(i as usize, j as usize);
+                    }
+                }
+            }
+            return;
+        }
+        // Crossing families: locate P = intersection of the reference
+        // lines (FP point; the span pad absorbs the error).
+        let t = ((self.a[r2].x - self.a[r1].x) * d2y - (self.a[r2].y - self.a[r1].y) * d2x) / cross;
+        let px = self.a[r1].x + t * d1x;
+        let py = self.a[r1].y + t * d1y;
+        let pad = FAMILY_SPAN_PAD_EPS * self.eps;
+        // Projection parameter of P along each reference direction.
+        let tp1 = ((px - self.a[r1].x) * d1x + (py - self.a[r1].y) * d1y) / (l1 * l1);
+        let tp2 = ((px - self.a[r2].x) * d2x + (py - self.a[r2].y) * d2y) / (l2 * l2);
+        let mut cand1: SmallVec<[u32; 16]> = SmallVec::new();
+        let mut cand2: SmallVec<[u32; 16]> = SmallVec::new();
+        for &i in &m1 {
+            let i = i as usize;
+            let s0 = ((self.a[i].x - self.a[r1].x) * d1x + (self.a[i].y - self.a[r1].y) * d1y)
+                / (l1 * l1);
+            let s1 = ((self.b[i].x - self.a[r1].x) * d1x + (self.b[i].y - self.a[r1].y) * d1y)
+                / (l1 * l1);
+            let (lo, hi) = if s0 < s1 { (s0, s1) } else { (s1, s0) };
+            // Span contains P (+ pad projected onto the parameter axis).
+            let tpad = pad / l1;
+            if lo - tpad <= tp1 && tp1 <= hi + tpad {
+                cand1.push(i as u32);
+            }
+        }
+        for &j in &m2 {
+            let j = j as usize;
+            let s0 = ((self.a[j].x - self.a[r2].x) * d2x + (self.a[j].y - self.a[r2].y) * d2y)
+                / (l2 * l2);
+            let s1 = ((self.b[j].x - self.a[r2].x) * d2x + (self.b[j].y - self.a[r2].y) * d2y)
+                / (l2 * l2);
+            let (lo, hi) = if s0 < s1 { (s0, s1) } else { (s1, s0) };
+            let tpad = pad / l2;
+            if lo - tpad <= tp2 && tp2 <= hi + tpad {
+                cand2.push(j as u32);
+            }
+        }
+        for &i in &cand1 {
+            for &j in &cand2 {
+                if self.bbox_gate(i as usize, j as usize) {
+                    self.test_pair(i as usize, j as usize);
+                }
+            }
+        }
     }
 
     /// eps-padded bbox gate, identical to `edges_intersect_general`'s.
