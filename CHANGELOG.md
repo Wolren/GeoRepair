@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+
+- Line noder crossing-only fast path: repairs where every interaction is a
+  proper interior crossing (figure-8 class) skip the family pass, the 2-D
+  sweep, eps clustering and the piece/dedup/reconnect maps. Chains are
+  built by a direct walk that reproduces `reconnect` bit-for-bit (parity
+  tests in `src/noding/line_tests.rs`). Interleaved A/B: `self-int ls`
+  500v 37.7 -> 16.9 us/call (2.2x), 1000v 110.5 -> 41.1 us/call (2.7x),
+  `spiral ls` 500v 1.5x, 1000v 1.3x.
+
 ## [0.14.5] - 2026-09-18
 
 ### Fixed

@@ -11,6 +11,7 @@ use alloc::vec::Vec;
 use geo::{Coord, Geometry, LineString, MultiLineString};
 
 use crate::make_valid::MakeValid;
+use crate::noding::line::LineNoder;
 use crate::noding::line::node_line;
 use crate::validation::GeoValidation;
 use crate::validation::impls::check_linestring_self_intersection;
@@ -277,4 +278,166 @@ fn make_valid_line_contract() {
     let g = Geometry::LineString(LineString::new(cs));
     let out = g.make_valid();
     assert!(out.is_valid(), "make_valid output must be valid");
+}
+
+// ---------------------------------------------------------------------------
+// Crossing-only fast path: parity with the forced general path
+// ---------------------------------------------------------------------------
+
+/// Subdivide a closed coordinate loop to exactly n vertices by arc length
+/// (the bench's figure-8 construction).
+fn subdivide(pairs: &[(f64, f64)], n: usize) -> Vec<Coord<f64>> {
+    let edges = pairs.len() - 1;
+    let lens: Vec<f64> = (0..edges)
+        .map(|e| {
+            let (ax, ay) = pairs[e];
+            let (bx, by) = pairs[e + 1];
+            ((bx - ax).powi(2) + (by - ay).powi(2)).sqrt()
+        })
+        .collect();
+    let total: f64 = lens.iter().sum();
+    let mut out = Vec::with_capacity(n);
+    let mut e = 0usize;
+    let mut edge_off = 0.0f64;
+    for j in 0..n {
+        while e < edges && lens[e] <= 0.0 {
+            e += 1;
+        }
+        if e >= edges {
+            break;
+        }
+        let target = (j as f64 / n as f64) * total;
+        while e + 1 < edges && edge_off + lens[e] < target {
+            edge_off += lens[e];
+            e += 1;
+        }
+        let (ax, ay) = pairs[e];
+        let (bx, by) = pairs[e + 1];
+        let t = if lens[e] > 0.0 {
+            ((target - edge_off) / lens[e]).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        out.push(c(ax + (bx - ax) * t, ay + (by - ay) * t));
+    }
+    out
+}
+
+fn figure8(n: usize) -> Vec<Coord<f64>> {
+    subdivide(
+        &[
+            (0.0, 0.0),
+            (10.0, 10.0),
+            (10.0, 0.0),
+            (0.0, 10.0),
+            (0.0, 0.0),
+        ],
+        n,
+    )
+}
+
+fn lissajous(n: usize) -> Vec<Coord<f64>> {
+    let mut cs = Vec::with_capacity(n + 1);
+    for i in 0..n {
+        let t = 2.0 * core::f64::consts::PI * i as f64 / n as f64;
+        cs.push(c(1000.0 * (5.0 * t).sin(), 1000.0 * (3.0 * t).sin()));
+    }
+    cs.push(cs[0]);
+    cs
+}
+
+/// The general path on a fresh noder, reached exactly as `run` reaches it
+/// when the fast path bails (revisit pre-scan, then `run_full`).
+fn general_chains(cs: &[Coord<f64>]) -> Option<Vec<Vec<Coord<f64>>>> {
+    let mut ln = LineNoder::new(cs);
+    let n = cs.len() - 1;
+    if n >= 32 && ln.revisit_dominated() {
+        return None;
+    }
+    ln.run_full()
+}
+
+#[test]
+fn crossing_only_figure8_parity() {
+    for n in [100usize, 500, 1000] {
+        let cs = figure8(n);
+        let fast = LineNoder::new(&cs).crossing_only();
+        assert!(fast.is_some(), "figure-8 {n}v must take the fast path");
+        assert_eq!(
+            fast,
+            general_chains(&cs),
+            "figure-8 {n}v fast/general outputs differ"
+        );
+        assert_chains_valid(fast.as_ref().expect("checked some"));
+    }
+}
+
+#[test]
+fn crossing_only_bowtie_parity() {
+    let cs = coords(&[
+        (0.0, 0.0),
+        (10.0, 10.0),
+        (10.0, 0.0),
+        (0.0, 10.0),
+        (0.0, 0.0),
+    ]);
+    let fast = LineNoder::new(&cs).crossing_only();
+    assert!(fast.is_some(), "bowtie must take the fast path");
+    assert_eq!(
+        fast,
+        general_chains(&cs),
+        "bowtie fast/general outputs differ"
+    );
+    assert_chains_valid(fast.as_ref().expect("checked some"));
+}
+
+#[test]
+fn crossing_only_bails_on_lissajous_eps_classes() {
+    let cs = lissajous(500);
+    assert!(
+        LineNoder::new(&cs).crossing_only().is_none(),
+        "lissajous has 1-ulp anchor pairs; the fast path must bail"
+    );
+    let general = general_chains(&cs);
+    assert!(general.is_some());
+    assert_chains_valid(general.as_ref().expect("checked some"));
+}
+
+#[test]
+fn crossing_only_bails_on_out_and_back() {
+    let cs = coords(&[(0.0, 0.0), (10.0, 0.0), (2.0, 0.0), (2.0, 10.0)]);
+    assert!(
+        LineNoder::new(&cs).crossing_only().is_none(),
+        "collinear backtrack must bail to the general path"
+    );
+}
+
+#[test]
+fn crossing_only_bails_on_vertex_on_edge() {
+    let cs = coords(&[
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 10.0),
+        (5.0, 0.0),
+        (5.0, 10.0),
+    ]);
+    assert!(
+        LineNoder::new(&cs).crossing_only().is_none(),
+        "vertex-on-edge must bail to the general path"
+    );
+}
+
+#[test]
+fn crossing_only_simple_line_parity() {
+    // A simple open polyline: the fast path returns the identity chain,
+    // matching the general path.
+    let mut cs = Vec::new();
+    for i in 0..200 {
+        let t = i as f64 * 0.3;
+        let r = 50.0 + t * 30.0;
+        cs.push(c(r * t.cos(), r * t.sin()));
+    }
+    let fast = LineNoder::new(&cs).crossing_only();
+    assert!(fast.is_some(), "simple line must take the fast path");
+    assert_eq!(fast, general_chains(&cs));
 }

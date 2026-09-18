@@ -95,6 +95,16 @@ const FAMILY_PARALLEL_SKIP_DIST: f64 = 1e-9;
 /// the FAMILY_SHALLOW_SIN floor ~ 7e-9 x scale) with margin; eps is
 /// 1e-12 x scale, so the pad is 1e-7 x scale.
 const FAMILY_SPAN_PAD_EPS: f64 = 1e5;
+/// Crossing-only fast path: per-pair classify budget (factor x n plus a
+/// floor). Beyond it the input is not the sparse-crossing class and the
+/// scan bails to the general path before paying its cost twice.
+const CROSSING_ONLY_PAIR_FACTOR: usize = 32;
+const CROSSING_ONLY_PAIR_FLOOR: usize = 1024;
+/// eps-class guard scan budget (iterations over x-sorted points, factor x
+/// points plus a floor). Exceeding it bails; the general path's cluster
+/// pass pays a real union-find there anyway.
+const EPS_CLASS_SCAN_FACTOR: usize = 64;
+const EPS_CLASS_SCAN_FLOOR: usize = 4096;
 
 /// Outcome of the lean per-pair test (mirrors the validator's predicate
 /// chain: fast-FP first, robust escalation, collinear, vertex-on-edge,
@@ -161,7 +171,7 @@ pub(crate) fn node_line(coords: &[Coord<f64>]) -> Option<Vec<Vec<Coord<f64>>>> {
 }
 
 impl<'a> LineNoder<'a> {
-    fn new(coords: &'a [Coord<f64>]) -> Self {
+    pub(super) fn new(coords: &'a [Coord<f64>]) -> Self {
         let n = coords.len() - 1;
         let mut min_x = f64::MAX;
         let mut max_x = f64::MIN;
@@ -223,31 +233,397 @@ impl<'a> LineNoder<'a> {
         // filter resolves the revisits in O(n); fall back to it. Small
         // inputs keep the full noder (the sweep is cheap there and the
         // crossing cases need it).
-        if self.n >= 32 {
-            // Radix the coords by x-bits and count equal (x, y) runs - the
-            // spoke wheel's shared vertex shows up as one long run, O(n)
-            // with a much smaller constant than a hashmap.
-            let mut keys: Vec<u64> = self.coords.iter().map(|c| sortable_u64(c.x)).collect();
-            let mut order: Vec<u32> = (0..keys.len() as u32).collect();
-            radix_sort_keys_tls(&mut keys, &mut order);
-            let mut max_freq = 1u32;
-            let mut run = 1u32;
-            for w in order.windows(2) {
-                let a = self.coords[w[0] as usize];
-                let b = self.coords[w[1] as usize];
-                if a.x.to_bits() == b.x.to_bits() && a.y.to_bits() == b.y.to_bits() {
-                    run += 1;
-                    if run > max_freq {
-                        max_freq = run;
-                    }
-                } else {
-                    run = 1;
+        if self.n >= 32 && self.revisit_dominated() {
+            return None;
+        }
+        if let Some(chains) = self.crossing_only() {
+            return Some(chains);
+        }
+        self.run_full()
+    }
+
+    /// Revisit-dominated detector: radix the coords by x-bits and find the
+    /// longest run of bit-equal (x, y) points (the spoke wheel's shared
+    /// vertex shows up as one long run, O(n) with a much smaller constant
+    /// than a hashmap).
+    pub(super) fn revisit_dominated(&self) -> bool {
+        let mut keys: Vec<u64> = self.coords.iter().map(|c| sortable_u64(c.x)).collect();
+        let mut order: Vec<u32> = (0..keys.len() as u32).collect();
+        radix_sort_keys_tls(&mut keys, &mut order);
+        let mut max_freq = 1u32;
+        let mut run = 1u32;
+        for w in order.windows(2) {
+            let a = self.coords[w[0] as usize];
+            let b = self.coords[w[1] as usize];
+            if a.x.to_bits() == b.x.to_bits() && a.y.to_bits() == b.y.to_bits() {
+                run += 1;
+                if run > max_freq {
+                    max_freq = run;
                 }
-            }
-            if max_freq * 2 + 2 >= self.n as u32 {
-                return None;
+            } else {
+                run = 1;
             }
         }
+        max_freq * 2 + 2 >= self.n as u32
+    }
+
+    /// Fast path for the crossing-only class. When every interaction is a
+    /// proper interior crossing (no collinear overlap, no vertex-on-edge,
+    /// no revisit domination) and no two DISTINCT input points sit within
+    /// eps of each other (the general path's clustering would merge them
+    /// and change piece endpoints), the general path's output reduces to:
+    /// segments split at their DD crossing points, exact-key dedup,
+    /// degree-2 reconnection - all of which it reuses. The screening is
+    /// one radix sort plus one active-set scan, no family pass, no second
+    /// sweep, no union-find. Returns `None` with the state reset when the
+    /// input needs the general path; `run` then calls `run_full` on the
+    /// untouched state.
+    pub(super) fn crossing_only(&mut self) -> Option<Vec<Vec<Coord<f64>>>> {
+        if self.n < 2 {
+            return None;
+        }
+        // Adjacent and closure collinear overlaps (out-and-back) are the
+        // nodes adjacent_pass pushes; that class keeps the general path.
+        self.adjacent_pass();
+        if !self.nodes.is_empty() {
+            self.crossing_bail();
+            return None;
+        }
+        if self.eps_classes_anchors() {
+            self.crossing_bail();
+            return None;
+        }
+        // Candidate pairs: segments whose x-intervals overlap, radix
+        // sorted like sweep_pass but without families. Same-line disjoint
+        // segments classify None (the collinear gate needs real t-overlap),
+        // so the family machinery is not needed for this class.
+        let closed = self.closed();
+        let mut revisits: Vec<Coord<f64>> = Vec::new();
+        let mut keys: Vec<u64> = (0..self.n).map(|i| sortable_u64(self.lo_x[i])).collect();
+        let mut order: Vec<u32> = (0..self.n as u32).collect();
+        radix_sort_keys_tls(&mut keys, &mut order);
+        let limit = CROSSING_ONLY_PAIR_FACTOR * self.n + CROSSING_ONLY_PAIR_FLOOR;
+        let mut calls = 0usize;
+        let mut active: Vec<u32> = Vec::new();
+        for &ord in &order {
+            let j = ord as usize;
+            active.retain(|&p| self.hi_x[p as usize] + self.eps >= self.lo_x[j]);
+            if active.len() > SWEEP_ACTIVE_LIMIT {
+                self.crossing_bail();
+                return None;
+            }
+            for &p in &active {
+                let i = p as usize;
+                if self.hi_y[i] < self.lo_y[j] - self.eps || self.lo_y[i] > self.hi_y[j] + self.eps
+                {
+                    continue;
+                }
+                // Adjacent pairs and the closed-line closure pair were
+                // certified by adjacent_pass (collinear overlaps bailed
+                // there), and they never record revisits, so the scan
+                // skips them without a classify.
+                if j == i + 1
+                    || i == j + 1
+                    || (closed && ((i == 0 && j == self.n - 1) || (j == 0 && i == self.n - 1)))
+                {
+                    continue;
+                }
+                calls += 1;
+                if calls > limit {
+                    self.crossing_bail();
+                    return None;
+                }
+                match classify::classify(self.a[i], self.b[i], self.a[j], self.b[j], self.eps) {
+                    Hit::None => {}
+                    Hit::Shared => {
+                        // A non-adjacent, non-closure shared endpoint is a
+                        // revisit vertex (degree > 2) and a chain boundary.
+                        let v = if self.a[i] == self.a[j] || self.a[i] == self.b[j] {
+                            self.a[i]
+                        } else {
+                            self.b[i]
+                        };
+                        revisits.push(v);
+                    }
+                    Hit::Cross(pt) => {
+                        self.nodes.push(NodeEnt { seg: i as u32, pt });
+                        self.nodes.push(NodeEnt { seg: j as u32, pt });
+                    }
+                    // These node at original endpoints through family and
+                    // cluster semantics the fast path does not reproduce.
+                    Hit::Collinear => {
+                        self.crossing_bail();
+                        return None;
+                    }
+                    Hit::VertexOnEdge(_) => {
+                        self.crossing_bail();
+                        return None;
+                    }
+                }
+            }
+            active.push(ord);
+        }
+        // eps-class guard. Bit-equal points are their own clusters (an
+        // exact duplicate, including the closed-line closure anchor pair,
+        // clusters to itself), so only DISTINCT points within eps
+        // (Chebyshev, the cluster metric) force the general path.
+        if self.eps_classes_present() {
+            self.crossing_bail();
+            return None;
+        }
+        // No clustering needed: every node point is alone in its eps cell,
+        // so segment splits are direct (the pure-collinear branch fills
+        // them the same way) and `crossing_bail` can reset exactly these.
+        for e in &self.nodes {
+            self.splits[e.seg as usize].push(e.pt);
+        }
+        // Direct chain construction. With no eps classes the output pieces
+        // are exactly the sub-segments split at their crossing points, and
+        // the only vertices with more than two incident piece-ends are
+        // crossing points and recorded revisit vertices. `reconnect` emits
+        // maximal degree-2 runs ordered by their first piece, and piece k
+        // runs from starts[k] to starts[k + 1] (the traversal is
+        // contiguous), so one array describes every piece and the chains
+        // are built without endpoint maps or a Vec per piece.
+        let mut breaks: Vec<(f64, f64)> = Vec::with_capacity(self.nodes.len() + revisits.len());
+        for e in &self.nodes {
+            breaks.push((e.pt.x, e.pt.y));
+        }
+        breaks.extend(revisits.iter().map(|c| (c.x, c.y)));
+        breaks.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+        breaks.dedup_by(|a, b| a.0.to_bits() == b.0.to_bits() && a.1.to_bits() == b.1.to_bits());
+        let mut starts: Vec<Coord<f64>> = Vec::with_capacity(self.n + self.nodes.len() + 1);
+        for seg in 0..self.n {
+            let a = self.a[seg];
+            let b = self.b[seg];
+            starts.push(a);
+            if self.splits[seg].is_empty() {
+                continue;
+            }
+            let dx = b.x - a.x;
+            let dy = b.y - a.y;
+            let len = (dx * dx + dy * dy).sqrt();
+            // Same span and eps-degenerate guards as `build_pieces`, so
+            // the piece set matches the general path exactly.
+            self.splits[seg].sort_by(|p, q| {
+                let tp = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len;
+                let tq = ((q.x - a.x) * dx + (q.y - a.y) * dy) / len;
+                tp.partial_cmp(&tq).unwrap_or(core::cmp::Ordering::Equal)
+            });
+            let mut prev_dist = 0.0f64;
+            for &p in &self.splits[seg] {
+                let d = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len;
+                if d < -self.eps || d > len + self.eps {
+                    continue;
+                }
+                if (d - prev_dist).abs() <= self.eps || (len - d).abs() <= self.eps {
+                    continue;
+                }
+                starts.push(p);
+                prev_dist = d;
+            }
+        }
+        starts.push(self.coords[self.n]);
+        let m = starts.len() - 1;
+        // Boundary k (between piece k - 1 and piece k) sits at starts[k];
+        // boundary m closes the loop on a closed line.
+        let is_break = |k: usize| {
+            breaks
+                .binary_search_by(|e| {
+                    e.0.total_cmp(&starts[k].x)
+                        .then(e.1.total_cmp(&starts[k].y))
+                })
+                .is_ok()
+        };
+        // Greedy walk, the exact semantics of `reconnect`: chains start
+        // at the lowest unused piece and extend forward then backward
+        // through degree-2 (non-break) boundaries, stopping at used
+        // pieces, break vertices and vertices already on the chain (loop
+        // guard). With no eps classes the only vertices that can repeat
+        // inside a chain are its own two boundary vertices, so the visited
+        // set reduces to those two keys.
+        let mut used = vec![false; m];
+        let mut chains: Vec<Vec<Coord<f64>>> = Vec::new();
+        for s in 0..m {
+            if used[s] {
+                continue;
+            }
+            used[s] = true;
+            let mut chain: Vec<Coord<f64>> = vec![starts[s], starts[s + 1]];
+            let mut cur = s;
+            let mut cur_b = s;
+            let front_key = (starts[s].x.to_bits(), starts[s].y.to_bits());
+            loop {
+                let next = if cur + 1 < m {
+                    cur + 1
+                } else if closed {
+                    0
+                } else {
+                    break;
+                };
+                let boundary = if cur + 1 < m { cur + 1 } else { m };
+                if used[next] || is_break(boundary) {
+                    break;
+                }
+                let far = if next == 0 {
+                    starts[1]
+                } else {
+                    starts[next + 1]
+                };
+                if (far.x.to_bits(), far.y.to_bits()) == front_key {
+                    break;
+                }
+                used[next] = true;
+                chain.push(far);
+                cur = next;
+            }
+            let mut pre: Vec<Coord<f64>> = Vec::new();
+            let back_key = (starts[cur + 1].x.to_bits(), starts[cur + 1].y.to_bits());
+            loop {
+                let prev = if cur_b > 0 {
+                    cur_b - 1
+                } else if closed {
+                    m - 1
+                } else {
+                    break;
+                };
+                let boundary = if cur_b > 0 { cur_b } else { m };
+                if used[prev] || is_break(boundary) {
+                    break;
+                }
+                let far = starts[prev];
+                if (far.x.to_bits(), far.y.to_bits()) == back_key {
+                    break;
+                }
+                used[prev] = true;
+                pre.push(far);
+                cur_b = prev;
+            }
+            pre.reverse();
+            pre.extend(chain);
+            if pre.len() >= 2 {
+                chains.push(pre);
+            }
+        }
+        // No runtime re-validation: every bbox-overlapping pair was
+        // classified (Cross pairs split at the point, everything else
+        // bailed or broke the chain), splits are strict-interior, and the
+        // walk cannot revisit a vertex (breaks plus the loop guard), so
+        // the chains are simple by construction. Debug builds still
+        // assert it; the tests and the fuzz corpus replay run in debug.
+        debug_assert!(
+            chains
+                .iter()
+                .all(|c| !crate::validation::impls::check_linestring_self_intersection(c)),
+            "crossing-only chains must be simple"
+        );
+        Some(chains)
+    }
+
+    /// Reset what the fast path touched so the general path sees the
+    /// noder exactly as `new()` built it: the splits it filled are
+    /// exactly the node segments' entries (empty before the fast path).
+    fn crossing_bail(&mut self) {
+        for e in &self.nodes {
+            self.splits[e.seg as usize].clear();
+        }
+        self.nodes.clear();
+    }
+
+    /// True when two DISTINCT points among the input anchors and the node
+    /// points lie within eps (Chebyshev) of each other.
+    fn eps_classes_present(&self) -> bool {
+        self.eps_classes_scan(&self.nodes)
+    }
+
+    /// Anchor-only eps classes, checked before the candidate scan: an
+    /// anchor-level near-coincidence already forces the general path, so
+    /// the scan (and its classify budget) is skipped entirely on that
+    /// class. Measured 2026-09-18: the lissajous' 1-ulp retrace pairs
+    /// bailed here and dropped its fast-attempt tax to one radix pass.
+    fn eps_classes_anchors(&self) -> bool {
+        self.eps_classes_scan(&[])
+    }
+
+    /// Shared scan: anchors plus `nodes` radix-sorted by x-bits, then
+    /// window-scanned with an iteration budget (a dense x-column routes
+    /// to the general path, whose union-find pays the same order anyway).
+    fn eps_classes_scan(&self, nodes: &[NodeEnt]) -> bool {
+        let na = self.coords.len();
+        let total = na + nodes.len();
+        let mut pts: Vec<(f64, f64)> = Vec::with_capacity(total);
+        for c in self.coords {
+            pts.push((c.x, c.y));
+        }
+        for e in nodes {
+            pts.push((e.pt.x, e.pt.y));
+        }
+        let mut keys: Vec<u64> = Vec::with_capacity(total);
+        let mut order: Vec<u32> = Vec::with_capacity(total);
+        for (i, p) in pts.iter().enumerate() {
+            keys.push(sortable_u64(p.0));
+            order.push(i as u32);
+        }
+        radix_sort_keys_tls(&mut keys, &mut order);
+        // Gather once so the window scan walks one contiguous array
+        // (the two-array index indirection measured 73 us on the 1000v
+        // figure-8, 2026-09-18).
+        let mut sorted: Vec<(f64, f64)> = order.iter().map(|&o| pts[o as usize]).collect();
+        let budget = EPS_CLASS_SCAN_FACTOR * total + EPS_CLASS_SCAN_FLOOR;
+        let mut iters = 0usize;
+        // Runs of bit-equal x are y-sorted before scanning. A vertical
+        // input run (the 1000v figure-8's 250-point legs) would otherwise
+        // make the plain x-window scan quadratic: measured 43,056
+        // iterations, 57 us, on 2026-09-18.
+        let mut i = 0usize;
+        while i < total {
+            let xi = sorted[i].0;
+            let mut run_end = i + 1;
+            while run_end < total && sorted[run_end].0.to_bits() == xi.to_bits() {
+                run_end += 1;
+            }
+            if run_end - i > 1 {
+                sorted[i..run_end].sort_unstable_by(|a, b| a.1.total_cmp(&b.1));
+            }
+            for j in i..run_end {
+                let (xi, yi) = sorted[j];
+                for &(xj, yj) in &sorted[j + 1..run_end] {
+                    if yj - yi > self.eps {
+                        break;
+                    }
+                    if xj.to_bits() == xi.to_bits() && yj.to_bits() == yi.to_bits() {
+                        continue;
+                    }
+                    iters += 1;
+                    if iters > budget {
+                        return true;
+                    }
+                    if (yj - yi).abs() <= self.eps {
+                        return true;
+                    }
+                }
+                for &(xj, yj) in &sorted[run_end..] {
+                    if xj - xi > self.eps {
+                        break;
+                    }
+                    iters += 1;
+                    if iters > budget {
+                        return true;
+                    }
+                    if (yj - yi).abs() <= self.eps {
+                        return true;
+                    }
+                }
+            }
+            i = run_end;
+        }
+        false
+    }
+
+    /// The general path: exact-collinear families, adjacency noding, the
+    /// 2-D sweep, eps clustering, piece construction and reconnection.
+    /// The revisit pre-scan runs in `run` before this is called.
+    pub(super) fn run_full(&mut self) -> Option<Vec<Vec<Coord<f64>>>> {
         self.family_pass();
         // Pure-collinear fast path: every segment lies on one exact line.
         // The 1-D family noding is then the complete noding - the 2-D
