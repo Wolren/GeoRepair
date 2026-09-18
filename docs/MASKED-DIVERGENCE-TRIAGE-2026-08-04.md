@@ -1,18 +1,20 @@
 # Masked Divergence Triage - 2026-08-04
 
-The GEOS XML suite reports **210 masked divergences** (209 live XML cases + 1
-ST_RFH corpus case): inputs GEOS deems VALID that our validator rejects, but
+The GEOS XML suite reports **213 masked divergences**: inputs GEOS deems VALID that our validator rejects, but
 where repair restores validity AND preserves even-odd area (the mask gate).
+Baseline: `VALIDATOR_DIVERGENCE_BASELINE = 213` in `tests/geos_xml_suite.rs`
+(classes: WrongOrientation 194, RepeatedPoint 8, MultiPointDuplicatePoints 8,
+RingTooFewPoints 2, PinchPoint 1).
 
 This pass adds per-case identification (`DIAG_MASKED=1` env flag prints
 `MASKED\t<file>\t<case>\t<error-class>` per case) and buckets every masked
 case by the first validator error class.
 
-## Class distribution (210 total)
+## Class distribution (213 total)
 
 | Class | Count | Meaning |
 |---|---|---|
-| WrongOrientation | 191 | Shells/holes with non-OGC winding (CW shells) |
+| WrongOrientation | 194 | Shells/holes with non-OGC winding (CW shells) |
 | RepeatedPoint | 8 | Consecutive duplicate vertices in a ring |
 | MultiPointDuplicatePoints | 8 | Duplicate members in a MultiPoint |
 | RingTooFewPoints | 2 | Rings with fewer than 4 points |
@@ -23,7 +25,7 @@ case by the first validator error class.
 Every masked case is the **documented stricter-validator divergence** - our
 validator is deliberately stricter than GEOS on classes GEOS's IsValidOp
 ignores (orientation is not part of OGC validity; GEOS also tolerates
-repeated/too-few points and MultiPoint duplicates). None of the 210 cases
+repeated/too-few points and MultiPoint duplicates). None of the 213 cases
 represents a case where GEOS finds a real defect that we miss.
 
 - **WrongOrientation (91%)** is load-bearing, not a bug: the repair dispatch
@@ -46,10 +48,13 @@ represents a case where GEOS finds a real defect that we miss.
 - Representative cases: `misc_hexwkb.xml` (HEXWKB MultiPoint duplicate),
   `general_TestValid2.xml` Tests 72-99 (orientation), `issue_issue-geos-275.xml`
   (ticket 275 orientation), `misc_Segfaults.xml` (orientation).
+- History: 2026-08-02 baseline was 211; +2 is the deliberate sync of
+  robust/overlay/TestOverlay-geos-{275,392,599}.xml (both new masked cases
+  are WrongOrientation class; see `tests/geos_xml_suite.rs:1131-1144`).
 
 ## Recommendation
 
 No action. The masked set is a stable, classed, drift-checked strictness
 baseline - not correctness debt. Revisit only if the validator's orientation
 policy changes (e.g. an opt-in GEOS-lenient validity mode), in which case the
-191 WrongOrientation cases are the first place to look.
+194 WrongOrientation cases are the first place to look.

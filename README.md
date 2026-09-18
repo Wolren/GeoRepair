@@ -235,8 +235,8 @@ cannot trace to a source file. Full GEOS setup: `docs/GEOS-SETUP.md`.
 5. **Mass-overlap repairs are the slowest synthetic class** (~0.46 ms/poly
    at dense grid 20x20) but stay ~230x faster than GEOS makeValid on the
    same shapes.
-6. **Python bindings: `tests/test_python.py` covers the WKT surface**
-   (18 tests); GeoJSON bindings were removed deliberately.
+6. **Python bindings: `tests/test_python.py` covers the WKB and WKT surface**
+   (41 tests); GeoJSON bindings were removed deliberately.
 7. **`simd-portable` is nightly-only** (3 E0554 on stable, expected);
    hand-written AVX2 beyond the bbox scan measured slower than
    auto-vectorized scalar (point_in_ring 8.4x, is_ring_ccw 2.8x), and

@@ -4,14 +4,19 @@ geo-repair ships two language bindings alongside the Rust crate. Both
 wrap the same engine and the same semantics: validate, repair, and
 validate-and-fix over WKB and WKT, single geometry and batch.
 
-- **Python** (`geo_repair` package, PyO3) — published on PyPI as
+- **Python** (`geo_repair` package, PyO3): published on PyPI as
   `geo-repair`, abi3 wheels covering Python 3.8+.
-- **C** (`geo_repair.h` FFI, WKB + WKT) — built as `cdylib` and
+- **C** (`geo_repair.h` FFI, WKB + WKT): built as `cdylib` and
   `staticlib`, artifacts shipped with every GitHub release.
 
-Both bindings are version-locked to the crate version
+Python and C are version-locked to the crate version
 (`geo_repair.version()` and `geo_repair_version()` return the crate
-version).
+version). The wheel vendored under `qgis/` is a pinned snapshot, not
+a release artifact: rebuild it from the release tag before shipping
+QGIS updates. Python exposes `method` plus `keep_collapsed` only; the
+C `..._with_config_full` entry points additionally accept `fill_rule`
+and an EPSG code. WASM ships fetch helpers only, with no
+`wasm_bindgen` repair exports.
 
 ---
 
@@ -68,10 +73,10 @@ suffixes `_wkb` / `_wkt`.
 
 Shared parameters:
 
-- `method`: `"auto"` (default), `"arrange"`, or `"structure"` — the
+- `method`: `"auto"` (default), `"arrange"`, or `"structure"`: the
   repair strategy (Structure mirrors GEOS ST_MakeValid; Arrange is the
   CDT-based fallback for complex topologies).
-- `keep_collapsed`: `bool` — when True, collapsed (zero-area) components
+- `keep_collapsed`: `bool`: when True, collapsed (zero-area) components
   are kept instead of dropped.
 
 Note the WKT/WKB asymmetry in `validate_*`: WKB returns
@@ -89,6 +94,9 @@ Install: copy the script (and the wheel, or `pip install geo-repair`)
 into `%APPDATA%/QGIS/QGIS3/profiles/default/processing/scripts/`
 (Windows) or `~/.local/share/QGIS/...` (Linux), restart QGIS, and the
 "Geo Repair" algorithm appears in the Processing Toolbox.
+
+Prefer `pip install geo-repair` (tracks the crate version); a wheel
+copied next to the script must be rebuilt from the same release tag.
 
 ---
 

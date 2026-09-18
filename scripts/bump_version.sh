@@ -36,9 +36,9 @@ echo "version bumped to $NEW (Cargo.toml + pyproject.toml + CHANGELOG + Cargo.lo
 echo
 echo "RELEASE CHECKLIST (docs/RELEASE.md):"
 echo "  1. cargo test --features \"arrange,structure,parallel,simd,validate\""
-echo "  2. cargo clippy --features \"arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,ffi\" -- -D warnings"
+echo "  2. cargo clippy --features \"arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,io-shp,ffi\" -- -D warnings"
 echo "  3. cargo deny check licenses advisories sources && cargo audit"
 echo "  4. cargo semver-checks check-release"
 echo "  5. cargo bench --features \"arrange,structure,parallel,simd,bench-geos-system,io-gpkg\" --bench real_world -- --fast  (full-pass band 3.5-3.9s)"
 echo "  6. maturin build --release && pytest tests/test_python.py"
-echo "  7. push -> CI green (16 jobs) -> cargo publish -> maturin publish"
+echo "  7. push -> CI green (20 jobs) -> cargo publish -> maturin publish"
