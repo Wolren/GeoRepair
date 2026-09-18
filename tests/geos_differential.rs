@@ -27,7 +27,6 @@
 
 use geo::{Coord, Geometry, LineString, Polygon};
 use geo_repair::MakeValid;
-use geo_repair::validation::GeoValidation;
 use geos::Geometry as GeosGeometry;
 use geos::{CoordSeq, CoordType, Geom};
 use proptest::prelude::*;
@@ -68,7 +67,7 @@ fn repaired_to_geos(geom: &Geometry<f64>) -> Option<GeosGeometry> {
     match geom {
         Geometry::Polygon(p) => poly_to_geos(p),
         Geometry::MultiPolygon(mp) => {
-            let geoms: Vec<GeosGeometry> = mp.0.iter().filter_map(|p| poly_to_geos(p)).collect();
+            let geoms: Vec<GeosGeometry> = mp.0.iter().filter_map(poly_to_geos).collect();
             if geoms.is_empty() {
                 None
             } else {

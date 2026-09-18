@@ -68,7 +68,7 @@ fn geometry_to_geos(geom: &Geometry<f64>) -> Option<geos::Geometry> {
             }
         }
         Geometry::MultiPolygon(mp) => {
-            let geoms: Vec<_> = mp.0.iter().filter_map(|p| polygon_to_geos(p)).collect();
+            let geoms: Vec<_> = mp.0.iter().filter_map(polygon_to_geos).collect();
             if geoms.is_empty() {
                 None
             } else {
@@ -237,6 +237,7 @@ fn run_par(_polys: &[Polygon<f64>], _cfg: &MakeValidConfig) -> f64 {
     0.0
 }
 
+#[cfg(not(any(feature = "bench-geos", feature = "bench-geos-system")))]
 fn run_line_ser(items: &[Geometry<f64>], cfg: &MakeValidConfig) -> f64 {
     let t0 = Instant::now();
     for g in items {

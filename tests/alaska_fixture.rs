@@ -7,11 +7,15 @@
 
 #![cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
 
-use geo::{Geometry, Polygon};
+#[cfg(not(feature = "parallel"))]
+use geo::Geometry;
+use geo::Polygon;
+#[cfg(not(feature = "parallel"))]
+use geo_repair::MakeValid;
 use geo_repair::io::{geo_area, load_bin, signed_area};
 #[cfg(feature = "parallel")]
 use geo_repair::parallel::par_fix_polygon_batch;
-use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
+use geo_repair::{MakeValidConfig, PolyMethod};
 use geos::Geom;
 use wkt::ToWkt;
 

@@ -4,8 +4,11 @@
 //! passthrough for the already-valid majority) and preserves input order.
 //!
 //! Usage:
+//!
+//! ```text
 //!   geo-repair-cli <input> [output] [--method auto|structure|arrange]
 //!                  [--jobs N] [--validate-only] [--json]
+//! ```
 //!
 //! Input formats (auto-detected by extension): .bin, .wkb/.wks
 //! (concatenated), .wkt, .gpkg, and - with their features - .shp, .csv, .gml.
@@ -214,7 +217,7 @@ fn repair_batch(
     };
 
     match jobs {
-        #[cfg(feature = "parallel")]
+        #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
         Some(n) if n > 1 => {
             let pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(n)
@@ -289,6 +292,9 @@ fn save_output(path: &str, geoms: &[Geometry<f64>]) -> Result<(), String> {
             }
             std::fs::write(path, out).map_err(|e| format!("cannot write {path}: {e}"))
         }
+        // gpkg save needs the backend (absent on wasm32 / without io-gpkg);
+        // the fallback arm reports the format as unsupported there.
+        #[cfg(all(feature = "io-gpkg", not(target_arch = "wasm32")))]
         "gpkg" => geo_repair::io::gpkg::save_gpkg(path, geoms),
         other => Err(format!(
             "output format '.{other}' not supported by the CLI (use .wkb, .bin, .wkt, or .gpkg)"
