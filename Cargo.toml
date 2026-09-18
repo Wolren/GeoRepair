@@ -54,6 +54,7 @@ simd-portable = []
 # Built-in WKB parser is always available — no extra deps needed
 bench-geos = ["geos/static", "std"]
 bench-geos-system = ["dep:geos", "std"]
+bench-gdal-system = ["std"]
 
 python = ["dep:pyo3", "geo/serde", "std"]
 ffi = ["dep:wkb", "geo-traits", "std"]
@@ -176,6 +177,10 @@ harness = false
 
 [[bench]]
 name = "wkb_cmp"
+harness = false
+
+[[bench]]
+name = "io_cmp"
 harness = false
 
 [profile.release]
