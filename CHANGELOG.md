@@ -5,6 +5,37 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- `strip_degenerate` demotion contract: demoted lines are filtered with
+  the validator's own predicates (`check_linestring_self_intersection` +
+  `check_line_components_intersect`) instead of `prep::has_no_intersections`,
+  so no dispatch arm can ship a `NotSimple` LineString/MultiLineString.
+  Fixes both fuzz-nightly validity breaches; both inputs replay as
+  committed corpus seeds (`fuzz/corpus/make_valid/regression_*.bin`) and
+  as `tests/regression_strip_demotion.rs`.
+- `strip_degenerate` polygon demotion: the exact-collinearity test
+  anchors on the dominant axis's extreme vertex pair, not the first
+  edge. A subnormal-length leading edge underflowed every orientation
+  to zero, so a real 1000 x 2e-9 sliver (fuzz-nightly crash 2026-09-14)
+  read as collinear and was demoted into a line the validator flags
+  NotSimple.
+- `strip_degenerate` MultiPolygon arm: components below the historical
+  absolute area cut are kept when the validator accepts them; a valid
+  ~1e-15-area triangle is real geometry (fuzz-nightly crash 2026-09-18
+  demoted two of them into raw closed rings that read NotSimple as a
+  MULTILINESTRING). Demoted boundaries now emit as open, filtered
+  lines.
+
+### Changed
+
+- No synthetic-bench movement: the CI gate subset (40 rows) stays
+  within the recorded baseline; demotion-heavy rows (collapsed 1000v,
+  near-collinear 1000v, invalid bowtie ladder, sliver 1000v) within
+  +/-5%.
+
 ## [0.14.4] - 2026-08-09
 
 ### Changed
