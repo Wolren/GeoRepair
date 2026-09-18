@@ -284,6 +284,13 @@ pub(crate) fn fix_polygon_owned(
     // in i_overlay. Route them to the caller's arrange/reduce chain, which
     // nodes at full f64 precision. Measured: differential fuzz 2026-08-03.
     if crate::make_valid::snap_cannot_represent(&poly) {
+        // Bit-exact preconditioning for uniform-magnitude input (details in
+        // make_valid::precondition): the normal fix runs at a transformed
+        // magnitude and the outcome maps back; `None` keeps the legacy
+        // Unconsumed routing below untouched.
+        if let Some(outcome) = crate::make_valid::precondition::precondition_fix(&poly, config) {
+            return outcome;
+        }
         return FixOutcome::Unconsumed(poly);
     }
     if let Some(mp) = crate::structure::symdiff::single_pass_fix_tuned(&poly, &config.tuning) {
