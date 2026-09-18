@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.5] - 2026-09-18
+
 ### Fixed
 
 - `strip_degenerate` demotion contract: demoted lines are filtered with
@@ -35,6 +37,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   within the recorded baseline; demotion-heavy rows (collapsed 1000v,
   near-collinear 1000v, invalid bowtie ladder, sliver 1000v) within
   +/-5%.
+- Guard-bound input (uniform large or small magnitude) takes an exact
+  preconditioning transform instead of the CDT path: translate to the
+  bbox minimum plus a power-of-two scale, with the per-coordinate
+  roundtrip identity verified, then the structure fix runs at the
+  preconditioned magnitude and the outcome maps back. `Fast` outcomes
+  downgrade to `Repaired` so the caller re-validates at native
+  magnitude (the gate's sub-ULP checks are absolute); mixed-magnitude
+  input keeps the CDT route. Large bowtie at 1e12: 6.5-7.2 us to
+  3.9-4.5 us per call (interleaved A/B); README large-coord rows
+  unchanged within run noise.
+- Per-stage profile clocks moved behind `reset_profile`: the two
+  `Instant::now` calls per `fix_polygon_owned` call and their counter
+  updates are skipped unless profiling is enabled (one relaxed atomic
+  load remains on the default path).
 
 ## [0.14.4] - 2026-08-09
 
