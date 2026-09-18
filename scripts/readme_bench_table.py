@@ -140,8 +140,10 @@ def update(json_path, readme_path):
         lines.append(
             f"| {norm_label(r['label'])} | {fmt_val(ours)} | {fmt_val(geos)} | {fmt_ratio(geos, ours)} |"
         )
+    # The lookahead match stopped right before SECTION_END, so the retained
+    # tail already starts with the header: appending it here duplicated it
+    # on every --update (found 2026-09-18).
     lines.append("")
-    lines.append(SECTION_END)
     new_section = "\n".join(lines) + "\n"
     _write(readme_path, text[: m.start()] + new_section + text[m.end() :], crlf)
     print(f"OK: README table updated with {len(rows)} rows")
