@@ -4,7 +4,10 @@
 //! Content is verbatim - no behavior changes; items are re-exported by
 //! structure/mod.rs so `crate::structure::X` paths keep resolving.
 
-use ::core::sync::atomic::{AtomicU64, Ordering};
+use ::core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+/// Enables the per-stage clocks; they are off otherwise so the default hot
+/// path pays nothing. `reset_profile` sets it.
+pub static PROFILE_ON: AtomicBool = AtomicBool::new(false);
 pub static PROFILE_FP_NS: AtomicU64 = AtomicU64::new(0);
 pub static PROFILE_SR_NS: AtomicU64 = AtomicU64::new(0);
 pub static PROFILE_HR_NS: AtomicU64 = AtomicU64::new(0);
@@ -16,6 +19,7 @@ pub static PROFILE_NEST_NS: AtomicU64 = AtomicU64::new(0);
 pub static PROFILE_SUB_NS: AtomicU64 = AtomicU64::new(0);
 
 pub fn reset_profile() {
+    PROFILE_ON.store(true, Ordering::Relaxed);
     PROFILE_FP_NS.store(0, Ordering::Relaxed);
     PROFILE_SR_NS.store(0, Ordering::Relaxed);
     PROFILE_HR_NS.store(0, Ordering::Relaxed);
