@@ -18,7 +18,9 @@ use std::path::Path;
 fn ring_from_seed(path: &Path) -> Polygon<f64> {
     let data = std::fs::read(path).expect("read fuzz seed");
     let mut coords: Vec<Coord<f64>> = data
-        .chunks_exact(16)
+        .as_chunks::<16>()
+        .0
+        .iter()
         .map(|chunk| {
             let mut xb = [0u8; 8];
             let mut yb = [0u8; 8];
