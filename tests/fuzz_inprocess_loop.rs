@@ -41,7 +41,7 @@ fn fuzz_inprocess_mutation_loop() {
             return;
         }
         let mut coords: Vec<Coord<f64>> = Vec::with_capacity(data.len() / 16 + 1);
-        for chunk in data.chunks_exact(16) {
+        for chunk in data.as_chunks::<16>().0 {
             let mut xb = [0u8; 8];
             let mut yb = [0u8; 8];
             xb.copy_from_slice(&chunk[0..8]);
