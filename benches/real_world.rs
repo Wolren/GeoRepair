@@ -78,7 +78,7 @@ fn poly_to_geos(poly: &Polygon<f64>) -> Option<GeosGeometry> {
 fn geo_polys_to_geos_batch<'a>(
     polys: impl Iterator<Item = &'a Polygon<f64>>,
 ) -> Vec<Option<GeosGeometry>> {
-    polys.map(|p| poly_to_geos(p)).collect()
+    polys.map(poly_to_geos).collect()
 }
 #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
 fn geom_to_geos(geom: &Geometry<f64>) -> Option<GeosGeometry> {
@@ -122,14 +122,14 @@ fn geom_to_geos(geom: &Geometry<f64>) -> Option<GeosGeometry> {
             GeosGeometry::create_multiline_string(geoms).ok()
         }
         MultiPolygon(mp) => {
-            let geoms: Vec<GeosGeometry> = mp.0.iter().filter_map(|p| poly_to_geos(p)).collect();
+            let geoms: Vec<GeosGeometry> = mp.0.iter().filter_map(poly_to_geos).collect();
             if geoms.is_empty() {
                 return None;
             }
             GeosGeometry::create_multipolygon(geoms).ok()
         }
         GeometryCollection(gc) => {
-            let geoms: Vec<GeosGeometry> = gc.0.iter().filter_map(|g| geom_to_geos(g)).collect();
+            let geoms: Vec<GeosGeometry> = gc.0.iter().filter_map(geom_to_geos).collect();
             if geoms.is_empty() {
                 return None;
             }
@@ -439,7 +439,7 @@ fn main() {
             // Pre-build GEOS geometries in parallel
             let t0 = Instant::now();
             let geos_geoms: Vec<Option<geos::Geometry>> =
-                polys.par_iter().map(|p| poly_to_geos(p)).collect();
+                polys.par_iter().map(poly_to_geos).collect();
             let geos_build_time = t0.elapsed().as_secs_f64();
 
             // Time GEOS isValid (parallel)
@@ -811,12 +811,20 @@ fn main() {
                 ordered[perm[k]] = Some(g);
             }
             let ordered: Vec<Geometry<f64>> = ordered.into_iter().map(|g| g.unwrap()).collect();
-            geo_repair::io::gpkg::save_gpkg(&out_path, &ordered)
-                .unwrap_or_else(|e| panic!("BENCH_OUTPUT write failed: {e}"));
-            eprintln!(
-                "Wrote repaired output ({n} features) to {out_path}",
-                n = ordered.len()
-            );
+            #[cfg(all(feature = "io-gpkg", not(target_arch = "wasm32")))]
+            {
+                geo_repair::io::gpkg::save_gpkg(&out_path, &ordered)
+                    .unwrap_or_else(|e| panic!("BENCH_OUTPUT write failed: {e}"));
+                eprintln!(
+                    "Wrote repaired output ({n} features) to {out_path}",
+                    n = ordered.len()
+                );
+            }
+            #[cfg(not(all(feature = "io-gpkg", not(target_arch = "wasm32"))))]
+            {
+                let _ = (&out_path, &ordered);
+                panic!("BENCH_OUTPUT needs the io-gpkg feature (write .bin or .wkb instead)");
+            }
             ordered
         } else {
             results
