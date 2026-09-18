@@ -511,6 +511,7 @@ impl<T: GeoFloat> MakeValid for Rect<T> {
 #[cfg(any(feature = "arrange", feature = "structure"))]
 mod multipolygon;
 mod polygon;
+pub(crate) mod precondition;
 mod strip;
 
 #[cfg(any(feature = "arrange", feature = "structure"))]
