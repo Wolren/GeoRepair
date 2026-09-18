@@ -5,6 +5,129 @@ use super::strip::{enforce_ccw, enforce_cw, has_nan, strip_degenerate};
 use super::strip::{enforce_ccw_with_idx, enforce_cw_with_idx};
 use super::*;
 
+// ---------------------------------------------------------------------------
+// Shared polygon-entry steps (2026-09-04)
+// ---------------------------------------------------------------------------
+// The borrowed entry body below and the owned [`make_valid_owned`] twin
+// carried identical copies of the pre-scan, the NaN-filter rebuild, and
+// the collapse tail behind a "keep in sync" comment. The logic lives here
+// once now; both entries delegate, so the two paths cannot drift apart.
+
+/// Fused exterior pre-scan: bbox extremes plus the NaN flag in one pass.
+fn scan_exterior_bbox_nan(coords: &[Coord<f64>]) -> (f64, f64, f64, f64, bool) {
+    let (mut min_x, mut max_x, mut min_y, mut max_y) =
+        (coords[0].x, coords[0].x, coords[0].y, coords[0].y);
+    let mut has_nan = !coords[0].x.is_finite() || !coords[0].y.is_finite();
+    for w in coords.windows(2) {
+        min_x = min_x.min(w[1].x);
+        max_x = max_x.max(w[1].x);
+        min_y = min_y.min(w[1].y);
+        max_y = max_y.max(w[1].y);
+        if !has_nan && (!w[1].x.is_finite() || !w[1].y.is_finite()) {
+            has_nan = true;
+        }
+    }
+    (min_x, max_x, min_y, max_y, has_nan)
+}
+
+/// Per-axis LOCAL bbox degeneracy: an axis is degenerate when its extent
+/// is at or below the coordinate rounding at that axis's own magnitude
+/// (eps = EPSILON times max |coord| on the axis). A global spread rule
+/// lets one distant spike dominate the other axis (fuzz crash-eaab5472,
+/// measured 2026-08-04).
+fn exterior_is_locally_degenerate(min_x: f64, max_x: f64, min_y: f64, max_y: f64) -> bool {
+    let x_scale = max_x.abs().max(min_x.abs());
+    let y_scale = max_y.abs().max(min_y.abs());
+    (max_x - min_x).abs() <= f64::EPSILON * x_scale
+        || (max_y - min_y).abs() <= f64::EPSILON * y_scale
+}
+
+/// True when any interior ring holds a non-finite coordinate.
+fn interiors_have_nan(poly: &Polygon<f64>) -> bool {
+    poly.interiors()
+        .iter()
+        .any(|ring| ring.0.iter().any(|c| !c.x.is_finite() || !c.y.is_finite()))
+}
+
+/// Short-ring exit: fewer than 4 exterior vertices with collapsing
+/// disabled leaves nothing to repair.
+fn short_ring_exit(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geometry<f64>> {
+    if !config.keep_collapsed && poly.exterior().0.len() < 4 {
+        if config.keep_collapsed && !poly.exterior().0.is_empty() {
+            return Some(Geometry::Point(Point(poly.exterior().0[0])));
+        }
+        return Some(empty_geom());
+    }
+    None
+}
+
+/// NaN-filter rebuild: finite-only exterior coords plus finite-only
+/// interior rings.
+fn filter_finite_rings(poly: &Polygon<f64>) -> (Vec<Coord<f64>>, Vec<LineString<f64>>) {
+    let ext_clean: Vec<Coord<f64>> = poly
+        .exterior()
+        .0
+        .iter()
+        .copied()
+        .filter(|c| c.x.is_finite() && c.y.is_finite())
+        .collect();
+    let int_clean: Vec<LineString<f64>> = poly
+        .interiors()
+        .iter()
+        .map(|ring| {
+            LineString::new(
+                ring.0
+                    .iter()
+                    .copied()
+                    .filter(|c| c.x.is_finite() && c.y.is_finite())
+                    .collect(),
+            )
+        })
+        .collect();
+    (ext_clean, int_clean)
+}
+
+/// Dedup plus reclose of the NaN-cleaned exterior. Returns the closed
+/// ring with its first valid coord, or the early Geometry when fewer
+/// than 3 distinct points survive.
+fn dedup_and_close(
+    ext_clean: Vec<Coord<f64>>,
+) -> Result<(LineString<f64>, Coord<f64>), Geometry<f64>> {
+    if ext_clean.is_empty() {
+        return Err(empty_geom());
+    }
+    let first_valid = ext_clean[0];
+    let deduped = crate::noding::remove_consecutive_duplicates(&ext_clean);
+    if deduped.len() < 3 {
+        return Err(match deduped.len() {
+            0 => empty_geom(),
+            1 => Geometry::Point(Point(deduped[0])),
+            _ => Geometry::LineString(LineString::new(deduped)),
+        });
+    }
+    let ext_ring = if deduped.first() == deduped.last() {
+        LineString::new(deduped)
+    } else {
+        let mut c = deduped;
+        c.push(c[0]);
+        LineString::new(c)
+    };
+    Ok((ext_ring, first_valid))
+}
+
+/// keep_collapsed collapse preservation tail.
+fn maybe_collapse_keep(
+    result: Geometry<f64>,
+    config: &MakeValidConfig,
+    orig: &Polygon<f64>,
+) -> Geometry<f64> {
+    let empty_result = matches!(&result, Geometry::GeometryCollection(gc) if gc.0.is_empty());
+    if !config.keep_collapsed || !empty_result {
+        return result;
+    }
+    collapse_degenerate(orig).unwrap_or(result)
+}
+
 #[cfg(any(feature = "arrange", feature = "structure"))]
 impl MakeValid for Triangle<f64> {
     type Scalar = f64;
@@ -68,48 +191,18 @@ impl MakeValid for Polygon<f64> {
     type Scalar = f64;
 
     fn make_valid_with_config(&self, config: &MakeValidConfig) -> Geometry<f64> {
-        // Fuse the NaN scan into the collapse-check loop to avoid a separate pass.
-        // The collapse check already iterates all coords - piggyback the is_finite
-        // check there.  make_valid_clean handles the merged logic.
+        // The exterior pre-scan fuses bbox extremes with the NaN check in
+        // one pass (shared helper below); the gate re-walks the ring with
+        // its own fused plausibility scan.
         if !config.keep_collapsed && self.exterior().0.len() >= 4 {
             let coords = &self.exterior().0;
-            let (mut min_x, mut max_x, mut min_y, mut max_y) =
-                (coords[0].x, coords[0].x, coords[0].y, coords[0].y);
-            let mut has_nan = !coords[0].x.is_finite() || !coords[0].y.is_finite();
-            for w in coords.windows(2) {
-                min_x = min_x.min(w[1].x);
-                max_x = max_x.max(w[1].x);
-                min_y = min_y.min(w[1].y);
-                max_y = max_y.max(w[1].y);
-                if !has_nan && (!w[1].x.is_finite() || !w[1].y.is_finite()) {
-                    has_nan = true;
-                }
-            }
-            // Bbox degeneracy is per-axis LOCAL: an axis is degenerate when
-            // its extent is at or below the coordinate rounding at that
-            // axis's own magnitude (eps = EPSILON * max |coord| on the
-            // axis). The old rule compared both extents against the max
-            // spread, so one distant spike dominated the other axis:
-            // measured 2026-08-04, a VALID ring with a 4.9e208 y-spike and
-            // a 1-unit x-extent (8 ULPs at 1e15) was emptied here in every
-            // repair mode (fuzz crash-eaab5472).
-            let x_scale = max_x.abs().max(min_x.abs());
-            let y_scale = max_y.abs().max(min_y.abs());
-            if (max_x - min_x).abs() <= f64::EPSILON * x_scale
-                || (max_y - min_y).abs() <= f64::EPSILON * y_scale
-            {
+            let (min_x, max_x, min_y, max_y, mut has_nan) = scan_exterior_bbox_nan(coords);
+            if exterior_is_locally_degenerate(min_x, max_x, min_y, max_y) {
                 return empty_geom();
             }
-            if !has_nan {
-                // Also check interior rings - exterior might be clean but holes can have NaNs
-                if !self.interiors().is_empty() {
-                    for ring in self.interiors().iter() {
-                        if ring.0.iter().any(|c| !c.x.is_finite() || !c.y.is_finite()) {
-                            has_nan = true;
-                            break;
-                        }
-                    }
-                }
+            // Also check interior rings - exterior might be clean but holes can have NaNs
+            if !has_nan && interiors_have_nan(self) {
+                has_nan = true;
             }
             if !has_nan {
                 // Panic containment: the boolean overlay path (i_overlay via
@@ -135,89 +228,28 @@ impl MakeValid for Polygon<f64> {
                 } else {
                     strip_degenerate(repaired)
                 };
-                if config.keep_collapsed
-                    && matches!(&result, Geometry::GeometryCollection(gc) if gc.0.is_empty())
-                {
-                    // Collapsed geometry with keep_collapsed: preserve it as a
-                    // lower dimension (GEOS keepCollapsed semantics) instead
-                    // of dropping it. Measured: fully-collinear ring (0 0, 5 0,
-                    // 10 0, 0 0) — the closing-edge check flags it as a
-                    // self-intersection and every repair path collapses to
-                    // empty (test_shell_collapse_keep_collapsed).
-                    if let Some(c) = collapse_degenerate(self) {
-                        return c;
-                    }
-                }
-                return result;
+                return maybe_collapse_keep(result, config, self);
             }
             // has_nan: fall through to NaN path
         }
         // For valid NaN-free polygons, use make_valid_clean fast-path
-        if !config.keep_collapsed && self.exterior().0.len() < 4 {
-            // Degenerate ring (< 4 vertices). If keep_collapsed, save as Point.
-            if config.keep_collapsed && !self.exterior().0.is_empty() {
-                return Geometry::Point(Point(self.exterior().0[0]));
-            }
-            return empty_geom();
+        if let Some(g) = short_ring_exit(self, config) {
+            return g;
         }
         // keep_collapsed: true with >= 4 verts: fall through to make_valid_impl
 
         // NaN path: filter, dedup, rebuild.
-        let ext_clean: Vec<Coord<f64>> = self
-            .exterior()
-            .0
-            .iter()
-            .copied()
-            .filter(|c| c.x.is_finite() && c.y.is_finite())
-            .collect();
-        if ext_clean.is_empty() {
-            return empty_geom();
-        }
-        let first_valid = ext_clean[0];
-        let int_clean: Vec<LineString<f64>> = self
-            .interiors()
-            .iter()
-            .map(|ring| {
-                LineString::new(
-                    ring.0
-                        .iter()
-                        .copied()
-                        .filter(|c| c.x.is_finite() && c.y.is_finite())
-                        .collect(),
-                )
-            })
-            .collect();
-        let deduped = crate::noding::remove_consecutive_duplicates(&ext_clean);
-        if deduped.len() < 3 {
-            return match deduped.len() {
-                0 => empty_geom(),
-                1 => Geometry::Point(Point(deduped[0])),
-                _ => Geometry::LineString(LineString::new(deduped)),
-            };
-        }
-        let ext_ring = if deduped.first() == deduped.last() {
-            LineString::new(deduped)
-        } else {
-            let mut c = deduped;
-            c.push(c[0]);
-            LineString::new(c)
+        let (ext_clean, int_clean) = filter_finite_rings(self);
+        let (ext_ring, first_valid) = match dedup_and_close(ext_clean) {
+            Ok(v) => v,
+            Err(g) => return g,
         };
         let cleaned = Polygon::new(ext_ring, int_clean);
         let (repaired, _) = make_valid_impl(self, &cleaned, config, first_valid);
         // The cleaned polygon is not gate-certified (it went through the
         // NaN-filter path), so strip always runs here.
         let result = strip_degenerate(repaired);
-        if config.keep_collapsed
-            && matches!(&result, Geometry::GeometryCollection(gc) if gc.0.is_empty())
-        {
-            // Collapse preservation for keep_collapsed (the !keep_collapsed
-            // block above is skipped on this path). Mirrors the panic-
-            // containment branch; see test_shell_collapse_keep_collapsed.
-            if let Some(c) = collapse_degenerate(self) {
-                return c;
-            }
-        }
-        result
+        maybe_collapse_keep(result, config, self)
     }
 }
 
@@ -619,49 +651,18 @@ pub(super) fn make_valid_impl_owned(
 /// ~99.85% of real-world polygons that are already valid.
 #[cfg(any(feature = "arrange", feature = "structure"))]
 pub fn make_valid_owned(poly: Polygon<f64>, config: &MakeValidConfig) -> Geometry<f64> {
-    // Mirrors make_valid_with_config with `poly` owned instead of `&self`.
-    // Keep the two bodies in sync.
+    // Same steps as the borrowed entry above, on the owned polygon.
+    // Shared helpers carry the logic; nothing may live in both bodies.
     if !config.keep_collapsed && poly.exterior().0.len() >= 4 {
-        let coords = &poly.exterior().0;
-        let (mut min_x, mut max_x, mut min_y, mut max_y) =
-            (coords[0].x, coords[0].x, coords[0].y, coords[0].y);
-        let mut has_nan = !coords[0].x.is_finite() || !coords[0].y.is_finite();
-        for w in coords.windows(2) {
-            min_x = min_x.min(w[1].x);
-            max_x = max_x.max(w[1].x);
-            min_y = min_y.min(w[1].y);
-            max_y = max_y.max(w[1].y);
-            if !has_nan && (!w[1].x.is_finite() || !w[1].y.is_finite()) {
-                has_nan = true;
-            }
-        }
-        // Bbox degeneracy is per-axis LOCAL: an axis is degenerate when
-        // its extent is at or below the coordinate rounding at that
-        // axis's own magnitude (eps = EPSILON * max |coord| on the
-        // axis). The old rule compared both extents against the max
-        // spread, so one distant spike dominated the other axis:
-        // measured 2026-08-04, a VALID ring with a 4.9e208 y-spike and
-        // a 1-unit x-extent (8 ULPs at 1e15) was emptied here in every
-        // repair mode (fuzz crash-eaab5472). A ring whose extent is
-        // below its own coordinate rounding has no representable area
-        // and is genuinely degenerate.
-        let x_scale = max_x.abs().max(min_x.abs());
-        let y_scale = max_y.abs().max(min_y.abs());
-        if (max_x - min_x).abs() <= f64::EPSILON * x_scale
-            || (max_y - min_y).abs() <= f64::EPSILON * y_scale
-        {
+        let (min_x, max_x, min_y, max_y, mut has_nan) = scan_exterior_bbox_nan(&poly.exterior().0);
+        if exterior_is_locally_degenerate(min_x, max_x, min_y, max_y) {
             return empty_geom();
         }
-        if !has_nan && !poly.interiors().is_empty() {
-            for ring in poly.interiors().iter() {
-                if ring.0.iter().any(|c| !c.x.is_finite() || !c.y.is_finite()) {
-                    has_nan = true;
-                    break;
-                }
-            }
+        if !has_nan && interiors_have_nan(&poly) {
+            has_nan = true;
         }
         if !has_nan {
-            let first = coords[0];
+            let first = poly.exterior().0[0];
             // Panic containment (mirrors the borrowed path): i_overlay can
             // assert on degenerate inputs; degrade to empty, never crash.
             #[cfg(feature = "std")]
@@ -679,68 +680,22 @@ pub fn make_valid_owned(poly: Polygon<f64>, config: &MakeValidConfig) -> Geometr
         }
         // has_nan: fall through to the NaN path below (mirrors the borrowed version).
     }
-    if !config.keep_collapsed && poly.exterior().0.len() < 4 {
-        if config.keep_collapsed && !poly.exterior().0.is_empty() {
-            return Geometry::Point(Point(poly.exterior().0[0]));
-        }
-        return empty_geom();
+    if let Some(g) = short_ring_exit(&poly, config) {
+        return g;
     }
     // keep_collapsed: true with >= 4 verts, or NaN present: rebuild clean.
-    let ext_clean: Vec<Coord<f64>> = poly
-        .exterior()
-        .0
-        .iter()
-        .copied()
-        .filter(|c| c.x.is_finite() && c.y.is_finite())
-        .collect();
-    if ext_clean.is_empty() {
-        return empty_geom();
-    }
-    let first_valid = ext_clean[0];
-    let int_clean: Vec<LineString<f64>> = poly
-        .interiors()
-        .iter()
-        .map(|ring| {
-            LineString::new(
-                ring.0
-                    .iter()
-                    .copied()
-                    .filter(|c| c.x.is_finite() && c.y.is_finite())
-                    .collect(),
-            )
-        })
-        .collect();
-    let deduped = crate::noding::remove_consecutive_duplicates(&ext_clean);
-    if deduped.len() < 3 {
-        return match deduped.len() {
-            0 => empty_geom(),
-            1 => Geometry::Point(Point(deduped[0])),
-            _ => Geometry::LineString(LineString::new(deduped)),
-        };
-    }
-    let ext_ring = if deduped.first() == deduped.last() {
-        LineString::new(deduped)
-    } else {
-        let mut c = deduped;
-        c.push(c[0]);
-        LineString::new(c)
+    let (ext_clean, int_clean) = filter_finite_rings(&poly);
+    let (ext_ring, first_valid) = match dedup_and_close(ext_clean) {
+        Ok(v) => v,
+        Err(g) => return g,
     };
     let cleaned = Polygon::new(ext_ring, int_clean);
     // `cleaned` shares the exterior bbox with the original ring (NaN filtering
     // does not change min/max), so recompute the scale cheaply from the
-    // cleaned exterior — same formula as the scan above.
+    // cleaned exterior: same formula as the scan above.
     let (g, verified) = make_valid_impl_owned(cleaned, config, first_valid, None);
     let result = if verified { g } else { strip_degenerate(g) };
-    if config.keep_collapsed
-        && matches!(&result, Geometry::GeometryCollection(gc) if gc.0.is_empty())
-    {
-        // Collapse preservation for keep_collapsed — mirrors the borrowed
-        // path (see make_valid_with_config).
-        if let Some(c) = collapse_degenerate(&poly) {
-            return c;
-        }
-    }
-    result
+    maybe_collapse_keep(result, config, &poly)
 }
 
 /// Enforce OGC winding: CCW exterior, CW interior rings.
