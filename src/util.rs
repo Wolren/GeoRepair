@@ -434,15 +434,26 @@ pub(crate) fn point_in_ring_exclusive_even_odd(pt: Coord<f64>, ring: &[Coord<f64
 /// by the first wasm runtime test: the repair test panicked in
 /// fix_polygon_owned's PROFILE_FP_NS timing.)
 #[cfg(all(not(target_arch = "wasm32"), feature = "std"))]
-pub(crate) struct ProfileClock(std::time::Instant);
+pub(crate) struct ProfileClock(Option<std::time::Instant>);
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "std"))]
 impl ProfileClock {
+    /// Starts a clock only while profiling is on (set by
+    /// [`crate::structure::reset_profile`]); otherwise this is one relaxed
+    /// atomic load and a branch. The two `Instant::now` calls per polygon
+    /// were a measurable share of the small-polygon and real-world rows.
     pub(crate) fn start() -> Self {
-        Self(std::time::Instant::now())
+        if crate::structure::PROFILE_ON.load(::core::sync::atomic::Ordering::Relaxed) {
+            Self(Some(std::time::Instant::now()))
+        } else {
+            Self(None)
+        }
     }
     pub(crate) fn ns(&self) -> u64 {
-        self.0.elapsed().as_nanos() as u64
+        match self.0 {
+            Some(t) => t.elapsed().as_nanos() as u64,
+            None => 0,
+        }
     }
 }
 
