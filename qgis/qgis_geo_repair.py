@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""QGIS Processing script: Geo Repair — fix invalid geometries using Rust engine.
+"""QGIS Processing script: Geo Repair: fix invalid geometries using Rust engine.
 
 === INSTALL ===
 1. Copy this file AND the geo_repair-*.whl next to it into:
@@ -9,9 +9,9 @@
 3. Wheel auto-installs on first run. Manual: pip install <folder>/geo_repair-*.whl
 
 === BEST PRACTICES ===
-- Batched WKB streaming — iterates features one-by-one via QGIS, batches WKBs
+- Batched WKB streaming: iterates features one-by-one via QGIS, batches WKBs
   into chunks, and sends them to the Rust engine.  Memory is O(1).
-- UI stays responsive — processEvents() is called inside batch processing so
+- UI stays responsive: processEvents() is called inside batch processing so
   the progress bar updates and cancellation works mid-batch.
 - Cancellation is checked before and during every batch.
 """
@@ -97,6 +97,13 @@ class GeoRepairAlgo(QgsProcessingAlgorithm):
 
     def processAlgorithm(self, params, ctx, fb):
         import geo_repair
+        try:
+            _wheel_ver = geo_repair.version()
+        except AttributeError:
+            _wheel_ver = getattr(geo_repair, "__version__", "unknown")
+        if isinstance(_wheel_ver, bytes):
+            _wheel_ver = _wheel_ver.decode("utf-8", "replace")
+        fb.pushInfo("geo_repair engine version %s" % _wheel_ver)
 
         no_check = self._invalid_geometry_check_no_check()
         ctx.setInvalidGeometryCheck(no_check)
@@ -127,7 +134,6 @@ class GeoRepairAlgo(QgsProcessingAlgorithm):
         processed = 0
 
         batch_wkbs = []
-        batch_fids = []
         batch_feats = []
 
         def yield_to_ui():
@@ -144,7 +150,7 @@ class GeoRepairAlgo(QgsProcessingAlgorithm):
             yield_to_ui()
 
         def flush_batch():
-            nonlocal batch_wkbs, batch_fids, batch_feats, processed, total_diags
+            nonlocal batch_wkbs, batch_feats, processed, total_diags
             if not batch_wkbs:
                 return
 
@@ -209,7 +215,6 @@ class GeoRepairAlgo(QgsProcessingAlgorithm):
 
             processed += len(batch_wkbs)
             batch_wkbs = []
-            batch_fids = []
             batch_feats = []
 
         for f in src.getFeatures(freq):
@@ -217,7 +222,6 @@ class GeoRepairAlgo(QgsProcessingAlgorithm):
 
             wkb = self._extract_wkb(f)
             batch_wkbs.append(wkb)
-            batch_fids.append(f.id())
             batch_feats.append(f)
 
             if len(batch_wkbs) >= _BATCH_SIZE:
@@ -265,14 +269,14 @@ class GeoRepairAlgo(QgsProcessingAlgorithm):
     def _report_diagnostics(fb, mode, diags, tot):
         bad = sum(1 for v, _ in diags if not v) if diags else 0
         if mode == 2:
-            fb.pushInfo("Done \u2014 repaired %d features" % tot)
+            fb.pushInfo("Done: repaired %d features" % tot)
         else:
             warned = 0
             for i, (valid, errors) in enumerate(diags):
                 if not valid and warned < 20:
                     fb.pushWarning("  Feature %d: %s" % (i, ", ".join(errors[:3])))
                     warned += 1
-            fb.pushInfo("Done \u2014 %d invalid features out of %d" % (bad, tot))
+            fb.pushInfo("Done: %d invalid features out of %d" % (bad, tot))
 
 
 def createAlgorithms():

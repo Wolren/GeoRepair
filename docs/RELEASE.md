@@ -25,7 +25,7 @@ counts). No "misc" entries.
 ```bash
 cargo test --features "arrange,structure,parallel,simd,validate"
 cargo test --features "arrange,structure,parallel,simd,ffi" --test ffi
-cargo clippy --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,ffi" -- -D warnings
+cargo clippy --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,io-shp,ffi" -- -D warnings
 cargo deny check licenses advisories sources
 cargo audit
 cargo semver-checks check-release
@@ -57,11 +57,11 @@ small sample and is not the bar.
 
 ## 5. Push and CI
 
-Push, then watch all 16 jobs to green: check, msrv, no-std, test,
-test-no-defaults, python, test-geos-oracle, test-serde, bench, clippy,
-rustdoc, semver, audit, deny, fuzz (5 smokes + ASan; cargo-fuzz has no
-UBSan), fuzz
-artifact upload on failure. A fuzz crash means a corpus seed + a root
+Push, then watch all 20 jobs to green: check, msrv, no-std, test,
+test-no-defaults, python, test-geos-oracle, test-serde, bench, bench-gate,
+wasm, c-ffi, lint, rustdoc, docs-rs, geos-static, semver, audit, deny,
+fuzz (5 smokes + ASan; cargo-fuzz has no UBSan). Fuzz artifacts upload on
+failure. A fuzz crash means a corpus seed + a root
 cause before release.
 
 ## 6. Publish

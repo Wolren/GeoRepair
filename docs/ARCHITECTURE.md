@@ -104,7 +104,7 @@ holes into MultiPolygons (measured: `speed_bug_regressions`
 
 The validator (`src/validation/`) runs Shewchuk exact predicates
 (`orient2d` via the `robust` crate) and agrees with GEOS on the OGC
-definition (934/934 GEOS XML suite cases pass). On top of exact
+definition (937/937 GEOS XML suite cases pass). On top of exact
 predicates it applies one **deliberate strictness gate**: edges whose
 exact orientation is nonzero but within ~32 ulps of the pair's own
 length scale (`32 * EPSILON * L²`) are treated as coincident. Measured

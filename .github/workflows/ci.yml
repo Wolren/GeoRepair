@@ -20,7 +20,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
         with:
           toolchain: stable
-      - run: cargo check --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,ffi"
+      - run: cargo check --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,io-shp,ffi"
         env:
           RUSTFLAGS: -Dwarnings
       # Version drift gate: the maturin pyproject version must track
@@ -69,7 +69,7 @@ jobs:
         with:
           toolchain: stable
       - run: sudo apt-get update && sudo apt-get install -y libgeos-dev geos-bin
-      - run: cargo test --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,ffi"
+      - run: cargo test --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,io-shp,ffi"
 
   test-no-defaults:
     runs-on: ubuntu-latest
@@ -255,7 +255,7 @@ jobs:
       - name: Format check
         run: cargo fmt --all -- --check
       - name: Clippy (all targets)
-        run: cargo clippy --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,ffi" --all-targets -- -D warnings
+        run: cargo clippy --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,io-shp,ffi" --all-targets -- -D warnings
 
   rustdoc:
     runs-on: ubuntu-latest
@@ -264,7 +264,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
         with:
           toolchain: stable
-      - run: cargo doc --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,ffi,serde"
+      - run: cargo doc --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,io-shp,ffi,serde"
         env:
           RUSTDOCFLAGS: -D warnings
 
