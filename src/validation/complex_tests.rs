@@ -572,3 +572,44 @@ fn test_degenerate_exterior_collinear_x() {
             .any(|e| matches!(e, GeometryValidationError::DegenerateExterior))
     );
 }
+
+#[test]
+fn retrace_ring_flags_self_intersection_both_windings() {
+    // fuzz-nightly class C (run 35578735657, 2026-09-21): the closing
+    // edge of this ring doubles back over part of the first edge. The
+    // collinear-overlap test compared a parameter fraction (a ratio to the
+    // parameterized segment's own length) on the a-side only, so the
+    // verdict flipped with segment direction: the CW input reported only
+    // WrongOrientation while the identical re-wound geometry reported
+    // SelfIntersection, and a fast-path gate certificate did not survive
+    // the OGC re-winding. Both windings must agree.
+    let coords = vec![
+        Coord {
+            x: 0.0,
+            y: -5.500000000232603,
+        },
+        Coord {
+            x: 0.0,
+            y: 589338232487936.0,
+        },
+        Coord {
+            x: 999901360038144.0,
+            y: 1.5,
+        },
+        Coord { x: 0.0, y: 5.0 },
+        Coord {
+            x: 0.0,
+            y: -5.500000000232603,
+        },
+    ];
+    let mut rev = coords.clone();
+    rev.reverse();
+    for (label, r) in [("cw", &coords), ("ccw", &rev)] {
+        let errs = check_ring_validity(r, true);
+        assert!(
+            errs.iter()
+                .any(|e| matches!(e, GeometryValidationError::SelfIntersection)),
+            "retrace ring {label} must flag SelfIntersection, got {errs:?}"
+        );
+    }
+}

@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Fuzz-nightly contract breach (runs 35430371542 and 35703833356,
+  2026-09-19 and 2026-09-22): repair no longer collapses polygons our own
+  validator accepts. The sub-ULP gate rejects some valid thin rings as
+  un-certifiable (a33000-unit edge inside a 4.9e208-magnitude bbox, a
+  3.95e-322 edge beside subnormal vertices), the full repair snapped the
+  micro-edge away and the pipeline returned GEOMETRYCOLLECTION EMPTY for
+  input it had called valid. `make_valid_with_config` now re-checks the
+  input with the exit validator only on the collapsed-result path and
+  returns the input unchanged (identity, GEOS MakeValid semantics) when
+  the repair produced a non-polygonal result for a valid polygon. Both
+  seeds replay as `fuzz/corpus/validate/regression_valid_collapse_gc_empty_*.bin`
+  and `tests/regression_fuzz_contract.rs`.
+- Fuzz-nightly contract breach (run 35578735657, 2026-09-21): the exact
+  collinear-overlap test in `edges_intersect_general` compared parameter
+  fractions (ratios to the parameterized segment's own length) on the
+  a-side only, so the verdict flipped with segment direction: a ring whose
+  closing edge doubles back over part of the first edge certified as Fast
+  in CW order, then the OGC re-winding flipped every segment and the exit
+  validator rejected the shipped output with SelfIntersection on identical
+  geometry. The exact-collinear branch now evaluates the overlap span in
+  both parameterizations (any span past endpoint-only touching flags, at
+  any scale, matching GEOS exact-predicate parity); the near-collinear
+  tolerance branch is unchanged. The gate refuses the retrace ring
+  (`src/structure/gate_tests.rs`) and both windings agree
+  (`src/validation/complex_tests.rs`); seed replays as
+  `fuzz/corpus/make_valid/regression_auto_retrace_ring.bin`.
+- Fuzz-nightly contract breach (run 35499180884, 2026-09-20): an i_overlay
+  `is_fill_top` assertion fired inside `merge_shells`' `unary_union`. The
+  containment site (`catch_unwind` at `src/structure/merge.rs:179`) was
+  never the problem: local replay shows the panic caught and a valid
+  fallback returned. The crash was harness-level: libfuzzer-sys's panic
+  hook aborts the process before unwinding, so every contained panic died
+  as a deadly signal under cargo-fuzz. `fuzz/fuzz_support.rs` re-installs
+  an unwinding hook (all five targets call it first); target-raised and
+  escaped panics still abort at libfuzzer-sys's `test_input_wrap`, so
+  genuine failures remain crash artifacts while containment works as the
+  profile comments promise. No dependency change: the contained i_overlay
+  panic needs no upstream bump. Seed replays as
+  `fuzz/corpus/make_valid/regression_i_overlay_fill_top_escape.bin`.
+
 ### Performance
 
 - Line noder crossing-only fast path: repairs where every interaction is a

@@ -10,11 +10,15 @@
 #![no_main]
 use libfuzzer_sys::fuzz_target;
 
+#[path = "../fuzz_support.rs"]
+mod fuzz_support;
+
 use geo_repair::io::wkb::read_wkb;
 use geo_repair::validation::GeoValidation;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 
 fuzz_target!(|data: &[u8]| {
+    fuzz_support::install_unwinding_panic_hook();
     let parsed = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read_wkb(data))) {
         Ok(p) => p,
         Err(_) => panic!("read_wkb panicked on {} bytes", data.len()),

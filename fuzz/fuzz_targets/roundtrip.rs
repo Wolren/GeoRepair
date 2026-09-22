@@ -12,6 +12,9 @@
 #![no_main]
 use libfuzzer_sys::fuzz_target;
 
+#[path = "../fuzz_support.rs"]
+mod fuzz_support;
+
 use geo::{Coord, Geometry, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use geo_repair::io::wkb::{read_wkb, write_wkb};
 use geo_repair::io::wkt::{read_wkt, write_wkt};
@@ -79,6 +82,7 @@ fn geom_eq(a: &Geometry<f64>, b: &Geometry<f64>) -> bool {
 }
 
 fuzz_target!(|data: &[u8]| {
+    fuzz_support::install_unwinding_panic_hook();
     // WKB roundtrip.
     let parsed = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read_wkb(data))) {
         Ok(p) => p,
