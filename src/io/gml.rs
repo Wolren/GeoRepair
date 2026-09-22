@@ -58,7 +58,7 @@ pub fn save_gml(path: &str, geoms: &[Geometry<f64>]) -> Result<(), String> {
 
 /// Local (namespace-stripped) element name from a QName.
 fn local<'a>(n: quick_xml::name::QName<'a>) -> &'a [u8] {
-    let b: &'a [u8] = n.0;
+    let b: &'a [u8] = n.0.as_bytes();
     match b.iter().rposition(|&c| c == b':') {
         Some(i) => &b[i + 1..],
         None => b,
@@ -189,7 +189,7 @@ fn collect_numbers(reader: &mut Reader<&[u8]>, elem: &[u8]) -> Result<Vec<f64>, 
     loop {
         match reader.read_event().map_err(|e| e.to_string())? {
             Event::Text(t) => {
-                let text = t.decode().map_err(|e| e.to_string())?;
+                let text: &str = &t;
                 for tok in text.split_whitespace() {
                     let v = parse_gml_number(tok)
                         .map_err(|_| format!("bad coordinate `{tok}` in GML"))?;
@@ -254,10 +254,8 @@ fn dimension_of(e: &BytesStart) -> usize {
     e.attributes()
         .flatten()
         .find_map(|a| {
-            if a.key.0 == b"srsDimension" {
-                std::str::from_utf8(&a.value)
-                    .ok()
-                    .and_then(|s| s.trim().parse::<usize>().ok())
+            if a.key.0 == "srsDimension" {
+                a.value.trim().parse::<usize>().ok()
             } else {
                 None
             }
