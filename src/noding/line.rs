@@ -282,6 +282,12 @@ impl<'a> LineNoder<'a> {
         if self.n < 2 {
             return None;
         }
+        // Full-bbox-chord class (x-scale): the candidate scan would burn
+        // its whole budget before bailing; go straight to the general path.
+        if self.full_span_dominated() {
+            self.crossing_bail();
+            return None;
+        }
         // Adjacent and closure collinear overlaps (out-and-back) are the
         // nodes adjacent_pass pushes; that class keeps the general path.
         self.adjacent_pass();
@@ -518,6 +524,42 @@ impl<'a> LineNoder<'a> {
             "crossing-only chains must be simple"
         );
         Some(chains)
+    }
+
+    /// True when several segments span essentially the whole bbox on x.
+    /// Those chords never leave the x-sweep's active set, so the
+    /// crossing-only candidate scan degenerates toward O(n^2) classify
+    /// calls at the input's worst coordinate magnitudes and burns its
+    /// entire budget before bailing: measured on the x-scale bench
+    /// (coords alternating 1e12/1e-12, every segment a full-width chord)
+    /// the scan cost ~3.5ms on top of the general path and breached the
+    /// CI bench-gate by +62% (2026-09-22). x only, deliberately: a
+    /// y-degenerate input keeps its x-intervals narrow, the sweep stays
+    /// cheap, and no bail is needed; it also keeps full-height chords
+    /// (bowtie's diagonals) on the fast path. Short-chord crossing-only
+    /// classes (figure-8, spiral, lissajous, self-int) are far below the
+    /// threshold; the degenerate class lands on the general path, which
+    /// prices it exactly as it did before the fast path existed.
+    fn full_span_dominated(&self) -> bool {
+        const FULL_SPAN_FRACTION: f64 = 0.9;
+        const FULL_SPAN_MIN_SEGMENTS: usize = 4;
+        let mut min_x = f64::MAX;
+        let mut max_x = f64::MIN;
+        for i in 0..self.n {
+            min_x = min_x.min(self.lo_x[i]);
+            max_x = max_x.max(self.hi_x[i]);
+        }
+        let bx = (max_x - min_x).abs().max(f64::MIN_POSITIVE);
+        let mut count = 0usize;
+        for i in 0..self.n {
+            if (self.hi_x[i] - self.lo_x[i]) >= FULL_SPAN_FRACTION * bx {
+                count += 1;
+                if count >= FULL_SPAN_MIN_SEGMENTS {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// Reset what the fast path touched so the general path sees the
