@@ -59,6 +59,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   500v 37.7 -> 16.9 us/call (2.2x), 1000v 110.5 -> 41.1 us/call (2.7x),
   `spiral ls` 500v 1.5x, 1000v 1.3x.
 
+- Crossing-only screening guard: inputs whose segments are full-width
+  chords (4+ segments spanning >=90% of the bbox on x) route straight to
+  the general path. On x-scale-style geometry (coords alternating
+  1e12/1e-12) every pair overlaps, so screening exhausted its classify
+  budget (~33k DD-escalated pairs) before bailing and paid the general
+  path twice: CI `x-scale 1000v` ran 5641-5766 us against the committed
+  3487.1 us baseline (the +30% gate limit is 4533.3). With the guard the
+  row returns to the pre-fast-path band: local serial A/B 9366-9471 to
+  5684-6670 us (baseline era 5612-6633). Fast-path rows are unchanged
+  (self-int ls 305 to 310, spiral ls 1739 to 1698, bowtie keeps the fast
+  path per `crossing_only_bowtie_parity`). The screen tests x only: the
+  sweep is x-driven, and full-height bowtie diagonals must stay on the
+  fast path.
+
 ## [0.14.5] - 2026-09-18
 
 ### Fixed
