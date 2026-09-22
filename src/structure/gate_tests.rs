@@ -342,3 +342,39 @@ mod gate_completeness {
         );
     }
 }
+
+#[cfg(all(test, feature = "arrange"))]
+mod gate_retrace_ring {
+    //! fuzz-nightly class C (run 35578735657, 2026-09-21): the fast-path
+    //! gate certified a ring whose closing edge doubles back over part of
+    //! the first edge; the OGC re-winding after the gate flipped the
+    //! segments and the exit validator then rejected the shipped output
+    //! with SelfIntersection on geometry the gate had called clean. The
+    //! shared pair predicate now flags the retrace in both windings, so
+    //! the gate must refuse to certify it and route it to full repair.
+
+    use crate::MakeValidConfig;
+    use geo::{Coord, LineString, Polygon};
+
+    const RETRACE_RING: [[f64; 2]; 5] = [
+        [0.0, -5.500000000232603],
+        [0.0, 589338232487936.0],
+        [999901360038144.0, 1.5],
+        [0.0, 5.0],
+        [0.0, -5.500000000232603],
+    ];
+
+    #[test]
+    fn gate_rejects_retrace_ring() {
+        let mut v: Vec<Coord<f64>> = RETRACE_RING.iter().map(|&[x, y]| Coord { x, y }).collect();
+        if v.first() != v.last() {
+            v.push(v[0]);
+        }
+        let poly = Polygon::new(LineString::new(v), Vec::new());
+        let outcome = crate::structure::fix_polygon_owned(poly, &MakeValidConfig::default(), None);
+        assert!(
+            !matches!(outcome, crate::structure::FixOutcome::Fast(..)),
+            "the gate must not certify a retrace ring"
+        );
+    }
+}

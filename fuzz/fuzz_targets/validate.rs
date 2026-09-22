@@ -9,11 +9,15 @@
 #![no_main]
 use libfuzzer_sys::fuzz_target;
 
+#[path = "../fuzz_support.rs"]
+mod fuzz_support;
+
 use geo::{Coord, LineString, Polygon};
 use geo_repair::validation::GeoValidation;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 
 fuzz_target!(|data: &[u8]| {
+    fuzz_support::install_unwinding_panic_hook();
     if data.len() < 32 || data.len() > 16 * 64 || data.len() % 16 != 0 {
         return;
     }
