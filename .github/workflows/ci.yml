@@ -20,7 +20,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772  # stable
         with:
           toolchain: stable
-      - run: cargo check --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,io-shp,ffi"
+      - run: cargo check --locked --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,io-shp,ffi"
         env:
           RUSTFLAGS: -Dwarnings
       # Version drift gate: the maturin pyproject version must track
@@ -44,8 +44,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772  # 1.88
         with:
           toolchain: "1.88"
-      - run: cargo check --features "arrange,structure,parallel,simd,validate"
-      - run: cargo check --features "arrange,structure,parallel,simd,validate,geo-traits"
+      - run: cargo check --locked --features "arrange,structure,parallel,simd,validate"
+      - run: cargo check --locked --features "arrange,structure,parallel,simd,validate,geo-traits"
 
   # no_std gate: alloc-only builds (std feature off) must compile. The bare
   # zero-feature config and a validate-only validator config are both
@@ -57,9 +57,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772  # stable
         with:
           toolchain: stable
-      - run: cargo check --no-default-features
-      - run: cargo check --no-default-features --features validate
-      - run: cargo check --no-default-features --features validate,structure,arrange
+      - run: cargo check --locked --no-default-features
+      - run: cargo check --locked --no-default-features --features validate
+      - run: cargo check --locked --no-default-features --features validate,structure,arrange
 
   test:
     runs-on: ubuntu-24.04
@@ -69,7 +69,7 @@ jobs:
         with:
           toolchain: stable
       - run: sudo apt-get update && sudo apt-get install -y libgeos-dev geos-bin
-      - run: cargo test --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,io-shp,ffi"
+      - run: cargo test --locked --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,io-shp,ffi"
 
   test-no-defaults:
     runs-on: ubuntu-24.04
@@ -79,7 +79,7 @@ jobs:
         with:
           toolchain: stable
       - run: sudo apt-get update && sudo apt-get install -y libgeos-dev geos-bin
-      - run: cargo test --no-default-features --features "arrange,structure,parallel,simd,validate"
+      - run: cargo test --locked --no-default-features --features "arrange,structure,parallel,simd,validate"
 
   # Python bindings gate: build the maturin wheel and run the WKT-surface
   # test suite (tests/test_python.py) against the real wheel.
@@ -113,9 +113,9 @@ jobs:
         with:
           toolchain: stable
       - run: sudo apt-get update && sudo apt-get install -y libgeos-dev geos-bin
-      - run: cargo test --features "arrange,structure,parallel,simd,validate,bench-geos-system" --test geos_compare --test alaska_fixture
+      - run: cargo test --locked --features "arrange,structure,parallel,simd,validate,bench-geos-system" --test geos_compare --test alaska_fixture
       - name: Differential fuzz vs GEOS (one-directional invariants)
-        run: cargo test --features "arrange,structure,parallel,simd,validate,bench-geos-system" --test geos_differential
+        run: cargo test --locked --features "arrange,structure,parallel,simd,validate,bench-geos-system" --test geos_differential
         env:
           PROPTEST_CASES: 1000
 
@@ -126,7 +126,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772  # stable
         with:
           toolchain: stable
-      - run: cargo check --features "serde"
+      - run: cargo check --locked --features "serde"
 
   # Regression smoke for the dual-bar benchmarks: the synthetic sweep (all
   # shape families, serial vs parallel) and the real-world sample bench
@@ -144,17 +144,17 @@ jobs:
           toolchain: stable
       - run: sudo apt-get update && sudo apt-get install -y libgeos-dev
       - name: Synthetic bench (serial vs parallel sweep)
-        run: cargo bench --bench bench
+        run: cargo bench --locked --bench bench
         env:
           BENCH_JSON: target/bench_full.json
       - name: README synthetic table coverage gate
         run: python scripts/readme_bench_table.py --check target/bench_full.json
       - name: Real-world sample bench (alaska subset, Structure vs GEOS)
-        run: cargo bench --features "arrange,structure,parallel,simd,bench-geos-system,io-gpkg" --bench real_world -- --fast
+        run: cargo bench --locked --features "arrange,structure,parallel,simd,bench-geos-system,io-gpkg" --bench real_world -- --fast
         env:
           BENCH_FILE: benches/real_world/alaska.bin
       - name: WKB/WKT head-to-head bench (ours vs georust/wkb + wkt)
-        run: cargo bench --bench wkb_cmp
+        run: cargo bench --locked --bench wkb_cmp
         env:
           BENCH_FILE: benches/real_world/alaska.bin
 
@@ -172,7 +172,7 @@ jobs:
         with:
           toolchain: stable
       - name: Synthetic bench subset (gate)
-        run: cargo bench --features arrange,structure,parallel,simd --bench bench
+        run: cargo bench --locked --features arrange,structure,parallel,simd --bench bench
         env:
           BENCH_SUBSET: "valid polygon 1000v,valid polygon 5000v,valid polygon 10000v,invalid bowtie 4v,invalid bowtie 50v,invalid bowtie 100v,invalid bowtie 500v,invalid bowtie 1000v,spaghetti 500v,spaghetti 2000v,self-touch 1000v,collapsed 1000v,near-collinear 1000v,large coord 1e12 1000v,star poly 1000v,valid ls 100v,valid ls 500v,valid ls 1000v,collinear ls 1000v,zigzag ls 1000v,spiral ls 1000v,self-int ls 1000v,dense self ls 1000v,duped ls 1000v,mls 500x3v,self-int mls 500x4v,star-burst 1000sp,collinear ov 1000seg,x-scale 1000v,ringing 1000v,lissajous 2000v,spoke 1000sp,star-comb 1000sp,hole hier 100h,overlap mp 100sh,dense grid 10x10=100,dense grid 20x20=400,dense grid 30x30=900,sliver 1000v,arrange valid 1000v"
           BENCH_JSON: target/bench_gate.json
@@ -202,14 +202,14 @@ jobs:
         with:
           toolchain: stable
           targets: wasm32-unknown-unknown
-      - run: cargo check --target wasm32-unknown-unknown
-      - run: cargo check --target wasm32-unknown-unknown --no-default-features --features "std,arrange,structure,simd,validate,wasm"
+      - run: cargo check --locked --target wasm32-unknown-unknown
+      - run: cargo check --locked --target wasm32-unknown-unknown --no-default-features --features "std,arrange,structure,simd,validate,wasm"
       - name: Install wasm-bindgen-test-runner (version-locked to the lockfile)
         run: |
           wb=$(grep -A1 'name = "wasm-bindgen"' Cargo.lock | grep version | head -1 | sed 's/version = "\(.*\)"/\1/')
           cargo install wasm-bindgen-cli --version "$wb" --locked
       - name: Runtime wasm tests in Node
-        run: cargo test --target wasm32-unknown-unknown --features "arrange,structure,simd,validate,wasm" --test wasm
+        run: cargo test --locked --target wasm32-unknown-unknown --features "arrange,structure,simd,validate,wasm" --test wasm
         env:
           CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
 
@@ -228,7 +228,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772  # stable
         with:
           toolchain: stable
-      - run: cargo build --release --features ffi
+      - run: cargo build --locked --release --features ffi
       - name: Compile + run C harness (Linux)
         if: runner.os != 'Windows'
         run: |
@@ -255,7 +255,7 @@ jobs:
       - name: Format check
         run: cargo fmt --all -- --check
       - name: Clippy (all targets)
-        run: cargo clippy --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,io-shp,ffi" --all-targets -- -D warnings
+        run: cargo clippy --locked --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,io-shp,ffi" --all-targets -- -D warnings
 
   rustdoc:
     runs-on: ubuntu-24.04
@@ -264,7 +264,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772  # stable
         with:
           toolchain: stable
-      - run: cargo doc --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,io-shp,ffi,serde"
+      - run: cargo doc --locked --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,io-shp,ffi,serde"
         env:
           RUSTDOCFLAGS: -D warnings
 
@@ -301,7 +301,7 @@ jobs:
         with:
           toolchain: stable
       - run: sudo apt-get update && sudo apt-get install -y cmake
-      - run: cargo check --features "arrange,structure,parallel,simd,validate,bench-geos"
+      - run: cargo check --locked --features "arrange,structure,parallel,simd,validate,bench-geos"
 
   # Semver gate: a minor/patch bump must never silently break the public
   # API. `check-release` compares the working tree against the latest
