@@ -18,7 +18,15 @@ geo-repair = { path = "..", features = ["arrange", "structure", "parallel", "sim
 # repair panic into a reported fuzz failure. With abort the panic kills
 # the process as a "deadly signal" (measured 2026-08-04: spade CDT
 # 'vertex insertion failed: TooLarge' on the mixed-magnitude corpus
-# seeds escaped and aborted the smoke).
+# seeds escaped and aborted the smoke). The unwind profile alone is not
+# enough: libfuzzer-sys's initialize installs a panic hook that aborts
+# the process BEFORE unwinding, which would defeat every catch_unwind
+# (measured: fuzz-nightly run 35499180884 on 2026-09-20 crashed on an
+# i_overlay assertion that merge_shells contained correctly under plain
+# cargo test). fuzz/fuzz_support.rs re-installs a non-aborting hook;
+# every target calls it first. Escaped and target-raised panics still
+# abort at libfuzzer-sys's test_input_wrap, so genuine failures remain
+# crash artifacts.
 [profile.release]
 panic = "unwind"
 

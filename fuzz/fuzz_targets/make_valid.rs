@@ -15,6 +15,9 @@
 #![no_main]
 use libfuzzer_sys::fuzz_target;
 
+#[path = "../fuzz_support.rs"]
+mod fuzz_support;
+
 use geo::{Coord, LineString, Polygon};
 use geo_repair::validation::GeoValidation;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
@@ -35,6 +38,7 @@ fn coords_from_bytes(data: &[u8]) -> Vec<Coord<f64>> {
 }
 
 fuzz_target!(|data: &[u8]| {
+    fuzz_support::install_unwinding_panic_hook();
     // 2..=32 coordinates (a closed ring needs >= 3 distinct points; larger
     // inputs are returned early to keep per-input repair time bounded).
     if data.len() < 32 || data.len() > 16 * 32 || data.len() % 16 != 0 {

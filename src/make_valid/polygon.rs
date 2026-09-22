@@ -228,7 +228,7 @@ impl MakeValid for Polygon<f64> {
                 } else {
                     strip_degenerate(repaired)
                 };
-                return maybe_collapse_keep(result, config, self);
+                return preserve_valid_input(result, config, self);
             }
             // has_nan: fall through to NaN path
         }
@@ -251,6 +251,33 @@ impl MakeValid for Polygon<f64> {
         let result = strip_degenerate(repaired);
         maybe_collapse_keep(result, config, self)
     }
+}
+
+/// Repair-of-valid-input preservation: a polygon our own validator accepts
+/// must never come back emptied or decomposed (fuzz validate target
+/// contract 2; nightly runs 35430371542 and 35703833356 on 2026-09-19 and
+/// 2026-09-22 shipped GEOMETRYCOLLECTION EMPTY for valid inputs: the
+/// sub-ULP gate rejects some valid thin rings as un-certifiable, the full
+/// repair then snaps their micro-edge away and the pipeline returns
+/// nothing). make_valid of a valid polygon is the identity (GEOS MakeValid
+/// semantics); the validator re-run happens only when the repair produced
+/// a non-polygonal result, so the certified fast path and every polygon
+/// result pay nothing.
+fn preserve_valid_input(
+    result: Geometry<f64>,
+    config: &MakeValidConfig,
+    orig: &Polygon<f64>,
+) -> Geometry<f64> {
+    use crate::validation::GeoValidation;
+    let out = maybe_collapse_keep(result, config, orig);
+    if matches!(&out, Geometry::Polygon(_) | Geometry::MultiPolygon(_)) {
+        return out;
+    }
+    if orig.validate().valid {
+        warn!("repair emptied a valid polygon; returning the input unchanged");
+        return Geometry::Polygon(orig.clone());
+    }
+    out
 }
 
 /// Check if any coordinate in a polygon is NaN or Infinity.

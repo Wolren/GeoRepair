@@ -145,31 +145,59 @@ pub(crate) fn edges_intersect_general(
         let dx = a2.x - a1.x;
         let dy = a2.y - a1.y;
         let len2 = dx * dx + dy * dy;
-        if len2 > eps {
+        if len2 > 0.0 {
             let t1 = ((b1.x - a1.x) * dx + (b1.y - a1.y) * dy) / len2;
             let t2 = ((b2.x - a1.x) * dx + (b2.y - a1.y) * dy) / len2;
             let lo = 0.0f64.max(t1.min(t2));
             let hi = 1.0f64.min(t1.max(t2));
-            if hi - lo > eps {
-                return true;
-            }
-        } else if len2 > 0.0 && o1 == 0.0 && o2 == 0.0 {
-            // EXACT collinearity below the length gate. o1/o2 exactly zero
-            // means the endpoints lie bit-exactly on the other edge's line —
-            // real shared topology (e.g. two MultiPolygon components sharing
-            // a sub-grid edge after snap rounding), not near-collinear
-            // rounding noise. The length gate exists for slivers whose
-            // orient is within ulps of zero; exact-zero orientation is a
-            // deliberate touch and must be flagged regardless of scale.
-            // Measured: mixed-magnitude polygon (1e-9..5e6) whose repaired
-            // components shared a 1e-8 edge; the global eps (1e-12 * 5.2e6
-            // ≈ 5.2e-6) swallowed it and GEOS flagged the result as
-            // Self-intersection. Differential fuzz found it.
-            let t1 = ((b1.x - a1.x) * dx + (b1.y - a1.y) * dy) / len2;
-            let t2 = ((b2.x - a1.x) * dx + (b2.y - a1.y) * dy) / len2;
-            let lo = 0.0f64.max(t1.min(t2));
-            let hi = 1.0f64.min(t1.max(t2));
-            if hi - lo > 0.0 {
+            let overlap_a = hi - lo;
+            if o1 == 0.0 && o2 == 0.0 {
+                // EXACT collinearity: o1/o2 exactly zero means the endpoints
+                // lie bit-exactly on the other edge's line - real shared
+                // topology (e.g. two MultiPolygon components sharing a
+                // sub-grid edge after snap rounding, or a ring that doubles
+                // back over its own closing edge), not near-collinear
+                // rounding noise. Any parameter span past endpoint-only
+                // touching is a real overlap and must be flagged at any
+                // scale (GEOS flags this class with exact predicates).
+                //
+                // The span is evaluated in BOTH parameterizations because a
+                // parameter fraction is a ratio to its OWN segment's length:
+                // the same physical span reads ~0 along the long segment and
+                // ~1 along the short one, so testing only the a-side made
+                // the verdict depend on segment order. The fast-path gate
+                // certifies the input ring, then enforce_ogc_winding flips
+                // every segment direction before the exit validator runs
+                // (fuzz-nightly class C, run 35578735657 on 2026-09-21:
+                // the CW ring passed the gate and the validator, the
+                // re-wound ring failed the validator on identical
+                // geometry).
+                //
+                // The span is only trusted when its LENGTH is a normal
+                // f64: a subnormal overlap distance is arithmetic
+                // garbage, not topology (2026-09-14 demotion breach: a
+                // subnormal first edge faked an exact-collinearity
+                // verdict on a real sliver, and tests/
+                // regression_strip_demotion.rs pins that a subnormal
+                // span must not change any verdict).
+                if overlap_a > 0.0 && (overlap_a * len2.sqrt()).is_normal() {
+                    return true;
+                }
+                let bx = b2.x - b1.x;
+                let by = b2.y - b1.y;
+                let blen2 = bx * bx + by * by;
+                if blen2 > 0.0 {
+                    let s1 = ((a1.x - b1.x) * bx + (a1.y - b1.y) * by) / blen2;
+                    let s2 = ((a2.x - b1.x) * bx + (a2.y - b1.y) * by) / blen2;
+                    let lo_b = 0.0f64.max(s1.min(s2));
+                    let hi_b = 1.0f64.min(s1.max(s2));
+                    if hi_b - lo_b > 0.0 && ((hi_b - lo_b) * blen2.sqrt()).is_normal() {
+                        return true;
+                    }
+                }
+            } else if len2 > eps && overlap_a > eps {
+                // Near-collinear (orient within the adaptive error bound):
+                // keep the historical a-side tolerance rule unchanged.
                 return true;
             }
         }

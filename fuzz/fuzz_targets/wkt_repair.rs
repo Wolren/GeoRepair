@@ -7,11 +7,15 @@
 #![no_main]
 use libfuzzer_sys::fuzz_target;
 
+#[path = "../fuzz_support.rs"]
+mod fuzz_support;
+
 use geo_repair::io::wkt::read_wkt;
 use geo_repair::validation::GeoValidation;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 
 fuzz_target!(|data: &[u8]| {
+    fuzz_support::install_unwinding_panic_hook();
     let text: String = data.iter().map(|&b| b as char).collect();
     // Cap the document size the same way the coordinate targets do: a
     // single WKT ring can be arbitrarily large, but per-input time must stay
