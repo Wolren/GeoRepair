@@ -1,8 +1,10 @@
 # Maturin build configuration for the geo_repair Python package.
 #
 # Build:   python -m maturin build --release --features python
-# Install: pip install geo-repair  (published on PyPI)
-# Publish: maturin publish (or the release.yml workflow on tags)
+# Install: not on PyPI yet (no geo-repair project there); build locally
+#          with `python -m maturin build --release --features python`.
+# Publish: release.yml on tags, only once the PYPI_PUBLISH repo variable
+#          is enabled (currently unset, so nothing is uploaded).
 #
 # NOTE: keep `version` in sync with Cargo.toml (the CI version-drift gate
 # enforces this; scripts/bump_version.sh updates both).

@@ -14,7 +14,7 @@ env:
 # 2026-08-04). Bump by re-resolving the tag, never by trusting a new tag.
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
@@ -38,7 +38,7 @@ jobs:
   # it. Deviations from the CI feature list are deliberate: io backends and
   # ffi pull newer transitive deps.
   msrv:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # 1.88
@@ -51,7 +51,7 @@ jobs:
   # zero-feature config and a validate-only validator config are both
   # supported; the repair features imply each other (see Cargo.toml).
   no-std:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
@@ -62,7 +62,7 @@ jobs:
       - run: cargo check --no-default-features --features validate,structure,arrange
 
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
@@ -72,7 +72,7 @@ jobs:
       - run: cargo test --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,io-shp,ffi"
 
   test-no-defaults:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
@@ -84,7 +84,7 @@ jobs:
   # Python bindings gate: build the maturin wheel and run the WKT-surface
   # test suite (tests/test_python.py) against the real wheel.
   python:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
@@ -106,7 +106,7 @@ jobs:
   # alaska test data are committed; alaska.bin is regenerable via
   # scripts/convert_shp_to_bin.py.
   test-geos-oracle:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
@@ -120,7 +120,7 @@ jobs:
           PROPTEST_CASES: 1000
 
   test-serde:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
@@ -136,7 +136,7 @@ jobs:
   # alaska.* set is a SMALL sample (the full 1,579,030-part dataset is
   # 748 MB and stays local; the bench defaults to data_0.gpkg there).
   bench:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
@@ -165,7 +165,7 @@ jobs:
   # bench, so nothing caught it. First run on a new baseline records it;
   # commit the artifact to benches/bench_baseline.json.
   bench-gate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
@@ -195,7 +195,7 @@ jobs:
   # mimalloc E0433 was only found the first time the target was actually
   # checked, 2026-08-06).
   wasm:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
@@ -245,7 +245,7 @@ jobs:
   # the geo ecosystem's gate (geo, wkt run it) - the CI feature set is the
   # one the test job uses, so every target that ships gets linted.
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
@@ -258,7 +258,7 @@ jobs:
         run: cargo clippy --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,io-shp,ffi" --all-targets -- -D warnings
 
   rustdoc:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
@@ -276,7 +276,7 @@ jobs:
   # pinned feature list, so simd-portable and bench-geos-system never
   # leak into the docs build.
   docs-rs:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       RUSTDOCFLAGS: -Dwarnings
     steps:
@@ -294,7 +294,7 @@ jobs:
   # (the geos crate's CI runs both). A broken cmake/static linkage
   # otherwise ships silently until a hermetic user hits it.
   geos-static:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
@@ -309,7 +309,7 @@ jobs:
   # baseline to bump). Runs on push AND pull_request: when the local
   # version equals the published one the check is a no-op.
   semver:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
@@ -323,7 +323,7 @@ jobs:
   # Supply-chain gate 1: RustSec advisory database (known vulnerabilities
   # in the dependency graph fail the build).
   audit:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
@@ -341,7 +341,7 @@ jobs:
   # (measured 2026-08-04: "unrecognized subcommand 'licenses'" with
   # command=check + arguments="licenses advisories sources").
   deny:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # stable
@@ -359,7 +359,7 @@ jobs:
   # uploaded on failure so discoveries can be committed back to the corpus
   # as regression seeds (the pull-back loop).
   fuzz:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # nightly
