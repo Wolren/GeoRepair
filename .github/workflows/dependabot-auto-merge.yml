@@ -15,14 +15,10 @@ jobs:
         uses: dependabot/fetch-metadata@v3
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
-      # Approve first so the approval exists before auto-merge is armed.
-      # Auto-merge still waits for the required checks ("test",
-      # "Analyze (rust)") because branch protection is strict.
-      - name: Approve
-        run: gh pr review --approve "$PR_URL"
-        env:
-          PR_URL: ${{ github.event.pull_request.html_url }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # No approval step: the repo Actions setting forbids GitHub
+      # Actions from approving PRs and branch protection requires
+      # zero reviews (required_approving_review_count: 0), so
+      # approval is neither possible nor needed here.
       # Needs repo setting "Allow auto-merge" enabled; without it this
       # step failed with "Auto merge is not allowed for this repository".
       - name: Enable auto-merge
