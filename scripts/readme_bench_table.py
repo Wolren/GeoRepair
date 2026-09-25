@@ -23,7 +23,11 @@ import re
 import sys
 
 SECTION_START = "### Synthetic benchmarks"
-SECTION_END = "### Run benchmarks"
+# The table ends at the next heading of level 2 or 3. It used to end at
+# "### Run benchmarks", which was removed from the README (2026-09-25);
+# pinning the boundary to "any following heading" keeps the gate working
+# when a subsection is added, renamed, or dropped after the table.
+SECTION_END = r"^(?:#{2,3} )"
 
 
 def _read(path):
@@ -77,7 +81,7 @@ def fmt_ratio(geos, ours):
 
 
 def _section_and_labels(text):
-    m = re.search(re.escape(SECTION_START) + r"(.*?)" + re.escape(SECTION_END), text, re.S)
+    m = re.search(re.escape(SECTION_START) + r"(.*?)(?=" + SECTION_END + r")", text, re.S | re.M)
     if not m:
         return None, None
     labels = set()
@@ -118,10 +122,10 @@ def update(json_path, readme_path):
     rows = load_rows(json_path)
     text, crlf = _read(readme_path)
     # Lookahead: match the section body WITHOUT consuming the following
-    # header, so text[m.end():] still starts at SECTION_END.
-    m = re.search(re.escape(SECTION_START) + r".*?(?=" + re.escape(SECTION_END) + r")", text, re.S)
+    # header, so text[m.end():] still starts at the next heading.
+    m = re.search(re.escape(SECTION_START) + r".*?(?=" + SECTION_END + r")", text, re.S | re.M)
     if not m:
-        print(f"FAIL: README has no '{SECTION_START}' section followed by '{SECTION_END}'", file=sys.stderr)
+        print(f"FAIL: README has no '{SECTION_START}' section followed by a heading", file=sys.stderr)
         return 1
     lines = [
         SECTION_START,

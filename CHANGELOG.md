@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- README: the hero block's second real-world timing table removed. It still
+  carried the 2026-08-07 measurements (validation 3.0-3.2 s, `0.75-0.9x` on a
+  GeoRepair/GEOS scale) while `## Performance` holds the 2026-09-18 set
+  (2.1 s, `1.4x` on the GEOS/GeoRepair scale): the same 1,579,030-polygon
+  dataset appeared twice with opposite ratio conventions. The
+  `## Performance` real-world table is the single source and the hero now
+  links to it.
+- README: geo-ecosystem section cut to a pointer at the new
+  `docs/INTEROP.md`, which carries the `geo-traits` interop surface and the
+  `GeoRepairValidation` adapter reference with examples.
+- README feature table: six `Cargo.toml` features were undocumented
+  (`rstar`, `io-wkb`, `io-geojson`, `hotpath`, `hotpath-alloc`,
+  `bench-gdal-system`); all are now listed, so the table covers all 30
+  features. `proj` no longer reads "placeholder": it transforms through
+  `geo/proj`.
+- README limitation 5: the derived `~230x` mass-overlap speedup replaced
+  with `over 200x` (the CI-gated table reads 217x), so prose claims that
+  track a refreshed table are stated as ranges.
+- README: `### Run benchmarks` removed (GEOS env-var commands, the CI gate
+  command, the measurement-rules paragraph). Bench commands live in
+  `docs/GEOS-SETUP.md`, methodology in `docs/BENCHMARKS.md`, which now also
+  carries the median-of-three rule for the real-world table.
+  `scripts/readme_bench_table.py` had `SECTION_END` pinned to that removed
+  heading, so its boundary is now "the next h2/h3 heading"; `--check` and
+  `--update` re-verified against all 133 rows.
+- README: the Python and C API code blocks replaced with inline install and
+  build commands (`docs/BINDINGS.md` keeps the examples). The README now
+  carries no fenced code blocks.
+
 ### Fixed
 
 - Fuzz-nightly contract breach (runs 35430371542 and 35703833356,
