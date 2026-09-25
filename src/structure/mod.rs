@@ -169,9 +169,22 @@ pub(crate) fn fix_polygon_owned(
         // collect cost a full pass; the plausible loop already walks
         // every window).
         let mut lines: Vec<Line<f64>> = Vec::new();
+        // The mid-size branch below sweeps a chain index; when it is the
+        // branch we will take, the index is built INSIDE the plausibility
+        // walk (one pass instead of walk + build_mono_chains). The other
+        // branches keep the plain flow, so nothing is built that is not
+        // read back.
+        let fused_chains =
+            total_verts > tuning.small_ring_lines && total_verts <= tuning.fast_path_max_verts;
+        let mut sink = crate::arrange::prep_intersect::ChainSink::default();
         let mut acc = crate::arrange::GateAccum {
             lines: (total_verts > tuning.small_ring_lines).then_some(&mut lines),
-            bbox: Some(&mut bbox),
+            chains: fused_chains.then_some(&mut sink),
+            // With chains fused, their global envelope is the polygon's
+            // bbox (same min/max over the same vertices), so the walk skips
+            // this accumulator entirely; the degeneracy check below reads
+            // the fused envelope instead.
+            bbox: (!fused_chains).then_some(&mut bbox),
             sub_ulp: Some(&mut sub_ulp),
             min_abs: Some(min_abs),
             max_abs: Some(max_abs),
@@ -185,6 +198,15 @@ pub(crate) fn fix_polygon_owned(
                 return false;
             }
         }
+        // Every ring walked: the fused chain index is complete, and its
+        // global envelope is the polygon bbox (same vertices, same min/max),
+        // which the degeneracy check below reads instead of a walk-borrowed
+        // accumulator.
+        let fused = if fused_chains {
+            Some(sink.finish())
+        } else {
+            None
+        };
         if sub_ulp {
             // Sub-ULP edge check: an edge shorter than EPSILON * bbox_scale
             // (mixed-magnitude rings, e.g. 1e8 coords with 1e-8 spikes) makes
@@ -199,7 +221,10 @@ pub(crate) fn fix_polygon_owned(
         // at its own scale), so this class needs its own check or the Fast
         // path ships a polygon the validator rejects (fuzz_inprocess_loop
         // micro-sliver, 2026-08-07).
-        if (bbox.1 - bbox.0).abs() < f64::EPSILON || (bbox.3 - bbox.2).abs() < f64::EPSILON {
+        let envelope = fused.as_ref().map_or(bbox, |(_, b)| *b);
+        if (envelope.1 - envelope.0).abs() < f64::EPSILON
+            || (envelope.3 - envelope.2).abs() < f64::EPSILON
+        {
             return false;
         }
         // Duplicated rings (hole == shell, hole == hole): the pair sweeps
@@ -227,15 +252,31 @@ pub(crate) fn fix_polygon_owned(
                     )
                     .is_empty()
             } else {
-                // Mid-size rings: the lines were collected by the
-                // plausibility pass above (acc.lines).
-                !lines.is_empty()
-                    && crate::arrange::prep::has_no_intersections_nan_ok_tuned(&lines, tuning)
-                    && crate::validation::holes::check_holes_valid(
-                        poly.exterior().0.as_slice(),
-                        poly.interiors(),
-                    )
-                    .is_empty()
+                // Mid-size rings: the lines AND the chain index were built
+                // by the plausibility pass above (acc.lines / acc.chains),
+                // so the sweep starts at the predicates instead of paying
+                // build_mono_chains for a second pass over the lines.
+                match fused {
+                    Some((chains, global_bbox)) => {
+                        !lines.is_empty()
+                            && crate::arrange::prep::has_no_intersections_from_chains(
+                                &lines,
+                                &chains,
+                                global_bbox,
+                                tuning,
+                            )
+                            && crate::validation::holes::check_holes_valid(
+                                poly.exterior().0.as_slice(),
+                                poly.interiors(),
+                            )
+                            .is_empty()
+                    }
+                    // fused_chains is exactly this branch's condition; a
+                    // None here would only mean the index was never built,
+                    // and failing the gate falls back to full repair (safe
+                    // direction), never to a wrong Fast path.
+                    None => false,
+                }
             }
         } else {
             // Very large rings: the radix ring pass (proper crossings +

@@ -82,6 +82,7 @@ fn snap_or_push_grid(
 }
 
 pub(crate) use super::prep_intersect::has_no_intersections;
+pub(crate) use super::prep_intersect::has_no_intersections_from_chains;
 pub(crate) use super::prep_intersect::has_no_intersections_nan_ok_tuned;
 pub(crate) use super::prep_intersect::has_no_intersections_tuned;
 pub(crate) fn odd_even_filter(lines: &mut Vec<Line<f64>>) {

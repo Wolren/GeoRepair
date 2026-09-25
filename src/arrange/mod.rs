@@ -122,6 +122,7 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Geom
     let mut lines = Vec::with_capacity(cap);
     let mut acc = GateAccum {
         lines: Some(&mut lines),
+        chains: None,
         bbox: None,
         sub_ulp: None,
         min_abs: None,
@@ -320,6 +321,7 @@ pub fn validate_polygon(poly: &Polygon<f64>) -> bool {
     let mut lines = Vec::with_capacity(cap);
     let mut acc = GateAccum {
         lines: Some(&mut lines),
+        chains: None,
         bbox: None,
         sub_ulp: None,
         min_abs: None,
@@ -576,6 +578,13 @@ pub fn diagnose_arrange(poly: &Polygon<f64>) -> Option<ArrangeTiming> {
 /// optional - a caller pays only for the accumulators it requested.
 pub(crate) struct GateAccum<'a> {
     pub lines: Option<&'a mut Vec<geo::Line<f64>>>,
+    /// Fused monotone-chain index: pushed in lockstep with `lines` (same
+    /// windows, same order) so the gate owns a chain index after its walk
+    /// and never makes the second pass `build_mono_chains` costs. Set by
+    /// callers that will sweep with
+    /// [`prep_intersect::has_no_intersections_from_chains`]; `None` keeps
+    /// the plain collect-then-build flow.
+    pub chains: Option<&'a mut prep_intersect::ChainSink>,
     pub bbox: Option<&'a mut (f64, f64, f64, f64)>,
     pub sub_ulp: Option<&'a mut bool>,
     pub min_abs: Option<&'a mut f64>,
@@ -592,6 +601,7 @@ impl GateAccum<'_> {
     pub(crate) fn none() -> GateAccum<'static> {
         GateAccum {
             lines: None,
+            chains: None,
             bbox: None,
             sub_ulp: None,
             min_abs: None,
@@ -651,6 +661,13 @@ pub(crate) fn ring_is_plausible(ring: &geo::LineString<f64>, acc: &mut GateAccum
         return false;
     }
     let n = coords.len() - 1;
+    // Fused chain index: when the caller wants chains, they are opened here
+    // and closed on success, so the gate's single walk over this ring also
+    // produces the monotone-chain index (ring boundaries are known, unlike
+    // the re-detection build_mono_chains does on a flat line array).
+    if let Some(s) = acc.chains.as_deref_mut() {
+        s.begin_ring();
+    }
     // Pinch (non-adjacent duplicate) table for n > 32, populated INSIDE
     // the windows loop - the standalone first_pinch_dup pass cost a full
     // second scan over the ring on every gate call (measured 2026-08-09:
@@ -730,8 +747,14 @@ fn plausible_body(
                 k = (k + 1) & (table_cap - 1);
             }
         }
-        if let Some(l) = acc.lines.as_deref_mut() {
-            l.push(geo::Line::new(w[0], w[1]));
+        match (acc.lines.as_deref_mut(), acc.chains.as_deref_mut()) {
+            (Some(l), Some(s)) => {
+                l.push(geo::Line::new(w[0], w[1]));
+                s.push_line(w[0].x, w[0].y, w[1].x, w[1].y);
+            }
+            (Some(l), None) => l.push(geo::Line::new(w[0], w[1])),
+            (None, Some(s)) => s.push_line(w[0].x, w[0].y, w[1].x, w[1].y),
+            (None, None) => {}
         }
         if let Some(bb) = acc.bbox.as_deref_mut() {
             bb.0 = bb.0.min(w[0].x);

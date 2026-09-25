@@ -49,6 +49,7 @@ fn quadrant(x: f64, y: f64) -> u8 {
     }
 }
 
+#[cfg_attr(test, derive(Debug, PartialEq))]
 pub(crate) struct MonoChain {
     start: usize,
     end: usize,
@@ -81,7 +82,7 @@ impl MonoChain {
 }
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
-fn build_mono_chains(lines: &[Line<f64>]) -> (Vec<MonoChain>, (f64, f64, f64, f64)) {
+pub(crate) fn build_mono_chains(lines: &[Line<f64>]) -> (Vec<MonoChain>, (f64, f64, f64, f64)) {
     let n = lines.len();
     if n == 0 {
         return (vec![], (f64::MAX, f64::MIN, f64::MAX, f64::MIN));
@@ -193,6 +194,246 @@ fn build_mono_chains(lines: &[Line<f64>]) -> (Vec<MonoChain>, (f64, f64, f64, f6
         mc.ring_eps = eps;
     }
     (chains, (gmin_x, gmax_x, gmin_y, gmax_y))
+}
+
+/// Fused monotone-chain builder: the gate's plausibility scan feeds it one
+/// line at a time, so the chain index is built during the walk the gate
+/// already makes instead of a second pass over the collected `lines`.
+/// Output is bit-identical to [`build_mono_chains`] for the same input
+/// (enforced by the `chain_fusion_equivalence` unit tests).
+///
+/// Rings are fed in order (`begin_ring` ... lines ... `finish`), which is
+/// how every caller already drives [`crate::arrange::ring_is_plausible`]:
+/// exterior first, then holes. Ring boundaries are therefore KNOWN here
+/// rather than re-detected from `line.start != prev.end`.
+pub(crate) struct ChainSink {
+    chains: Vec<MonoChain>,
+    /// Flat line index of the next push; mirrors the index into the
+    /// caller's `lines` vector (both are pushed in lockstep).
+    flat: usize,
+    // Current chain accumulators.
+    start: usize,
+    quad: u8,
+    min_x: f64,
+    max_x: f64,
+    min_y: f64,
+    max_y: f64,
+    chain_open: bool,
+    // Current ring accumulators.
+    ring_idx: u32,
+    ring_chain_start: usize,
+    ring_min_x: f64,
+    ring_max_x: f64,
+    ring_min_y: f64,
+    ring_max_y: f64,
+    ring_open: bool,
+    // Set by `begin_ring` while the previous ring is still open: the
+    // reference builder folds the NEXT ring's first line into the previous
+    // ring's last chain and into its ring bbox (hence its eps) before
+    // closing it. Deferring the flush to that line's `push_line` keeps the
+    // fused output bit-identical to `build_mono_chains`.
+    pending_boundary: bool,
+    // Global envelope over every chain (the grid path's `global_bbox`).
+    gmin_x: f64,
+    gmax_x: f64,
+    gmin_y: f64,
+    gmax_y: f64,
+    any: bool,
+}
+
+impl Default for ChainSink {
+    fn default() -> Self {
+        ChainSink {
+            chains: Vec::new(),
+            flat: 0,
+            start: 0,
+            quad: 0,
+            min_x: f64::MAX,
+            max_x: f64::MIN,
+            min_y: f64::MAX,
+            max_y: f64::MIN,
+            chain_open: false,
+            ring_idx: 0,
+            ring_chain_start: 0,
+            ring_min_x: f64::MAX,
+            ring_max_x: f64::MIN,
+            ring_min_y: f64::MAX,
+            ring_max_y: f64::MIN,
+            ring_open: false,
+            pending_boundary: false,
+            gmin_x: f64::MAX,
+            gmax_x: f64::MIN,
+            gmin_y: f64::MAX,
+            gmax_y: f64::MIN,
+            any: false,
+        }
+    }
+}
+
+impl ChainSink {
+    /// Open the next ring. A previously open ring is NOT flushed here: its
+    /// close waits for this ring's first line (see `pending_boundary`), so
+    /// the fused output matches the reference's boundary handling exactly.
+    /// No-op before the first ring.
+    pub(crate) fn begin_ring(&mut self) {
+        if self.ring_open {
+            self.pending_boundary = true;
+        }
+    }
+
+    /// Feed the ring's next line (the walk's next window).
+    pub(crate) fn push_line(&mut self, x0: f64, y0: f64, x1: f64, y1: f64) {
+        let i = self.flat;
+        self.flat += 1;
+        let (lm_x, lx_x) = if x0 < x1 { (x0, x1) } else { (x1, x0) };
+        let (lm_y, lx_y) = if y0 < y1 { (y0, y1) } else { (y1, y0) };
+        if !self.any {
+            self.gmin_x = lm_x;
+            self.gmax_x = lx_x;
+            self.gmin_y = lm_y;
+            self.gmax_y = lx_y;
+            self.any = true;
+        } else {
+            self.gmin_x = self.gmin_x.min(lm_x);
+            self.gmax_x = self.gmax_x.max(lx_x);
+            self.gmin_y = self.gmin_y.min(lm_y);
+            self.gmax_y = self.gmax_y.max(lx_y);
+        }
+        if self.pending_boundary {
+            // This line is the FIRST line of the new ring. The reference
+            // folds it into the previous ring's open chain and ring bbox
+            // first, then closes that chain, stamps its eps from the
+            // inflated bbox, and starts the new chain on this same line.
+            self.min_x = self.min_x.min(lm_x);
+            self.max_x = self.max_x.max(lx_x);
+            self.min_y = self.min_y.min(lm_y);
+            self.max_y = self.max_y.max(lx_y);
+            self.ring_min_x = self.ring_min_x.min(lm_x);
+            self.ring_max_x = self.ring_max_x.max(lx_x);
+            self.ring_min_y = self.ring_min_y.min(lm_y);
+            self.ring_max_y = self.ring_max_y.max(lx_y);
+            self.push_open_chain(i);
+            self.stamp_ring_eps();
+            self.ring_idx += 1;
+            self.ring_chain_start = self.chains.len();
+            self.ring_min_x = lm_x;
+            self.ring_max_x = lx_x;
+            self.ring_min_y = lm_y;
+            self.ring_max_y = lx_y;
+            self.start = i;
+            self.quad = quadrant(x1 - x0, y1 - y0);
+            self.min_x = lm_x;
+            self.max_x = lx_x;
+            self.min_y = lm_y;
+            self.max_y = lx_y;
+            self.chain_open = true;
+            self.ring_open = true;
+            self.pending_boundary = false;
+            return;
+        }
+        if !self.ring_open {
+            self.ring_open = true;
+            self.ring_min_x = lm_x;
+            self.ring_max_x = lx_x;
+            self.ring_min_y = lm_y;
+            self.ring_max_y = lx_y;
+        } else {
+            self.ring_min_x = self.ring_min_x.min(lm_x);
+            self.ring_max_x = self.ring_max_x.max(lx_x);
+            self.ring_min_y = self.ring_min_y.min(lm_y);
+            self.ring_max_y = self.ring_max_y.max(lx_y);
+        }
+        if !self.chain_open {
+            self.chain_open = true;
+            self.start = i;
+            self.quad = quadrant(x1 - x0, y1 - y0);
+            self.min_x = lm_x;
+            self.max_x = lx_x;
+            self.min_y = lm_y;
+            self.max_y = lx_y;
+            return;
+        }
+        self.min_x = self.min_x.min(lm_x);
+        self.max_x = self.max_x.max(lx_x);
+        self.min_y = self.min_y.min(lm_y);
+        self.max_y = self.max_y.max(lx_y);
+        let cur_quad = quadrant(x1 - x0, y1 - y0);
+        if cur_quad != self.quad {
+            self.chains.push(MonoChain {
+                start: self.start,
+                end: i,
+                quad: self.quad,
+                min_x: self.min_x,
+                min_y: self.min_y,
+                max_x: self.max_x,
+                max_y: self.max_y,
+                ring_id: self.ring_idx,
+                ring_eps: 0.0, // stamped at the ring end
+            });
+            self.start = i;
+            self.quad = cur_quad;
+            self.min_x = lm_x;
+            self.max_x = lx_x;
+            self.min_y = lm_y;
+            self.max_y = lx_y;
+        }
+    }
+
+    /// Push the open chain, ending at line `end`.
+    fn push_open_chain(&mut self, end: usize) {
+        if self.chain_open {
+            self.chains.push(MonoChain {
+                start: self.start,
+                end,
+                quad: self.quad,
+                min_x: self.min_x,
+                min_y: self.min_y,
+                max_x: self.max_x,
+                max_y: self.max_y,
+                ring_id: self.ring_idx,
+                ring_eps: 0.0, // stamped below
+            });
+            self.chain_open = false;
+        }
+    }
+
+    /// Stamp the open ring's scale-relative eps on every chain of it.
+    fn stamp_ring_eps(&mut self) {
+        let scale = (self.ring_max_x - self.ring_min_x)
+            .abs()
+            .max((self.ring_max_y - self.ring_min_y).abs())
+            .max(1.0);
+        let eps = 1e-12 * scale;
+        for mc in self.chains[self.ring_chain_start..].iter_mut() {
+            mc.ring_eps = eps;
+        }
+    }
+
+    /// Close the open ring exactly as the reference builder closes it after
+    /// its loop: flush the last chain (no foreign line folded in) and stamp
+    /// the ring's eps. Tolerates a ring left open by an aborted scan.
+    fn flush_ring(&mut self) {
+        self.push_open_chain(self.flat);
+        self.stamp_ring_eps();
+        self.ring_idx += 1;
+        self.ring_chain_start = self.chains.len();
+        self.ring_open = false;
+        self.pending_boundary = false;
+    }
+
+    /// Consume the sink: (chains, global bbox) in
+    /// [`build_mono_chains`]'s tuple order.
+    pub(crate) fn finish(mut self) -> (Vec<MonoChain>, (f64, f64, f64, f64)) {
+        if self.ring_open {
+            self.flush_ring();
+        }
+        let bbox = if self.any {
+            (self.gmin_x, self.gmax_x, self.gmin_y, self.gmax_y)
+        } else {
+            (f64::MAX, f64::MIN, f64::MAX, f64::MIN)
+        };
+        (self.chains, bbox)
+    }
 }
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
@@ -457,6 +698,35 @@ pub(crate) fn has_no_intersections_nan_ok_tuned(
     }
 
     let (chains, global_bbox) = build_mono_chains(lines);
+    has_no_intersections_from_chains(lines, &chains, global_bbox, tuning)
+}
+
+/// The chain-index half of [`has_no_intersections_nan_ok_tuned`], split out
+/// so a caller that already owns a chain index - the gate builds it inside
+/// its plausibility scan via [`ChainSink`] instead of making a second pass
+/// over the collected lines - pays no extra traversal. The verdict must be
+/// identical whichever way `chains` was produced (enforced by the
+/// `chain_fusion_equivalence` unit tests).
+pub(crate) fn has_no_intersections_from_chains(
+    lines: &[Line<f64>],
+    chains: &[MonoChain],
+    global_bbox: (f64, f64, f64, f64),
+    tuning: &crate::core::Tuning,
+) -> bool {
+    if lines.is_empty() {
+        return true;
+    }
+    if lines.len() <= crate::core::SMALL_RING_LINES.min(tuning.small_ring_lines) {
+        return has_no_intersections_small(lines);
+    }
+    debug_assert_eq!(
+        chains.last().map(|c| c.end),
+        Some(lines.len()),
+        "chain index must cover every collected line"
+    );
+    if chains.is_empty() {
+        return true;
+    }
 
     // Spiky-ring dispatch: a ring whose chains are nearly all single edges
     // (quadrant flips every vertex or two - star/radial shapes) defeats the
@@ -772,4 +1042,346 @@ fn has_no_intersections_grid(
         }
     }
     Some(true)
+}
+
+
+#[cfg(test)]
+mod chain_fusion_tests {
+    use super::*;
+    use crate::arrange::{GateAccum, ring_is_plausible};
+    use geo::{LineString, LinesIter, Polygon};
+
+    /// One fused walk (lines + chain index + envelope in a single pass),
+    /// next to the reference outputs computed from the SAME collected lines.
+    /// Coordinates in the fixtures avoid signed zero: IEEE min/max returns
+    /// the second operand on a tie, so -0.0 vs 0.0 can make two correct
+    /// accumulators differ in representation only. `nz` normalizes that so
+    /// the assertions compare semantics, not tie-break order.
+    struct Snapshot {
+        ok: bool,
+        lines: Vec<Line<f64>>,
+        chains: Vec<MonoChain>,
+        fused_bbox: (f64, f64, f64, f64),
+        walk_bbox: (f64, f64, f64, f64),
+        ref_chains: Vec<MonoChain>,
+        ref_bbox: (f64, f64, f64, f64),
+    }
+
+    /// Drive `ring_is_plausible` exactly the way the fast-path gate does:
+    /// exterior first, then holes, all three accumulators live.
+    fn walk(poly: &Polygon<f64>) -> Snapshot {
+        let mut lines = Vec::new();
+        let mut sink = ChainSink::default();
+        let mut bbox = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+        let mut acc = GateAccum {
+            lines: Some(&mut lines),
+            chains: Some(&mut sink),
+            bbox: Some(&mut bbox),
+            sub_ulp: None,
+            min_abs: None,
+            max_abs: None,
+            extremal: None,
+        };
+        let mut ok = ring_is_plausible(poly.exterior(), &mut acc);
+        for hole in poly.interiors() {
+            if !ok {
+                break;
+            }
+            ok = ring_is_plausible(hole, &mut acc);
+        }
+        let (chains, fused_bbox) = sink.finish();
+        let (ref_chains, ref_bbox) = build_mono_chains(&lines);
+        Snapshot {
+            ok,
+            lines,
+            chains,
+            fused_bbox,
+            walk_bbox: bbox,
+            ref_chains,
+            ref_bbox,
+        }
+    }
+
+    fn nz(v: f64) -> f64 {
+        if v == 0.0 {
+            0.0
+        } else {
+            v
+        }
+    }
+
+    fn nz_bbox(b: (f64, f64, f64, f64)) -> (f64, f64, f64, f64) {
+        (nz(b.0), nz(b.1), nz(b.2), nz(b.3))
+    }
+
+    fn nz_chains(c: &[MonoChain]) -> Vec<MonoChain> {
+        c.iter()
+            .map(|m| MonoChain {
+                start: m.start,
+                end: m.end,
+                quad: m.quad,
+                min_x: nz(m.min_x),
+                min_y: nz(m.min_y),
+                max_x: nz(m.max_x),
+                max_y: nz(m.max_y),
+                ring_id: m.ring_id,
+                ring_eps: m.ring_eps,
+            })
+            .collect()
+    }
+
+    /// The invariant the gate's mid-size branch rests on: whatever the
+    /// fused walk produced, `build_mono_chains` would have produced it too,
+    /// from the same lines, with the same envelope. On a completed walk the
+    /// line collection must also be the polygon's full line set.
+    fn assert_equivalent(poly: &Polygon<f64>) -> Snapshot {
+        let s = walk(poly);
+        assert_eq!(
+            nz_chains(&s.chains),
+            nz_chains(&s.ref_chains),
+            "fused chain index must equal build_mono_chains"
+        );
+        assert_eq!(
+            nz_bbox(s.fused_bbox),
+            nz_bbox(s.ref_bbox),
+            "fused envelope must equal build_mono_chains's"
+        );
+        if s.ok {
+            // A completed walk collects every vertex twice over (each window
+            // contributes both endpoints and the ring closes onto its first
+            // vertex), so the fused envelope and the walk's own accumulator
+            // see the same set of coordinates.
+            assert_eq!(
+                nz_bbox(s.fused_bbox),
+                nz_bbox(s.walk_bbox),
+                "fused envelope must equal the walk's bbox accumulator"
+            );
+            let all: Vec<Line<f64>> = poly.lines_iter().collect();
+            assert_eq!(s.lines, all, "a completed walk collects every line");
+        } else {
+            // Aborted walk: the walk's accumulator stops at the last
+            // window's start while the sink also saw that window's end, so
+            // the fused envelope can be wider. The gate returns false at
+            // the failed ring and never reads it, so containment is the
+            // only invariant that matters here.
+            assert!(
+                s.fused_bbox.0 <= s.walk_bbox.0
+                    && s.fused_bbox.1 >= s.walk_bbox.1
+                    && s.fused_bbox.2 <= s.walk_bbox.2
+                    && s.fused_bbox.3 >= s.walk_bbox.3,
+                "fused envelope must contain the walk's accumulator"
+            );
+        }
+        s
+    }
+
+    /// The sweep verdict must not depend on who built the chain index.
+    fn assert_same_verdict(poly: &Polygon<f64>) -> Snapshot {
+        let s = assert_equivalent(poly);
+        if !s.ok {
+            return s;
+        }
+        let tuning = crate::core::Tuning::default();
+        assert_eq!(
+            has_no_intersections_nan_ok_tuned(&s.lines, &tuning),
+            has_no_intersections_from_chains(&s.lines, &s.chains, s.fused_bbox, &tuning),
+            "verdict must not depend on who built the chains"
+        );
+        s
+    }
+
+    fn circle(n: usize, cx: f64, cy: f64, r: f64) -> LineString<f64> {
+        let mut pts: Vec<geo::Coord<f64>> = (0..n)
+            .map(|i| {
+                let a = std::f64::consts::TAU * (i as f64) / (n as f64);
+                geo::Coord {
+                    x: cx + r * a.cos(),
+                    y: cy + r * a.sin(),
+                }
+            })
+            .collect();
+        pts.push(pts[0]);
+        LineString::new(pts)
+    }
+
+    fn polygon_with_holes(shell: LineString<f64>, holes: Vec<LineString<f64>>) -> Polygon<f64> {
+        Polygon::new(shell, holes)
+    }
+
+    #[test]
+    fn circle_single_ring() {
+        assert_same_verdict(&polygon_with_holes(circle(64, 10.0, 20.0, 5.0), vec![]));
+    }
+
+    #[test]
+    fn shell_plus_hole_travels_two_rings() {
+        // Two rings: ring_id and the per-ring eps stamp must line up with
+        // the reference's ring-boundary re-detection.
+        let poly = polygon_with_holes(
+            circle(64, 0.0, 0.0, 100.0),
+            vec![circle(48, 3.0, 7.0, 20.0)],
+        );
+        let s = assert_same_verdict(&poly);
+        assert!(s.ok, "concentric-ish rings with a gap are plausible");
+        assert!(s.chains.iter().any(|c| c.ring_id == 1), "hole chains exist");
+    }
+
+    #[test]
+    fn corner_heavy_ring_breaks_chains() {
+        // An L-shaped walk: axis-aligned runs force quadrant changes, so
+        // chains break far more often than on a circle.
+        let mut pts = vec![geo::Coord { x: 1.0, y: 1.0 }];
+        let mut t = 2.0;
+        for i in 0..40 {
+            pts.push(geo::Coord { x: t, y: 1.0 + (i as f64) });
+            pts.push(geo::Coord { x: t + 0.5, y: 1.0 + (i as f64) });
+            t += 0.5;
+        }
+        pts.push(pts[0]);
+        assert_same_verdict(&polygon_with_holes(LineString::new(pts), vec![]));
+    }
+
+    #[test]
+    fn star_many_quadrant_flips() {
+        let mut pts: Vec<geo::Coord<f64>> = Vec::new();
+        for i in 0..120 {
+            let a = std::f64::consts::TAU * (i as f64) / 120.0;
+            let r = if i % 2 == 0 { 50.0 } else { 20.0 };
+            pts.push(geo::Coord {
+                x: 5.0 + r * a.cos(),
+                y: -3.0 + r * a.sin(),
+            });
+        }
+        pts.push(pts[0]);
+        assert_same_verdict(&polygon_with_holes(LineString::new(pts), vec![]));
+    }
+
+    #[test]
+    fn bowtie_reports_the_same_crossing_from_either_index() {
+        // Self-intersecting: both entries must say false.
+        let mut pts: Vec<geo::Coord<f64>> = Vec::new();
+        for i in 0..50 {
+            pts.push(geo::Coord {
+                x: (i as f64) * 0.3,
+                y: (i as f64) * 0.3,
+            });
+        }
+        // Cross the first and last thirds back through the middle, offset
+        // so no vertex repeats (a repeated vertex is a pinch, and the walk
+        // rejects it before the sweep ever runs).
+        for i in 0..50 {
+            pts.push(geo::Coord {
+                x: (50.0 - i as f64) * 0.3,
+                y: (i as f64) * 0.3 + 0.07,
+            });
+        }
+        pts.push(pts[0]);
+        let poly = polygon_with_holes(LineString::new(pts), vec![]);
+        let s = assert_same_verdict(&poly);
+        assert!(s.ok, "a bowtie is still a plausible ring");
+        assert!(
+            !has_no_intersections_nan_ok_tuned(&s.lines, &crate::core::Tuning::default()),
+            "the bowtie must be reported as intersecting"
+        );
+    }
+
+    #[test]
+    fn tiny_ring_below_the_fuse_threshold() {
+        // The gate only fuses above small_ring_lines, but the sink itself
+        // has no such limit: a 4-vertex ring must still index identically.
+        assert_same_verdict(&polygon_with_holes(
+            LineString::new(vec![
+                geo::Coord { x: 2.0, y: 2.0 },
+                geo::Coord { x: 8.0, y: 2.0 },
+                geo::Coord { x: 8.0, y: 9.0 },
+                geo::Coord { x: 2.0, y: 9.0 },
+                geo::Coord { x: 2.0, y: 2.0 },
+            ]),
+            vec![],
+        ));
+    }
+
+    #[test]
+    fn degenerate_point_ring_aborts_cleanly() {
+        // Every vertex identical: the walk fails on the first window, so
+        // the sink never saw a line. The reference agrees (empty input).
+        let pts = vec![geo::Coord { x: 4.0, y: 4.0 }; 40];
+        let poly = polygon_with_holes(LineString::new(pts), vec![]);
+        let s = assert_equivalent(&poly);
+        assert!(!s.ok, "a collapsed ring is not plausible");
+        assert!(s.chains.is_empty());
+        assert!(s.lines.is_empty());
+    }
+
+    #[test]
+    fn aborted_walk_indexes_only_the_prefix_it_collected() {
+        // Adjacent duplicate at window 20: the walk stops mid-ring, so both
+        // the line collection and the chain index are a prefix. They must
+        // still agree with each other.
+        let mut pts: Vec<geo::Coord<f64>> = (0..40)
+            .map(|i| geo::Coord {
+                x: 10.0 + (i as f64) * 0.7,
+                y: 12.0 - (i as f64) * 0.3,
+            })
+            .collect();
+        pts[21] = pts[20];
+        pts.push(pts[0]);
+        let poly = polygon_with_holes(LineString::new(pts), vec![]);
+        let s = assert_equivalent(&poly);
+        assert!(!s.ok, "an adjacent duplicate fails the walk");
+        assert!(!s.lines.is_empty(), "the prefix before the failure is kept");
+        assert_eq!(s.chains.last().map(|c| c.end), Some(s.lines.len()));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #[test]
+            fn fused_index_and_verdict_match_the_reference(
+                pts in proptest::collection::vec(
+                    (-500.0f64..500.0, -500.0f64..500.0),
+                    1..220,
+                ),
+                hole_pts in proptest::option::of(proptest::collection::vec(
+                    (-500.0f64..500.0, -500.0f64..500.0),
+                    1..80,
+                )),
+            ) {
+                let mk = |mut p: Vec<(f64, f64)>| {
+                    // Pin -0.0 to +0.0: the equivalence below compares bit
+                    // patterns, and IEEE min/max breaks ties by operand order.
+                    for c in p.iter_mut() {
+                        if c.0 == 0.0 {
+                            c.0 = 0.0;
+                        }
+                        if c.1 == 0.0 {
+                            c.1 = 0.0;
+                        }
+                    }
+                    let mut coords: Vec<geo::Coord<f64>> = p
+                        .iter()
+                        .map(|&(x, y)| geo::Coord { x, y })
+                        .collect();
+                    if coords.len() < 2 {
+                        coords.push(geo::Coord { x: 1.0, y: 1.0 });
+                        coords.push(geo::Coord { x: 2.0, y: 3.0 });
+                    }
+                    coords.push(coords[0]);
+                    LineString::new(coords)
+                };
+                let poly = Polygon::new(
+                    mk(pts),
+                    hole_pts.map(|h| mk(h)).into_iter().collect(),
+                );
+                let s = assert_same_verdict(&poly);
+                // On a completed walk, lines and chains cover the whole
+                // polygon; on an aborted one they cover the prefix. Both
+                // cases were already checked inside assert_equivalent.
+                prop_assert!(s.chains.last().map_or(true, |c| c.end <= s.lines.len()));
+            }
+        }
+    }
 }
