@@ -326,6 +326,19 @@ pub(crate) fn segment_intersection_dd(
 mod tests {
     use super::*;
 
+    // DD_CALL_COUNT is process-global and three tests here reset it. Without
+    // this lock one test's reset lands inside another's before/after window
+    // and the snapshot assertion reads (0, 0): a race that snapshot deltas
+    // (ed73e76) could not tolerate, since a concurrent reset destroys the
+    // delta itself.
+    static COUNTER_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn lock_counter() -> std::sync::MutexGuard<'static, ()> {
+        COUNTER_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     #[test]
     fn test_dd_add() {
         let a = DD::from_f64(1.0);
@@ -515,7 +528,7 @@ mod tests {
     #[test]
     fn test_dd_call_counter() {
         // Verify that segment_intersection_dd increments the call counter.
-        // Use snapshot deltas to tolerate parallel test interference.
+        let _guard = lock_counter();
         let before = dd_call_count();
         segment_intersection_dd(
             Coord { x: 0.0, y: 0.0 },
@@ -540,6 +553,7 @@ mod tests {
     #[cfg(feature = "structure")]
     #[test]
     fn test_dd_called_during_polygon_repair() {
+        let _guard = lock_counter();
         use crate::MakeValid;
         use geo::Polygon;
         // Bowtie polygon — classic self-intersecting case
