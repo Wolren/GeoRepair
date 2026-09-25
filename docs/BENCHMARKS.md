@@ -9,7 +9,8 @@ The README carries the summary; this file is the detail.
 - GEOS: conda-forge `libgeos` 3.14.1 (MSVC, serial per-call, no LTO),
   driven concurrently via Rayon, geometries built via CoordSeq direct
   construction (no WKT round-trip). Both columns measured in the same
-  process; the GeoRepair column is the Rayon parallel batch.
+  process; the GeoRepair column is the Rayon parallel batch. Full GEOS
+  setup and bench commands: `docs/GEOS-SETUP.md`.
 - GEOS reference per case: `makeValid` for valid inputs, `UnaryUnion` for
   invalid line inputs (GEOS `makeValid` on lines is a repeated-point
   strip + clone - a passthrough, not noding; verified against
@@ -17,7 +18,8 @@ The README carries the summary; this file is the detail.
 - Ratio convention everywhere: **GEOS / GeoRepair** - `>1` means
   geo-repair is faster, `<1` means GEOS is faster.
 - Measurement rules: always take the settled second run (first-run-after-
-  build is inflated ~18% by Windows Defender + cold LTO code); never trust
+  build is inflated ~18% by Windows Defender + cold LTO code); the
+  real-world table carries the median of three settled runs; never trust
   a bench binary you cannot trace to a source file (stale
   `target/release/examples/*.exe` have produced phantom numbers before).
 - Sub-µs rows are Rayon dispatch noise; read the larger rows and the
@@ -296,7 +298,7 @@ repair pipeline's central guarantee.
 
 Measured 2026-08-07 (evening, lean-predicate + gate-fusion pass) with a
 throwaway stage probe (deleted after the run). The 2026-08-09 way to get
-this decomposition is the `hotpath` feature on the synthetic bench — see
+this decomposition is the `hotpath` feature on the synthetic bench: see
 "Profiling the benchmark" below; the manual probe remains the source for
 TRUE per-item numbers (hotpath inflates per-call costs).
 

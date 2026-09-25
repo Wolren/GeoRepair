@@ -27,14 +27,9 @@ The **Structure** strategy (default) mirrors GEOS ST_MakeValid: planar
 graph extraction, face walking, winding-number assembly. The **Arrange**
 strategy is a CDT-based fallback for complex topologies.
 
-Performance on the 1,579,030-polygon production dataset (i5-12400F,
-release, parallel batch, GEOS 3.14.1 conda-forge as reference):
-
-| Dataset | GeoRepair | GEOS | vs GEOS |
-|---------|----------:|-----:|:-------:|
-| Validation (1.58M) | **3.0-3.2 s** | 3.6-3.9 s | **0.75-0.9x** |
-| Invalid subset | 0 polys (2026-08-06) | 0 | - |
-| Full dataset (1.58M polys) | 3.8-4.0 s | **3.3-3.5 s** | 1.1-1.2x |
+Measured against GEOS on the 1,579,030-polygon production dataset
+(i5-12400F, release, parallel batch, GEOS 3.14.1 conda-forge as
+reference). Current timings: [Performance](#performance).
 
 ## Performance
 
@@ -44,15 +39,12 @@ Structure batch on a production GIS dataset (813 features from a GeoPackage,
 flattened to 1,579,030 polygon parts). i5-12400F (6C/12T), release LTO,
 Rayon 12-thread batch; GEOS is conda-forge 3.14.1, serial per-call, run
 concurrently via Rayon, geometries built via CoordSeq direct construction
-(the one-time 1.5 s pre-build is excluded). Ratio is GEOS / GeoRepair:
-**>1 means GeoRepair is faster** (same convention as the synthetic tables).
+(the one-time 1.5 s pre-build is excluded).
 
 | Dataset | GeoRepair | GEOS | Ratio |
 |---------|----------:|-----:|------:|
 | Validation (1.58M) | **2.1 s** (1.3 µs/poly) | 3.0 s (1.9 µs/poly) | **1.4x** |
 | Full pass (1.58M) | 3.6 s (2.3 µs/poly) | **3.0 s** (1.9 µs/poly) | 0.83x |
-
-Validity agreement with GEOS: 100% (full validator, 0/0 disagreements); the gate screen flags 139 of 1,579,030 that GEOS accepts (99.99%, 2026-09-18).
 
 ### Synthetic benchmarks
 
@@ -197,24 +189,6 @@ we win. Methodology: `docs/BENCHMARKS.md`. Regenerate:
 | arrange star 100sp | 2.3 | 1162 | 497x |
 | arrange star 500sp | 7.7 | 42753 | 5560x |
 
-### Run benchmarks
-
-```shell
-# Real-world + synthetic with GEOS comparison (system GEOS, conda)
-GEOS_LIB_DIR='D:\Miniconda\Library\lib' GEOS_INCLUDE_DIR='D:\Miniconda\Library\include' \
-GEOS_VERSION=3.14.1 cargo bench --features bench-geos-system,arrange,structure,parallel,simd --bench real_world
-GEOS_LIB_DIR='D:\Miniconda\Library\lib' GEOS_INCLUDE_DIR='D:\Miniconda\Library\include' \
-GEOS_VERSION=3.14.1 cargo bench --features bench-geos-system,arrange,structure,parallel,simd --bench bench
-
-# CI regression gate (no GEOS; fixed subset vs benches/bench_baseline.json)
-python scripts/bench_gate.py
-```
-
-Measurement rules: always take the settled second run
-(first-run-after-build is inflated ~18%); the real-world table carries the
-median of three settled runs; never trust a bench binary you
-cannot trace to a source file. Full GEOS setup: `docs/GEOS-SETUP.md`.
-
 ## Limitations
 
 1. **GEOS comparison is against conda-forge MSVC GEOS** (serial per-call,
@@ -234,7 +208,7 @@ cannot trace to a source file. Full GEOS setup: `docs/GEOS-SETUP.md`.
    200k-edge giant single-pass noding costs 168 ms vs 36 ms for the
    boolean path (`SP_MAX_EDGES` in `src/core/mod.rs`).
 5. **Mass-overlap repairs are the slowest synthetic class** (~0.46 ms/poly
-   at dense grid 20x20) but stay ~230x faster than GEOS makeValid on the
+   at dense grid 20x20) but stay over 200x faster than GEOS makeValid on the
    same shapes.
 6. **Python bindings: `tests/test_python.py` covers the WKB and WKT surface**
    (41 tests); GeoJSON bindings were removed deliberately.
@@ -245,89 +219,37 @@ cannot trace to a source file. Full GEOS setup: `docs/GEOS-SETUP.md`.
 8. **`proj` requires native PROJ and is mutually exclusive with `io-gpkg`**
    (sqlite3 link conflict); `io-gpkg` is a default feature, so `proj` users
    build with `--no-default-features --features proj,...`.
-9. **GEOS XML suite:** 937/937 dispatched cases pass; 3,629 overlay/relate
-   cases are skipped (out of scope); 213 masked divergences (documented
-   tolerance gates). The suite's WKT/WKB readers are our own - external
-   `wkt`/`wkb` crates are disallowed because they measure slower.
-10. **Sub-µs synthetic rows are noise** (Rayon dispatch overhead); the
-    trustworthy metrics are the real-world batch numbers and the larger
-    synthetic rows.
 
 ## Integration with the geo ecosystem
 
-geo-repair is built on `geo` types and plugs into the georust ecosystem two
-ways:
-
-- **geo-traits sources** (`geo-traits` feature). The `interop` module runs
-  validation and repair over `geo_traits::GeometryTrait` /
-  `geo_traits::GeometryCollectionTrait`, the trait layer implemented by
-  `geo`, geoarrow, geozero, and `wkb`. Any such source can be validated or
-  repaired in one call (`interop::is_valid_geometry`,
-  `interop::make_valid_geometry`, `interop::make_valid_geometries`, ...)
-  without materializing `geo` types; results come back as `geo::Geometry<f64>`.
-
-- **geo's `Validation` trait** (always available). `GeoRepairValidation(&geometry)`
-  wraps any `&geo::Geometry<f64>` and exposes geo_repair's validator through
-  geo's `Validation` trait (`.is_valid()`, `.check_validation()`,
-  `.validation_errors()`) with geo's `Invalid*` error taxonomy. The orphan
-  rule prevents implementing geo's trait for geo's own types, so the adapter
-  is the bridge. Mapping is best-effort: geo_repair's stricter gates (32-ulp
-  collinear, T-junction) surface through it, and classes geo does not model
-  (ring closure, orientation, duplicates, ...) are omitted from the geo view.
-
-```rust
-use geo::algorithm::validation::Validation;
-use geo_repair::GeoRepairValidation;
-
-let adapter = GeoRepairValidation(&geometry);
-assert!(!adapter.is_valid());
-```
+geo-repair plugs into georust two ways: a `geo-traits` interop module that
+validates or repairs any `GeometryTrait` source (geo, geoarrow, geozero,
+`wkb`) in one call, and a `GeoRepairValidation` adapter that exposes our
+validator through geo's own `Validation` trait. Details and examples:
+[`docs/INTEROP.md`](docs/INTEROP.md).
 
 ## Python bindings
 
 The `geo-repair` PyPI package exposes the full validation and repair
 surface over WKB bytes and WKT text, single geometry and batch
-(including a rayon-backed parallel batch). abi3 wheels (`cp38-abi3`)
-serve Python 3.8+; typing stubs are shipped in the wheel.
-
-```bash
-pip install geo-repair
-```
-
-```python
-import geo_repair
-
-fixed = geo_repair.repair_wkt("POLYGON((0 0, 5 5, 5 0, 0 5, 0 0))")
-assert geo_repair.is_valid_wkt(fixed)
-
-was_valid, errors, fixed_wkb = geo_repair.validate_and_fix_wkb(wkb_bytes)
-results = geo_repair.par_repair_wkb_batch(list_of_wkb_bytes)
-```
+(including a rayon-backed parallel batch). Install with
+`pip install geo-repair`; abi3 wheels (`cp38-abi3`) serve Python 3.8+
+and typing stubs ship in the wheel.
 
 Every function exists for WKB and WKT (`repair_*`, `repair_*_batch`,
 `par_repair_*_batch`, `repair_validate_*`, `is_valid_*`, `validate_*`,
 `validate_and_fix_*`, plus batch forms), with `method`
 (auto/arrange/structure) and `keep_collapsed` parameters. A QGIS
 Processing script (`qgis/qgis_geo_repair.py`) streams features through
-the WKB batch API. Full API reference: `docs/BINDINGS.md`.
+the WKB batch API. Examples and full API reference: `docs/BINDINGS.md`.
 
 ## C API
 
 The `ffi` feature exposes a panic-safe C API over WKB and WKT, single
-geometries and parallel batches:
-
-```bash
-cargo build --release --features ffi
-# output: target/release/geo_repair.{dll,so,dylib} + libgeo_repair.a + include/geo_repair.h
-```
-
-```c
-#include "geo_repair.h"
-
-GeoRepairResult r = geo_repair_make_valid(bowtie_wkb, bowtie_wkb_len);
-if (r.success) { /* r.wkb_data / r.wkb_len = fixed WKB */ }
-geo_repair_free_result(&r);
-```
+geometries and parallel batches. Build with
+`cargo build --release --features ffi`; the output is
+`target/release/geo_repair.{dll,so,dylib}` plus `libgeo_repair.a` and
+the `include/geo_repair.h` header.
 
 Every result carries a `GeoRepairErrorCode` (None/Parse/InvalidInput/
 InvalidGeometry/Encode/Panic); batches report per-item outcomes without
@@ -347,25 +269,31 @@ macOS are attached to every GitHub release. Full API reference:
 | `parallel` | Rayon parallel processing (non-WASM) | yes |
 | `simd` | No-op on stable (kernels compiled unconditionally, LLVM auto-vectorized; hand-written AVX2 measured slower, kept only for the nightly `simd-portable` path) | no |
 | `validate` | OGC validation predicates | yes |
+| `rstar` | R-tree index used by noding (enabled transitively by `arrange`/`structure`/`validate`) | yes (transitive) |
 | `mimalloc` | Use mimalloc global allocator | yes |
 | `std` | Standard library + file I/O. Disable for no_std builds. | yes |
 | `simd-portable` | Portable SIMD via `core::simd` (nightly only) | no |
 | `memmap` | Memory-mapped binary file loading | no |
 | `wasm` | WASM browser fetch (synchronous XHR) | no |
-| `proj` | CRS transformation (placeholder) | no |
+| `proj` | CRS transformation via `geo/proj` (requires native PROJ) | no |
 | `serde` | Geometry serde support (`geo/serde`) | no |
 | `ffi` | C-compatible FFI bindings | no |
 | `geo-traits` | Interop surface over `geo_traits::GeometryTrait` / `GeometryCollectionTrait` (geo, geoarrow, geozero, wkb sources) | no |
 | `python` | Python bindings via PyO3 | no |
 | `io-shp` | Shapefile format backend | no |
 | `io-wkt` | No-op (WKT is built-in, kept for CI compatibility) | no |
+| `io-wkb` | No-op (WKB is built-in, kept for CI compatibility) | no |
+| `io-geojson` | No-op (GeoJSON backend removed, kept for CI compatibility) | no |
 | `io-csv` | CSV format backend | no |
 | `io-gml` | GML/XML format backend | no |
 | `io-gpkg` | GeoPackage format backend (default; gated out on wasm32) | yes |
 | `io-all` | All opt-in backends except gpkg | no |
 | `io-all-native` | All opt-in backends including gpkg | no |
+| `hotpath` | Dev-only: `hotpath::measure` instrumentation on hot paths | no |
+| `hotpath-alloc` | Dev-only: `hotpath` instrumentation plus allocation counters | no |
 | `bench-geos` | GEOS comparison benchmarks (build from source, MSVC, no LTO) | no |
 | `bench-geos-system` | GEOS comparison benchmarks (link against system GEOS, conda-forge MSVC) | no |
+| `bench-gdal-system` | GDAL/OGR I/O comparison benchmark (link against system GDAL) | no |
 
 ## License
 
