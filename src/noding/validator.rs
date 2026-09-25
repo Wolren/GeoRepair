@@ -330,6 +330,7 @@ impl NodingValidator {
     }
 
     /// Validate all non-adjacent edge pairs.
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn validate(&mut self) {
         self.violations.clear();
         let n = self.edges.len();
