@@ -748,6 +748,7 @@ pub(crate) fn enforce_ogc_winding(g: Geometry<f64>) -> (Geometry<f64>, bool) {
 /// exterior, then holes — exactly what the gate pushes. When the slice
 /// length mismatches (defensive; can only happen on a caller bug) the
 /// per-ring search falls back per ring.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(crate) fn enforce_ogc_winding_with_extrema(
     g: Geometry<f64>,
     extrema: Option<&[usize]>,
