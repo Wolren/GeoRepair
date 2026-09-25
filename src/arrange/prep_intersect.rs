@@ -737,7 +737,7 @@ pub(crate) fn has_no_intersections_from_chains(
     // tests vs 5,272 sweep tests, 12x). The sweep uses the SAME per-pair
     // predicate chain as rec_overlaps' leaf (proper crossing + same-ring
     // full predicate), so the verdict is decision-identical.
-    if nc_is_spiky(&chains, tuning)
+    if nc_is_spiky(chains, tuning)
         && let Some(result) = has_no_intersections_edge_sweep(lines)
     {
         return result;
@@ -745,7 +745,7 @@ pub(crate) fn has_no_intersections_from_chains(
     }
 
     // Try fast grid path; fall back to R-tree if any cell gets too dense
-    let grid_result = has_no_intersections_grid(&chains, lines, global_bbox);
+    let grid_result = has_no_intersections_grid(chains, lines, global_bbox);
     if let Some(result) = grid_result {
         return result;
     }
@@ -1044,7 +1044,6 @@ fn has_no_intersections_grid(
     Some(true)
 }
 
-
 #[cfg(test)]
 mod chain_fusion_tests {
     use super::*;
@@ -1106,11 +1105,7 @@ mod chain_fusion_tests {
     }
 
     fn nz(v: f64) -> f64 {
-        if v == 0.0 {
-            0.0
-        } else {
-            v
-        }
+        if v == 0.0 { 0.0 } else { v }
     }
 
     fn nz_bbox(b: (f64, f64, f64, f64)) -> (f64, f64, f64, f64) {
@@ -1236,8 +1231,14 @@ mod chain_fusion_tests {
         let mut pts = vec![geo::Coord { x: 1.0, y: 1.0 }];
         let mut t = 2.0;
         for i in 0..40 {
-            pts.push(geo::Coord { x: t, y: 1.0 + (i as f64) });
-            pts.push(geo::Coord { x: t + 0.5, y: 1.0 + (i as f64) });
+            pts.push(geo::Coord {
+                x: t,
+                y: 1.0 + (i as f64),
+            });
+            pts.push(geo::Coord {
+                x: t + 0.5,
+                y: 1.0 + (i as f64),
+            });
             t += 0.5;
         }
         pts.push(pts[0]);
@@ -1377,13 +1378,15 @@ mod chain_fusion_tests {
                 };
                 let poly = Polygon::new(
                     mk(pts),
-                    hole_pts.map(|h| mk(h)).into_iter().collect(),
+                    hole_pts.map(mk).into_iter().collect(),
                 );
                 let s = assert_same_verdict(&poly);
                 // On a completed walk, lines and chains cover the whole
                 // polygon; on an aborted one they cover the prefix. Both
                 // cases were already checked inside assert_equivalent.
-                prop_assert!(s.chains.last().map_or(true, |c| c.end <= s.lines.len()));
+                prop_assert!(
+                    s.chains.last().is_none_or(|c| c.end <= s.lines.len())
+                );
             }
         }
     }
