@@ -1073,13 +1073,16 @@ mod chain_fusion_tests {
         let mut lines = Vec::new();
         let mut sink = ChainSink::default();
         let mut bbox = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+        let mut sub_ulp = false;
+        let mut min_abs = f64::INFINITY;
+        let mut max_abs = 0.0f64;
         let mut acc = GateAccum {
             lines: Some(&mut lines),
             chains: Some(&mut sink),
             bbox: Some(&mut bbox),
-            sub_ulp: None,
-            min_abs: None,
-            max_abs: None,
+            sub_ulp: Some(&mut sub_ulp),
+            min_abs: Some(&mut min_abs),
+            max_abs: Some(&mut max_abs),
             extremal: None,
         };
         let mut ok = ring_is_plausible(poly.exterior(), &mut acc);

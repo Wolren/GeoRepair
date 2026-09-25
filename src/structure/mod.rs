@@ -168,7 +168,15 @@ pub(crate) fn fix_polygon_owned(
         // path (measured 2026-08-09: the separate poly.lines_iter()
         // collect cost a full pass; the plausible loop already walks
         // every window).
-        let mut lines: Vec<Line<f64>> = Vec::new();
+        let collect_lines = total_verts > tuning.small_ring_lines;
+        // Pre-sized: a mid-size ring pushes one line per window, so Vec::new
+        // pays three or four reallocations over a 10000-vertex ring
+        // (measured 2026-09-25: 5.7 us of growth alone).
+        let mut lines: Vec<Line<f64>> = if collect_lines {
+            Vec::with_capacity(total_verts)
+        } else {
+            Vec::new()
+        };
         // The mid-size branch below sweeps a chain index; when it is the
         // branch we will take, the index is built INSIDE the plausibility
         // walk (one pass instead of walk + build_mono_chains). The other
@@ -178,12 +186,14 @@ pub(crate) fn fix_polygon_owned(
             total_verts > tuning.small_ring_lines && total_verts <= tuning.fast_path_max_verts;
         let mut sink = crate::arrange::prep_intersect::ChainSink::default();
         let mut acc = crate::arrange::GateAccum {
-            lines: (total_verts > tuning.small_ring_lines).then_some(&mut lines),
+            lines: collect_lines.then_some(&mut lines),
             chains: fused_chains.then_some(&mut sink),
-            // With chains fused, their global envelope is the polygon's
-            // bbox (same min/max over the same vertices), so the walk skips
-            // this accumulator entirely; the degeneracy check below reads
-            // the fused envelope instead.
+            // Fused, the chain envelope IS the polygon bbox (same vertices,
+            // same min/max), so the walk skips that accumulator and the
+            // degeneracy check below reads the fused envelope instead. The
+            // sub-ULP and |coord| duties stay here: folding them into
+            // push_line measured slower (interleaved A/B 2026-09-25: 3/3
+            // rounds, 260.1 vs 247.1 us median at 10000v).
             bbox: (!fused_chains).then_some(&mut bbox),
             sub_ulp: Some(&mut sub_ulp),
             min_abs: Some(min_abs),
