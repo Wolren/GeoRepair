@@ -99,6 +99,7 @@ pub(crate) fn single_pass_fix_tuned(
 /// cut edges, XOR into the accumulated area, and remove the built boundary
 /// from the cut edges, until nothing remains. Returns the odd-winding faces
 /// (even-odd rule), exactly like GEOS.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn make_valid_poly_symdiff(cut_edges: &[Line<f64>]) -> Vec<Polygon<f64>> {
     // build_area snaps vertices to the SNAP_SCALE grid; snap the input edges
     // the same way so boundary removal matches exactly.
@@ -116,6 +117,12 @@ pub fn make_valid_poly_symdiff(cut_edges: &[Line<f64>]) -> Vec<Polygon<f64>> {
         guard += 1;
         if guard > 64 {
             warn!("make_valid_poly_symdiff: iteration guard exceeded");
+            // Hitting this guard means the loop is cycling rather than
+            // converging, and the answer would then depend on the guard's
+            // parity. Tests fail loudly instead of shipping that.
+            #[cfg(test)]
+            panic!("make_valid_poly_symdiff hit the iteration guard (non-convergence)");
+            #[cfg(not(test))]
             break;
         }
         let Some(new_area) = crate::structure::build_area::build_area(&remaining) else {
@@ -167,12 +174,21 @@ pub fn make_valid_poly_symdiff(cut_edges: &[Line<f64>]) -> Vec<Polygon<f64>> {
             use geo::Area;
             let t: f64 = area.iter().map(|p| p.unsigned_area()).sum();
             eprintln!("   area after XOR = {t:.4} ({} polys)", area.len());
+            let matched = remaining
+                .iter()
+                .filter(|l| seg_counts.contains_key(&segment_key(snap(l.start), snap(l.end))))
+                .count();
+            eprintln!(
+                "   diag: remaining={} matched_by_key={}",
+                remaining.len(),
+                matched
+            );
         }
         remaining.retain(|l| {
             let key = segment_key(snap(l.start), snap(l.end));
-            // Keep edges NOT on the built boundary: count==0 (unused) or
-            // count==2 (internal edge shared by two faces → next iter).
-            seg_counts.get(&key).copied().unwrap_or(0) != 1
+            // EXPERIMENT: consume every edge lying on the built boundary
+            // (count >= 1), including count==2 internal edges.
+            seg_counts.get(&key).copied().unwrap_or(0) == 0
         });
     }
     area
@@ -258,4 +274,70 @@ fn symdiff_polygons(a: &[Polygon<f64>], b: &[Polygon<f64>]) -> Vec<Polygon<f64>>
 
 pub fn edges_from_coords(coords: &[Coord<f64>]) -> Vec<Line<f64>> {
     coords.windows(2).map(|w| Line::new(w[0], w[1])).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{MakeValid, MakeValidConfig, PolyMethod};
+    use geo::{Area, LineString, Polygon};
+
+    /// Deterministic torus-wrapped random walk, the bench's `spaghetti`
+    /// rows. Verbatim replication of benches/bench.rs::make_spaghetti_ring.
+    fn spaghetti_ring(n: usize) -> Polygon<f64> {
+        let span = (n as f64).sqrt().ceil() as i64;
+        let mut x = 0i64;
+        let mut y = 0i64;
+        let mut seed = 0x9E3779B97F4A7C15u64;
+        let mut next = move || {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (seed >> 33) as u32
+        };
+        let mut coords = Vec::with_capacity(n + 1);
+        coords.push(Coord {
+            x: x as f64,
+            y: y as f64,
+        });
+        for _ in 1..n {
+            match next() % 4 {
+                0 => x += 1,
+                1 => x -= 1,
+                2 => y += 1,
+                _ => y -= 1,
+            }
+            x = x.rem_euclid(span);
+            y = y.rem_euclid(span);
+            coords.push(Coord {
+                x: x as f64,
+                y: y as f64,
+            });
+        }
+        coords.push(coords[0]);
+        Polygon::new(LineString::new(coords), Vec::new())
+    }
+
+    /// The symdiff loop used to cycle on this class: the same faces were
+    /// rebuilt every pass, so it ran into the 64-iteration guard and the
+    /// returned area turned on that constant's parity (n=500 gave 184.681818
+    /// at guard 64 and 193.681818 at guard 65). Counting count==2 internal
+    /// edges as "still to process" kept them alive forever; consuming every
+    /// edge on the built boundary converges in one or two passes.
+    #[test]
+    fn symdiff_converges_on_self_crossing_walk() {
+        let cfg = MakeValidConfig {
+            poly_method: PolyMethod::Structure,
+            ..Default::default()
+        };
+        for (n, expected) in [(500usize, 216.681818f64), (2000, 279.041209)] {
+            let out = spaghetti_ring(n).make_valid_with_config(&cfg);
+            assert!(crate::is_valid(&out), "n={n}: repair must stay valid");
+            let area = out.unsigned_area();
+            assert!(
+                (area - expected).abs() < 1e-4,
+                "n={n}: area {area} drifted from the pinned {expected}"
+            );
+        }
+    }
 }
