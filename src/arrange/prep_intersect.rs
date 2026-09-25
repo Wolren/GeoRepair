@@ -707,6 +707,7 @@ pub(crate) fn has_no_intersections_nan_ok_tuned(
 /// over the collected lines - pays no extra traversal. The verdict must be
 /// identical whichever way `chains` was produced (enforced by the
 /// `chain_fusion_equivalence` unit tests).
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(crate) fn has_no_intersections_from_chains(
     lines: &[Line<f64>],
     chains: &[MonoChain],
