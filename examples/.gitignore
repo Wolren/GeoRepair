@@ -1,0 +1,13 @@
+# Scratch probes. Each one says "Not committed" in its own header comment.
+#
+# This is an explicit filename list, not a *_probe.rs pattern: the real
+# examples per_poly_probe.rs and sp_diag.rs are tracked and would be caught
+# by a pattern.
+bowtie_probe.rs
+crash_repro.rs
+floor_probe.rs
+gate_probe.rs
+gate_time.rs
+guard_check.rs
+selfint_probe.rs
+spag_probe.rs

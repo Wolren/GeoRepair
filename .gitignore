@@ -19,6 +19,12 @@ fuzz/artifacts/
 fuzz/coverage/
 /dist/
 
+# Scratch run logs (errA.log, gate dumps, ...).
+*.log
+# proptest regression seeds are committed on purpose - see
+# tests/fuzz.proptest-regressions and proptest-regressions/ - so do NOT
+# ignore them here.
+
 # Agent/instruction files must never be tracked
 AGENTS.md
 CLAUDE.md

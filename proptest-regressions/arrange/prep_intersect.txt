@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc f065cfa0de8aea1d8fb4589c53e3d09fb7fc952d378ffb3542dea26527aeef94 # shrinks to pts = [(0.0, 0.0), (0.0, -7.4639841784556), (0.0, 362.0709769302464)], hole_pts = Some([(0.0, 0.0), (0.0, 202.18541428138147), (0.0, 0.0)])
