@@ -194,14 +194,19 @@ panic = "unwind"
 [profile.bench]
 lto = "fat"
 codegen-units = 1
-# Also "unwind": modern cargo forces unwind on bench-harness units and
-# would still honor abort for other units built under this profile, so
-# the lib compiled TWICE with clashing output filenames (cargo issue
-# 6313) and the two same-stem artifacts raced: depending on which write
-# landed last, CI saw type errors or undefined symbols at link
-# (three bench-job reds on identical trees, 2026-09-22). The harness
-# unit was never abort, so measured numbers never saw the setting.
-panic = "unwind"
+# `panic` must NOT be set here: cargo 1.98+ ignores it for the bench
+# profile and warns `panic setting is ignored for bench profile` on every
+# invocation. The default is already `unwind`, so removing it is a no-op
+# for behavior. Historical context, kept because the warning looks like it
+# is asking to restore the setting - it is not: modern cargo forces
+# unwind on bench-harness units and would still honor abort for other
+# units built under this profile, so the lib compiled TWICE with clashing
+# output filenames (cargo issue 6313) and the two same-stem artifacts
+# raced: depending on which write landed last, CI saw type errors or
+# undefined symbols at link (three bench-job reds on identical trees,
+# 2026-09-22). The harness unit was never abort, so measured numbers
+# never saw the setting. If cargo ever supports panic for this profile
+# again, set it back to "unwind" for exactly that reason.
 
 [package.metadata.cargo-semver-checks.lints]
 # Deliberate breaking changes on the 0.x line, documented here:

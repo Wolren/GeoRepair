@@ -743,6 +743,27 @@ fn test_geometrycollection_all_nested_empty() {
     assert_empty(&gc.make_valid());
 }
 
+#[test]
+fn test_geometrycollection_over_deep_nesting_is_repaired() {
+    // The validator accepts GeometryCollection nesting only up to
+    // MAX_COLLECTION_DEPTH (depths 0..=100); one level deeper and the input
+    // is invalid with ExcessiveNesting. Repair used to rebuild the same tree
+    // verbatim, so make_valid handed back geometry that still failed
+    // validate() — the "invalid output in mode Auto" assertion that turned
+    // fuzz-nightly red (runs 35973600308 / 36113501091, 2026-09-24/25).
+    let mut gc = GeometryCollection(vec![Geometry::Point(Point::new(1.0, 2.0))]);
+    for _ in 0..200 {
+        gc = GeometryCollection(vec![Geometry::GeometryCollection(gc)]);
+    }
+    assert!(!gc.validate().valid, "200-deep collection must be invalid");
+
+    let out = gc.make_valid();
+    assert_valid(&out);
+
+    // Repair has to be idempotent once it has collapsed below the limit.
+    assert_valid(&out.make_valid());
+}
+
 // =========================================================================
 // Polygon edge cases
 // =========================================================================
