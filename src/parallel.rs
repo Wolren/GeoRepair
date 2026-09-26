@@ -223,11 +223,14 @@ pub fn par_fix_collection<T: GeoFloat + Send + Sync>(
     gc: &GeometryCollection<T>,
     config: &MakeValidConfig,
 ) -> Geometry<T> {
-    let fixed =
+    let repaired =
         gc.0.par_iter()
             .map(|g| g.make_valid_with_config(config))
-            .filter(|g| !matches!(g, Geometry::GeometryCollection(gc) if gc.0.is_empty()))
             .collect::<Vec<_>>();
+    let mut fixed = Vec::with_capacity(repaired.len());
+    for g in repaired {
+        crate::make_valid::push_repaired_member(&mut fixed, g, 1);
+    }
     if fixed.is_empty() {
         Geometry::GeometryCollection(GeometryCollection(Vec::new()))
     } else {
@@ -235,14 +238,17 @@ pub fn par_fix_collection<T: GeoFloat + Send + Sync>(
     }
 }
 
-/// Repair a GeometryCollection in parallel — each sub-geometry is processed on a separate rayon thread.
+/// Repair a GeometryCollection in parallel - each sub-geometry is processed on a separate rayon thread.
 #[cfg(any(feature = "arrange", feature = "structure"))]
 pub fn par_fix_collection(gc: &GeometryCollection<f64>, config: &MakeValidConfig) -> Geometry<f64> {
-    let fixed =
+    let repaired =
         gc.0.par_iter()
             .map(|g| g.make_valid_with_config(config))
-            .filter(|g| !matches!(g, Geometry::GeometryCollection(gc) if gc.0.is_empty()))
             .collect::<Vec<_>>();
+    let mut fixed = Vec::with_capacity(repaired.len());
+    for g in repaired {
+        crate::make_valid::push_repaired_member(&mut fixed, g, 1);
+    }
     if fixed.is_empty() {
         Geometry::GeometryCollection(GeometryCollection(Vec::new()))
     } else {

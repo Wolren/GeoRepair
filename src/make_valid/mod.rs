@@ -26,7 +26,7 @@ use crate::validation::edges::{edges_intersect_general, edges_vertex_on_edge};
 use crate::validation::impls::{
     check_line_components_intersect, check_linestring_self_intersection, segments_collinear_overlap,
 };
-use crate::validation::{GeoValidation, ValidationResult};
+use crate::validation::{GeoValidation, MAX_COLLECTION_DEPTH, ValidationResult};
 use alloc::vec::Vec;
 use log::warn;
 
@@ -523,17 +523,57 @@ pub use polygon::make_valid_owned;
 pub(crate) use polygon::snap_cannot_represent;
 pub use strip::strip_degenerate_test;
 
+/// Append one repaired collection member to `out`, dropping members that
+/// repaired down to an empty collection and folding wrapper levels that would
+/// push the nesting past [`MAX_COLLECTION_DEPTH`].
+///
+/// `member_depth` is the absolute nesting depth a member collection would
+/// occupy, i.e. 1 for a direct child of the outermost collection. A member
+/// that is itself a `GeometryCollection` is re-wrapped while
+/// `member_depth <= MAX_COLLECTION_DEPTH`; deeper than that its members are
+/// spliced straight into the parent. An OGC `GeometryCollection` is an
+/// unordered bag of heterogeneous geometries, so the wrapper carries no
+/// semantics of its own and folding it away preserves the content exactly.
+///
+/// Without this, `make_valid` on an over-deep input rebuilt the same
+/// over-deep tree and returned geometry that still fails `validate()` - the
+/// `invalid output in mode Auto` assertion the nightly `wkb_repair` fuzz
+/// target tripped on (runs 35973600308 and 36113501091, 2026-09-24/25).
+pub(crate) fn push_repaired_member<T: CoordNum>(
+    out: &mut Vec<Geometry<T>>,
+    member: Geometry<T>,
+    member_depth: usize,
+) {
+    match member {
+        Geometry::GeometryCollection(gc) => {
+            if gc.0.is_empty() {
+                return;
+            }
+            if member_depth > MAX_COLLECTION_DEPTH {
+                for g in gc.0 {
+                    push_repaired_member(out, g, member_depth + 1);
+                }
+            } else {
+                let mut inner = Vec::new();
+                for g in gc.0 {
+                    push_repaired_member(&mut inner, g, member_depth + 1);
+                }
+                out.push(Geometry::GeometryCollection(GeometryCollection(inner)));
+            }
+        }
+        other => out.push(other),
+    }
+}
+
 #[cfg(any(feature = "arrange", feature = "structure"))]
 impl MakeValid for GeometryCollection<f64> {
     type Scalar = f64;
 
     fn make_valid_with_config(&self, config: &MakeValidConfig) -> Geometry<f64> {
-        let fixed: Vec<Geometry<f64>> = self
-            .0
-            .iter()
-            .map(|g| g.make_valid_with_config(config))
-            .filter(|g| !matches!(g, Geometry::GeometryCollection(gc) if gc.0.is_empty()))
-            .collect();
+        let mut fixed: Vec<Geometry<f64>> = Vec::with_capacity(self.0.len());
+        for g in &self.0 {
+            push_repaired_member(&mut fixed, g.make_valid_with_config(config), 1);
+        }
         if fixed.is_empty() {
             empty_geom::<f64>()
         } else {
@@ -552,12 +592,10 @@ impl<T: NodingFloat> MakeValid for GeometryCollection<T> {
     type Scalar = T;
 
     fn make_valid_with_config(&self, config: &MakeValidConfig) -> Geometry<T> {
-        let fixed: Vec<Geometry<T>> = self
-            .0
-            .iter()
-            .map(|g| g.make_valid_with_config(config))
-            .filter(|g| !matches!(g, Geometry::GeometryCollection(gc) if gc.0.is_empty()))
-            .collect();
+        let mut fixed: Vec<Geometry<T>> = Vec::with_capacity(self.0.len());
+        for g in &self.0 {
+            push_repaired_member(&mut fixed, g.make_valid_with_config(config), 1);
+        }
         if fixed.is_empty() {
             empty_geom()
         } else {

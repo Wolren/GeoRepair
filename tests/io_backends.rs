@@ -2,12 +2,31 @@
 //! (CSV, GeoPackage, Shapefile, GML). Each module is feature-gated to match
 //! the backend it exercises.
 
-use geo::{Coord, Geometry, LineString, Point, Polygon};
+// Each helper and import is gated to the backends that use it: with no
+// io-* feature enabled the whole file compiles to nothing, and ungated
+// items showed up as `unused import` / `never used` warnings under
+// `cargo check --tests` with a reduced feature set.
+#[cfg(feature = "io-gml")]
+use geo::Coord;
+#[cfg(any(
+    feature = "io-csv",
+    feature = "io-gpkg",
+    feature = "io-shp",
+    feature = "io-gml"
+))]
+use geo::{Geometry, LineString, Point, Polygon};
 
+#[cfg(feature = "io-csv")]
 fn sample_point() -> Geometry<f64> {
     Geometry::Point(Point::new(1.5, 2.5))
 }
 
+#[cfg(any(
+    feature = "io-csv",
+    feature = "io-gpkg",
+    feature = "io-shp",
+    feature = "io-gml"
+))]
 fn sample_polygon() -> Geometry<f64> {
     Geometry::Polygon(Polygon::new(
         LineString::from(vec![
