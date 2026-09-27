@@ -48,15 +48,16 @@ impl MakeValid for MultiPolygon<f64> {
             return enforce_ogc_winding(Geometry::MultiPolygon(mp)).0;
         }
         // Even-parent filter: prevent NestedHoles from unary_union by removing
-        // shells that are fully contained inside larger shells.
+        // shells that are fully contained inside larger shells. NOTE: no early
+        // return for a single survivor - the merged result still has to pass
+        // the validity gate below (a converted hole can cross a hole the parent
+        // already carried; fuzz-nightly wkt_repair seeds 3111ecaf / edf6e65b).
+        // The pre-merge shells are kept for that gate: BuildArea over the raw
+        // component edges is the fallback that actually rebuilds the faces.
+        let orig_shells = mp.0.clone();
         let filtered = crate::structure::merge::merge_shells(mp.0);
-        if filtered.0.len() <= 1 {
-            return if filtered.0.is_empty() {
-                empty_geom::<f64>()
-            } else {
-                // Keep MultiPolygon type for multi input
-                enforce_ogc_winding(Geometry::MultiPolygon(filtered)).0
-            };
+        if filtered.0.is_empty() {
+            return empty_geom::<f64>();
         }
         let mp = filtered;
         // Check if shells have overlapping bboxes - if not, unary_union is overkill
@@ -99,6 +100,7 @@ impl MakeValid for MultiPolygon<f64> {
                 drop_nested_components(unioned)
             }
         };
+        let result = validity_gate(result, orig_shells);
         // MultiPolygon input → prefer MultiPolygon output type (GEOS/JTS convention
         // for multi-component repair, even when union collapses to one shell).
         match result {
@@ -110,6 +112,84 @@ impl MakeValid for MultiPolygon<f64> {
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     fn par_make_valid_with_config(&self, config: &MakeValidConfig) -> Geometry<f64> {
         crate::parallel::par_fix_multi_polygon(self, config)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Final validity gate
+// ---------------------------------------------------------------------------
+
+/// Final validity gate for the MultiPolygon pipeline.
+///
+/// `merge_shells` converts a fully-contained component into a hole of its
+/// parent, but it only fingerprints rings the parent ALREADY had - it never
+/// checks the new hole against them. When a repaired component crosses a hole
+/// that came from its own repair (sliver vs. quad, fuzz-nightly `wkt_repair`
+/// seeds `3111ecaf` / `edf6e65b`) the merge produces a polygon whose interiors
+/// intersect, which our validator rejects as `DisconnectedInteriorRing`.
+/// The single-survivor shortcut used to return that without any gate at all.
+///
+/// `orig` is the pre-merge component list. Escalation, in order: BuildArea
+/// face decomposition over the crossing merged edges, BuildArea over the raw
+/// components, then the components that validate on their own (degrading to
+/// the largest single one, then to empty). Valid-but-thin beats invalid: the
+/// repair contract is `out.validate().valid`.
+fn validity_gate(g: Geometry<f64>, orig: Vec<Polygon<f64>>) -> Geometry<f64> {
+    use geo::Area;
+    if is_valid_with_geo(&g) {
+        return g;
+    }
+    let mp = match g {
+        Geometry::MultiPolygon(mp) => mp,
+        Geometry::Polygon(p) => MultiPolygon::new(vec![p]),
+        other => return other,
+    };
+    #[cfg(feature = "arrange")]
+    {
+        for cand in [mp.clone(), MultiPolygon::new(orig.clone())] {
+            if let Some(built) = polygonizer_fallback(&cand).filter(is_valid_with_geo) {
+                return built;
+            }
+        }
+        for cand in [mp.clone(), MultiPolygon::new(orig.clone())] {
+            if let Some(kept) = keep_valid_components(cand).filter(is_valid_with_geo) {
+                return kept;
+            }
+        }
+    }
+    // Nothing rebuilt cleanly: ship the largest component that validates on
+    // its own rather than an invalid whole - or empty, if none does.
+    warn!("MultiPolygon: merged output invalid, degrading to the largest valid component");
+    let mut best: Option<Polygon<f64>> = None;
+    let mut best_area = 0.0f64;
+    for p in orig.into_iter().chain(mp.0) {
+        if is_valid_with_geo(&Geometry::Polygon(p.clone())) {
+            let a = p.unsigned_area();
+            if a > best_area {
+                best_area = a;
+                best = Some(p);
+            }
+        }
+    }
+    match best {
+        Some(p) => Geometry::Polygon(p),
+        None => empty_geom::<f64>(),
+    }
+}
+
+/// Drop components that are invalid on their own; `None` when nothing usable
+/// is left, so the caller can try the next candidate instead of returning
+/// empty.
+#[cfg(feature = "arrange")]
+fn keep_valid_components(mp: MultiPolygon<f64>) -> Option<Geometry<f64>> {
+    let kept: Vec<Polygon<f64>> =
+        mp.0.into_iter()
+            .filter(|p| is_valid_with_geo(&Geometry::Polygon(p.clone())))
+            .collect();
+    match kept.len() {
+        0 => None,
+        1 => Some(Geometry::Polygon(kept.into_iter().next().expect("len==1"))),
+        _ => Some(Geometry::MultiPolygon(MultiPolygon::new(kept))),
     }
 }
 
