@@ -40,6 +40,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Merged MultiPolygon output could ship crossings: `merge_shells`
+  converts a fully-contained component into a hole of its parent but only
+  fingerprints rings the parent ALREADY had, so on `wkt_repair` seeds
+  3111ecaf / edf6e65b a repaired sliver crossed the quad that had just
+  been converted into a hole of the same shell - and the
+  `filtered.0.len() <= 1` shortcut returned that single merged polygon
+  with no validity check at all, so Auto and Structure both shipped
+  output our own validator rejects with `DisconnectedInteriorRing`. The
+  early return is gone: every merged result now flows through
+  `validity_gate`, which escalates only when the merged geometry is
+  invalid (BuildArea face decomposition over the merged edges, then over
+  the pre-merge component shells, then the components that validate on
+  their own, then the largest single valid component). On both seeds the
+  second rung already recovers a valid MULTIPOLYGON with real area, so
+  this is a correctness gate, not a data-dropping last resort. Both seeds
+  are committed as corpus regressions; `corpus_replay` covers 64 inputs.
+- Fuzz-nightly red for seven consecutive days (2026-09-20..26, across
+  three SHAs), two independent defect classes. Over-deep collections:
+  the validator accepts depths 0..=100 and `make_valid` reproduced a
+  190-deep GeometryCollection verbatim, so repair shipped geometry that
+  still failed `validate()` ("invalid output in mode Auto"). Members past
+  `MAX_COLLECTION_DEPTH` (now one shared constant instead of a literal
+  100) are spliced into their parent - an OGC collection is an unordered
+  bag, so folding a wrapper level away loses nothing - and the pass is
+  idempotent. Escaping assertion: `merge_shells`' area-preservation
+  tie-break asked geo's own `Validation::is_valid`, whose relate engine
+  carries `debug_assert!("topology position conflict with coordinate")`
+  precisely when geo believes the input is valid; cargo-fuzz builds with
+  `-Cdebug-assertions`, so it escaped as a fuzz crash ("make_valid
+  panicked on WKB in mode Auto"). The probe only breaks a tie, so it is
+  now `catch_unwind`-ed and an unanswered question counts as "not valid",
+  leaving the union standing. The seven downloaded crash inputs are
+  committed to the corpus; `corpus_replay` covers 62.
+- Symdiff difference loop: converge instead of running into its guard.
+  `make_valid_poly_symdiff` counted `count == 2` internal edges as
+  "still to process" and kept them in `remaining` forever, so on the
+  bench's spaghetti rings the same five faces were rebuilt on every
+  pass, the accumulated area flipped between two values, and control
+  fell out of the 64-iteration guard: the answer depended on an
+  arbitrary constant (n=500 returned 184.681818 at guard 64 and
+  193.681818 at guard 65, with 6 vs 10 rings). Counting every edge on
+  the built boundary as consumed matches what the difference step is
+  for, and it converges: one or two BuildArea passes instead of 64 at
+  every size tested (50-2000 verts), which is where the performance had
+  been going - `spaghetti 500v` 4576 -> 1514 us and `spaghetti 2000v`
+  34371 -> 9783 us. The guard now panics in test builds so
+  non-convergence cannot hide again, and a pinned test runs the
+  self-crossing walk at 500 and 2000 verts asserting validity plus the
+  converged area. Area parity against GEOS on this class is open and
+  NOT claimed here (ours 216.681818 vs GEOS 144.244318 at n=500).
 - Fuzz-nightly contract breach (runs 35430371542 and 35703833356,
   2026-09-19 and 2026-09-22): repair no longer collapses polygons our own
   validator accepts. The sub-ULP gate rejects some valid thin rings as
@@ -103,6 +153,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   path per `crossing_only_bowtie_parity`). The screen tests x only: the
   sweep is x-driven, and full-height bowtie diagonals must stay on the
   fast path.
+
+- Fast-path gate sweep: the mid-size path walked the rings twice - once
+  to validate and collect the lines, then again inside `build_mono_chains`
+  over the materialized vector. `ChainSink` now rides along in the same
+  walk, `build_mono_chains` is split so a prebuilt index can be handed
+  to the sweep (`has_no_intersections_from_chains`, verdict identical
+  either way), and the fused path drops the bbox accumulator (the chain
+  envelope is the bbox). Ring boundary handling is replicated exactly:
+  the reference folds the next ring's first line into the previous
+  ring's last chain and ring eps, so the flush is deferred to that line.
+  `valid polygon` (parallel): 10000v 51.8 -> 39.2 us (2.63x -> 1.99x vs
+  GEOS), 1000v 5.39 -> 4.32 us vs 2.42. Covered by `chain_fusion_tests`:
+  8 fixtures plus a 256-case proptest asserting the fused index equals
+  `build_mono_chains` and that the sweep verdict is source-blind.
+- Fast-path gate line buffer pre-sized: `fast_path_check` collected one
+  `Line` per window into a `Vec::new`, so a 10000-vertex ring paid three
+  or four reallocations and recopies before the sweep even started; it
+  now knows `total_verts` up front and allocates once. Interleaved A/B
+  on the same fixture (10000v full path, alternating binary order, three
+  rounds): 254.8 -> 235.7 us median. The companion fold of the sub-ULP
+  flag and `|coord|` extrema into `ChainSink::push_line` measured
+  slower (254.8 -> 260.1 us, 3/3 rounds) and was reverted: moving
+  accumulator work into a sink method behind an `Option` deref costs
+  more than the branches it removes.
 
 ## [0.14.5] - 2026-09-18
 
