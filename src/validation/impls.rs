@@ -125,7 +125,7 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
         return false;
     }
     let closed = coords[0] == coords[n];
-    let scale = {
+    let (raw_span, scale) = {
         let mut min_x = f64::MAX;
         let mut max_x = f64::MIN;
         let mut min_y = f64::MAX;
@@ -136,8 +136,31 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
             min_y = min_y.min(c.y);
             max_y = max_y.max(c.y);
         }
-        (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0)
+        let sp = (max_x - min_x).abs().max((max_y - min_y).abs());
+        (sp, sp.max(1.0))
     };
+    // Catastrophically small geometry (fuzz class: a 7-point line spanning
+    // 6e-275): the absolute 1e-12 eps floor dwarfs the whole line and every
+    // O(L^2) orient product underflows to 0, so both predicates collapse and
+    // an exactly-simple line falsely reports NotSimple (wkb seed 146242f1).
+    // Scale to unit span by an exact power of two - up-scaling never rounds
+    // (subnormal inputs map to normal) - which preserves orientation signs
+    // and collinearity bit-for-bit, then re-run. The scaled span lands in
+    // [0.5, 4), so the recursion cannot re-trigger.
+    if raw_span > 0.0 && raw_span < 1e-100 {
+        let mut k = (-(raw_span.log2())).ceil() as i32;
+        let mut scaled = coords.to_vec();
+        while k > 0 {
+            let step = k.min(511);
+            let f = 2f64.powi(step);
+            for c in scaled.iter_mut() {
+                c.x *= f;
+                c.y *= f;
+            }
+            k -= step;
+        }
+        return check_linestring_self_intersection(&scaled);
+    }
     let eps = 1e-12 * scale;
 
     // Adjacent pairs (share a vertex): allowed to touch only at the shared
