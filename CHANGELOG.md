@@ -40,6 +40,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fuzz-nightly red on every run since the workflow's first night
+  (2026-09-27..10-04, runs 36307822577..37191916307): six new crash
+  inputs, four independent root causes. DD normalization:
+  `segment_intersection_dd` destructured `normalize_four` but read only the
+  first point from the normalized result - the other seven coordinates
+  stayed raw - so every "normalized" intersection mixed scales and the
+  de-normalized node points came out at raw^2 magnitude (1e167 points for a
+  5.3e83 line). The crossing-only split guards then dropped those splits as
+  out-of-range and the noder shipped the non-simple input unchanged: debug
+  builds hit `crossing-only chains must be simple` (wkb seed 17790c39),
+  release shipped `NotSimple` output. Noder contract: `run()` accepted
+  `crossing_only`'s chains without re-checking them, and `run_full`
+  returned the input unvalidated when clustering left zero pieces, so a
+  pathological input came back as its own repair (wkb seed 146242f1: a
+  line spanning 1e-231 where the absolute 1e-12 eps floor swallows every
+  point and no split survives). Both paths now refuse: `run()` validates
+  the crossing-only chains and falls back to the full pipeline,
+  `run_full` returns `None` when the pieces are empty but the input still
+  fails the validator, and the caller's greedy `simple_subline` fallback
+  therefore actually runs; the validator also up-scales subnormal spans
+  (<1e-100) by an exact power of two before testing so orientation
+  products cannot underflow to zero. Single-shell gate: a MultiPolygon
+  that reduced to one surviving component skipped `validity_gate`
+  entirely (wkb seed 1da58cf8 shipped a self-intersecting POLYGON that
+  exact arithmetic confirms crosses); the survivor is now
+  winding-normalized and gated like every other merge result while still
+  returning POLYGON, which the GEOS fixtures expect. Panic containment:
+  three paths still able to carry a foreign `debug_assert` to the harness
+  are wrapped now - the NaN-filtered polygon's `make_valid_impl` call
+  (geo relate's "topology position conflict with coordinate", make_valid
+  seed 0559eed8), the whole MultiPolygon union/gate pipeline, and the
+  single-survivor gate (i_overlay's `extract_ogc` `is_fill_top`
+  assertion inside `unary_union`, wkt seeds aa4bb7d2 / 455657db). All
+  three degrade to an empty - valid - geometry behind a `warn!`,
+  mirroring the existing main-path containment; a valid input returns at
+  the idempotency fast path before any of these calls, so
+  repair-of-valid-input is unaffected. All six inputs are committed to
+  the corpus; `corpus_replay` covers 70 and `regression_fuzz_contract`
+  carries the raw-f64 make_valid seed.
 - Merged MultiPolygon output could ship crossings: `merge_shells`
   converts a fully-contained component into a hole of its parent but only
   fingerprints rings the parent ALREADY had, so on `wkt_repair` seeds

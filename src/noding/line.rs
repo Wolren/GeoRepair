@@ -237,7 +237,19 @@ impl<'a> LineNoder<'a> {
             return None;
         }
         if let Some(chains) = self.crossing_only() {
-            return Some(chains);
+            // crossing_only's own re-check is debug-only ("chains simple by
+            // construction"); enforce it on every build so a bad chain set
+            // falls through to the general path instead of shipping a
+            // non-simple output that fails the caller's valid-or-empty
+            // contract (fuzz wkb seed 17790c39 shipped NotSimple in release
+            // while debug hit the assert).
+            if chains
+                .iter()
+                .all(|c| !crate::validation::impls::check_linestring_self_intersection(c))
+            {
+                return Some(chains);
+            }
+            self.crossing_bail();
         }
         self.run_full()
     }
@@ -701,6 +713,15 @@ impl<'a> LineNoder<'a> {
             }
         }
         if chains.is_empty() {
+            // No pieces survived the cluster/dedup passes (an absolute eps
+            // floor can swallow a subnormal-scale input whole). The noder's
+            // contract is that its output validates, so an input that fails
+            // the validator must not be handed back as-is: return None and
+            // let the caller fall back to the greedy filter (or empty)
+            // rather than ship an output the harness rejects.
+            if crate::validation::impls::check_linestring_self_intersection(self.coords) {
+                return None;
+            }
             return Some(vec![self.coords.to_vec()]);
         }
         Some(chains)

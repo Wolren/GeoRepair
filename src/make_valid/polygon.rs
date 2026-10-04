@@ -245,6 +245,21 @@ impl MakeValid for Polygon<f64> {
             Err(g) => return g,
         };
         let cleaned = Polygon::new(ext_ring, int_clean);
+        // Panic containment (fuzz make_valid seed 0559eed8): geo's relate
+        // debug_assert ("topology position conflict with coordinate") fires
+        // inside make_valid_impl on subnormal/huge inputs in debug builds
+        // and escaped here - this call was never wrapped, unlike the main
+        // path above. A foreign panic degrades to empty; preserve_valid_input
+        // style contracts are recovered downstream by maybe_collapse_keep.
+        #[cfg(feature = "std")]
+        let (repaired, _) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            make_valid_impl(self, &cleaned, config, first_valid)
+        }))
+        .unwrap_or_else(|_| {
+            warn!("make_valid panicked on NaN-cleaned polygon; returning empty geometry");
+            (empty_geom::<f64>(), false)
+        });
+        #[cfg(not(feature = "std"))]
         let (repaired, _) = make_valid_impl(self, &cleaned, config, first_valid);
         // The cleaned polygon is not gate-certified (it went through the
         // NaN-filter path), so strip always runs here.

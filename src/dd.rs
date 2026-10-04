@@ -274,20 +274,20 @@ pub(crate) fn segment_intersection_dd(
         || c.y.abs() > large_threshold
         || d.x.abs() > large_threshold
         || d.y.abs() > large_threshold;
-    let (na, _nb, _nc, _nd, scale, origin) = if needs_norm {
+    let (na, nb, nc, nd, scale, origin) = if needs_norm {
         normalize_four(a, b, c, d)
     } else {
         (a, b, c, d, 1.0, Coord { x: 0.0, y: 0.0 })
     };
 
     let ax = DD::from_f64(na.x);
-    let ay = DD::from_f64(a.y);
-    let bx = DD::from_f64(b.x);
-    let by = DD::from_f64(b.y);
-    let cx = DD::from_f64(c.x);
-    let cy = DD::from_f64(c.y);
-    let dx = DD::from_f64(d.x);
-    let dy = DD::from_f64(d.y);
+    let ay = DD::from_f64(na.y);
+    let bx = DD::from_f64(nb.x);
+    let by = DD::from_f64(nb.y);
+    let cx = DD::from_f64(nc.x);
+    let cy = DD::from_f64(nc.y);
+    let dx = DD::from_f64(nd.x);
+    let dy = DD::from_f64(nd.y);
 
     // Direction vectors
     let abx = bx.sub(ax);

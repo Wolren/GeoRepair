@@ -126,3 +126,14 @@ fn fuzz_make_valid_retrace_ring_output_valid() {
     let poly = poly_from_seed("make_valid", "regression_auto_retrace_ring.bin");
     assert_all_modes_valid(&poly, "run 35578735657 seed");
 }
+
+/// fuzz-nightly 2026-09-30 (run 36695466963): Deep - make_valid aborted with
+/// `make_valid panicked on mode Auto` while geo's relate
+/// `topology position conflict with coordinate` assertion printed right before
+/// it — i.e. an uncaught panic escaped one of the dispatch arms despite the
+/// 0944822 containment guards.
+#[test]
+fn fuzz_make_valid_relate_escape_0559eed8() {
+    let poly = poly_from_seed("make_valid", "regression_relate_escaped_0559eed8.bin");
+    assert_all_modes_valid(&poly, "run 36695466963 seed 0559eed8");
+}
