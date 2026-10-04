@@ -54,6 +54,10 @@ impl MakeValid for MultiPolygon<f64> {
         // already carried; fuzz-nightly wkt_repair seeds 3111ecaf / edf6e65b).
         // The pre-merge shells are kept for that gate: BuildArea over the raw
         // component edges is the fallback that actually rebuilds the faces.
+        // `merge_shells` consumes the list, so this copy is unconditional -
+        // but a branch below that CERTIFIED its own output skips the gate
+        // entirely (bench gate: `overlap mp 100sh` paid for re-validating an
+        // already-valid union).
         let orig_shells = mp.0.clone();
         let filtered = crate::structure::merge::merge_shells(mp.0);
         if filtered.0.is_empty() {
@@ -62,6 +66,12 @@ impl MakeValid for MultiPolygon<f64> {
         let mp = filtered;
         // Check if shells have overlapping bboxes - if not, unary_union is overkill
         let shells_overlap = shells_have_overlapping_bboxes(&mp);
+        // `certified` = the producing branch already ran `is_valid_with_geo`
+        // on this exact geometry. `enforce_ogc_winding` only rewrites winding
+        // toward OGC order, which a geometry the validator accepted already
+        // has (`is_valid_with_geo` reports WrongOrientation), so the gate
+        // would hand it straight back.
+        let mut certified = false;
         let result = if !shells_overlap {
             enforce_ogc_winding(Geometry::MultiPolygon(mp)).0
         } else {
@@ -70,6 +80,7 @@ impl MakeValid for MultiPolygon<f64> {
             if is_valid_with_geo(&Geometry::MultiPolygon(unioned.clone()))
                 && !shells_have_vertex_inside(&unioned)
             {
+                certified = true;
                 enforce_ogc_winding(Geometry::MultiPolygon(unioned)).0
             } else {
                 warn!("MultiPolygon: unary_union invalid, retrying with precision reduction");
@@ -82,6 +93,7 @@ impl MakeValid for MultiPolygon<f64> {
                         && !shells_have_vertex_inside(&re_union);
                     if re_valid {
                         best = Some(enforce_ogc_winding(Geometry::MultiPolygon(re_union)).0);
+                        certified = true;
                         break;
                     }
                     if best.is_none() {
@@ -90,17 +102,31 @@ impl MakeValid for MultiPolygon<f64> {
                 }
                 // If all retries failed, clean union output with drop_nested_components
                 // Use the best (last) retry result to avoid another union call.
-                let unioned = best
-                    .take()
-                    .map(|g| match g {
-                        Geometry::MultiPolygon(mp) => mp,
-                        _ => MultiPolygon::new(Vec::new()),
-                    })
-                    .unwrap_or_else(|| geo::algorithm::bool_ops::unary_union(&mp));
-                drop_nested_components(unioned)
+                if certified {
+                    // `re_valid` already ruled out nesting and invalid
+                    // components on this exact geometry, so
+                    // `drop_nested_components` would be a no-op: ship the
+                    // winding-enforced result it certified.
+                    best.expect("certified implies a retry result")
+                } else {
+                    let unioned = best
+                        .take()
+                        .map(|g| match g {
+                            Geometry::MultiPolygon(mp) => mp,
+                            _ => MultiPolygon::new(Vec::new()),
+                        })
+                        .unwrap_or_else(|| geo::algorithm::bool_ops::unary_union(&mp));
+                    drop_nested_components(unioned)
+                }
             }
         };
-        let result = validity_gate(result, orig_shells);
+        // A certified branch proved `result` valid itself; the gate opens
+        // with `is_valid_with_geo` and would return it unchanged.
+        let result = if certified {
+            result
+        } else {
+            validity_gate(result, orig_shells)
+        };
         // MultiPolygon input → prefer MultiPolygon output type (GEOS/JTS convention
         // for multi-component repair, even when union collapses to one shell).
         match result {
