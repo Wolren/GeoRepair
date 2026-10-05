@@ -24,7 +24,8 @@ impl<'a> super::LineNoder<'a> {
         let a2 = self.b[i];
         let b1 = self.a[j];
         let b2 = self.b[j];
-        match classify(a1, a2, b1, b2, self.eps) {
+        let hit = classify(a1, a2, b1, b2, self.eps);
+        match hit {
             Hit::None | Hit::Shared => {}
             Hit::Cross(pt) => {
                 self.nodes.push(NodeEnt { seg: i as u32, pt });
