@@ -229,24 +229,36 @@ impl<T: NodingFloat> MakeValid for LineString<T> {
                 // cannot guarantee a valid result - the greedy filter is
                 // the fallback.
                 let runs = match crate::noding::line::node_line(&fd) {
+                    // The noder's contract: every returned chain already
+                    // passed the validator's own predicate (run_full
+                    // re-validates; crossing_only is simple by
+                    // construction plus the debug assert).
                     Some(runs) => runs,
-                    None => simple_subline(&fd),
+                    None => {
+                        // The greedy fallback is only "simple by
+                        // construction" for the pairwise tests it copies -
+                        // without the validator's tiny-span rescale it can
+                        // emit subnormal runs the validator rejects
+                        // (fuzz 52812: fallback part 0 = NotSimple,
+                        // part 1 fine). Re-check every run with the
+                        // validator's own predicate and drop failures,
+                        // then apply the cross-component rule - the
+                        // validator runs it on any multi-part output.
+                        let runs: Vec<Vec<Coord<f64>>> = simple_subline(&fd)
+                            .into_iter()
+                            .filter(|r| {
+                                r.len() >= 2
+                                    && !r.windows(2).any(|w| w[0] == w[1])
+                                    && !check_linestring_self_intersection(r)
+                            })
+                            .collect();
+                        match keep_conflicting_runs(&runs) {
+                            Some(kept) => kept.into_iter().map(|i| runs[i].clone()).collect(),
+                            None => runs,
+                        }
+                    }
                 };
-                let out: Vec<LineString<T>> = runs
-                    .into_iter()
-                    .map(|r| {
-                        LineString::new(
-                            r.into_iter()
-                                .map(|c| Coord {
-                                    x: <T as num_traits::NumCast>::from(c.x)
-                                        .expect("f64 coord converts back to T"),
-                                    y: <T as num_traits::NumCast>::from(c.y)
-                                        .expect("f64 coord converts back to T"),
-                                })
-                                .collect(),
-                        )
-                    })
-                    .collect();
+                let out: Vec<LineString<T>> = runs.iter().map(|r| run_to_line::<T>(r)).collect();
                 return match out.len() {
                     0 => empty_geom(),
                     1 => Geometry::LineString(out.into_iter().next().expect("len==1 verified")),
@@ -357,6 +369,93 @@ fn simple_subline(coords: &[Coord<f64>]) -> Vec<Vec<Coord<f64>>> {
     runs
 }
 
+/// Map a f64 coordinate run (noder / greedy-fallback output) onto the
+/// target scalar. `f64 -> T` is exact for `f64` and lossless for `f32`.
+fn run_to_line<T: NodingFloat>(run: &[Coord<f64>]) -> LineString<T> {
+    LineString::new(
+        run.iter()
+            .map(|c| Coord {
+                x: <T as num_traits::NumCast>::from(c.x).expect("f64 coord converts back to T"),
+                y: <T as num_traits::NumCast>::from(c.y).expect("f64 coord converts back to T"),
+            })
+            .collect(),
+    )
+}
+
+/// Greedy cross-component conflict filter (mirror of the validator's
+/// [`check_line_components_intersect`] rule): keep a run unless it
+/// conflicts with an already-kept one. Returns `None` when every run is
+/// kept (the common case - no allocation), `Some(kept indices)` otherwise.
+/// Shared by `LineString::make_valid` (multi-run noding output) and
+/// `MultiLineString::make_valid`.
+fn keep_conflicting_runs(runs: &[Vec<Coord<f64>>]) -> Option<Vec<usize>> {
+    if runs.len() < 2 {
+        return None;
+    }
+    let (mut gmin_x, mut gmax_x, mut gmin_y, mut gmax_y) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+    for r in runs {
+        for c in r {
+            gmin_x = gmin_x.min(c.x);
+            gmax_x = gmax_x.max(c.x);
+            gmin_y = gmin_y.min(c.y);
+            gmax_y = gmax_y.max(c.y);
+        }
+    }
+    let scale = (gmax_x - gmin_x)
+        .abs()
+        .max((gmax_y - gmin_y).abs())
+        .max(1.0);
+    let eps = 1e-12 * scale;
+    // Bbox prefilter: most component pairs are disjoint; reject them
+    // before the per-edge checks (measured 2026-08-07: mls 50x3v went
+    // 1.7 -> 18.5 us when the cross-component filter ran
+    // check_line_components_intersect on every pair).
+    let bboxes: Vec<(f64, f64, f64, f64)> = runs
+        .iter()
+        .map(|r| {
+            let mut min_x = f64::MAX;
+            let mut max_x = f64::MIN;
+            let mut min_y = f64::MAX;
+            let mut max_y = f64::MIN;
+            for c in r {
+                min_x = min_x.min(c.x);
+                max_x = max_x.max(c.x);
+                min_y = min_y.min(c.y);
+                max_y = max_y.max(c.y);
+            }
+            (min_x, max_x, min_y, max_y)
+        })
+        .collect();
+    let mut kept: Vec<usize> = Vec::new();
+    // Sound skip bound: the validator's MLS cross check does NOT prefilter,
+    // and the predicate is eps-tolerant - the area-based orient tests let a
+    // segment of length L see points up to eps/L away, and
+    // segments_collinear_overlap's `len2 > eps` guard caps L at sqrt(eps),
+    // so the reachable bbox gap is at most sqrt(eps) (the other branches
+    // need a true crossing, i.e. bbox overlap, or an eps-inflated bbox
+    // containment). Skipping strictly beyond reach can never hide a
+    // conflict; within reach the full predicate runs.
+    let reach = eps.sqrt();
+    for j in 0..runs.len() {
+        let (bx0, bx1, by0, by1) = bboxes[j];
+        let conflict = kept.iter().any(|&i| {
+            let (ax0, ax1, ay0, ay1) = bboxes[i];
+            if ax1 + reach < bx0 || bx1 + reach < ax0 || ay1 + reach < by0 || by1 + reach < ay0 {
+                return false; // bboxes farther apart than the predicate's reach
+            }
+            check_line_components_intersect(&runs[i], &runs[j], eps)
+        });
+        if !conflict {
+            kept.push(j);
+        }
+    }
+    if kept.len() == runs.len() {
+        None
+    } else {
+        Some(kept)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // MultiLineString
 // ---------------------------------------------------------------------------
@@ -391,56 +490,7 @@ impl<T: NodingFloat> MakeValid for MultiLineString<T> {
                         .collect()
                 })
                 .collect();
-            let (mut gmin_x, mut gmax_x, mut gmin_y, mut gmax_y) =
-                (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
-            for ls in &fd {
-                for c in ls {
-                    gmin_x = gmin_x.min(c.x);
-                    gmax_x = gmax_x.max(c.x);
-                    gmin_y = gmin_y.min(c.y);
-                    gmax_y = gmax_y.max(c.y);
-                }
-            }
-            let scale = (gmax_x - gmin_x)
-                .abs()
-                .max((gmax_y - gmin_y).abs())
-                .max(1.0);
-            let eps = 1e-12 * scale;
-            // Bbox prefilter: most component pairs are disjoint; reject
-            // them before the per-edge checks (measured 2026-08-07: mls
-            // 50x3v went 1.7 -> 18.5 µs when the cross-component filter
-            // ran check_line_components_intersect on every pair).
-            let bboxes: Vec<(f64, f64, f64, f64)> = fd
-                .iter()
-                .map(|ls| {
-                    let mut min_x = f64::MAX;
-                    let mut max_x = f64::MIN;
-                    let mut min_y = f64::MAX;
-                    let mut max_y = f64::MIN;
-                    for c in ls {
-                        min_x = min_x.min(c.x);
-                        max_x = max_x.max(c.x);
-                        min_y = min_y.min(c.y);
-                        max_y = max_y.max(c.y);
-                    }
-                    (min_x, max_x, min_y, max_y)
-                })
-                .collect();
-            let mut kept: Vec<usize> = Vec::new();
-            for j in 0..fd.len() {
-                let (bx0, bx1, by0, by1) = bboxes[j];
-                let conflict = kept.iter().any(|&i| {
-                    let (ax0, ax1, ay0, ay1) = bboxes[i];
-                    if ax1 < bx0 || bx1 < ax0 || ay1 < by0 || by1 < ay0 {
-                        return false; // disjoint bboxes
-                    }
-                    check_line_components_intersect(&fd[i], &fd[j], eps)
-                });
-                if !conflict {
-                    kept.push(j);
-                }
-            }
-            if kept.len() != fd.len() {
+            if let Some(kept) = keep_conflicting_runs(&fd) {
                 lines = kept.into_iter().map(|i| lines[i].clone()).collect();
             }
         }
@@ -516,6 +566,7 @@ mod strip;
 
 #[cfg(any(feature = "arrange", feature = "structure"))]
 pub use multipolygon::drop_nested_components;
+#[cfg(any(feature = "arrange", feature = "structure"))]
 pub(crate) use multipolygon::mp_looks_valid;
 pub(crate) use polygon::enforce_ogc_winding;
 pub use polygon::is_valid_with_geo;
