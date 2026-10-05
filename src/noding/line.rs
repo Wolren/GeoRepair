@@ -106,6 +106,16 @@ const CROSSING_ONLY_PAIR_FLOOR: usize = 1024;
 const EPS_CLASS_SCAN_FACTOR: usize = 64;
 const EPS_CLASS_SCAN_FLOOR: usize = 4096;
 
+/// A chain the validator rejects on sight: fewer than 2 points
+/// (RingTooFewPoints) or an adjacent-duplicate pair (RepeatedPoint).
+/// Both pass `check_linestring_self_intersection` (its `n < 2` early-out
+/// makes `[P, P]` simple), so the construction checks screen them with
+/// this linear scan instead of the full predicate (fuzz 55853 shipped a
+/// computed `[P, P]` chain through run_full).
+fn chain_degenerate(chain: &[Coord<f64>]) -> bool {
+    chain.len() < 2 || chain.windows(2).any(|w| w[0] == w[1])
+}
+
 /// Outcome of the lean per-pair test (mirrors the validator's predicate
 /// chain: fast-FP first, robust escalation, collinear, vertex-on-edge,
 /// shared endpoint).
@@ -243,7 +253,14 @@ impl<'a> LineNoder<'a> {
         // sweep re-verifies in debug (assert in crossing_only's caller).
         // Re-validating every chain here cost ~40% on the crossing-only
         // bench class for a check the construction already guarantees.
+        // Degenerate chains ([P, P] or single points) are the one gap:
+        // they pass the self-int predicate (n < 2 early-out) but the
+        // validator rejects them (RepeatedPoint / RingTooFewPoints), so
+        // the linear scan below is the only extra screen.
         if let Some(chains) = self.crossing_only() {
+            if chains.iter().any(|c| chain_degenerate(c)) {
+                return None;
+            }
             return Some(chains);
         }
         self.run_full()
@@ -726,7 +743,14 @@ impl<'a> LineNoder<'a> {
         }
         let chains = self.reconnect(pieces);
         for chain in &chains {
-            if crate::validation::impls::check_linestring_self_intersection(chain) {
+            // Degenerate chains pass the self-int predicate below
+            // (n < 2 early-out) but fail the validator (RepeatedPoint /
+            // RingTooFewPoints) - a computed [P, P] chain shipped once
+            // (fuzz 55853: eps clustering collapsed both split points of
+            // a piece onto one coordinate).
+            if chain_degenerate(chain)
+                || crate::validation::impls::check_linestring_self_intersection(chain)
+            {
                 return None;
             }
         }
@@ -737,7 +761,9 @@ impl<'a> LineNoder<'a> {
             // the validator must not be handed back as-is: return None and
             // let the caller fall back to the greedy filter (or empty)
             // rather than ship an output the harness rejects.
-            if crate::validation::impls::check_linestring_self_intersection(self.coords) {
+            if chain_degenerate(self.coords)
+                || crate::validation::impls::check_linestring_self_intersection(self.coords)
+            {
                 return None;
             }
             return Some(vec![self.coords.to_vec()]);
@@ -866,6 +892,17 @@ impl<'a> LineNoder<'a> {
             let (t_lo, t_hi) = if t0 < t1 { (t0, t1) } else { (t1, t0) };
             let lo_i = endpts.partition_point(|e| e.0 <= t_lo + eps_t);
             let hi_i = endpts.partition_point(|e| e.0 < t_hi - eps_t);
+            // Fuzz seed regression_invalid_output_auto_146242f1 bit 5
+            // (target/crash_panic_53134.wkb): when the member's projected
+            // span collapses inside the eps merge band (t_hi - t_lo <=
+            // 2*eps_t, including eps_t = inf when len2 underflows), the
+            // two thresholds cross and hi_i < lo_i - slicing panicked with
+            // "starts at 4 but ends at 0". A span that thin has no
+            // strictly-interior room beyond eps of its own endpoints, so
+            // there is nothing to node (pre-existing at 5eab330).
+            if lo_i >= hi_i {
+                continue;
+            }
             for e in &endpts[lo_i..hi_i] {
                 // Strict interior: the member's own endpoints sit at the
                 // range boundaries and are excluded; another member's

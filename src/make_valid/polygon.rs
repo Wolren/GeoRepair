@@ -457,12 +457,12 @@ pub(super) fn make_valid_impl(
                         // Same extreme-span gate as Auto: the fast-path
                         // plausibility sweep can miss self-intersections
                         // at subnormal/huge magnitude mixes (fuzz
-                        // crash-65111cd0). The extrema come fused from
-                        // the fast-path gate's plausibility pass (no
-                        // re-scan of the coords, 2026-08-09).
-                        if min_abs.is_finite()
-                            && min_abs > 0.0
-                            && max_abs / min_abs > 1e100
+                        // crash-65111cd0) and in the f64 orient overflow
+                        // zone (fuzz crash_mut_auto_53657). The extrema
+                        // come fused from the fast-path gate's
+                        // plausibility pass (no re-scan of the coords,
+                        // 2026-08-09).
+                        if fast_gate_needs_full_validation(min_abs, max_abs)
                             && !is_valid_with_geo(&g_norm)
                         {
                             warn!(
@@ -521,15 +521,12 @@ pub(super) fn make_valid_impl(
                         // every pair overlap; the orient overflow yields
                         // NaN no-cross verdicts - fuzz crash-65111cd0).
                         // Extreme-span rings get the full validator; the
-                        // normal fast path stays cheap (the Structure arm
-                        // full-gates unconditionally; here the cheap
-                        // span check keeps the 1.58M-valid case at the
-                        // fast-path cost). The extrema come fused from
-                        // the fast-path gate's plausibility pass (no
+                        // normal fast path stays cheap (the cheap
+                        // span/overflow check keeps the 1.58M-valid case
+                        // at the fast-path cost). The extrema come fused
+                        // from the fast-path gate's plausibility pass (no
                         // re-scan of the coords, 2026-08-09).
-                        if min_abs.is_finite()
-                            && min_abs > 0.0
-                            && max_abs / min_abs > 1e100
+                        if fast_gate_needs_full_validation(min_abs, max_abs)
                             && !is_valid_with_geo(&g_norm)
                         {
                             warn!(
@@ -903,6 +900,29 @@ pub(super) fn structure_fix_owned(
     ext_scale: Option<f64>,
 ) -> crate::structure::FixOutcome {
     crate::structure::fix_polygon_owned(poly, config, ext_scale)
+}
+
+/// True when the structure fast path's f64-only plausibility sweep cannot be
+/// trusted to have seen every self-intersection on this magnitude range, so
+/// the full Shewchuk validator must run before the result is certified.
+///
+/// Two independent failure zones:
+/// - ratio > 1e100: subnormal/huge mixes make the eps-padded bbox overlap
+///   every pair and orient underflow (fuzz crash-65111cd0).
+/// - max_abs > 1e150: orient products (dx * dy) overflow f64 (~1.8e308)
+///   to inf and inf - inf = NaN fails every cross test as "no crossing"
+///   (products overflow once max_abs exceeds ~6.7e153; 1e150 keeps
+///   margin). Fuzz crash_mut_auto_53657: coords 1.5e82..1.4e166 span
+///   only 9.4e83 - under the ratio threshold - so the sweep "saw" a
+///   clean ring, the ratio guard never ran is_valid_with_geo, and a
+///   self-intersecting polygon shipped as gate-certified output that
+///   our own validator correctly rejected.
+///
+/// Rings in the normal magnitude range (benches, real-world data) take
+/// neither branch and pay zero extra work.
+fn fast_gate_needs_full_validation(min_abs: f64, max_abs: f64) -> bool {
+    (min_abs.is_finite() && min_abs > 0.0 && max_abs / min_abs > 1e100)
+        || (max_abs.is_finite() && max_abs > 1e150)
 }
 
 /// Check OGC validity using our own GeoValidation (Shewchuk-based).
