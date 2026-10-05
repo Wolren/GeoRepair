@@ -40,6 +40,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fuzz-nightly per-input timeouts on wkt_repair seeds `timeout-aa3d69dc`
+  (549 b, run 36844965890: `libFuzzer: timeout after 1427 seconds`) and
+  `timeout-251df359` (1456 b, run 37111161330): one pathological
+  MULTIPOLYGON component per input (coords mixing 4e-16 with 6.7e7) makes
+  the repair pipeline's i_overlay union re-node a few dozen slivers into an
+  ~1100-2000 component / 50-77k vertex face explosion, after which
+  `geo::algorithm::Validation::is_valid` (geo's relate engine) was called
+  on that geometry three times - in `drop_nested_components`'s
+  winding-insensitive gate, in `merge_shells`' area-preservation
+  `shells_look_valid` probe, and again in the MultiPolygon-level
+  `drop_nested_components` - at 30-45 s per call, ~97% of total runtime
+  (release: 98.9 s / 63.5 s per call; debug, which CI fuzz runs, >1200 s
+  hence the timeouts). New `mp_looks_valid` probes an OGC-winding-
+  normalized copy with our own Shewchuk validator instead: ~100 ms per call
+  on the same geometry, identical accept/reject verdicts on every seed and
+  fixture (the a27dfba6 winding case is why the probe normalizes first - the
+  raw-shell probe used to send CW merge output into the polygonizer), and
+  it removes the un-caught geo relate `debug_assert` from a non-catching
+  site (edge_end_bundle_star.rs:116, fuzz run 35836311392 class). Both
+  inputs committed as `regression_timeout_*.wkt`; release now 2.2 s / 4.2 s,
+  debug 28-43 s - under the 1200 s CI limit. `corpus_replay` covers 72.
 - Fuzz-nightly red on every run since the workflow's first night
   (2026-09-27..10-04, runs 36307822577..37191916307): six new crash
   inputs, four independent root causes. DD normalization:

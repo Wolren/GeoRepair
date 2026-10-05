@@ -307,6 +307,25 @@ impl MakeValid for Geometry<f64> {
     }
 }
 
+/// Winding-insensitive validity probe for merged MultiPolygons.
+///
+/// Replaces `geo::algorithm::Validation::is_valid` at the merge/drop_nested
+/// gates:
+/// - PERF: geo's relate engine takes 30-45s on the fuzz timeout seeds'
+///   exploded MPs (1100-2000 components / 50-77k verts; timeout-aa3d69dc /
+///   251df359 were libFuzzer >1200s timeouts, ~97% of it this call), while
+///   our Shewchuk validator runs the same geometry in ~100ms.
+/// - SAFETY: geo's relate carries debug_assert!s that panic on adversarial
+///   input (edge_end_bundle_star.rs:116; fuzz run 35836311392).
+///
+/// Winding-insensitivity: merge_shells emits GEOS-walker CW shells that our
+/// validator reports as WrongOrientation, so probe an OGC-normalized COPY -
+/// rejecting on winding alone sent valid merged output into the polygonizer
+/// and it came back SelfIntersection (seed a27dfba6).
+pub(crate) fn mp_looks_valid(mp: &MultiPolygon<f64>) -> bool {
+    is_valid_with_geo(&enforce_ogc_winding(Geometry::MultiPolygon(mp.clone())).0)
+}
+
 /// Post-repair: transform to target CRS if configured.
 pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
     if mp.0.len() <= 1 {
@@ -416,11 +435,14 @@ pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
     //
     // The gate MUST be winding-insensitive: merge_shells emits GEOS walker
     // winding (CW shells), which OUR GeoValidation rejects as WrongOrientation
-    // (orientation is normalized later by enforce_ogc_winding). Using our
-    // validator here sent valid merged output into the polygonizer fallback,
-    // which re-expanded faces into edge-sharing components → SelfIntersection
-    // (measured: 3 valid comps → 4 comps with SI on seed a27dfba6).
-    if geo::algorithm::Validation::is_valid(&mp_kept) {
+    // (orientation is normalized later by enforce_ogc_winding). Probing the RAW
+    // shells with our validator sent valid merged output into the polygonizer
+    // fallback, which re-expanded faces into edge-sharing components →
+    // SelfIntersection (measured: 3 valid comps → 4 comps with SI on seed
+    // a27dfba6) - hence `mp_looks_valid`, which probes a normalized copy and
+    // also skips geo's relate engine (30-45s on the exploded fuzz timeout MPs).
+    let geo_valid = mp_looks_valid(&mp_kept);
+    if geo_valid {
         return enforce_ogc_winding(Geometry::MultiPolygon(mp_kept)).0;
     }
     // Edge-sharing case: containment didn't reduce components.
