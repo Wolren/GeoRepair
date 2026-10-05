@@ -210,25 +210,28 @@ pub fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
 /// Winding-insensitive "are these filtered shells already valid?" probe for the
 /// area-preservation guard above.
 ///
-/// geo's own `Validation::is_valid` cannot be trusted to *not* panic: its
-/// relate engine carries a `debug_assert!(false, "topology position conflict
-/// with coordinate ...")` (geo 0.33.1 `edge_end_bundle_star.rs:116`) that fires
-/// precisely when geo considers the input valid but its labelling disagrees.
-/// libFuzzer builds with `-Cdebug-assertions`, so on adversarial shells that
-/// assertion escaped as a fuzz crash (`make_valid panicked on WKB in mode
-/// Auto`, fuzz-nightly run 35836311392). The probe only breaks an area-loss
-/// tie, so an unanswered question counts as "not valid" and the union stands.
+/// Historically this called geo's `Validation::is_valid`, which cannot be
+/// trusted to *not* panic: its relate engine carries a `debug_assert!(false,
+/// "topology position conflict with coordinate ...")` (geo 0.33.1
+/// `edge_end_bundle_star.rs:116`) that fires precisely when geo considers the
+/// input valid but its labelling disagrees. libFuzzer builds with
+/// `-Cdebug-assertions`, so on adversarial shells that assertion escaped as a
+/// fuzz crash (`make_valid panicked on WKB in mode Auto`, fuzz-nightly run
+/// 35836311392). It was also pathologically slow: 30-45s on the exploded
+/// timeout-seed MPs where `mp_looks_valid` runs in ~100ms. The probe only
+/// breaks an area-loss tie, so an unanswered question counts as "not valid"
+/// and the union stands.
 #[cfg(feature = "std")]
 fn shells_look_valid(mp: &MultiPolygon<f64>) -> bool {
     std::panic::catch_unwind(core::panic::AssertUnwindSafe(|| {
-        geo::algorithm::Validation::is_valid(mp)
+        crate::make_valid::mp_looks_valid(mp)
     }))
     .unwrap_or(false)
 }
 
 #[cfg(not(feature = "std"))]
 fn shells_look_valid(mp: &MultiPolygon<f64>) -> bool {
-    geo::algorithm::Validation::is_valid(mp)
+    crate::make_valid::mp_looks_valid(mp)
 }
 
 /// True if every vertex of `ring` lies strictly inside `poly` (exterior

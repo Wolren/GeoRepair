@@ -516,6 +516,7 @@ mod strip;
 
 #[cfg(any(feature = "arrange", feature = "structure"))]
 pub use multipolygon::drop_nested_components;
+pub(crate) use multipolygon::mp_looks_valid;
 pub(crate) use polygon::enforce_ogc_winding;
 pub use polygon::is_valid_with_geo;
 #[cfg(any(feature = "arrange", feature = "structure"))]
