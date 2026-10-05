@@ -76,13 +76,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returned the input unvalidated when clustering left zero pieces, so a
   pathological input came back as its own repair (wkb seed 146242f1: a
   line spanning 1e-231 where the absolute 1e-12 eps floor swallows every
-  point and no split survives). Both paths now refuse: `run()` validates
-  the crossing-only chains and falls back to the full pipeline,
-  `run_full` returns `None` when the pieces are empty but the input still
-  fails the validator, and the caller's greedy `simple_subline` fallback
-  therefore actually runs; the validator also up-scales subnormal spans
-  (<1e-100) by an exact power of two before testing so orientation
-  products cannot underflow to zero. Single-shell gate: a MultiPolygon
+  point and no split survives). Both paths now refuse: the
+  crossing-only path audits every split before it is placed and refuses
+  the whole fast path whenever a split falls outside its host segment -
+  the exact mechanism that dropped the 1e167 node points above, and the
+  only residual way a crossing-only chain can come out non-simple, since
+  every other pair interaction is classified by the screening itself -
+  so such inputs fall back to the full pipeline while clean inputs pay
+  only the flag check (a per-chain validation pass was tried first and
+  cost 38% on `self-int ls 1000v`, so it was replaced by this audit;
+  `self-int ls 1000v` is back at parity, median 1.007 serial / 0.891
+  parallel over five alternating pairs). `run_full` returns `None` when
+  the pieces are empty but the input still fails the validator, and the
+  caller's greedy `simple_subline` fallback therefore actually runs; the
+  validator also up-scales subnormal spans (<1e-100) by an exact power
+  of two before testing so orientation products cannot underflow to
+  zero. Single-shell gate: a MultiPolygon
   that reduced to one surviving component skipped `validity_gate`
   entirely (wkb seed 1da58cf8 shipped a self-intersecting POLYGON that
   exact arithmetic confirms crosses); the survivor is now

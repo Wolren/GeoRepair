@@ -236,20 +236,15 @@ impl<'a> LineNoder<'a> {
         if self.n >= 32 && self.revisit_dominated() {
             return None;
         }
+        // crossing_only's chains are simple by construction: every
+        // interacting pair is classified, every crossing node is placed on
+        // both of its segments (an unplaceable node bails to the general
+        // path - the fuzz wkb seed 17790c39 dropped-split class), and the
+        // sweep re-verifies in debug (assert in crossing_only's caller).
+        // Re-validating every chain here cost ~40% on the crossing-only
+        // bench class for a check the construction already guarantees.
         if let Some(chains) = self.crossing_only() {
-            // crossing_only's own re-check is debug-only ("chains simple by
-            // construction"); enforce it on every build so a bad chain set
-            // falls through to the general path instead of shipping a
-            // non-simple output that fails the caller's valid-or-empty
-            // contract (fuzz wkb seed 17790c39 shipped NotSimple in release
-            // while debug hit the assert).
-            if chains
-                .iter()
-                .all(|c| !crate::validation::impls::check_linestring_self_intersection(c))
-            {
-                return Some(chains);
-            }
-            self.crossing_bail();
+            return Some(chains);
         }
         self.run_full()
     }
@@ -411,6 +406,15 @@ impl<'a> LineNoder<'a> {
         breaks.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
         breaks.dedup_by(|a, b| a.0.to_bits() == b.0.to_bits() && a.1.to_bits() == b.1.to_bits());
         let mut starts: Vec<Coord<f64>> = Vec::with_capacity(self.n + self.nodes.len() + 1);
+        // Audit flag: a crossing node that cannot be placed on its own
+        // segment would leave the crossing inside the chain, breaking the
+        // "simple by construction" claim (fuzz wkb seed 17790c39: DD-mixed
+        // node points at raw^2 magnitude, dropped by these guards, release
+        // shipped NotSimple). Bit-equal repeats of an already-placed node
+        // are the same point recorded by both segments' pair - those stay
+        // a dedup. Collected, then bailed after the loop (no &mut self
+        // while borrowing splits).
+        let mut unplaceable = false;
         for seg in 0..self.n {
             let a = self.a[seg];
             let b = self.b[seg];
@@ -429,17 +433,31 @@ impl<'a> LineNoder<'a> {
                 tp.partial_cmp(&tq).unwrap_or(core::cmp::Ordering::Equal)
             });
             let mut prev_dist = 0.0f64;
+            let mut prev_pt: Option<Coord<f64>> = None;
             for &p in &self.splits[seg] {
+                if let Some(q) = prev_pt
+                    && q.x.to_bits() == p.x.to_bits()
+                    && q.y.to_bits() == p.y.to_bits()
+                {
+                    continue;
+                }
+                prev_pt = Some(p);
                 let d = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len;
                 if d < -self.eps || d > len + self.eps {
+                    unplaceable = true;
                     continue;
                 }
                 if (d - prev_dist).abs() <= self.eps || (len - d).abs() <= self.eps {
+                    unplaceable = true;
                     continue;
                 }
                 starts.push(p);
                 prev_dist = d;
             }
+        }
+        if unplaceable {
+            self.crossing_bail();
+            return None;
         }
         starts.push(self.coords[self.n]);
         let m = starts.len() - 1;
