@@ -192,6 +192,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
+- MultiPolygon validity gate: `validity_gate` opens with `is_valid_with_geo`,
+  so every merged MultiPolygon result paid a second full validity pass even
+  though the producing branch (the unary_union accept arm, the precision-retry
+  arm) had just validated the exact geometry it hands over - the bench-gate
+  row `overlap mp 100sh` ran 220.331 us against the 168.558 us baseline
+  (+30.7%, gate limit 219.175). Those branches now set `certified` and the
+  gate is skipped, along with the `drop_nested_components` pass on the
+  certified precision-retry arm (a no-op: `re_valid` already ruled out
+  nesting and invalid components). `enforce_ogc_winding` runs between the
+  check and the gate but only rewrites winding toward OGC order, which a
+  geometry the validator accepted already has, so the skipped gate would
+  return the same verdict; the gate itself is unchanged for the path where a
+  branch could not certify its own output. Interleaved A/B on
+  `overlap mp 100sh` (serial/parallel us): pre-gate 0944822 255.9/63.8,
+  gate c0c2cfa 368.3/95.7, this change 343.0/74.9 (-22% parallel vs the
+  gate); release A/B vs 5eab330 on the bench-gate subset: 71.60 -> 69.88
+  (0.98x), gate pass (40 cases within +30%).
+
 - Line noder crossing-only fast path: repairs where every interaction is a
   proper interior crossing (figure-8 class) skip the family pass, the 2-D
   sweep, eps clustering and the piece/dedup/reconnect maps. Chains are
