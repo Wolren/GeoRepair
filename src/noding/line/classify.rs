@@ -9,11 +9,11 @@ use crate::orient::orient2d;
 use super::Hit;
 
 /// Classify a segment pair with the validator's own predicate semantics.
-/// Order: fast-FP proper crossing, robust proper crossing, collinear
-/// overlap (adaptive gate), vertex-on-edge (segment-local tolerance),
-/// shared endpoint. Shared endpoints are checked LAST so that a pair that
-/// shares an endpoint AND overlaps collinearly (or touches vertex-on-edge)
-/// still gets its noding nodes.
+/// Order: eps vertex-on-segment screen, fast-FP proper crossing, robust
+/// proper crossing, collinear overlap (adaptive gate), segment-local
+/// vertex-on-edge, shared endpoint. Shared endpoints are checked LAST so
+/// that a pair that shares an endpoint AND overlaps collinearly (or
+/// touches vertex-on-edge) still gets its noding nodes.
 #[inline]
 pub(super) fn classify(
     a1: Coord<f64>,
@@ -38,6 +38,43 @@ pub(super) fn classify(
     let e2 = orient_err(dx_a * (b2.y - a1.y), dy_a * (b2.x - a1.x));
     let e3 = orient_err(dx_b * (a1.y - b1.y), dy_b * (a1.x - b1.x));
     let e4 = orient_err(dx_b * (a2.y - b1.y), dy_b * (a2.x - b1.x));
+    // Eps vertex-on-segment screen: mirrors the validator's
+    // `segments_intersect_any` vertex branch (fast orients stand in for
+    // the robust ones - |o| <= eps implies |f| <= eps + e), checked
+    // BEFORE the crossing test. The sign tests below only see a TRUE
+    // crossing (endpoints strictly on opposite sides); a vertex within
+    // eps of the other segment's line can sit on the same side as its
+    // partner and fall out as Hit::None, letting crossing_only ship
+    // chains the validator's eps sweep rejects (fuzz crash-9c50dad6:
+    // input vertex 4.6e-311 off the far segment's line, same side as the
+    // partner endpoint, vs eps = 5.26e71 - the pair never truly crosses,
+    // yet the eps rule makes the unsplit segment non-simple). The
+    // validator's beyond-endpoint (Chebyshev > eps) test is dropped so
+    // eps-near-ENDPOINT contacts bail too - resolving them needs the
+    // general path's clustering - while exact shares (distance 0) fall
+    // through to Hit::Shared so revisits still record.
+    let contact = |p: Coord<f64>, s1: Coord<f64>, s2: Coord<f64>, f: f64, e: f64| {
+        (p != s1 && p != s2)
+            && f.abs() <= eps + e
+            && p.x >= s1.x.min(s2.x) - eps
+            && p.x <= s1.x.max(s2.x) + eps
+            && p.y >= s1.y.min(s2.y) - eps
+            && p.y <= s1.y.max(s2.y) + eps
+    };
+    // f1 = orient(a1, a2, b1) tests b1 against line a, etc. - each
+    // contact check must pair the vertex with ITS OWN orient term.
+    if contact(a1, b1, b2, f3, e3) {
+        return Hit::VertexOnEdge(a1);
+    }
+    if contact(a2, b1, b2, f4, e4) {
+        return Hit::VertexOnEdge(a2);
+    }
+    if contact(b1, a1, a2, f1, e1) {
+        return Hit::VertexOnEdge(b1);
+    }
+    if contact(b2, a1, a2, f2, e2) {
+        return Hit::VertexOnEdge(b2);
+    }
     if f1.abs() > 2.0 * e1 && f2.abs() > 2.0 * e2 && f3.abs() > 2.0 * e3 && f4.abs() > 2.0 * e4 {
         if (f1 > 0.0 && f2 < 0.0 || f1 < 0.0 && f2 > 0.0)
             && (f3 > 0.0 && f4 < 0.0 || f3 < 0.0 && f4 > 0.0)
