@@ -413,7 +413,7 @@ fn crossing_only_bails_on_out_and_back() {
 }
 
 #[test]
-fn crossing_only_bails_on_vertex_on_edge() {
+fn crossing_only_splits_vertex_on_edge() {
     let cs = coords(&[
         (0.0, 0.0),
         (10.0, 0.0),
@@ -421,9 +421,22 @@ fn crossing_only_bails_on_vertex_on_edge() {
         (5.0, 0.0),
         (5.0, 10.0),
     ]);
+    // (5.0, 0.0) rests strictly inside segment (0,0)-(10,0). This used to
+    // bail to run_full; the fast path now splits the host segment at the
+    // vertex (the same resolution test_pair applies in the general path),
+    // so crossing_only completes with valid chains. Bailing cost ringing
+    // 1000v +60% locally / +93% CI: every wave-vertex-on-chord contact
+    // tripped it (fuzz crash-9c50dad6 fix, 64c2b58).
+    let chains = LineNoder::new(&cs)
+        .crossing_only()
+        .expect("vertex-on-edge now splits the host segment instead of bailing");
+    assert_chains_valid(&chains);
+    let v = c(5.0, 0.0);
     assert!(
-        LineNoder::new(&cs).crossing_only().is_none(),
-        "vertex-on-edge must bail to the general path"
+        chains
+            .iter()
+            .any(|ch| ch.first() == Some(&v) || ch.last() == Some(&v)),
+        "split point (5,0) must terminate a chain: {chains:?}"
     );
 }
 

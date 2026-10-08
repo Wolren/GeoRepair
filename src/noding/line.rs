@@ -385,9 +385,26 @@ impl<'a> LineNoder<'a> {
                         self.crossing_bail();
                         return None;
                     }
-                    Hit::VertexOnEdge(_) => {
-                        self.crossing_bail();
-                        return None;
+                    Hit::VertexOnEdge(v) => {
+                        // v is one of the four original endpoints (the
+                        // screen excludes exact shares) resting >= eps
+                        // inside the OTHER segment's span. Split that
+                        // segment at v: the split is clean (d > eps from
+                        // its endpoints), v enters `breaks` so chains END
+                        // there, and the validator allows the boundary
+                        // contact. Bailing to the general path instead
+                        // cost ringing 1000v +60% locally / +93% CI
+                        // (every wave-vertex-on-chord contact tripped it)
+                        // while fixing nothing the split does not.
+                        let seg = if v == self.a[i] || v == self.b[i] {
+                            j
+                        } else {
+                            i
+                        };
+                        self.nodes.push(NodeEnt {
+                            seg: seg as u32,
+                            pt: v,
+                        });
                     }
                 }
             }
