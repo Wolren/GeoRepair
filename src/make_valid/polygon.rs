@@ -550,29 +550,6 @@ pub(super) fn make_valid_impl(
                     // OGC validity requires CCW shells; normalize before
                     // the gate.
                     let r_norm = enforce_ogc_winding(r).0;
-                    #[cfg(all(any(test, debug_assertions), feature = "std"))]
-                    if std::env::var("DIAG_MV").is_ok() {
-                        use geo::Area;
-                        let ra = match &r_norm {
-                            Geometry::Polygon(p) => p.unsigned_area(),
-                            Geometry::MultiPolygon(mp) => {
-                                mp.0.iter().map(|p| p.unsigned_area()).sum()
-                            }
-                            Geometry::GeometryCollection(gc) => {
-                                gc.0.iter()
-                                    .map(|x| match x {
-                                        Geometry::Polygon(p) => p.unsigned_area(),
-                                        _ => 0.0,
-                                    })
-                                    .sum()
-                            }
-                            _ => 0.0,
-                        };
-                        eprintln!(
-                            "DIAG_MV auto: structure r={ra:.4} valid={}",
-                            is_valid_with_geo(&r_norm)
-                        );
-                    }
                     if is_valid_with_geo(&r_norm) {
                         (r_norm, false)
                     } else {
