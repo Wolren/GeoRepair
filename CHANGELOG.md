@@ -1,11 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
 All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.14.6] - 2026-10-08
 
 ### Changed
 
@@ -40,6 +42,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- wkb_repair fuzz asserted invalid repairs on three decoded seeds (CI run
+  37311463272): `crash_mut_auto_52812` (LineString -> MultiLineString with a
+  piece the validator flags NotSimple), `crash_mut_auto_55853` (MLS part
+  reduced to two identical points: RepeatedPoint + NotSimple),
+  `crash_mut_auto_53657` (GeometryCollection member with a SelfIntersection),
+  plus a slice panic in `node_family_1d` (`lo_i > hi_i`, line index starts at
+  4 but ends at 0). Root causes: `LineString::make_valid` trusted the
+  `simple_subline` fallback's runs without the validator's tiny-span rescale
+  or the cross-run conflict filter the MultiLineString path applies (input
+  span < 1e-100, subnormal-scale geometry); `run_full` accepted a `[P,P]`
+  chain because `check_linestring_self_intersection` early-outs at n < 2; the
+  polygon fast gate short-circuited while max/min < 1e100 even though orient
+  products at 1.5e82..1.4e166 overflow f64 to inf and the overflowed sweep
+  certified a ring that was genuinely self-intersecting; `node_family_1d`
+  crossed its partition thresholds when a member's projected span collapsed
+  inside the merge band (eps_t = inf from a subnormal len2). Verified: full
+  suite green (439 lib / 49 GEOS / 25 ffi), mutation sweep over all 17 wkb
+  corpus seeds (61968 bit flips x 2 modes) found=0 panics=0; the four inputs
+  are committed as `fuzz/corpus/wkb_repair/regression_*.bin`.
+- wkb_repair fuzz invalid output (CI run 37339799584, crash-9c50dad6, 105 b):
+  a LineString vertex resting on another segment's interior - 1.24e74 away
+  from the endpoint, 235x eps - was never split. `classify`'s fast path
+  returned `Hit::None` once all four fast orients were definitive with
+  matching signs, so it never reached the vertex-on-edge test, and the
+  fall-through bbox used a coordinate-space margin (1e-12 * len^2) that is
+  vacuous past len 1e12. `classify` now runs an eps vertex-on-segment screen,
+  pairing each tested vertex with the orient computed against the OTHER
+  segment's line (the pairing the original screen got wrong). Verified: the
+  crash repairs valid in Auto and Structure; committed as
+  `fuzz/corpus/wkb_repair/regression_invalid_output_eps_vertex_9c50dad6.bin`.
+- The vertex-on-segment screen added for crash-9c50dad6 ran before the
+  crossing/collinear tests, and its `Hit::VertexOnEdge` arm bailed
+  `crossing_only` to `run_full`: ringing 1000v cost 438.257 us on CI against
+  a 227.167 us baseline (limit 295.367 us, +93%, bench-gate red on a5305c2)
+  and 78.6 -> 125.4 us locally (+60%). `classify` restored the validator's
+  order (crossing -> collinear -> vertex) and reinstated the beyond-endpoint
+  condition (Chebyshev > eps from BOTH segment endpoints, the cross-component
+  `on_seg` rule), so boundary contacts fall through while the crash-9c50dad6
+  contact (distances 5.26e83 / 1.24e74 vs eps 5.26e71) still fires;
+  `VertexOnEdge` now splits the host segment in place - the resolution
+  `test_pair` already applied - instead of bailing. Verified: ringing 0.97x
+  vs the pre-screen head, worst case on a 14-case focus subset 1.25x on a
+  3.1 us case (sub-us absolute), real_world fast path 0.95x; CI run
+  37760162374 green including bench-gate and fuzz.
+- `cargo check --no-default-features` failed: `make_valid` re-exported
+  `mp_looks_valid` without the cfg gate for the arrange/structure features
+  that define it (red no-std CI job). Verified: `cargo check --locked
+  --no-default-features` exit 0; no-std job green.
 - Fuzz-nightly per-input timeouts on wkt_repair seeds `timeout-aa3d69dc`
   (549 b, run 36844965890: `libFuzzer: timeout after 1427 seconds`) and
   `timeout-251df359` (1456 b, run 37111161330): one pathological
