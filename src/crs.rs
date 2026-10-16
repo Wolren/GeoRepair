@@ -204,9 +204,9 @@ impl Crs {
     /// ```
     pub fn to_wkt2(&self) -> Option<String> {
         match self.authority.as_deref()? {
-            "EPSG:4326" => Some(WKT2_EPSG_4326.to_owned()),
-            "EPSG:4269" => Some(WKT2_EPSG_4269.to_owned()),
-            "EPSG:3857" => Some(WKT2_EPSG_3857.to_owned()),
+            "EPSG:4326" => Some(String::from(WKT2_EPSG_4326)),
+            "EPSG:4269" => Some(String::from(WKT2_EPSG_4269)),
+            "EPSG:3857" => Some(String::from(WKT2_EPSG_3857)),
             _ => None,
         }
     }
