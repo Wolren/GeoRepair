@@ -287,18 +287,6 @@ impl ChainSink {
         self.flat += 1;
         let (lm_x, lx_x) = if x0 < x1 { (x0, x1) } else { (x1, x0) };
         let (lm_y, lx_y) = if y0 < y1 { (y0, y1) } else { (y1, y0) };
-        if !self.any {
-            self.gmin_x = lm_x;
-            self.gmax_x = lx_x;
-            self.gmin_y = lm_y;
-            self.gmax_y = lx_y;
-            self.any = true;
-        } else {
-            self.gmin_x = self.gmin_x.min(lm_x);
-            self.gmax_x = self.gmax_x.max(lx_x);
-            self.gmin_y = self.gmin_y.min(lm_y);
-            self.gmax_y = self.gmax_y.max(lx_y);
-        }
         if self.pending_boundary {
             // This line is the FIRST line of the new ring. The reference
             // folds it into the previous ring's open chain and ring bbox
@@ -397,7 +385,17 @@ impl ChainSink {
         }
     }
 
-    /// Stamp the open ring's scale-relative eps on every chain of it.
+    /// Stamp the open ring's scale-relative eps on every chain of it, and
+    /// fold that ring's bbox into the global envelope.
+    ///
+    /// The global envelope is the grid path's `global_bbox`. It is the
+    /// min/max over every vertex, and every vertex belongs to exactly one
+    /// ring bbox, so folding the (complete) ring bbox in here is exactly
+    /// equivalent to the per-line accumulation it replaces - with four
+    /// min/max per RING instead of four per VERTEX (2026-10-17). Called
+    /// once per ring, always with a complete ring bbox: from `push_line`'s
+    /// `pending_boundary` arm for the ring being closed, and from
+    /// `flush_ring` for the ring being finished.
     fn stamp_ring_eps(&mut self) {
         let scale = (self.ring_max_x - self.ring_min_x)
             .abs()
@@ -407,6 +405,11 @@ impl ChainSink {
         for mc in self.chains[self.ring_chain_start..].iter_mut() {
             mc.ring_eps = eps;
         }
+        self.gmin_x = self.gmin_x.min(self.ring_min_x);
+        self.gmax_x = self.gmax_x.max(self.ring_max_x);
+        self.gmin_y = self.gmin_y.min(self.ring_min_y);
+        self.gmax_y = self.gmax_y.max(self.ring_max_y);
+        self.any = true;
     }
 
     /// Close the open ring exactly as the reference builder closes it after
@@ -434,6 +437,37 @@ impl ChainSink {
         };
         (self.chains, bbox)
     }
+}
+
+/// Repeated-vertex class for a NON-ADJACENT pair of edges in the same ring.
+///
+/// GEOS's `PolygonIntersectionAnalyzer::findInvalidIntersection` treats any
+/// same-segString intersection that is not an adjacent-in-ring endpoint
+/// touch as `eRingSelfIntersection`, so it needs no duplicate-vertex
+/// machinery at all. Our `lean_pair_intersects` classifies an exact shared
+/// endpoint as `ambiguous` and *not* intersecting, so the leaf has to close
+/// that class itself - otherwise the caller must keep an independent
+/// duplicate-vertex table over the whole ring.
+///
+/// Only three of the four endpoint orientations are tested. The fourth,
+/// `a.start == b.end`, is exactly the ring's own closure for the pair
+/// (first edge, last edge) - and that pair is deliberately not treated as
+/// adjacent here, because the two edges can still overlap collinearly past
+/// the shared vertex. Dropping that one orientation is enough:
+/// a vertex repeated at positions p < q is caught by
+/// - `end == start` on the pair (p-1, q)                    (p >= 1),
+/// - `end == end`   on the pair (p-1, q-1) or, for p == 0,   (L-1, q-1),
+/// - `start == start` on the pair (p, q).
+/// Every one of those pairs consists of edges incident to the repeated
+/// point, so every one is enumerated.
+///
+/// Only called when the pair already escalated (`ambiguous`), which every
+/// repeated-vertex pair does: the shared point makes one of the four
+/// orientations exactly zero, so it can never clear the strong-zone gate.
+/// That keeps the three compares off the clean path entirely.
+#[inline]
+fn shares_repeated_vertex(a: &Line<f64>, b: &Line<f64>) -> bool {
+    a.start == b.start || a.end == b.end || a.end == b.start
 }
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
@@ -482,6 +516,12 @@ fn rec_overlaps(
                 eps,
                 &mut ambiguous,
             ) {
+                return true;
+            }
+            // Repeated vertex: see `shares_repeated_vertex`. This replaces
+            // the per-ring duplicate-vertex hash table the caller used to
+            // carry (2026-10-17) - same verdicts, no table.
+            if ambiguous && shares_repeated_vertex(li, lj) {
                 return true;
             }
         }
@@ -614,6 +654,10 @@ pub fn has_no_intersections_small(lines: &[Line<f64>]) -> bool {
                     eps,
                     &mut ambiguous,
                 ) {
+                    return false;
+                }
+                // Repeated vertex: see `shares_repeated_vertex`.
+                if ambiguous && shares_repeated_vertex(li, lj) {
                     return false;
                 }
             }
@@ -962,6 +1006,10 @@ fn has_no_intersections_edge_sweep(lines: &[Line<f64>]) -> Option<bool> {
                 ) {
                     return Some(false);
                 }
+                // Repeated vertex: see `shares_repeated_vertex`.
+                if ambiguous && shares_repeated_vertex(li, lj) {
+                    return Some(false);
+                }
             }
         }
         active.push(oi);
@@ -1068,21 +1116,16 @@ mod chain_fusion_tests {
     }
 
     /// Drive `ring_is_plausible` exactly the way the fast-path gate does:
-    /// exterior first, then holes, all three accumulators live.
+    /// exterior first, then holes, with the line, chain and bbox
+    /// accumulators live.
     fn walk(poly: &Polygon<f64>) -> Snapshot {
         let mut lines = Vec::new();
         let mut sink = ChainSink::default();
         let mut bbox = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
-        let mut sub_ulp = false;
-        let mut min_abs = f64::INFINITY;
-        let mut max_abs = 0.0f64;
         let mut acc = GateAccum {
             lines: Some(&mut lines),
             chains: Some(&mut sink),
             bbox: Some(&mut bbox),
-            sub_ulp: Some(&mut sub_ulp),
-            min_abs: Some(&mut min_abs),
-            max_abs: Some(&mut max_abs),
             extremal: None,
         };
         let mut ok = ring_is_plausible(poly.exterior(), &mut acc);

@@ -55,14 +55,14 @@ we win. Methodology: `docs/BENCHMARKS.md`. Regenerate:
 
 | Benchmark | GeoRepair | GEOS | Ratio |
 |-----------|----------:|-----:|------:|
-| valid polygon 4v | 0.048 | 0.235 | 4.8x |
-| valid polygon 10v | 0.121 | 0.322 | 2.7x |
-| valid polygon 50v | 0.289 | 0.515 | 1.8x |
-| valid polygon 100v | 0.459 | 0.614 | 1.3x |
-| valid polygon 500v | 1.5 | 1.9 | 1.3x |
-| valid polygon 1000v | 2.8 | 2.2 | 0.80x |
-| valid polygon 5000v | 12.9 | 9.4 | 0.73x |
-| valid polygon 10000v | 26.7 | 17.7 | 0.66x |
+| valid polygon 4v | 0.047 | 0.235 | 5.0x |
+| valid polygon 10v | 0.131 | 0.322 | 2.5x |
+| valid polygon 50v | 0.253 | 0.515 | 2.0x |
+| valid polygon 100v | 0.396 | 0.614 | 1.6x |
+| valid polygon 500v | 1.3 | 1.9 | 1.5x |
+| valid polygon 1000v | 2.4 | 2.2 | 0.93x |
+| valid polygon 5000v | 12.2 | 9.4 | 0.77x |
+| valid polygon 10000v | 22.4 | 17.7 | 0.79x |
 | invalid bowtie 4v | 0.68 | 17.2 | 25x |
 | invalid bowtie 50v | 6.6 | 63.5 | 9.6x |
 | invalid bowtie 100v | 23.3 | 112 | 4.8x |
@@ -82,16 +82,16 @@ we win. Methodology: `docs/BENCHMARKS.md`. Regenerate:
 | near-collinear 100v | 61.4 | 180 | 2.9x |
 | near-collinear 500v | 814 | 1115 | 1.4x |
 | near-collinear 1000v | 2544 | 2627 | 1.0x |
-| large coord 1e12 100v | 0.366 | 0.44 | 1.2x |
+| large coord 1e12 100v | 0.393 | 0.44 | 1.1x |
 | large coord 1e12 500v | 1.4 | 1.2 | 0.88x |
-| large coord 1e12 1000v | 3.2 | 2.5 | 0.78x |
+| large coord 1e12 1000v | 2.3 | 2.5 | 1.1x |
 | valid line | 0.009 | 0.038 | 4.3x |
 | zero-length line | 0.006 | 0.267 | 45x |
-| valid ls 4v | 0.028 | 0.038 | 1.4x |
-| valid ls 10v | 0.062 | 0.042 | 0.67x |
-| valid ls 50v | 0.146 | 0.083 | 0.57x |
-| valid ls 100v | 0.297 | 0.118 | 0.40x |
-| valid ls 500v | 1.2 | 0.61 | 0.50x |
+| valid ls 4v | 0.029 | 0.038 | 1.3x |
+| valid ls 10v | 0.064 | 0.042 | 0.65x |
+| valid ls 50v | 0.143 | 0.083 | 0.58x |
+| valid ls 100v | 0.301 | 0.118 | 0.39x |
+| valid ls 500v | 1.2 | 0.61 | 0.49x |
 | valid ls 1000v | 2.4 | 2.6 | 1.1x |
 | collinear ls 4v | 0.028 | 0.538 | 20x |
 | collinear ls 10v | 0.068 | 0.578 | 8.5x |
