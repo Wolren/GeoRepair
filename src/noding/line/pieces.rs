@@ -13,10 +13,10 @@ use rustc_hash::FxHashSet;
 
 use crate::validation::sweep::{radix_sort_keys_tls, sortable_u64};
 
-use super::Hit;
-use super::NO_FAMILY;
-use super::NodeEnt;
 use super::classify::classify;
+use super::Hit;
+use super::NodeEnt;
+use super::NO_FAMILY;
 
 impl<'a> super::LineNoder<'a> {
     pub(super) fn test_pair(&mut self, i: usize, j: usize) {
@@ -120,19 +120,55 @@ impl<'a> super::LineNoder<'a> {
             }
             r
         }
-        for (i, &(pt_, _, _)) in pts.iter().enumerate() {
-            let (px, py) = (pt_.x, pt_.y);
-            let mut j = i + 1;
-            while j < total && pts[j].0.x - px <= self.eps {
-                if (pts[j].0.y - py).abs() <= self.eps {
-                    let ri = find(&mut parent, i as u32);
-                    let rj = find(&mut parent, j as u32);
+        // Union-find over the eps (Chebyshev) neighborhood. `pts`
+        // is sorted by (x, y), so a plain forward x-window walk per
+        // point - the old form - is O(k^2) on a long bit-equal-x
+        // run (a subdivided vertical edge: the figure-8 class pays
+        // ~(0.2n)^2 per run, measured 6.7 ms on 4000 vertices where
+        // the fast path's active-set limit routes it here). Within a
+        // maximal equal-x block y is ascending, so each point's
+        // y-window is a contiguous range found by binary search;
+        // cross-block pairs (distinct x within eps - the genuine
+        // eps-class, small by contract) keep the forward walk. Same
+        // pair set as the old scan (the within-block window covers
+        // both directions; the union is symmetric), so the clustering
+        // is decision-identical.
+        let mut i = 0usize;
+        while i < total {
+            let mut block_end = i + 1;
+            while block_end < total && pts[block_end].0.x.to_bits() == pts[i].0.x.to_bits() {
+                block_end += 1;
+            }
+            for a in i..block_end {
+                let py = pts[a].0.y;
+                let lo = i + pts[i..block_end].partition_point(|p| p.0.y < py - self.eps);
+                let hi = i + pts[i..block_end].partition_point(|p| p.0.y <= py + self.eps);
+                for b in lo..hi {
+                    if b == a {
+                        continue;
+                    }
+                    let ri = find(&mut parent, a as u32);
+                    let rj = find(&mut parent, b as u32);
                     if ri != rj {
                         parent[ri as usize] = rj;
                     }
                 }
-                j += 1;
             }
+            for a in i..block_end {
+                let (px, py) = (pts[a].0.x, pts[a].0.y);
+                let mut j = block_end;
+                while j < total && pts[j].0.x - px <= self.eps {
+                    if (pts[j].0.y - py).abs() <= self.eps {
+                        let ri = find(&mut parent, a as u32);
+                        let rj = find(&mut parent, j as u32);
+                        if ri != rj {
+                            parent[ri as usize] = rj;
+                        }
+                    }
+                    j += 1;
+                }
+            }
+            i = block_end;
         }
         // Canonical per cluster: the first point in the sort order
         // (deterministic). When a cluster contains an original vertex the
