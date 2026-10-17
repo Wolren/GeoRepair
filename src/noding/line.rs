@@ -59,7 +59,7 @@ use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
 use crate::validation::impls::segments_collinear_overlap;
-use crate::validation::sweep::{radix_sort_keys_tls, sortable_u64, SegGrid};
+use crate::validation::sweep::{SegGrid, radix_sort_keys_tls, sortable_u64};
 
 mod classify;
 mod pieces;
@@ -330,75 +330,26 @@ impl<'a> LineNoder<'a> {
         }
         let closed = self.closed();
         let limit = CROSSING_ONLY_PAIR_FACTOR * self.n + CROSSING_ONLY_PAIR_FLOOR;
-        // Monotone-chain candidate index, the model the polygon gate uses,
-        // replacing the per-SEGMENT x-sorted scan. Segments are grouped into
-        // quadrant-monotone chains in one walk, a grid over the CHAIN
-        // envelopes yields the chain pairs, and each pair is enumerated on the
-        // axis where both chains are widest. The old form paid one grid query
-        // per segment plus a full radix sort of the segment lo_x values: on
-        // the 4000-vertex figure-8 the sort alone was 103 us and the
-        // per-segment queries about 270 us of node_line's 796 us.
-        let lines: Vec<geo::Line<f64>> = (0..self.n)
-            .map(|i| geo::Line::new(self.a[i], self.b[i]))
-            .collect();
-        let (mc, _) = crate::arrange::prep_intersect::build_mono_chains(&lines);
-        let nc = mc.len();
-        let mut chain_boxes: Vec<[f64; 4]> = Vec::with_capacity(nc);
-        for c in &mc {
-            chain_boxes.push([
-                c.min_x - self.eps,
-                c.max_x + self.eps,
-                c.min_y - self.eps,
-                c.max_y + self.eps,
-            ]);
-        }
         let mut st = ScanState {
             bail: false,
             calls: 0,
             limit,
         };
         let mut revisits: Vec<Coord<f64>> = Vec::new();
-        // Self-pairs first in chain order, then cross pairs in grid order.
-        for ci in 0..nc {
-            self.enumerate_chain_pair(&mc, ci, ci, &mut st, &mut revisits);
-            if st.bail {
-                break;
-            }
-        }
-        if !st.bail && nc > 1 {
-            match SegGrid::build(&chain_boxes) {
-                Some(mut grid) => {
-                    let mut stop = false;
-                    for ci in 0..nc {
-                        if stop {
-                            break;
-                        }
-                        let bi = chain_boxes[ci];
-                        grid.for_each_candidate(bi, Some(ci), |cj| {
-                            if stop || st.bail || cj <= ci {
-                                return;
-                            }
-                            self.enumerate_chain_pair(&mc, ci, cj, &mut st, &mut revisits);
-                            if st.bail {
-                                stop = true;
-                            }
-                        });
-                    }
-                }
-                None => {
-                    for ci in 0..nc {
-                        for cj in (ci + 1)..nc {
-                            self.enumerate_chain_pair(&mc, ci, cj, &mut st, &mut revisits);
-                            if st.bail {
-                                break;
-                            }
-                        }
-                        if st.bail {
-                            break;
-                        }
-                    }
-                }
-            }
+        // Chain index first (the model the polygon gate uses, cheapest when the
+        // chains are few and small). It needs the chain builder from `arrange`,
+        // and its grid over CHAIN envelopes can bail: a long chain's box covers
+        // most of the grid, which wide inputs do (a spiral's chains do), and
+        // the bail used to leave an all-pairs chain scan behind - measured
+        // +43 % on `spiral ls 1000v`, and CI flagged it at +130 % (2026-10-17).
+        // Both cases fall through to the per-segment grid, which is
+        // O(n + output) regardless of chain shape.
+        #[cfg(feature = "arrange")]
+        let indexed = self.enumerate_by_chain_index(&mut st, &mut revisits);
+        #[cfg(not(feature = "arrange"))]
+        let indexed = false;
+        if !indexed {
+            self.enumerate_segment_grid(&mut st, &mut revisits);
         }
         let bail = st.bail;
         if bail {
@@ -624,6 +575,101 @@ impl<'a> LineNoder<'a> {
     /// Reset what the fast path touched so the general path sees the
     /// noder exactly as `new()` built it: the splits it filled are
     /// exactly the node segments' entries (empty before the fast path).
+    /// Enumerate pairs through the per-segment `SegGrid`, classifying each with
+    /// [`Self::classify_pair`] so the pair set, the order and the `calls` budget
+    /// come from one implementation.
+    ///
+    /// This is the fallback when the chain index is unavailable (`arrange` off)
+    /// or unusable (its grid bails on wide inputs). Cost is O(n + output) and
+    /// independent of chain shape, which is what the chain index cannot promise:
+    /// a chain pair is walked in O(|A| + |B|) even when the two chains only
+    /// share grid cells and touch nowhere.
+    fn enumerate_segment_grid(&mut self, st: &mut ScanState, revisits: &mut Vec<Coord<f64>>) {
+        let mut boxes: Vec<[f64; 4]> = Vec::with_capacity(self.n);
+        for i in 0..self.n {
+            boxes.push([
+                self.lo_x[i] - self.eps,
+                self.hi_x[i] + self.eps,
+                self.lo_y[i] - self.eps,
+                self.hi_y[i] + self.eps,
+            ]);
+        }
+        let mut grid = match SegGrid::build(&boxes) {
+            Some(g) => g,
+            None => {
+                st.bail = true;
+                return;
+            }
+        };
+        for j in 0..self.n {
+            if st.bail {
+                return;
+            }
+            let bj = boxes[j];
+            grid.for_each_candidate(bj, Some(j), |i| {
+                if st.bail || i >= j {
+                    return;
+                }
+                // `ia != ib`, so `classify_pair`'s self-pair ordering guard is
+                // inert and `i < j` holds already.
+                self.classify_pair(i, j, 0, 1, st, revisits);
+            });
+        }
+    }
+
+    /// Chain-index candidate enumeration. Returns false when the chain grid
+    /// cannot be built, so the caller can fall back to the per-segment grid
+    /// instead of scanning every chain pair.
+    #[cfg(feature = "arrange")]
+    fn enumerate_by_chain_index(
+        &mut self,
+        st: &mut ScanState,
+        revisits: &mut Vec<Coord<f64>>,
+    ) -> bool {
+        let lines: Vec<geo::Line<f64>> = (0..self.n)
+            .map(|i| geo::Line::new(self.a[i], self.b[i]))
+            .collect();
+        let (mc, _) = crate::arrange::prep_intersect::build_mono_chains(&lines);
+        let nc = mc.len();
+        let mut chain_boxes: Vec<[f64; 4]> = Vec::with_capacity(nc);
+        for c in &mc {
+            chain_boxes.push([
+                c.min_x - self.eps,
+                c.max_x + self.eps,
+                c.min_y - self.eps,
+                c.max_y + self.eps,
+            ]);
+        }
+        let mut grid = match SegGrid::build(&chain_boxes) {
+            Some(g) => g,
+            None => return false,
+        };
+        // Self-pairs first in chain order, then cross pairs in grid order.
+        for ci in 0..nc {
+            self.enumerate_chain_pair(&mc, ci, ci, st, revisits);
+            if st.bail {
+                return true;
+            }
+        }
+        let mut stop = false;
+        for ci in 0..nc {
+            if stop {
+                break;
+            }
+            let bi = chain_boxes[ci];
+            grid.for_each_candidate(bi, Some(ci), |cj| {
+                if stop || st.bail || cj <= ci {
+                    return;
+                }
+                self.enumerate_chain_pair(&mc, ci, cj, st, revisits);
+                if st.bail {
+                    stop = true;
+                }
+            });
+        }
+        true
+    }
+
     /// Enumerate every segment pair of two chains whose padded boxes can
     /// overlap, and classify each one.
     ///
@@ -635,6 +681,7 @@ impl<'a> LineNoder<'a> {
     /// wide common axis means short windows: the figure-8's vertical runs all
     /// share one x value, so they must be enumerated on y or their
     /// self-comparison is square.
+    #[cfg(feature = "arrange")]
     fn enumerate_chain_pair(
         &mut self,
         mc: &[crate::arrange::prep_intersect::MonoChain],
@@ -654,8 +701,16 @@ impl<'a> LineNoder<'a> {
         }
         let use_y = (a.max_x - a.min_x).abs().min((b.max_x - b.min_x).abs())
             < (a.max_y - a.min_y).abs().min((b.max_y - b.min_y).abs());
-        let a_asc = if use_y { a.quad == 0 || a.quad == 3 } else { a.quad <= 1 };
-        let b_asc = if use_y { b.quad == 0 || b.quad == 3 } else { b.quad <= 1 };
+        let a_asc = if use_y {
+            a.quad == 0 || a.quad == 3
+        } else {
+            a.quad <= 1
+        };
+        let b_asc = if use_y {
+            b.quad == 0 || b.quad == 3
+        } else {
+            b.quad <= 1
+        };
         let bn = be - bs;
         let bidx = |p: usize| if b_asc { bs + p } else { be - 1 - p };
         // Candidates first: the window walk borrows the coordinate arrays
@@ -710,8 +765,18 @@ impl<'a> LineNoder<'a> {
         if i == j || (ia == ib && j <= i) {
             return;
         }
-        let bi = [self.lo_x[i] - self.eps, self.hi_x[i] + self.eps, self.lo_y[i] - self.eps, self.hi_y[i] + self.eps];
-        let bj = [self.lo_x[j] - self.eps, self.hi_x[j] + self.eps, self.lo_y[j] - self.eps, self.hi_y[j] + self.eps];
+        let bi = [
+            self.lo_x[i] - self.eps,
+            self.hi_x[i] + self.eps,
+            self.lo_y[i] - self.eps,
+            self.hi_y[i] + self.eps,
+        ];
+        let bj = [
+            self.lo_x[j] - self.eps,
+            self.hi_x[j] + self.eps,
+            self.lo_y[j] - self.eps,
+            self.hi_y[j] + self.eps,
+        ];
         if bi[1] < bj[0] || bj[1] < bi[0] || bi[3] < bj[2] || bj[3] < bi[2] {
             return;
         }
@@ -744,8 +809,15 @@ impl<'a> LineNoder<'a> {
                 st.bail = true;
             }
             Hit::VertexOnEdge(v) => {
-                let seg = if v == self.a[i] || v == self.b[i] { j } else { i };
-                self.nodes.push(NodeEnt { seg: seg as u32, pt: v });
+                let seg = if v == self.a[i] || v == self.b[i] {
+                    j
+                } else {
+                    i
+                };
+                self.nodes.push(NodeEnt {
+                    seg: seg as u32,
+                    pt: v,
+                });
             }
         }
     }

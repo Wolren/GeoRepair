@@ -7,6 +7,8 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.7] - 2026-10-17
+
 ### Added
 
 - CRS WKT2 support for `Crs` (ISO 19162:2019 / OGC 18-010r11):
@@ -27,6 +29,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now WKT2-aware.
 - `Crs::to_esri_wkt()`'s doc comment claimed it produced "OGC-standard
   WKT"; it emits ESRI-flavoured WKT1. Doc corrected (behaviour unchanged).
+
+### Performance
+
+- Valid-shape certification, the path every already-valid geometry takes, is
+  about 2.1x faster on large rings and 1.6-1.8x on medium ones. The published
+  `valid polygon` rows move from 47.7 to 22.4 µs parallel per polygon at
+  10000v, 3.9 to 2.4 at 1000v and 0.714 to 0.396 at 100v.
+- The fast-path gate no longer keeps a per-ring duplicate-vertex hash table.
+  The repeated-vertex class is closed by the pair predicates themselves, which
+  also removes the only per-vertex structure whose working set grew with ring
+  size.
+- The sub-ULP edge test and the `min_abs` extreme-magnitude reduction moved out
+  of the fused per-vertex walk into a single reduction per ring.
+- The self-intersecting-line noder replaced its x-active-set scans with a shared
+  uniform-grid candidate index: in `crossing_only`, in `run_full`'s
+  family-versus-sweep loop (which was quadratic) and in
+  `sweep_ring_self_intersects`. Two whole-coordinate radix sorts are gone with
+  it. `self-int ls` goes from 6.3 to 3.1 µs at 100v, 43.5 to 15.6 at 500v and
+  121 to 28.8 at 1000v, and the cost now grows linearly per input doubling
+  instead of quadratically.
 
 ## [0.14.6] - 2026-10-08
 
