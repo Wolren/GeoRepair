@@ -46,7 +46,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # stable
         with:
           toolchain: stable
-      - uses: actions/setup-python@06da6279cdbca41027908073e81a4544dc79c06b  # v7
+      - uses: actions/setup-python@ec52d0af729a7c50ced4261d17a07916f43f5b8e  # v7
         with:
           python-version: "3.13"
       - run: pip install "maturin>=1.7,<2" pytest
@@ -71,7 +71,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # stable
         with:
           toolchain: stable
-      - uses: actions/setup-python@06da6279cdbca41027908073e81a4544dc79c06b  # v7
+      - uses: actions/setup-python@ec52d0af729a7c50ced4261d17a07916f43f5b8e  # v7
         with:
           python-version: "3.13"
       - run: pip install "maturin>=1.7,<2"
