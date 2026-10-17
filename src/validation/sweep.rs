@@ -218,11 +218,7 @@ fn cell_range(lo: f64, hi: f64, min: f64, inv_cell: f64, nc: usize) -> (usize, u
         }
     };
     let (a, b) = (idx(lo), idx(hi));
-    if a <= b {
-        (a, b)
-    } else {
-        (b, a)
-    }
+    if a <= b { (a, b) } else { (b, a) }
 }
 
 impl SegGrid {
