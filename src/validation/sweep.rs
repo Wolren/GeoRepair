@@ -236,7 +236,7 @@ impl SegGrid {
             max_y = max_y.max(b[3]);
         }
         let span = (max_x - min_x).abs().max((max_y - min_y).abs());
-        if !(span > 0.0) || !span.is_finite() {
+        if span <= 0.0 || !span.is_finite() {
             return None;
         }
         // sqrt(m) cells per axis: O(m) cells, and a box covers O(1) of
@@ -511,10 +511,7 @@ fn sweep_with_grid(
     check_revisit: bool,
     closed: bool,
 ) -> Option<bool> {
-    let mut grid = match SegGrid::build(spans) {
-        Some(g) => g,
-        None => return None,
-    };
+    let mut grid = SegGrid::build(spans)?;
     let mut hit = false;
     for r_i in 0..n {
         if hit {
