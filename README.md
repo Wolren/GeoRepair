@@ -109,9 +109,9 @@ we win. Methodology: `docs/BENCHMARKS.md`. Regenerate:
 | spiral ls 100v | 1.5 | 18.1 | 12x |
 | spiral ls 500v | 127 | 563 | 4.4x |
 | spiral ls 1000v | 362 | 1933 | 5.3x |
-| self-int ls 100v | 6.3 | 2.3 | 0.36x |
-| self-int ls 500v | 43.5 | 3.3 | 0.08x |
-| self-int ls 1000v | 121 | 6.4 | 0.05x |
+| self-int ls 100v | 3.5 | 2.3 | 0.65x |
+| self-int ls 500v | 16.3 | 3.3 | 0.20x |
+| self-int ls 1000v | 36.1 | 6.4 | 0.18x |
 | dense self ls 10v | 0.074 | 1.3 | 17x |
 | dense self ls 50v | 0.231 | 5.2 | 22x |
 | dense self ls 100v | 0.288 | 12.5 | 43x |
@@ -123,9 +123,9 @@ we win. Methodology: `docs/BENCHMARKS.md`. Regenerate:
 | mls 50x3v | 2.8 | 30.8 | 11x |
 | mls 250x3v | 15.5 | 129 | 8.3x |
 | mls 500x3v | 39.6 | 276 | 7.0x |
-| self-int mls 50x4v | 31.0 | 78.1 | 2.5x |
-| self-int mls 250x4v | 193 | 521 | 2.7x |
-| self-int mls 500x4v | 619 | 1206 | 1.9x |
+| self-int mls 50x4v | 33.2 | 78.1 | 2.3x |
+| self-int mls 250x4v | 199 | 521 | 2.6x |
+| self-int mls 500x4v | 538 | 1206 | 2.2x |
 | star-burst 10sp | 3.0 | 18.1 | 5.9x |
 | star-burst 50sp | 1.0 | 349 | 334x |
 | star-burst 100sp | 1.6 | 1438 | 873x |
