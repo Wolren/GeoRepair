@@ -57,7 +57,7 @@ jobs:
         run: |
           pip install --force-reinstall target/wheels/*.whl
           pytest tests/test_python.py -q
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v4
         with:
           name: wheel-${{ matrix.name }}
           path: target/wheels/*.whl
@@ -76,7 +76,7 @@ jobs:
           python-version: "3.13"
       - run: pip install "maturin>=1.7,<2"
       - run: maturin sdist
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v4
         with:
           name: wheel-sdist
           path: target/wheels/*.tar.gz
@@ -173,7 +173,7 @@ jobs:
             (cd dist && tar czf "../geo-repair-$ver-linux-x86_64.tar.gz" .)
           fi
       - name: Upload C lib artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v4
         with:
           name: c-lib-${{ matrix.name }}
           path: geo-repair-*
