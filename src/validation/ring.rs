@@ -208,6 +208,30 @@ pub fn check_ring_validity(ring: &[Coord<f64>], is_exterior: bool) -> Vec<Geomet
     errors
 }
 
+/// Bit-mix for the pinch table's raw coordinate keys.
+///
+/// The table is open-addressed with `hash & (cap - 1)`, i.e. it
+/// uses the LOW bits of the key. A coordinate that is an exact
+/// multiple of 2^m (any large-magnitude regular grid: projected-CRS
+/// values, snapped data, synthetic 1e12-scale benches - 1e12 =
+/// 2^12 * 5^12) has all-zero low mantissa bits, so the raw
+/// `(kx ^ ky.rotate_left(32))` hash collapsed every axis-aligned
+/// side of such a ring to a single bucket and the linear probe ran
+/// O(n^2) - measured 11.4 ms on an 8000-vertex 1e12 square vs
+/// 0.3 ms with the mix (stage probe 2026-10-08). A lone odd
+/// multiply does not fix it: v2(k * K) = v2(k), the low bits stay
+/// zero. The multiply + xorshift finalizer moves the high-bit
+/// entropy (exponent + high mantissa, which vary on exactly those
+/// inputs) into the masked bits. Deterministic and key-injective
+/// in effect: equal keys hash equal (the slot equality test on the
+/// raw keys is unchanged), distinct keys distribute - the verdict
+/// is decision-identical, only the probe order changes.
+pub(crate) fn pinch_key_hash(kx: u64, ky: u64) -> u64 {
+    let ax = kx.wrapping_mul(0x9E3779B97F4A7C15);
+    let ay = ky.wrapping_mul(0xC2B2AE3D27D4EB4F);
+    (ax ^ (ax >> 32)) ^ (ay ^ (ay >> 32))
+}
+
 /// First non-adjacent duplicate vertex in a ring's interior coords
 /// (normalized -0.0 keys), or None. Shared by the exit validator's pinch
 /// classification and the fast-path gate's duplicate scan - the gate must
@@ -240,7 +264,7 @@ pub(crate) fn first_pinch_dup(coords: &[Coord<f64>]) -> Option<usize> {
     for (idx, c) in coords.iter().enumerate() {
         let kx = (c.x + 0.0).to_bits();
         let ky = (c.y + 0.0).to_bits();
-        let h = (kx ^ ky.rotate_left(32)) as usize & (cap - 1);
+        let h = crate::validation::ring::pinch_key_hash(kx, ky) as usize & (cap - 1);
         let mut k = h;
         loop {
             let w = k / 64;
