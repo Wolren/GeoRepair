@@ -13,21 +13,48 @@ use super::*;
 // the collapse tail behind a "keep in sync" comment. The logic lives here
 // once now; both entries delegate, so the two paths cannot drift apart.
 
-/// Fused exterior pre-scan: bbox extremes plus the NaN flag in one pass.
+/// Fused exterior pre-scan: bbox extremes plus the NaN flag.
+///
+/// The extremes come from the AVX-dispatched [`crate::simd::aabb_minmax_simd`]
+/// kernel, which is measured ~4.5x the scalar loop on this access pattern,
+/// and the finiteness reduction is written branchlessly so LLVM can
+/// vectorize it. The previous hand-rolled `windows(2)` form with the
+/// `if !has_nan && (...)` short-circuit did neither and measured 16 % of
+/// the entire valid-polygon gate on a 10 000-vertex ring (2026-10-17).
+///
+/// The AVX reduction is only trusted for all-finite input. `minpd`/`maxpd`
+/// return their *second* operand when the comparison is unordered, so a
+/// NaN can leave an accumulator lane poisoned until the next finite value
+/// lands in that same lane - which would drop a real extreme from the
+/// lane-wise reduction, unlike Rust's NaN-ignoring `f64::min`/`max`. When
+/// any coordinate is non-finite the extremes are therefore recomputed with
+/// the exact original scalar rule (init from `coords[0]`, fold the rest,
+/// Rust `min`/`max`), which reproduces the previous function bit for bit -
+/// including the all-NaN axis that carries NaN out, and the `f64::MAX`
+/// saturation that [`exterior_is_locally_degenerate`] rejects either way.
+/// `has_nan` is the same "any coordinate is non-finite" OR over the
+/// identical coordinate set. For all-finite input, `minpd`/`maxpd` are the
+/// true ordered min/max, so the two rules agree; only a `-0.0`/`0.0` tie
+/// could pick the other zero, and every consumer takes `.abs()` or a
+/// difference first.
 fn scan_exterior_bbox_nan(coords: &[Coord<f64>]) -> (f64, f64, f64, f64, bool) {
-    let (mut min_x, mut max_x, mut min_y, mut max_y) =
-        (coords[0].x, coords[0].x, coords[0].y, coords[0].y);
-    let mut has_nan = !coords[0].x.is_finite() || !coords[0].y.is_finite();
-    for w in coords.windows(2) {
-        min_x = min_x.min(w[1].x);
-        max_x = max_x.max(w[1].x);
-        min_y = min_y.min(w[1].y);
-        max_y = max_y.max(w[1].y);
-        if !has_nan && (!w[1].x.is_finite() || !w[1].y.is_finite()) {
-            has_nan = true;
-        }
+    let (min_x, max_x, min_y, max_y) = crate::simd::aabb_minmax_simd(coords);
+    let mut has_nan = false;
+    for c in coords {
+        has_nan |= !c.x.is_finite() | !c.y.is_finite();
     }
-    (min_x, max_x, min_y, max_y, has_nan)
+    if has_nan {
+        let (mut mnx, mut mxx, mut mny, mut mxy) =
+            (coords[0].x, coords[0].x, coords[0].y, coords[0].y);
+        for c in &coords[1..] {
+            mnx = mnx.min(c.x);
+            mxx = mxx.max(c.x);
+            mny = mny.min(c.y);
+            mxy = mxy.max(c.y);
+        }
+        return (mnx, mxx, mny, mxy, true);
+    }
+    (min_x, max_x, min_y, max_y, false)
 }
 
 /// Per-axis LOCAL bbox degeneracy: an axis is degenerate when its extent
@@ -670,7 +697,8 @@ pub fn make_valid_owned(poly: Polygon<f64>, config: &MakeValidConfig) -> Geometr
     // Same steps as the borrowed entry above, on the owned polygon.
     // Shared helpers carry the logic; nothing may live in both bodies.
     if !config.keep_collapsed && poly.exterior().0.len() >= 4 {
-        let (min_x, max_x, min_y, max_y, mut has_nan) = scan_exterior_bbox_nan(&poly.exterior().0);
+        let (min_x, max_x, min_y, max_y, mut has_nan) =
+            scan_exterior_bbox_nan(&poly.exterior().0);
         if exterior_is_locally_degenerate(min_x, max_x, min_y, max_y) {
             return empty_geom();
         }

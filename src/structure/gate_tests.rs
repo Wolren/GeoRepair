@@ -5,9 +5,9 @@ mod gate_completeness {
     //! OGC re-winding, because the Fast path now SKIPS that validator
     //! (2026-08-07). A gate/validator divergence here ships invalid output.
 
-    use crate::MakeValidConfig;
     use crate::make_valid::{enforce_ogc_winding, is_valid_with_geo};
     use crate::validation::GeoValidation;
+    use crate::MakeValidConfig;
     use geo::{Coord, LineString, Polygon};
 
     fn ring(coords: &[(f64, f64)]) -> LineString<f64> {
@@ -341,6 +341,89 @@ mod gate_completeness {
             v.errors
         );
     }
+
+    /// A regular n-gon, CCW, no holes.
+    fn ngon(n: usize, r: f64, cx: f64, cy: f64) -> Vec<Coord<f64>> {
+        let mut v: Vec<Coord<f64>> = (0..n - 1)
+            .map(|i| {
+                let a = std::f64::consts::TAU * i as f64 / (n - 1) as f64;
+                Coord {
+                    x: cx + r * a.cos(),
+                    y: cy + r * a.sin(),
+                }
+            })
+            .collect();
+        v.push(v[0]);
+        v
+    }
+
+    /// Non-adjacent repeated vertex on a ring LARGER than `SMALL_RING_LINES`
+    /// (2026-10-17).
+    ///
+    /// The gate used to carry an open-addressed duplicate-vertex table over
+    /// the whole ring. That table is gone: the repeated-vertex class is now
+    /// closed by the pair predicates themselves (`shares_repeated_vertex`,
+    /// mirroring GEOS's rule that any same-ring interaction which is not an
+    /// adjacent-in-ring endpoint touch is invalid). The property that has to
+    /// hold is exactly the one this test pins - the chain leaf must SEE the
+    /// pair, and the verdict must match what the validator says. `n = 40`
+    /// puts the ring on the fused chain path (not the small-ring sweep, not
+    /// the very-large validator branch), which is the branch that changed.
+    #[test]
+    fn gate_rejects_repeated_vertex_on_chain_path() {
+        let clean = Polygon::new(LineString::new(ngon(40, 100.0, 500.0, 500.0)), Vec::new());
+
+        // Repeat vertex 1 at position 21: a non-adjacent repeat, so the ring
+        // touches itself at exactly that point. Both incident edges must be
+        // paired by the chain sweep for the gate to reject it.
+        let mut coords = ngon(40, 100.0, 500.0, 500.0);
+        coords[21] = coords[1];
+        let pinched = Polygon::new(LineString::new(coords), Vec::new());
+
+        // The clean ring must actually take the fast path, or the test is
+        // vacuous (it would pass by rejecting everything).
+        match crate::structure::fix_polygon_owned(clean.clone(), &MakeValidConfig::default(), None)
+        {
+            crate::structure::FixOutcome::Fast(g, _, _, _) => {
+                let (g, ok) = enforce_ogc_winding(g);
+                assert!(ok, "clean 40-gon failed orientation certification");
+                assert!(is_valid_with_geo(&g), "clean 40-gon shipped invalid");
+            }
+            other => panic!(
+                "clean 40-gon did not take the fast path: {}",
+                match other {
+                    crate::structure::FixOutcome::Repaired(_) => "Repaired",
+                    crate::structure::FixOutcome::Unconsumed(_) => "Unconsumed",
+                    crate::structure::FixOutcome::Fast(..) => "Fast",
+                }
+            ),
+        }
+
+        // The validator must agree that the pinched ring is invalid, or the
+        // gate is being asked to certify something the contract allows.
+        assert!(
+            !pinched.validate().valid,
+            "validator accepted a non-adjacent repeated vertex"
+        );
+
+        match crate::structure::fix_polygon_owned(
+            pinched.clone(),
+            &MakeValidConfig::default(),
+            None,
+        ) {
+            crate::structure::FixOutcome::Fast(g, _, _, _) => {
+                let (g, ok) = enforce_ogc_winding(g);
+                assert!(
+                    !ok || is_valid_with_geo(&g),
+                    "Fast shipped a repeated-vertex ring the validator rejects"
+                );
+            }
+            crate::structure::FixOutcome::Repaired(g) => {
+                assert!(g.is_valid(), "Repaired shipped an invalid polygon");
+            }
+            crate::structure::FixOutcome::Unconsumed(_) => {}
+        }
+    }
 }
 
 #[cfg(all(test, feature = "arrange"))]
@@ -376,5 +459,142 @@ mod gate_retrace_ring {
             !matches!(outcome, crate::structure::FixOutcome::Fast(..)),
             "the gate must not certify a retrace ring"
         );
+    }
+}
+
+/// `ring_guards` is the gate's whole-ring guard reduction (sub-ULP edge flag
+/// plus smallest non-zero |ordinate|), and `has_sub_ulp_edge` is the
+/// pre-collapse pass's early-exit version of the same rule. Both go through
+/// `edge_is_sub_ulp`. This pins them against each other and against a naive
+/// reimplementation, including the cases that made the rule local in the
+/// first place (2026-10-17).
+mod ring_guards_agreement {
+    use crate::arrange::{has_sub_ulp_edge, ring_guards};
+    use geo::{Coord, LineString, Polygon};
+
+    fn closed(mut v: Vec<Coord<f64>>) -> Vec<Coord<f64>> {
+        let f = v[0];
+        v.push(f);
+        v
+    }
+
+    fn as_poly(ring: &[Coord<f64>]) -> Polygon<f64> {
+        Polygon::new(LineString::new(ring.to_vec()), Vec::new())
+    }
+
+    fn naive_sub_ulp(ring: &[Coord<f64>]) -> bool {
+        for w in ring.windows(2) {
+            let eps = f64::EPSILON
+                * w[0]
+                    .x
+                    .abs()
+                    .max(w[0].y.abs())
+                    .max(w[1].x.abs())
+                    .max(w[1].y.abs());
+            if eps > 0.0 && (w[1].x - w[0].x).abs().max((w[1].y - w[0].y).abs()) < eps {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Mirrors the in-walk `min_abs` this reduction replaced: the minimum
+    /// over non-zero |x| and |y| of `windows(2)`'s leading coordinate.
+    fn naive_min_abs(ring: &[Coord<f64>]) -> f64 {
+        let mut m = f64::INFINITY;
+        for w in ring.windows(2) {
+            for v in [w[0].x.abs(), w[0].y.abs()] {
+                if v != 0.0 {
+                    m = m.min(v);
+                }
+            }
+        }
+        m
+    }
+
+    #[test]
+    fn matches_the_naive_rule_and_the_precollapse_pass() {
+        let cases: Vec<Vec<Coord<f64>>> = vec![
+            // Unit square at the origin: axis-aligned edges plus zero
+            // ordinates, so both halves of the min rule are exercised.
+            closed(vec![
+                Coord { x: 0.0, y: 0.0 },
+                Coord { x: 1.0, y: 0.0 },
+                Coord { x: 1.0, y: 1.0 },
+                Coord { x: 0.0, y: 1.0 },
+            ]),
+            // Same square at 1e12 magnitude: still a valid 4-unit ring.
+            closed(vec![
+                Coord { x: 1e12, y: 1e12 },
+                Coord {
+                    x: 1e12 + 4.0,
+                    y: 1e12,
+                },
+                Coord {
+                    x: 1e12 + 4.0,
+                    y: 1e12 + 4.0,
+                },
+                Coord {
+                    x: 1e12,
+                    y: 1e12 + 4.0,
+                },
+            ]),
+            // 1e-8 spike at 1e8 magnitude: the noise class the guard exists
+            // for (1e-8 < EPSILON * 1e8).
+            closed(vec![
+                Coord { x: 1e8, y: 1e8 },
+                Coord {
+                    x: 1e8 + 1.0,
+                    y: 1e8,
+                },
+                Coord {
+                    x: 1e8 + 1.0,
+                    y: 1e8 + 1e-8,
+                },
+                Coord {
+                    x: 1e8,
+                    y: 1e8 + 1.0,
+                },
+            ]),
+            // Valid ring with a distant spike: the 2026-08-04 false positive
+            // the local rule was introduced to fix. Its 1-unit base edge must
+            // NOT read as sub-ULP.
+            closed(vec![
+                Coord { x: 0.0, y: 0.0 },
+                Coord { x: 1.0, y: 0.0 },
+                Coord { x: 1.0, y: 1.0 },
+                Coord { x: 0.0, y: 1.0 },
+                Coord {
+                    x: 4.9e208,
+                    y: 4.9e208,
+                },
+            ]),
+            // Signed zeros must read as zero (skipped), not as a 0.0 minimum.
+            closed(vec![
+                Coord { x: -0.0, y: -0.0 },
+                Coord { x: 2.0, y: 0.0 },
+                Coord { x: 2.0, y: 3.0 },
+                Coord { x: 0.0, y: 3.0 },
+            ]),
+        ];
+
+        for (i, ring) in cases.iter().enumerate() {
+            let (sub, min_abs) = ring_guards(ring);
+            assert_eq!(
+                sub,
+                naive_sub_ulp(ring),
+                "case {i}: ring_guards sub-ULP verdict disagrees with the naive rule"
+            );
+            assert_eq!(
+                sub,
+                has_sub_ulp_edge(&as_poly(ring), None),
+                "case {i}: the pre-collapse pass disagrees with ring_guards"
+            );
+            let want = naive_min_abs(ring);
+            assert!(
+                min_abs == want || (min_abs.is_infinite() && want.is_infinite()),
+                "case {i}: min_abs {min_abs} != {want}"
+            );
+        }
     }
 }

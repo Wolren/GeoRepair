@@ -94,8 +94,9 @@ pub(crate) enum FixOutcome {
 /// zero-copy passthrough, matching GEOS's shared-geometry return.
 ///
 /// `ext_scale` is the caller's precomputed exterior bbox scale
-/// (max spread, floored at 1.0) — lets `has_sub_ulp_edge` skip its own bbox
-/// pass. `None` recomputes it.
+/// (max spread, floored at 1.0). `None` recomputes it. It is no longer read
+/// by the sub-ULP test: that rule went per-edge-local in 2026-08-04, so the
+/// parameter is accepted only for call-site compatibility.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(crate) fn fix_polygon_owned(
     poly: Polygon<f64>,
@@ -153,15 +154,39 @@ pub(crate) fn fix_polygon_owned(
         if total_verts == 0 || poly.exterior().0.len() < 4 {
             return false;
         }
-        // Basic form + sub-ULP edges + the global envelope bbox + the
-        // extreme-magnitude min/max-abs extrema in ONE pass over the
-        // coords (measured 2026-08-08: the separate sub-ULP and
-        // envelope scans cost ~15-20 us on a 5000-vertex ring). The
-        // extrema ride out with the Fast outcome so the caller's
-        // extreme-span gate (crash-65111cd0 guard, 2026-08-09) does
-        // not re-scan the same coords.
+        // Basic form + the global envelope bbox in ONE pass over the coords;
+        // the max-abs extrema ride out with the Fast outcome so the caller's
+        // extreme-span gate (crash-65111cd0 guard, 2026-08-09) does not
+        // re-scan the same coords.
         let mut bbox = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
-        let mut sub_ulp = false;
+        // The sub-ULP edge flag and the extreme-magnitude `min_abs` extrema
+        // are whole-polygon properties, decided once per polygon here instead
+        // of per vertex inside the fused plausibility walk. Both used to ride
+        // along in that walk at ~16 scalar ops per vertex on EVERY valid ring,
+        // including the benchmark shapes where neither can ever fire; as
+        // dedicated reductions they vectorise and the walk stops paying for
+        // them (2026-10-17). A sub-ULP ring skips the walk entirely, since the
+        // flag routes the polygon to the full repair.
+        //
+        // Both come from the same coordinate set the walk would have covered
+        // (see `arrange::ring_guards`), in one pass per ring; an unclosed ring
+        // is rejected by the walk regardless, so these guards cannot certify
+        // one.
+        let (mut sub_ulp, ext_min_abs) = crate::arrange::ring_guards(&poly.exterior().0);
+        *min_abs = (*min_abs).min(ext_min_abs);
+        for hole in poly.interiors() {
+            let (hole_sub_ulp, hole_min_abs) = crate::arrange::ring_guards(&hole.0);
+            sub_ulp |= hole_sub_ulp;
+            *min_abs = (*min_abs).min(hole_min_abs);
+        }
+        if sub_ulp {
+            // An edge shorter than EPSILON * its own coordinate magnitude
+            // (mixed-magnitude rings, e.g. 1e8 coords with 1e-8 spikes)
+            // makes proper-crossing detection blind - collinear overlap is
+            // invisible. Such inputs are invalid anyway; route them to the
+            // full repair.
+            return false;
+        }
         // Lines ride out of the plausibility pass for rings above the
         // small-ring threshold (the stack SmallVec stays for <= 32) - one
         // fewer full pass over the coords on the mid-size valid-polygon
@@ -195,9 +220,6 @@ pub(crate) fn fix_polygon_owned(
             // push_line measured slower (interleaved A/B 2026-09-25: 3/3
             // rounds, 260.1 vs 247.1 us median at 10000v).
             bbox: (!fused_chains).then_some(&mut bbox),
-            sub_ulp: Some(&mut sub_ulp),
-            min_abs: Some(min_abs),
-            max_abs: Some(max_abs),
             extremal: Some(extremal),
         };
         if !crate::arrange::ring_is_plausible(poly.exterior(), &mut acc) {
@@ -217,13 +239,6 @@ pub(crate) fn fix_polygon_owned(
         } else {
             None
         };
-        if sub_ulp {
-            // Sub-ULP edge check: an edge shorter than EPSILON * bbox_scale
-            // (mixed-magnitude rings, e.g. 1e8 coords with 1e-8 spikes) makes
-            // proper-crossing detection blind - collinear overlap is invisible.
-            // Such inputs are invalid anyway; route them to the full repair.
-            return false;
-        }
         // Absolute envelope degeneracy - the validator's own rule: a geometry
         // whose bbox is thinner than f64::EPSILON on either axis is rejected
         // as DegenerateExterior. The basic-form gate uses a LOCAL relative
@@ -232,6 +247,16 @@ pub(crate) fn fix_polygon_owned(
         // path ships a polygon the validator rejects (fuzz_inprocess_loop
         // micro-sliver, 2026-08-07).
         let envelope = fused.as_ref().map_or(bbox, |(_, b)| *b);
+        // `max_abs` is the largest |ordinate| over every vertex of every
+        // ring. Each bbox extreme is attained by some vertex, so the largest
+        // |extreme| IS the largest |ordinate| - no per-vertex pass needed
+        // (it used to run inside the walk as a second accumulator).
+        *max_abs = envelope
+            .0
+            .abs()
+            .max(envelope.1.abs())
+            .max(envelope.2.abs())
+            .max(envelope.3.abs());
         if (envelope.1 - envelope.0).abs() < f64::EPSILON
             || (envelope.3 - envelope.2).abs() < f64::EPSILON
         {
