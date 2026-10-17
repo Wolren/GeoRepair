@@ -59,7 +59,7 @@ use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
 use crate::validation::impls::segments_collinear_overlap;
-use crate::validation::sweep::{radix_sort_keys_tls, sortable_u64};
+use crate::validation::sweep::{radix_sort_keys_tls, sortable_u64, SegGrid};
 
 mod classify;
 mod pieces;
@@ -334,19 +334,45 @@ impl<'a> LineNoder<'a> {
         radix_sort_keys_tls(&mut keys, &mut order);
         let limit = CROSSING_ONLY_PAIR_FACTOR * self.n + CROSSING_ONLY_PAIR_FLOOR;
         let mut calls = 0usize;
-        let mut active: Vec<u32> = Vec::new();
+        // Static grid instead of an incremental x-active set. The old
+        // active set kept every segment of a run sharing one lo_x (a
+        // subdivided vertical edge) and rescanned all of them per step,
+        // which is O(n^2) on exactly that class (see SegGrid). Positions
+        // are x-ranks, `ki < k` reproduces the active set's membership,
+        // and the two gates below are the ones the old loop applied, so
+        // the tested pairs and their order are unchanged.
+        let mut boxes: Vec<[f64; 4]> = Vec::with_capacity(self.n);
         for &ord in &order {
-            let j = ord as usize;
-            active.retain(|&p| self.hi_x[p as usize] + self.eps >= self.lo_x[j]);
-            if active.len() > SWEEP_ACTIVE_LIMIT {
+            let i = ord as usize;
+            boxes.push([
+                self.lo_x[i] - self.eps,
+                self.hi_x[i] + self.eps,
+                self.lo_y[i] - self.eps,
+                self.hi_y[i] + self.eps,
+            ]);
+        }
+        let mut grid = match SegGrid::build(&boxes) {
+            Some(g) => g,
+            None => {
                 self.crossing_bail();
                 return None;
             }
-            for &p in &active {
-                let i = p as usize;
-                if self.hi_y[i] < self.lo_y[j] - self.eps || self.lo_y[i] > self.hi_y[j] + self.eps
-                {
-                    continue;
+        };
+        let mut bail = false;
+        for k in 0..self.n {
+            if bail {
+                break;
+            }
+            let j = order[k] as usize;
+            let bj = boxes[k];
+            grid.for_each_candidate(bj, Some(k), |ki| {
+                if bail || ki >= k {
+                    return;
+                }
+                let i = order[ki] as usize;
+                let bi = boxes[ki];
+                if bi[1] < bj[0] || bi[3] < bj[2] || bi[2] > bj[3] {
+                    return;
                 }
                 // Adjacent pairs and the closed-line closure pair were
                 // certified by adjacent_pass (collinear overlaps bailed
@@ -356,12 +382,12 @@ impl<'a> LineNoder<'a> {
                     || i == j + 1
                     || (closed && ((i == 0 && j == self.n - 1) || (j == 0 && i == self.n - 1)))
                 {
-                    continue;
+                    return;
                 }
                 calls += 1;
                 if calls > limit {
-                    self.crossing_bail();
-                    return None;
+                    bail = true;
+                    return;
                 }
                 match classify::classify(self.a[i], self.b[i], self.a[j], self.b[j], self.eps) {
                     Hit::None => {}
@@ -382,8 +408,8 @@ impl<'a> LineNoder<'a> {
                     // These node at original endpoints through family and
                     // cluster semantics the fast path does not reproduce.
                     Hit::Collinear => {
-                        self.crossing_bail();
-                        return None;
+                        bail = true;
+                        return;
                     }
                     Hit::VertexOnEdge(v) => {
                         // v is one of the four original endpoints (the
@@ -407,8 +433,11 @@ impl<'a> LineNoder<'a> {
                         });
                     }
                 }
-            }
-            active.push(ord);
+            });
+        }
+        if bail {
+            self.crossing_bail();
+            return None;
         }
         // eps-class guard. Bit-equal points are their own clusters (an
         // exact duplicate, including the closed-line closure anchor pair,
@@ -1035,15 +1064,59 @@ impl<'a> LineNoder<'a> {
         }
         if !by_family.is_empty() {
             self.family_members = by_family;
-            // Large-family members vs sweep members.
+            // Large-family members vs sweep members. The old form scanned
+            // every sweep member for every removed member with only
+            // bbox_gate as a filter: O(F x S), which is n^2/4 on the
+            // figure-8 class, where the two vertical runs form one family
+            // of ~n/2 (measured 3.05 ms of a 6.19 ms 4000-vertex repair,
+            // and half of the noder's time once the other quadratic was
+            // removed). A static grid over the sweep members - built once,
+            // never mutated, so it cannot degenerate the way an x-active
+            // set does - visits only cell-sharing candidates and hands
+            // them back in sweep_ids order, so the pair set and its order
+            // are unchanged. A cell too dense to index keeps the old scan.
+            let mut sweep_boxes: Vec<[f64; 4]> = Vec::with_capacity(sweep_ids.len());
+            for &s in &sweep_ids {
+                let s = s as usize;
+                sweep_boxes.push([
+                    self.lo_x[s] - self.eps,
+                    self.hi_x[s] + self.eps,
+                    self.lo_y[s] - self.eps,
+                    self.hi_y[s] + self.eps,
+                ]);
+            }
+            let mut sweep_grid = SegGrid::build(&sweep_boxes);
             let removed_lists: Vec<Vec<u32>> = self.family_members.values().cloned().collect();
+            let mut hits: Vec<u32> = Vec::new();
             for members in &removed_lists {
                 for &i in members {
                     let i = i as usize;
-                    for &s in &sweep_ids {
-                        let s = s as usize;
-                        if self.bbox_gate(i, s) {
-                            self.test_pair(i, s);
+                    let bi = [
+                        self.lo_x[i] - self.eps,
+                        self.hi_x[i] + self.eps,
+                        self.lo_y[i] - self.eps,
+                        self.hi_y[i] + self.eps,
+                    ];
+                    match sweep_grid.as_mut() {
+                        Some(g) => {
+                            hits.clear();
+                            g.for_each_candidate(bi, None, |pos| {
+                                hits.push(sweep_ids[pos]);
+                            });
+                            for &s in &hits {
+                                let s = s as usize;
+                                if self.bbox_gate(i, s) {
+                                    self.test_pair(i, s);
+                                }
+                            }
+                        }
+                        None => {
+                            for &s in &sweep_ids {
+                                let s = s as usize;
+                                if self.bbox_gate(i, s) {
+                                    self.test_pair(i, s);
+                                }
+                            }
                         }
                     }
                 }
