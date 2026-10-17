@@ -697,8 +697,7 @@ pub fn make_valid_owned(poly: Polygon<f64>, config: &MakeValidConfig) -> Geometr
     // Same steps as the borrowed entry above, on the owned polygon.
     // Shared helpers carry the logic; nothing may live in both bodies.
     if !config.keep_collapsed && poly.exterior().0.len() >= 4 {
-        let (min_x, max_x, min_y, max_y, mut has_nan) =
-            scan_exterior_bbox_nan(&poly.exterior().0);
+        let (min_x, max_x, min_y, max_y, mut has_nan) = scan_exterior_bbox_nan(&poly.exterior().0);
         if exterior_is_locally_degenerate(min_x, max_x, min_y, max_y) {
             return empty_geom();
         }

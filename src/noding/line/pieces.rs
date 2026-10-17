@@ -13,10 +13,10 @@ use rustc_hash::FxHashSet;
 
 use crate::validation::sweep::{radix_sort_keys_tls, sortable_u64};
 
-use super::classify::classify;
 use super::Hit;
-use super::NodeEnt;
 use super::NO_FAMILY;
+use super::NodeEnt;
+use super::classify::classify;
 
 impl<'a> super::LineNoder<'a> {
     pub(super) fn test_pair(&mut self, i: usize, j: usize) {
