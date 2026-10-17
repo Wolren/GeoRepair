@@ -18,18 +18,23 @@ OGC geometry repair and validation for Rust. Passes the GEOS XML validation suit
 > and feature flags are all subject to change as we improve correctness
 > and performance.
 
-Detects and fixes invalid GIS geometries (self-intersections, unclosed
-rings, degenerate shapes, NaN coordinates) using algorithms selected by
-geometry type. Built-in I/O for WKB, WKT, and a custom binary batch
-format with no extra dependencies.
+GeoRepair repairs invalid OGC geometries and answers whether a geometry is
+valid. It fixes the common damage: self-intersections, unclosed rings,
+degenerate shapes, and NaN coordinates. Input that is already valid comes
+back unchanged, through a certification path that never runs the repair.
 
-The **Structure** strategy (default) mirrors GEOS ST_MakeValid: planar
-graph extraction, face walking, winding-number assembly. The **Arrange**
-strategy is a CDT-based fallback for complex topologies.
+Two strategies, chosen by geometry type:
 
-Measured against GEOS on the 1,579,030-polygon production dataset
-(i5-12400F, release, parallel batch, GEOS 3.14.1 conda-forge as
-reference). Current timings: [Performance](#performance).
+- **Structure** (default) mirrors GEOS `ST_MakeValid`: planar graph
+  extraction, face walking, winding-number assembly.
+- **Arrange** is a CDT-based fallback for complex topologies.
+
+WKB and WKT reading and writing, plus a custom binary batch format, are
+built in with no extra dependencies. The GEOS XML validation suite passes.
+
+Timings are measured against GEOS 3.14.1 (conda-forge) on a 1,579,030
+polygon production dataset, i5-12400F, release, 12-thread parallel batch:
+[Performance](#performance).
 
 ## Performance
 
