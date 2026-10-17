@@ -7,6 +7,27 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+### Added
+
+- CRS WKT2 support for `Crs` (ISO 19162:2019 / OGC 18-010r11):
+  - `Crs::to_wkt2()` emits an authoritative WKT2:2019 definition for the
+    bundled EPSG CRSs 4326, 4269 and 3857. Other codes return `None`: a
+    code-only `Crs` cannot synthesise a correct datum/projection, so it
+    declines rather than fabricating one.
+  - `Crs::from_wkt()` parses the CRS identifier out of either WKT2
+    (`ID["EPSG",4326]`) or WKT1 (`AUTHORITY["EPSG","4326"]`) text using a
+    byte-oriented, allocation-free scan that shares the WKT1 reader's
+    whitespace/identifier predicates.
+    `Crs::from_prj_wkt()` is now an alias for it.
+
+### Fixed
+
+- `Crs::from_prj_wkt()` only recognised WKT1's `AUTHORITY` keyword and so
+  silently returned `None` on genuine WKT2 input, which uses `ID`. It is
+  now WKT2-aware.
+- `Crs::to_esri_wkt()`'s doc comment claimed it produced "OGC-standard
+  WKT"; it emits ESRI-flavoured WKT1. Doc corrected (behaviour unchanged).
+
 ## [0.14.6] - 2026-10-08
 
 ### Changed

@@ -8,6 +8,14 @@
 //! The `Crs` type is embedded in [`crate::Feature`] for I/O
 //! round-tripping and in [`crate::MakeValidConfig`] for
 //! CRS-aware tolerance adjustment.
+//!
+//! # CRS text (WKT)
+//!
+//! [`Crs::to_wkt2`] emits a WKT2:2019 definition (ISO 19162:2019, OGC
+//! 18-010r11) for the EPSG CRSs bundled with this crate, and
+//! [`Crs::from_wkt`] extracts the authority from either WKT1 or WKT2 CRS
+//! text. [`Crs::to_esri_wkt`] produces ESRI-flavoured WKT1 for `.prj`
+//! consumers.
 
 #[cfg(feature = "proj")]
 use crate::core::MakeValidError;
@@ -123,39 +131,96 @@ impl Crs {
         }
     }
 
-    /// Parse a `.prj`-style WKT string to extract the authority.
+    /// Parse the CRS identifier out of a WKT CRS string.
     ///
-    /// Looks for `AUTHORITY["EPSG","<code>"]` in the WKT and returns
-    /// the corresponding Crs. Returns `None` if no authority is found.
-    pub fn from_prj_wkt(wkt: &str) -> Option<Self> {
-        let needle = "AUTHORITY";
-        let mut pos = 0;
-        let mut result: Option<Self> = None;
-        while let Some(start) = wkt[pos..].find(needle) {
-            let seg = &wkt[pos + start + needle.len()..];
-            let seg = seg.trim_start().strip_prefix('[')?;
-            let seg = seg.trim_start().strip_prefix('"')?;
-            let (org, rest) = seg.split_once('"')?;
-            let rest = rest.trim_start().strip_prefix(',')?;
-            let rest = rest.trim_start().strip_prefix('"')?;
-            let (code_str, _) = rest.split_once('"')?;
-            if let Ok(code) = code_str.parse::<u32>() {
-                // Keep the LAST authority found — the deepest (CRS-level)
-                // AUTHORITY is outermost in the WKT hierarchy and appears last.
-                result = Some(Self {
-                    authority: Some(format!("{org}:{code}")),
-                    is_geographic: org == "EPSG" && epsg_is_geographic(code),
-                });
-            }
-            pos = start + 1;
-        }
-        result
+    /// Handles both WKT1 (`.prj`-style) and WKT2 (ISO 19162:2019) text:
+    ///
+    /// - WKT1 writes `AUTHORITY["EPSG","4326"]` (both arguments quoted);
+    /// - WKT2 writes `ID["EPSG",4326]` (code unquoted). WKT2 retains
+    ///   `AUTHORITY` as a deprecated alias of `ID`, so both are accepted.
+    ///
+    /// The **last** identifier is used. The CRS-level identifier is the
+    /// outermost one and is written last, after the identifiers of nested
+    /// objects such as the datum, ellipsoid, prime meridian, base CRS,
+    /// conversion method and parameters. Identifier-looking text inside
+    /// quoted values (for example a `REMARK`) is ignored.
+    ///
+    /// Returns `None` when the string carries no identifier, which is
+    /// common for hand-authored `.prj` files.
+    ///
+    /// The scan is byte-oriented and allocation-free (it borrows the
+    /// organisation out of `wkt`); only the resulting authority string is
+    /// allocated.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use geo_repair::Crs;
+    ///
+    /// let wkt = Crs::from_epsg(4326).to_wkt2().unwrap();
+    /// assert_eq!(Crs::from_wkt(&wkt), Some(Crs::from_epsg(4326)));
+    /// ```
+    pub fn from_wkt(wkt: &str) -> Option<Self> {
+        let (org, code) = last_identifier(wkt)?;
+        Some(Self {
+            authority: Some(format!("{org}:{code}")),
+            is_geographic: org == "EPSG" && epsg_is_geographic(code),
+        })
     }
 
-    /// Generate an OGC-standard WKT string suitable for `.prj` files.
+    /// Parse a `.prj`-style WKT string to extract the authority.
     ///
-    /// Includes `AUTHORITY` clause for proper round-tripping.
-    /// Returns `None` if the CRS has no authority string.
+    /// Retained for backwards compatibility; this is an alias for
+    /// [`Crs::from_wkt`], which additionally understands the WKT2 `ID`
+    /// keyword. Returns `None` if no authority is found.
+    pub fn from_prj_wkt(wkt: &str) -> Option<Self> {
+        Self::from_wkt(wkt)
+    }
+
+    /// Emit an ISO 19162:2019 (WKT2:2019) CRS definition.
+    ///
+    /// WKT2:2019 is the current OGC WKT-CRS edition (OGC 18-010r11),
+    /// aligned with ISO 19162:2019. WKT2 superseded WKT1 and models
+    /// datums (including datum ensembles), coordinate systems, axes and
+    /// units explicitly.
+    ///
+    /// Authoritative definitions are bundled for the EPSG CRSs this crate
+    /// special-cases — EPSG:4326, EPSG:4269 and EPSG:3857. [`Crs`] stores
+    /// only an authority code, so it cannot synthesise a correct definition
+    /// for any other code; those return `None` rather than a fabricated
+    /// (and probably wrong) datum or projection. Use [`Crs::authority`] or
+    /// [`Crs::srid`] to obtain the code in that case.
+    ///
+    /// For WKT1 output see [`Crs::to_esri_wkt`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use geo_repair::Crs;
+    ///
+    /// let wkt = Crs::from_epsg(3857).to_wkt2().unwrap();
+    /// assert!(wkt.starts_with("PROJCRS["));
+    /// assert!(Crs::from_epsg(32633).to_wkt2().is_none());
+    /// ```
+    pub fn to_wkt2(&self) -> Option<String> {
+        match self.authority.as_deref()? {
+            "EPSG:4326" => Some(String::from(WKT2_EPSG_4326)),
+            "EPSG:4269" => Some(String::from(WKT2_EPSG_4269)),
+            "EPSG:3857" => Some(String::from(WKT2_EPSG_3857)),
+            _ => None,
+        }
+    }
+
+    /// Generate a WKT1 (ESRI-flavoured `.prj`-style) CRS string.
+    ///
+    /// This is **WKT1**, not WKT2: `GEOGCS`/`PROJCS` keywords with ESRI
+    /// parameter names (`D_WGS_1984`, `Mercator_Auxiliary_Sphere`, …) and an
+    /// `AUTHORITY` clause for round-tripping. It is not an OGC/ISO standard
+    /// WKT2 string — for that see [`Crs::to_wkt2`].
+    ///
+    /// Returns `None` if the CRS has no authority string. For codes without
+    /// a bundled definition this emits a templated placeholder whose datum
+    /// and projection are not authoritative.
     pub fn to_esri_wkt(&self) -> Option<String> {
         let srid = self.srid()?;
         let auth_clause = format!(",AUTHORITY[\"EPSG\",\"{srid}\"]");
@@ -207,6 +272,213 @@ impl Crs {
             ),
         })
     }
+}
+
+/// Authoritative WKT2:2019 (ISO 19162:2019 / OGC 18-010r11) definition of
+/// EPSG:4326 (WGS 84), as published by the EPSG registry / PROJ.
+const WKT2_EPSG_4326: &str = r#"GEOGCRS["WGS 84",
+    ENSEMBLE["World Geodetic System 1984 ensemble",
+        MEMBER["World Geodetic System 1984 (Transit)"],
+        MEMBER["World Geodetic System 1984 (G730)"],
+        MEMBER["World Geodetic System 1984 (G873)"],
+        MEMBER["World Geodetic System 1984 (G1150)"],
+        MEMBER["World Geodetic System 1984 (G1674)"],
+        MEMBER["World Geodetic System 1984 (G1762)"],
+        MEMBER["World Geodetic System 1984 (G2139)"],
+        MEMBER["World Geodetic System 1984 (G2296)"],
+        ELLIPSOID["WGS 84",6378137,298.257223563,
+            LENGTHUNIT["metre",1]],
+        ENSEMBLEACCURACY[2.0]],
+    PRIMEM["Greenwich",0,
+        ANGLEUNIT["degree",0.0174532925199433]],
+    CS[ellipsoidal,2],
+    AXIS["geodetic latitude (Lat)",north,
+        ORDER[1],
+        ANGLEUNIT["degree",0.0174532925199433]],
+    AXIS["geodetic longitude (Lon)",east,
+        ORDER[2],
+        ANGLEUNIT["degree",0.0174532925199433]],
+    USAGE[
+        SCOPE["Horizontal component of 3D system."],
+        AREA["World."],
+        BBOX[-90,-180,90,180]],
+    ID["EPSG",4326]]"#;
+
+/// Authoritative WKT2:2019 definition of EPSG:4269 (NAD83).
+const WKT2_EPSG_4269: &str = r#"GEOGCRS["NAD83",
+    DATUM["North American Datum 1983",
+        ELLIPSOID["GRS 1980",6378137,298.257222101,
+            LENGTHUNIT["metre",1]]],
+    PRIMEM["Greenwich",0,
+        ANGLEUNIT["degree",0.0174532925199433]],
+    CS[ellipsoidal,2],
+    AXIS["geodetic latitude (Lat)",north,
+        ORDER[1],
+        ANGLEUNIT["degree",0.0174532925199433]],
+    AXIS["geodetic longitude (Lon)",east,
+        ORDER[2],
+        ANGLEUNIT["degree",0.0174532925199433]],
+    USAGE[
+        SCOPE["Geodesy."],
+        AREA["North America - onshore and offshore: Canada. Puerto Rico. United States (USA). US Virgin Islands. British Virgin Islands."],
+        BBOX[14.92,167.65,86.46,-40.73]],
+    ID["EPSG",4269],
+    REMARK["Longitude is POSITIVE EAST. The adjustment included connections to Greenland and Mexico but the system was not adopted there. For applications with an accuracy of better than 1m replaced by NAD83(HARN) in the US and PRVI and by NAD83(CSRS) in Canada."]]"#;
+
+/// Authoritative WKT2:2019 definition of EPSG:3857 (WGS 84 / Pseudo-Mercator).
+const WKT2_EPSG_3857: &str = r#"PROJCRS["WGS 84 / Pseudo-Mercator",
+    BASEGEOGCRS["WGS 84",
+        ENSEMBLE["World Geodetic System 1984 ensemble",
+            MEMBER["World Geodetic System 1984 (Transit)"],
+            MEMBER["World Geodetic System 1984 (G730)"],
+            MEMBER["World Geodetic System 1984 (G873)"],
+            MEMBER["World Geodetic System 1984 (G1150)"],
+            MEMBER["World Geodetic System 1984 (G1674)"],
+            MEMBER["World Geodetic System 1984 (G1762)"],
+            MEMBER["World Geodetic System 1984 (G2139)"],
+            MEMBER["World Geodetic System 1984 (G2296)"],
+            ELLIPSOID["WGS 84",6378137,298.257223563,
+                LENGTHUNIT["metre",1]],
+            ENSEMBLEACCURACY[2.0]],
+        PRIMEM["Greenwich",0,
+            ANGLEUNIT["degree",0.0174532925199433]],
+        ID["EPSG",4326]],
+    CONVERSION["Popular Visualisation Pseudo-Mercator",
+        METHOD["Popular Visualisation Pseudo Mercator",
+            ID["EPSG",1024]],
+        PARAMETER["Latitude of natural origin",0,
+            ANGLEUNIT["degree",0.0174532925199433],
+            ID["EPSG",8801]],
+        PARAMETER["Longitude of natural origin",0,
+            ANGLEUNIT["degree",0.0174532925199433],
+            ID["EPSG",8802]],
+        PARAMETER["False easting",0,
+            LENGTHUNIT["metre",1],
+            ID["EPSG",8806]],
+        PARAMETER["False northing",0,
+            LENGTHUNIT["metre",1],
+            ID["EPSG",8807]]],
+    CS[Cartesian,2],
+    AXIS["easting (X)",east,
+        ORDER[1],
+        LENGTHUNIT["metre",1]],
+    AXIS["northing (Y)",north,
+        ORDER[2],
+        LENGTHUNIT["metre",1]],
+    USAGE[
+        SCOPE["Web mapping and visualisation."],
+        AREA["World between 85.06°S and 85.06°N."],
+        BBOX[-85.06,-180,85.06,180]],
+    ID["EPSG",3857]]"#;
+
+/// ASCII-whitespace skip, matching the predicate the WKT1 reader uses in
+/// `src/io/wkt/read.rs`.
+#[inline]
+fn skip_ws(s: &[u8], i: &mut usize) {
+    while *i < s.len() && s[*i].is_ascii_whitespace() {
+        *i += 1;
+    }
+}
+
+/// Identifier byte, matching the WKT1 reader's keyword predicate
+/// (`is_ascii_alphabetic() || b'_'`).
+#[inline]
+fn is_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphabetic() || b == b'_'
+}
+
+/// Return the organisation and code of the last CRS identifier in `wkt`.
+///
+/// Byte-oriented, single-pass and allocation-free: it borrows the
+/// organisation straight out of `wkt` and parses the code in place (the only
+/// allocation on the `from_wkt` path is the resulting authority string).
+/// Recognises the WKT2 `ID` keyword and the WKT1 `AUTHORITY` keyword (WKT2
+/// retains `AUTHORITY` as a deprecated alias). `ID` is matched as a whole
+/// word so `ELLIPSOID` cannot match, and quoted spans are skipped so
+/// identifier-looking text inside a name or `REMARK` cannot match.
+fn last_identifier(wkt: &str) -> Option<(&str, u32)> {
+    let s = wkt.as_bytes();
+    let n = s.len();
+    let mut i = 0;
+    let mut result = None;
+    while i < n {
+        let b = s[i];
+        if b == b'"' {
+            // Skip the quoted span.
+            i += 1;
+            while i < n && s[i] != b'"' {
+                i += 1;
+            }
+            i += 1;
+            continue;
+        }
+        if !is_ident_byte(b) {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        i += 1;
+        while i < n && is_ident_byte(s[i]) {
+            i += 1;
+        }
+        let word = &wkt[start..i];
+        // Keep the LAST identifier: the CRS-level one is the outermost and
+        // is therefore written last.
+        if (word == "ID" || word == "AUTHORITY")
+            && let Some((org, code)) = parse_clause(wkt, i)
+        {
+            result = Some((org, code));
+        }
+    }
+    result
+}
+
+/// Parse the `["ORG", code]` / `["ORG", "code"]` argument list that follows an
+/// `ID` / `AUTHORITY` keyword, starting at byte offset `i`. The organisation
+/// is borrowed from `wkt` and the code is parsed in place: no allocation.
+fn parse_clause(wkt: &str, mut i: usize) -> Option<(&str, u32)> {
+    let s = wkt.as_bytes();
+    let n = s.len();
+    skip_ws(s, &mut i);
+    if i >= n || s[i] != b'[' {
+        return None;
+    }
+    i += 1;
+    skip_ws(s, &mut i);
+    if i >= n || s[i] != b'"' {
+        return None;
+    }
+    i += 1;
+    let org_start = i;
+    while i < n && s[i] != b'"' {
+        i += 1;
+    }
+    if i >= n {
+        return None;
+    }
+    let org = &wkt[org_start..i];
+    i += 1; // closing quote of the organisation
+    skip_ws(s, &mut i);
+    if i >= n || s[i] != b',' {
+        return None;
+    }
+    i += 1;
+    skip_ws(s, &mut i);
+    // WKT2 writes the code unquoted (`ID["EPSG",4326]`); WKT1 quotes it
+    // (`AUTHORITY["EPSG","4326"]`). Accept both.
+    if i < n && s[i] == b'"' {
+        i += 1;
+        skip_ws(s, &mut i);
+    }
+    let code_start = i;
+    while i < n && s[i].is_ascii_digit() {
+        i += 1;
+    }
+    if i == code_start {
+        return None;
+    }
+    let code = wkt[code_start..i].parse::<u32>().ok()?;
+    Some((org, code))
 }
 
 impl Default for Crs {
@@ -369,5 +641,114 @@ mod tests {
     fn test_default_is_unknown() {
         let crs = Crs::default();
         assert_eq!(crs, Crs::unknown());
+    }
+
+    #[test]
+    fn test_to_wkt2_known_codes() {
+        assert!(
+            Crs::from_epsg(4326)
+                .to_wkt2()
+                .unwrap()
+                .starts_with("GEOGCRS[")
+        );
+        assert!(
+            Crs::from_epsg(4269)
+                .to_wkt2()
+                .unwrap()
+                .starts_with("GEOGCRS[")
+        );
+        assert!(
+            Crs::from_epsg(3857)
+                .to_wkt2()
+                .unwrap()
+                .starts_with("PROJCRS[")
+        );
+    }
+
+    #[test]
+    fn test_to_wkt2_is_wkt2_not_wkt1() {
+        let w = Crs::from_epsg(4326).to_wkt2().unwrap();
+        assert!(w.contains("GEOGCRS["));
+        assert!(w.contains("ID[\"EPSG\",4326]"));
+        assert!(w.contains("ENSEMBLE["));
+        assert!(!w.contains("GEOGCS["));
+        assert!(!w.contains("AUTHORITY["));
+    }
+
+    #[test]
+    fn test_to_wkt2_none_for_unbundled_code() {
+        assert_eq!(Crs::from_epsg(32633).to_wkt2(), None);
+        assert_eq!(Crs::unknown().to_wkt2(), None);
+        // A non-EPSG authority that happens to carry an EPSG code must not
+        // be served the EPSG definition.
+        assert_eq!(Crs::from_authority("ESRI:4326").to_wkt2(), None);
+    }
+
+    #[test]
+    fn test_to_wkt2_roundtrip() {
+        for code in [4326u32, 4269, 3857] {
+            let wkt = Crs::from_epsg(code).to_wkt2().unwrap();
+            assert_eq!(
+                Crs::from_wkt(&wkt),
+                Some(Crs::from_epsg(code)),
+                "EPSG:{code}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_from_wkt_wkt2_id() {
+        assert_eq!(
+            Crs::from_wkt(r#"GEOGCRS["WGS 84",ID["EPSG",4326]]"#),
+            Some(Crs::from_epsg(4326))
+        );
+    }
+
+    #[test]
+    fn test_from_wkt_wkt1_authority() {
+        assert_eq!(
+            Crs::from_wkt(r#"GEOGCS["WGS 84",AUTHORITY["EPSG","4326"]]"#),
+            Some(Crs::from_epsg(4326))
+        );
+    }
+
+    #[test]
+    fn test_from_wkt_prefers_crs_level_identifier() {
+        // EPSG:3857 nests ID["EPSG",4326] in BASEGEOGCRS and ID["EPSG",1024]
+        // plus parameter IDs in the conversion; the CRS-level ID is last.
+        let wkt = Crs::from_epsg(3857).to_wkt2().unwrap();
+        assert_eq!(Crs::from_wkt(&wkt).unwrap().srid(), Some(3857));
+    }
+
+    #[test]
+    fn test_from_wkt_ignores_quoted_and_substring_id() {
+        // "ELLIPSOID" ends in ID but is a distinct token; an ID-shaped
+        // sequence inside a quoted value must be skipped.
+        let wkt = r#"GEOGCRS["ID test",REMARK["see ID["ESRI",9999]"],ID["ESRI",102100]]"#;
+        assert_eq!(Crs::from_wkt(wkt), Some(Crs::from_authority("ESRI:102100")));
+    }
+
+    #[test]
+    fn test_from_wkt_none_without_identifier() {
+        assert_eq!(Crs::from_wkt(r#"GEOGCRS["No identifier here"]"#), None);
+        // Hand-authored ESRI WKT1 with no AUTHORITY clause (as found in
+        // real `.prj` files, e.g. an Albers definition).
+        let esri = r#"PROJCS["Albers Equal Area",GEOGCS["clark66",DATUM["D_North_American_1927",SPHEROID["Clarke_1866",6378206.4,294.9786982]]]]"#;
+        assert_eq!(Crs::from_wkt(esri), None);
+    }
+
+    #[test]
+    fn test_from_prj_wkt_is_alias_of_from_wkt() {
+        let wkt = r#"GEOGCS["WGS 84",AUTHORITY["EPSG","4326"]]"#;
+        assert_eq!(Crs::from_prj_wkt(wkt), Crs::from_wkt(wkt));
+    }
+
+    #[test]
+    fn test_from_wkt_handles_wkt2_authority_alias() {
+        // WKT2 keeps AUTHORITY as a deprecated alias of ID.
+        assert_eq!(
+            Crs::from_wkt(r#"GEOGCRS["NAD83",AUTHORITY["EPSG","4269"]]"#),
+            Some(Crs::from_epsg(4269))
+        );
     }
 }
