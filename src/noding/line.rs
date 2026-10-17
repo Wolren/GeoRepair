@@ -180,6 +180,13 @@ pub(crate) fn node_line(coords: &[Coord<f64>]) -> Option<Vec<Vec<Coord<f64>>>> {
     ln.run()
 }
 
+/// Shared budget/verdict state for the chain-index pair enumeration.
+struct ScanState {
+    bail: bool,
+    calls: usize,
+    limit: usize,
+}
+
 impl<'a> LineNoder<'a> {
     pub(super) fn new(coords: &'a [Coord<f64>]) -> Self {
         let n = coords.len() - 1;
@@ -270,22 +277,20 @@ impl<'a> LineNoder<'a> {
     /// longest run of bit-equal (x, y) points (the spoke wheel's shared
     /// vertex shows up as one long run, O(n) with a much smaller constant
     /// than a hashmap).
+    /// True when the longest run of bit-identical coordinates is long
+    /// enough to dominate the input (`max_freq * 2 + 2 >= n`). A hash count
+    /// answers it in one pass; the previous form radix-sorted every
+    /// coordinate by x to group them first, which was ~95 us of node_line's
+    /// 796 us at n=4000 for a question a count decides exactly.
     pub(super) fn revisit_dominated(&self) -> bool {
-        let mut keys: Vec<u64> = self.coords.iter().map(|c| sortable_u64(c.x)).collect();
-        let mut order: Vec<u32> = (0..keys.len() as u32).collect();
-        radix_sort_keys_tls(&mut keys, &mut order);
+        let mut counts: FxHashMap<(u64, u64), u32> = FxHashMap::default();
+        counts.reserve(self.coords.len());
         let mut max_freq = 1u32;
-        let mut run = 1u32;
-        for w in order.windows(2) {
-            let a = self.coords[w[0] as usize];
-            let b = self.coords[w[1] as usize];
-            if a.x.to_bits() == b.x.to_bits() && a.y.to_bits() == b.y.to_bits() {
-                run += 1;
-                if run > max_freq {
-                    max_freq = run;
-                }
-            } else {
-                run = 1;
+        for c in self.coords {
+            let e = counts.entry((c.x.to_bits(), c.y.to_bits())).or_insert(0);
+            *e += 1;
+            if *e > max_freq {
+                max_freq = *e;
             }
         }
         max_freq * 2 + 2 >= self.n as u32
@@ -323,118 +328,79 @@ impl<'a> LineNoder<'a> {
             self.crossing_bail();
             return None;
         }
-        // Candidate pairs: segments whose x-intervals overlap, radix
-        // sorted like sweep_pass but without families. Same-line disjoint
-        // segments classify None (the collinear gate needs real t-overlap),
-        // so the family machinery is not needed for this class.
         let closed = self.closed();
-        let mut revisits: Vec<Coord<f64>> = Vec::new();
-        let mut keys: Vec<u64> = (0..self.n).map(|i| sortable_u64(self.lo_x[i])).collect();
-        let mut order: Vec<u32> = (0..self.n as u32).collect();
-        radix_sort_keys_tls(&mut keys, &mut order);
         let limit = CROSSING_ONLY_PAIR_FACTOR * self.n + CROSSING_ONLY_PAIR_FLOOR;
-        let mut calls = 0usize;
-        // Static grid instead of an incremental x-active set. The old
-        // active set kept every segment of a run sharing one lo_x (a
-        // subdivided vertical edge) and rescanned all of them per step,
-        // which is O(n^2) on exactly that class (see SegGrid). Positions
-        // are x-ranks, `ki < k` reproduces the active set's membership,
-        // and the two gates below are the ones the old loop applied, so
-        // the tested pairs and their order are unchanged.
-        let mut boxes: Vec<[f64; 4]> = Vec::with_capacity(self.n);
-        for &ord in &order {
-            let i = ord as usize;
-            boxes.push([
-                self.lo_x[i] - self.eps,
-                self.hi_x[i] + self.eps,
-                self.lo_y[i] - self.eps,
-                self.hi_y[i] + self.eps,
+        // Monotone-chain candidate index, the model the polygon gate uses,
+        // replacing the per-SEGMENT x-sorted scan. Segments are grouped into
+        // quadrant-monotone chains in one walk, a grid over the CHAIN
+        // envelopes yields the chain pairs, and each pair is enumerated on the
+        // axis where both chains are widest. The old form paid one grid query
+        // per segment plus a full radix sort of the segment lo_x values: on
+        // the 4000-vertex figure-8 the sort alone was 103 us and the
+        // per-segment queries about 270 us of node_line's 796 us.
+        let lines: Vec<geo::Line<f64>> = (0..self.n)
+            .map(|i| geo::Line::new(self.a[i], self.b[i]))
+            .collect();
+        let (mc, _) = crate::arrange::prep_intersect::build_mono_chains(&lines);
+        let nc = mc.len();
+        let mut chain_boxes: Vec<[f64; 4]> = Vec::with_capacity(nc);
+        for c in &mc {
+            chain_boxes.push([
+                c.min_x - self.eps,
+                c.max_x + self.eps,
+                c.min_y - self.eps,
+                c.max_y + self.eps,
             ]);
         }
-        let mut grid = match SegGrid::build(&boxes) {
-            Some(g) => g,
-            None => {
-                self.crossing_bail();
-                return None;
-            }
+        let mut st = ScanState {
+            bail: false,
+            calls: 0,
+            limit,
         };
-        let mut bail = false;
-        for k in 0..self.n {
-            if bail {
+        let mut revisits: Vec<Coord<f64>> = Vec::new();
+        // Self-pairs first in chain order, then cross pairs in grid order.
+        for ci in 0..nc {
+            self.enumerate_chain_pair(&mc, ci, ci, &mut st, &mut revisits);
+            if st.bail {
                 break;
             }
-            let j = order[k] as usize;
-            let bj = boxes[k];
-            grid.for_each_candidate(bj, Some(k), |ki| {
-                if bail || ki >= k {
-                    return;
-                }
-                let i = order[ki] as usize;
-                let bi = boxes[ki];
-                if bi[1] < bj[0] || bi[3] < bj[2] || bi[2] > bj[3] {
-                    return;
-                }
-                // Adjacent pairs and the closed-line closure pair were
-                // certified by adjacent_pass (collinear overlaps bailed
-                // there), and they never record revisits, so the scan
-                // skips them without a classify.
-                if j == i + 1
-                    || i == j + 1
-                    || (closed && ((i == 0 && j == self.n - 1) || (j == 0 && i == self.n - 1)))
-                {
-                    return;
-                }
-                calls += 1;
-                if calls > limit {
-                    bail = true;
-                    return;
-                }
-                match classify::classify(self.a[i], self.b[i], self.a[j], self.b[j], self.eps) {
-                    Hit::None => {}
-                    Hit::Shared => {
-                        // A non-adjacent, non-closure shared endpoint is a
-                        // revisit vertex (degree > 2) and a chain boundary.
-                        let v = if self.a[i] == self.a[j] || self.a[i] == self.b[j] {
-                            self.a[i]
-                        } else {
-                            self.b[i]
-                        };
-                        revisits.push(v);
-                    }
-                    Hit::Cross(pt) => {
-                        self.nodes.push(NodeEnt { seg: i as u32, pt });
-                        self.nodes.push(NodeEnt { seg: j as u32, pt });
-                    }
-                    // These node at original endpoints through family and
-                    // cluster semantics the fast path does not reproduce.
-                    Hit::Collinear => {
-                        bail = true;
-                        return;
-                    }
-                    Hit::VertexOnEdge(v) => {
-                        // v is one of the four original endpoints (the
-                        // screen excludes exact shares) resting >= eps
-                        // inside the OTHER segment's span. Split that
-                        // segment at v: the split is clean (d > eps from
-                        // its endpoints), v enters `breaks` so chains END
-                        // there, and the validator allows the boundary
-                        // contact. Bailing to the general path instead
-                        // cost ringing 1000v +60% locally / +93% CI
-                        // (every wave-vertex-on-chord contact tripped it)
-                        // while fixing nothing the split does not.
-                        let seg = if v == self.a[i] || v == self.b[i] {
-                            j
-                        } else {
-                            i
-                        };
-                        self.nodes.push(NodeEnt {
-                            seg: seg as u32,
-                            pt: v,
+        }
+        if !st.bail && nc > 1 {
+            match SegGrid::build(&chain_boxes) {
+                Some(mut grid) => {
+                    let mut stop = false;
+                    for ci in 0..nc {
+                        if stop {
+                            break;
+                        }
+                        let bi = chain_boxes[ci];
+                        grid.for_each_candidate(bi, Some(ci), |cj| {
+                            if stop || st.bail || cj <= ci {
+                                return;
+                            }
+                            self.enumerate_chain_pair(&mc, ci, cj, &mut st, &mut revisits);
+                            if st.bail {
+                                stop = true;
+                            }
                         });
                     }
                 }
-            });
+                None => {
+                    for ci in 0..nc {
+                        for cj in (ci + 1)..nc {
+                            self.enumerate_chain_pair(&mc, ci, cj, &mut st, &mut revisits);
+                            if st.bail {
+                                break;
+                            }
+                        }
+                        if st.bail {
+                            break;
+                        }
+                    }
+                }
+            }
         }
+        let bail = st.bail;
         if bail {
             self.crossing_bail();
             return None;
@@ -658,6 +624,132 @@ impl<'a> LineNoder<'a> {
     /// Reset what the fast path touched so the general path sees the
     /// noder exactly as `new()` built it: the splits it filled are
     /// exactly the node segments' entries (empty before the fast path).
+    /// Enumerate every segment pair of two chains whose padded boxes can
+    /// overlap, and classify each one.
+    ///
+    /// Both chains are monotone, so on either axis their lo and hi values are
+    /// non-decreasing along the chain; a segment's overlapping partners in the
+    /// other chain are therefore a contiguous window, and two advancing
+    /// pointers walk it in O(|A| + |B| + output). The axis is the one where
+    /// both chains are widest (the larger of the two min-spreads), because a
+    /// wide common axis means short windows: the figure-8's vertical runs all
+    /// share one x value, so they must be enumerated on y or their
+    /// self-comparison is square.
+    fn enumerate_chain_pair(
+        &mut self,
+        mc: &[crate::arrange::prep_intersect::MonoChain],
+        ia: usize,
+        ib: usize,
+        st: &mut ScanState,
+        revisits: &mut Vec<Coord<f64>>,
+    ) {
+        if st.bail {
+            return;
+        }
+        let (a, b) = (&mc[ia], &mc[ib]);
+        let (as_, ae) = (a.start, a.end);
+        let (bs, be) = (b.start, b.end);
+        if as_ >= ae || bs >= be {
+            return;
+        }
+        let use_y = (a.max_x - a.min_x).abs().min((b.max_x - b.min_x).abs())
+            < (a.max_y - a.min_y).abs().min((b.max_y - b.min_y).abs());
+        let a_asc = if use_y { a.quad == 0 || a.quad == 3 } else { a.quad <= 1 };
+        let b_asc = if use_y { b.quad == 0 || b.quad == 3 } else { b.quad <= 1 };
+        let bn = be - bs;
+        let bidx = |p: usize| if b_asc { bs + p } else { be - 1 - p };
+        // Candidates first: the window walk borrows the coordinate arrays
+        // immutably and classifying a pair needs `&mut self` for the node
+        // pushes.
+        let mut pairs: Vec<(u32, u32)> = Vec::new();
+        {
+            let (lo, hi): (&[f64], &[f64]) = if use_y {
+                (&self.lo_y, &self.hi_y)
+            } else {
+                (&self.lo_x, &self.hi_x)
+            };
+            let (mut p_lo, mut p_hi) = (0usize, 0usize);
+            for step in 0..(ae - as_) {
+                let i = if a_asc { as_ + step } else { ae - 1 - step };
+                let i0 = lo[i];
+                let i1 = hi[i];
+                while p_lo < bn && hi[bidx(p_lo)] < i0 {
+                    p_lo += 1;
+                }
+                if p_hi < p_lo {
+                    p_hi = p_lo;
+                }
+                while p_hi < bn && lo[bidx(p_hi)] <= i1 {
+                    p_hi += 1;
+                }
+                for p in p_lo..p_hi {
+                    pairs.push((i as u32, bidx(p) as u32));
+                }
+            }
+        }
+        for &(i, j) in &pairs {
+            self.classify_pair(i as usize, j as usize, ia, ib, st, revisits);
+            if st.bail {
+                return;
+            }
+        }
+    }
+
+    /// Leaf of `descend`: the per-pair gates and the classification the old
+    /// segment scan applied, verbatim, so the pair set and the `calls` budget
+    /// are unchanged.
+    fn classify_pair(
+        &mut self,
+        i: usize,
+        j: usize,
+        ia: usize,
+        ib: usize,
+        st: &mut ScanState,
+        revisits: &mut Vec<Coord<f64>>,
+    ) {
+        if i == j || (ia == ib && j <= i) {
+            return;
+        }
+        let bi = [self.lo_x[i] - self.eps, self.hi_x[i] + self.eps, self.lo_y[i] - self.eps, self.hi_y[i] + self.eps];
+        let bj = [self.lo_x[j] - self.eps, self.hi_x[j] + self.eps, self.lo_y[j] - self.eps, self.hi_y[j] + self.eps];
+        if bi[1] < bj[0] || bj[1] < bi[0] || bi[3] < bj[2] || bj[3] < bi[2] {
+            return;
+        }
+        if j == i + 1
+            || i == j + 1
+            || (self.closed() && ((i == 0 && j == self.n - 1) || (j == 0 && i == self.n - 1)))
+        {
+            return;
+        }
+        st.calls += 1;
+        if st.calls > st.limit {
+            st.bail = true;
+            return;
+        }
+        match classify::classify(self.a[i], self.b[i], self.a[j], self.b[j], self.eps) {
+            Hit::None => {}
+            Hit::Shared => {
+                let v = if self.a[i] == self.a[j] || self.a[i] == self.b[j] {
+                    self.a[i]
+                } else {
+                    self.b[i]
+                };
+                revisits.push(v);
+            }
+            Hit::Cross(pt) => {
+                self.nodes.push(NodeEnt { seg: i as u32, pt });
+                self.nodes.push(NodeEnt { seg: j as u32, pt });
+            }
+            Hit::Collinear => {
+                st.bail = true;
+            }
+            Hit::VertexOnEdge(v) => {
+                let seg = if v == self.a[i] || v == self.b[i] { j } else { i };
+                self.nodes.push(NodeEnt { seg: seg as u32, pt: v });
+            }
+        }
+    }
+
     fn crossing_bail(&mut self) {
         for e in &self.nodes {
             self.splits[e.seg as usize].clear();
@@ -683,74 +775,89 @@ impl<'a> LineNoder<'a> {
     /// Shared scan: anchors plus `nodes` radix-sorted by x-bits, then
     /// window-scanned with an iteration budget (a dense x-column routes
     /// to the general path, whose union-find pays the same order anyway).
+    /// True when two DISTINCT input points (by bit key) sit within `eps` of
+    /// each other on both axes: the general path's clustering would merge
+    /// them and change piece endpoints.
+    ///
+    /// A sparse hash grid with cell = eps answers this in one pass. A
+    /// qualifying pair lies in the same or in an adjacent cell, so a 3x3
+    /// neighbourhood query per point suffices, and only occupied cells are
+    /// stored, so a wide extent with a tiny eps cannot blow the grid up the
+    /// way a full array grid would. The previous form radix-sorted every
+    /// point by x, y-sorted each bit-equal-x column, then window-scanned
+    /// (~170 us of node_line's 796 us at n=4000) for the same answer at
+    /// log-factor cost.
     fn eps_classes_scan(&self, nodes: &[NodeEnt]) -> bool {
-        let na = self.coords.len();
-        let total = na + nodes.len();
-        let mut pts: Vec<(f64, f64)> = Vec::with_capacity(total);
-        for c in self.coords {
-            pts.push((c.x, c.y));
+        let eps = self.eps;
+        if !(eps > 0.0) || !eps.is_finite() {
+            return false;
         }
-        for e in nodes {
-            pts.push((e.pt.x, e.pt.y));
+        let total = self.coords.len() + nodes.len();
+        if total < 2 {
+            return false;
         }
-        let mut keys: Vec<u64> = Vec::with_capacity(total);
-        let mut order: Vec<u32> = Vec::with_capacity(total);
-        for (i, p) in pts.iter().enumerate() {
-            keys.push(sortable_u64(p.0));
-            order.push(i as u32);
-        }
-        radix_sort_keys_tls(&mut keys, &mut order);
-        // Gather once so the window scan walks one contiguous array
-        // (the two-array index indirection measured 73 us on the 1000v
-        // figure-8, 2026-09-18).
-        let mut sorted: Vec<(f64, f64)> = order.iter().map(|&o| pts[o as usize]).collect();
-        let budget = EPS_CLASS_SCAN_FACTOR * total + EPS_CLASS_SCAN_FLOOR;
-        let mut iters = 0usize;
-        // Runs of bit-equal x are y-sorted before scanning. A vertical
-        // input run (the 1000v figure-8's 250-point legs) would otherwise
-        // make the plain x-window scan quadratic: measured 43,056
-        // iterations, 57 us, on 2026-09-18.
-        let mut i = 0usize;
-        while i < total {
-            let xi = sorted[i].0;
-            let mut run_end = i + 1;
-            while run_end < total && sorted[run_end].0.to_bits() == xi.to_bits() {
-                run_end += 1;
-            }
-            if run_end - i > 1 {
-                sorted[i..run_end].sort_unstable_by(|a, b| a.1.total_cmp(&b.1));
-            }
-            for j in i..run_end {
-                let (xi, yi) = sorted[j];
-                for &(xj, yj) in &sorted[j + 1..run_end] {
-                    if yj - yi > self.eps {
-                        break;
-                    }
-                    if xj.to_bits() == xi.to_bits() && yj.to_bits() == yi.to_bits() {
+        /// Any point already stored in the 3x3 neighbourhood of (kx, ky)
+        /// that is within eps on both axes and bit-distinct from the probe?
+        fn hit_neighbours(
+            grid: &FxHashMap<(i64, i64), (u64, u64)>,
+            kx: i64,
+            ky: i64,
+            bx: u64,
+            by: u64,
+            x: f64,
+            y: f64,
+            eps: f64,
+        ) -> bool {
+            for cx in (kx - 1)..=(kx + 1) {
+                for cy in (ky - 1)..=(ky + 1) {
+                    if cx == kx && cy == ky {
                         continue;
                     }
-                    iters += 1;
-                    if iters > budget {
-                        return true;
-                    }
-                    if (yj - yi).abs() <= self.eps {
-                        return true;
-                    }
-                }
-                for &(xj, yj) in &sorted[run_end..] {
-                    if xj - xi > self.eps {
-                        break;
-                    }
-                    iters += 1;
-                    if iters > budget {
-                        return true;
-                    }
-                    if (yj - yi).abs() <= self.eps {
-                        return true;
+                    if let Some(&(qx, qy)) = grid.get(&(cx, cy)) {
+                        if qx == bx && qy == by {
+                            continue;
+                        }
+                        if (x - f64::from_bits(qx)).abs() <= eps
+                            && (y - f64::from_bits(qy)).abs() <= eps
+                        {
+                            return true;
+                        }
                     }
                 }
             }
-            i = run_end;
+            false
+        }
+        let inv = 1.0 / eps;
+        let mut grid: FxHashMap<(i64, i64), (u64, u64)> = FxHashMap::default();
+        grid.reserve(total);
+        // One distinct point per cell is enough: two distinct points in one
+        // cell are within eps by construction, so the own-cell check returns
+        // before the cell could hold a second, and if the exact test ever
+        // disagreed (a float artefact) the conservative answer is the same.
+        let mut probe = |x: f64, y: f64| -> bool {
+            let (bx, by) = (x.to_bits(), y.to_bits());
+            let kx = (x * inv).floor() as i64;
+            let ky = (y * inv).floor() as i64;
+            if let Some(&(qx, qy)) = grid.get(&(kx, ky)) {
+                if qx != bx || qy != by {
+                    return true;
+                }
+            }
+            if hit_neighbours(&grid, kx, ky, bx, by, x, y, eps) {
+                return true;
+            }
+            grid.insert((kx, ky), (bx, by));
+            false
+        };
+        for c in self.coords {
+            if probe(c.x, c.y) {
+                return true;
+            }
+        }
+        for e in nodes {
+            if probe(e.pt.x, e.pt.y) {
+                return true;
+            }
         }
         false
     }

@@ -51,14 +51,14 @@ fn quadrant(x: f64, y: f64) -> u8 {
 
 #[cfg_attr(test, derive(Debug, PartialEq))]
 pub(crate) struct MonoChain {
-    start: usize,
-    end: usize,
-    quad: u8,
-    min_x: f64,
-    min_y: f64,
-    max_x: f64,
-    max_y: f64,
-    ring_id: u32,
+    pub(crate) start: usize,
+    pub(crate) end: usize,
+    pub(crate) quad: u8,
+    pub(crate) min_x: f64,
+    pub(crate) min_y: f64,
+    pub(crate) max_x: f64,
+    pub(crate) max_y: f64,
+    pub(crate) ring_id: u32,
     /// 1e-12 * ring bbox scale, computed once per ring in
     /// build_mono_chains. Used by the same-ring full pair predicate
     /// (the gate must match check_ring_validity's ring-local eps).
