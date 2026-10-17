@@ -180,7 +180,7 @@ jobs:
         run: python scripts/bench_gate.py --json target/bench_gate.json --baseline benches/bench_baseline.json
       - name: Upload recorded baseline (when the first run created it)
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v4
         with:
           name: bench-baseline
           path: benches/bench_baseline.json
@@ -205,7 +205,7 @@ jobs:
         run: CRS_WKT_BASELINE=benches/crs_wkt_baseline.txt cargo bench --locked --features "arrange,structure,parallel,simd" --bench crs_wkt
       - name: Upload recorded baseline (when the first run created it)
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v4
         with:
           name: crs-wkt-baseline
           path: benches/crs_wkt_baseline.txt
@@ -414,7 +414,7 @@ jobs:
         run: cargo fuzz run --sanitizer address make_valid -- -runs=2000 -max_len=1024
       - name: Upload crash artifacts (pull-back loop)
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v4
         with:
           name: fuzz-crashes
           path: fuzz/artifacts/**
