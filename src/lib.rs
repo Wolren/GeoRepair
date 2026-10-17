@@ -290,6 +290,11 @@
 //! - Projected (metres): `1e-6` metres
 //! - Unknown: `1e-12`
 //!
+//! For CRS text interchange, [`Crs::to_wkt2`] emits an ISO 19162:2019
+//! (WKT2:2019) definition for the bundled EPSG CRSs (`4326`, `4269`,
+//! `3857`), and [`Crs::from_wkt`] reads the authority from either WKT1 or
+//! WKT2 text.
+//!
 //! CRS is set directly on [`MakeValidConfig`]:
 //!
 //! ```rust

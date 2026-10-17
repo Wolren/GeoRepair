@@ -187,6 +187,31 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # CRS WKT parse/serialize gate: benches/crs_wkt.rs measures WKT1 vs WKT2
+  # parsing and serialization for the SAME CRS (both encodings), with
+  # best-of-batches timing, and gates itself against
+  # benches/crs_wkt_baseline.txt - recording that baseline on the first run
+  # (a maintainer commits the uploaded artifact, like the bench-gate job).
+  # This is the only gate that can see a regression in the CRS parser: the
+  # repair benchmarks never touch it.
+  crs-wkt-bench-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de  # stable
+        with:
+          toolchain: stable
+      - name: CRS WKT bench (records the baseline on the first run)
+        run: CRS_WKT_BASELINE=benches/crs_wkt_baseline.txt cargo bench --locked --features "arrange,structure,parallel,simd" --bench crs_wkt
+      - name: Upload recorded baseline (when the first run created it)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v4
+        with:
+          name: crs-wkt-baseline
+          path: benches/crs_wkt_baseline.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
   # WebAssembly gate: the crate claims wasm32 support (default features
   # minus C-bound deps; the `wasm` feature adds browser fetch). Both the
   # full default feature set and the minimal wasm config must compile, and
