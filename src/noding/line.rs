@@ -100,6 +100,21 @@ const FAMILY_SPAN_PAD_EPS: f64 = 1e5;
 /// scan bails to the general path before paying its cost twice.
 const CROSSING_ONLY_PAIR_FACTOR: usize = 32;
 const CROSSING_ONLY_PAIR_FLOOR: usize = 1024;
+
+/// Cap on the priced work of the chain-index enumeration, in units of `n`.
+/// Each cross-chain walk costs `O(|A| + |B|)` pointer steps, so a shape whose
+/// chains are long AND whose chains meet in many combinations would spend
+/// `O(n * chains)` there while the per-segment grid spends `O(n + output)`.
+///
+/// Set to `0`, i.e. the chain-index enumeration is DISABLED. Measured
+/// 2026-10-17 on this box: it lost ~30 % on the `ringing` ladder (90 -> 116 us
+/// at 1000v parallel, reproduced against `5a07c75`) and ~20-40 % on
+/// `ringing`/`spiral`, while its win on the `self-int` ladder stayed inside
+/// run-to-run noise. The per-segment grid is the same `O(n + output)`
+/// enumerator with a lower constant, so it is the only pair enumeration
+/// `crossing_only` uses. The machinery is kept intact for a shape that prices
+/// the window walk in; raise this constant to re-enable it.
+const CHAIN_INDEX_WORK_LIMIT: usize = 0;
 /// eps-class guard scan budget (iterations over x-sorted points, factor x
 /// points plus a floor). Exceeding it bails; the general path's cluster
 /// pass pays a real union-find there anyway.
@@ -283,14 +298,21 @@ impl<'a> LineNoder<'a> {
     /// coordinate by x to group them first, which was ~95 us of node_line's
     /// 796 us at n=4000 for a question a count decides exactly.
     pub(super) fn revisit_dominated(&self) -> bool {
-        let mut counts: FxHashMap<(u64, u64), u32> = FxHashMap::default();
-        counts.reserve(self.coords.len());
+        let mut keys: Vec<u64> = self.coords.iter().map(|c| sortable_u64(c.x)).collect();
+        let mut order: Vec<u32> = (0..keys.len() as u32).collect();
+        radix_sort_keys_tls(&mut keys, &mut order);
         let mut max_freq = 1u32;
-        for c in self.coords {
-            let e = counts.entry((c.x.to_bits(), c.y.to_bits())).or_insert(0);
-            *e += 1;
-            if *e > max_freq {
-                max_freq = *e;
+        let mut run = 1u32;
+        for w in order.windows(2) {
+            let a = self.coords[w[0] as usize];
+            let b = self.coords[w[1] as usize];
+            if a.x.to_bits() == b.x.to_bits() && a.y.to_bits() == b.y.to_bits() {
+                run += 1;
+                if run > max_freq {
+                    max_freq = run;
+                }
+            } else {
+                run = 1;
             }
         }
         max_freq * 2 + 2 >= self.n as u32
@@ -601,12 +623,11 @@ impl<'a> LineNoder<'a> {
                 return;
             }
         };
-        for j in 0..self.n {
+        for (j, bj) in boxes.iter().enumerate() {
             if st.bail {
                 return;
             }
-            let bj = boxes[j];
-            grid.for_each_candidate(bj, Some(j), |i| {
+            grid.for_each_candidate(*bj, Some(j), |i| {
                 if st.bail || i >= j {
                     return;
                 }
@@ -626,6 +647,15 @@ impl<'a> LineNoder<'a> {
         st: &mut ScanState,
         revisits: &mut Vec<Coord<f64>>,
     ) -> bool {
+        // Disabled (CHAIN_INDEX_WORK_LIMIT == 0): return before building
+        // anything. The check used to live after the chain index was built,
+        // so a disabled chain index still paid for the `Vec<Line>` copy, the
+        // mono-chain construction and the chain-grid attempt on every call -
+        // measured 2026-10-17 as a ~20 % regression on `ringing` against
+        // 5a07c75, which is exactly this waste.
+        if CHAIN_INDEX_WORK_LIMIT == 0 {
+            return false;
+        }
         let lines: Vec<geo::Line<f64>> = (0..self.n)
             .map(|i| geo::Line::new(self.a[i], self.b[i]))
             .collect();
@@ -644,28 +674,49 @@ impl<'a> LineNoder<'a> {
             Some(g) => g,
             None => return false,
         };
-        // Self-pairs first in chain order, then cross pairs in grid order.
+        // Price the cross-chain walks before paying for them. Each costs
+        // O(|A| + |B|) pointer steps over a contiguous window, so a shape whose
+        // chains are long AND whose chains meet in many combinations spends
+        // O(n * chains) here while the per-segment grid spends O(n + output).
+        // Collect the pairs first, and hand the shape to
+        // `enumerate_segment_grid` when the bill is too large: nothing has
+        // been classified yet, so the fallback starts from a clean noder.
+        // Self-pairs are O(n) in total and always affordable.
+        let limit = CHAIN_INDEX_WORK_LIMIT.saturating_mul(self.n);
+        let mut pairs: Vec<(u32, u32)> = Vec::new();
+        let mut work: usize = 0;
+        let mut over = false;
+        for (ci, bi) in chain_boxes.iter().enumerate() {
+            if over {
+                break;
+            }
+            grid.for_each_candidate(*bi, Some(ci), |cj| {
+                if over || cj <= ci {
+                    return;
+                }
+                work += (mc[ci].end - mc[ci].start) + (mc[cj].end - mc[cj].start);
+                if work > limit {
+                    over = true;
+                    return;
+                }
+                pairs.push((ci as u32, cj as u32));
+            });
+        }
+        if over {
+            return false;
+        }
+        // Self-pairs first in chain order, then the priced cross pairs.
         for ci in 0..nc {
             self.enumerate_chain_pair(&mc, ci, ci, st, revisits);
             if st.bail {
                 return true;
             }
         }
-        let mut stop = false;
-        for ci in 0..nc {
-            if stop {
-                break;
+        for &(ci, cj) in &pairs {
+            self.enumerate_chain_pair(&mc, ci as usize, cj as usize, st, revisits);
+            if st.bail {
+                return true;
             }
-            let bi = chain_boxes[ci];
-            grid.for_each_candidate(bi, Some(ci), |cj| {
-                if stop || st.bail || cj <= ci {
-                    return;
-                }
-                self.enumerate_chain_pair(&mc, ci, cj, st, revisits);
-                if st.bail {
-                    stop = true;
-                }
-            });
         }
         true
     }
@@ -860,76 +911,73 @@ impl<'a> LineNoder<'a> {
     /// (~170 us of node_line's 796 us at n=4000) for the same answer at
     /// log-factor cost.
     fn eps_classes_scan(&self, nodes: &[NodeEnt]) -> bool {
-        let eps = self.eps;
-        if !(eps > 0.0) || !eps.is_finite() {
-            return false;
-        }
-        let total = self.coords.len() + nodes.len();
-        if total < 2 {
-            return false;
-        }
-        /// Any point already stored in the 3x3 neighbourhood of (kx, ky)
-        /// that is within eps on both axes and bit-distinct from the probe?
-        fn hit_neighbours(
-            grid: &FxHashMap<(i64, i64), (u64, u64)>,
-            kx: i64,
-            ky: i64,
-            bx: u64,
-            by: u64,
-            x: f64,
-            y: f64,
-            eps: f64,
-        ) -> bool {
-            for cx in (kx - 1)..=(kx + 1) {
-                for cy in (ky - 1)..=(ky + 1) {
-                    if cx == kx && cy == ky {
-                        continue;
-                    }
-                    if let Some(&(qx, qy)) = grid.get(&(cx, cy)) {
-                        if qx == bx && qy == by {
-                            continue;
-                        }
-                        if (x - f64::from_bits(qx)).abs() <= eps
-                            && (y - f64::from_bits(qy)).abs() <= eps
-                        {
-                            return true;
-                        }
-                    }
-                }
-            }
-            false
-        }
-        let inv = 1.0 / eps;
-        let mut grid: FxHashMap<(i64, i64), (u64, u64)> = FxHashMap::default();
-        grid.reserve(total);
-        // One distinct point per cell is enough: two distinct points in one
-        // cell are within eps by construction, so the own-cell check returns
-        // before the cell could hold a second, and if the exact test ever
-        // disagreed (a float artefact) the conservative answer is the same.
-        let mut probe = |x: f64, y: f64| -> bool {
-            let (bx, by) = (x.to_bits(), y.to_bits());
-            let kx = (x * inv).floor() as i64;
-            let ky = (y * inv).floor() as i64;
-            if let Some(&(qx, qy)) = grid.get(&(kx, ky)) {
-                if qx != bx || qy != by {
-                    return true;
-                }
-            }
-            if hit_neighbours(&grid, kx, ky, bx, by, x, y, eps) {
-                return true;
-            }
-            grid.insert((kx, ky), (bx, by));
-            false
-        };
+        let na = self.coords.len();
+        let total = na + nodes.len();
+        let mut pts: Vec<(f64, f64)> = Vec::with_capacity(total);
         for c in self.coords {
-            if probe(c.x, c.y) {
-                return true;
-            }
+            pts.push((c.x, c.y));
         }
         for e in nodes {
-            if probe(e.pt.x, e.pt.y) {
-                return true;
+            pts.push((e.pt.x, e.pt.y));
+        }
+        let mut keys: Vec<u64> = Vec::with_capacity(total);
+        let mut order: Vec<u32> = Vec::with_capacity(total);
+        for (i, p) in pts.iter().enumerate() {
+            keys.push(sortable_u64(p.0));
+            order.push(i as u32);
+        }
+        radix_sort_keys_tls(&mut keys, &mut order);
+        // Gather once so the window scan walks one contiguous array
+        // (the two-array index indirection measured 73 us on the 1000v
+        // figure-8, 2026-09-18).
+        let mut sorted: Vec<(f64, f64)> = order.iter().map(|&o| pts[o as usize]).collect();
+        let budget = EPS_CLASS_SCAN_FACTOR * total + EPS_CLASS_SCAN_FLOOR;
+        let mut iters = 0usize;
+        // Runs of bit-equal x are y-sorted before scanning. A vertical
+        // input run (the 1000v figure-8's 250-point legs) would otherwise
+        // make the plain x-window scan quadratic: measured 43,056
+        // iterations, 57 us, on 2026-09-18.
+        let mut i = 0usize;
+        while i < total {
+            let xi = sorted[i].0;
+            let mut run_end = i + 1;
+            while run_end < total && sorted[run_end].0.to_bits() == xi.to_bits() {
+                run_end += 1;
             }
+            if run_end - i > 1 {
+                sorted[i..run_end].sort_unstable_by(|a, b| a.1.total_cmp(&b.1));
+            }
+            for j in i..run_end {
+                let (xi, yi) = sorted[j];
+                for &(xj, yj) in &sorted[j + 1..run_end] {
+                    if yj - yi > self.eps {
+                        break;
+                    }
+                    if xj.to_bits() == xi.to_bits() && yj.to_bits() == yi.to_bits() {
+                        continue;
+                    }
+                    iters += 1;
+                    if iters > budget {
+                        return true;
+                    }
+                    if (yj - yi).abs() <= self.eps {
+                        return true;
+                    }
+                }
+                for &(xj, yj) in &sorted[run_end..] {
+                    if xj - xi > self.eps {
+                        break;
+                    }
+                    iters += 1;
+                    if iters > budget {
+                        return true;
+                    }
+                    if (yj - yi).abs() <= self.eps {
+                        return true;
+                    }
+                }
+            }
+            i = run_end;
         }
         false
     }

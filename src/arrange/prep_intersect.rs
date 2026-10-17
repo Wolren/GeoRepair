@@ -458,6 +458,7 @@ impl ChainSink {
 /// - `end == start` on the pair (p-1, q)                    (p >= 1),
 /// - `end == end`   on the pair (p-1, q-1) or, for p == 0,   (L-1, q-1),
 /// - `start == start` on the pair (p, q).
+///
 /// Every one of those pairs consists of edges incident to the repeated
 /// point, so every one is enumerated.
 ///
