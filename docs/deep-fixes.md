@@ -1,13 +1,13 @@
 ---
 name: geo-repair-deep-fixes
-description: Investigation of two approaches to fix the remaining 25 fuzz pipeline failures — GEOS BuildArea port vs Arrange CDT assembly fix.
+description: Two approaches to fix the 25 remaining fuzz pipeline failures: a GEOS BuildArea port, or an Arrange CDT fix.
 ---
 
 # GeoRepair Deep Fix Investigation
 
 ## The Remaining Problem
 
-25 fuzz tests fail (81 pass) after all O(n log n) post-repair gates are in place. The failures come from the pipeline itself producing invalid output — not from missing validation. Categories:
+25 fuzz tests fail (81 pass) after all O(n log n) post-repair gates are in place. The pipeline itself produces invalid output. Validation is not missing. Categories:
 
 | Category | Count | Source |
 |----------|-------|--------|
@@ -26,11 +26,11 @@ description: Investigation of two approaches to fix the remaining 25 fuzz pipeli
 GEOS's `MakeValid` does NOT use CDT or `unary_union`. Instead:
 
 1. **Extract boundary**: `geom->getBoundary()` gets the polygon's ring edges as linework
-2. **Node the edges**: `nodeLineWithFirstCoordinate(bound)` — union with first point to fully node all intersections
+2. **Node the edges**: `nodeLineWithFirstCoordinate(bound)` unions with the first point and fully nodes all intersections
 3. **BuildArea**: Passes the noded linework to `Polygonizer` which extracts all faces
-4. **Sort by envelope area** descending — largest face first
+4. **Sort by envelope area** descending. The largest face comes first.
 5. **Find holes**: For each face's holes, match them to other faces' exteriors via `ringsEqualAnyDirection`
-6. **Filter**: Keep only faces with an **even number of parents** (shell = 0 parents, island in a hole = 2 parents, etc.)
+6. **Filter**: Keep only faces with an **even number of parents**. A shell has 0 parents. An island in a hole has 2.
 7. **Union**: `CascadedPolygonUnion` dissolves shared edges between kept faces
 
 ### Why It Fixes Everything
@@ -39,15 +39,15 @@ GEOS's `MakeValid` does NOT use CDT or `unary_union`. Instead:
 |---------|----------------------|
 | NestedHoles | Even-parent filter ensures no component contains another |
 | SelfIntersection | Polygonizer produces valid faces from fully-noded edges |
-| NotSimple | Same — fully-noded edges prevent self-touching |
+| NotSimple | Same cause: fully noded edges prevent self-touching |
 | WrongOrientation | Each face from Polygonizer has correct winding |
 | DisconnectedInteriorRing | Hole-split faces become separate top-level polygons |
-| DegenerateExterior | Faces with <3 vertices or zero area are naturally excluded |
+| DegenerateExterior | The Polygonizer drops faces with under 3 vertices or zero area |
 
 ### Implementation Plan
 
 We already have the building blocks:
-- **Edge extraction**: `poly.lines_iter()` — already available
+- **Edge extraction**: `poly.lines_iter()` already exists
 - **Full noding**: `noding::snap_round` or the intersection splitting in `prep`
 - **Polygonizer**: The `structure::classify` module already extracts faces from planar graphs
 - **Face sorting**: Sort by `shoelace_abs_sum` (envelope area is O(n) per face)
@@ -62,19 +62,19 @@ Estimated effort: ~100-150 lines in a new `structure/build_area.rs` module.
 - Edge noding: O(n log n) with monotone chain
 - Polygonizer: O(n log n) with sweep
 - Face sorting: O(k log k) where k = face count (typically 2-10)
-- Hole matching: O(k² × n_holes × n_ring) — k is small (< 10), so effectively O(n)
-- Final union: O(k log k) — only on kept faces
+- Hole matching: O(k² × n_holes × n_ring). k is small (< 10), so the cost is effectively O(n)
+- Final union: O(k log k), on kept faces only
 
 **No Shewchuk O(n²) anywhere. Zero benchmark regression.**
 
 ## Option B: Fix Arrange CDT Assembly
 
-### What's Wrong
+### What Is Wrong
 
 The Arrange strategy's `fix_from_lines` / `fallback_polygon_fix` uses CDT triangulation, then assembles rings from labeled interior triangles. The assembly step can produce self-intersecting or self-touching rings because:
 1. CDT produces valid triangles
 2. Triangle labeling can have precision errors at boundaries
-3. The face-walking/ring-extraction step doesn't validate ring topology
+3. The face-walking and ring-extraction step does not validate ring topology
 
 ### The Fix
 
@@ -100,9 +100,9 @@ Option B only fixes Arrange-specific failures (~75 of the ~285 assertion hits). 
 
 ## Recommendation
 
-**Implement Option A first** (BuildArea port) — it fixes ALL remaining failure categories at once by replacing both the Structure merge step and the Arrange fallback with a correct-by-construction algorithm. Then **add Option B** (Arrange assembly validation) as a cheap safety net for any topology that still reaches the Arrange path.
+**Implement Option A first** (the BuildArea port). It fixes all remaining failure categories at once. It replaces the Structure merge step and the Arrange fallback with a correct-by-construction algorithm. Then **add Option B** (Arrange assembly validation) as a cheap safety net for topologies that still reach the Arrange path.
 
-The combined effect: single Polygon repair becomes correct-by-construction (BuildArea) and MultiPolygon repair uses even-parent filtering instead of `unary_union`, eliminating NestedHoles at the source.
+Combined, single Polygon repair becomes correct by construction (BuildArea). MultiPolygon repair uses even-parent filtering instead of `unary_union`, so NestedHoles disappear at the source.
 
 ## GEOS Reference Code
 
@@ -111,8 +111,8 @@ The combined effect: single Polygon repair becomes correct-by-construction (Buil
 - `Polygonizer.h`: https://github.com/libgeos/geos/blob/main/src/operation/polygonize/Polygonizer.h
 
 Key algorithm in `MakeValidPoly`:
-1. `bound = geom->getBoundary();` — extract rings as linework
-2. `cut_edges = nodeLineWithFirstCoordinate(bound);` — full noding via union with first point
-3. `BuildArea().build(cut_edges)` — Polygonizer → sort → findFaceHoles → even-parent filter → union
-4. `symdif(area, new_area)` — iterative area building (the outer loop)
-5. `difference(cut_edges, new_area_bound)` — remove used edges; loop until no more edges
+1. `bound = geom->getBoundary();` extracts ring edges as linework
+2. `cut_edges = nodeLineWithFirstCoordinate(bound);` nodes fully through a union with the first point
+3. `BuildArea().build(cut_edges)` runs Polygonizer, sort, findFaceHoles, even-parent filter, union
+4. `symdif(area, new_area)` builds the area iteratively (the outer loop)
+5. `difference(cut_edges, new_area_bound)` removes used edges. The loop runs until no edges remain.

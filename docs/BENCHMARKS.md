@@ -136,7 +136,7 @@ but not the overlap class. GEOS: 2.5 ms serial on the same input.
 | self-int mls 50x4v | 30.17 | 76.31 | 2.53x |
 
 The GEOS reference for the invalid-line rows is `UnaryUnion` (the
-operation GEOS users actually call to fix linework). GEOS `makeValid` on
+operation GEOS users call to fix linework). GEOS `makeValid` on
 lines is a passthrough: `fixLineStringElement` strips repeated points and
 clones, with no noding branch anywhere in `GeometryFixer.cpp` - verified
 three ways (geosop oracle, shapely C-API, source). The reference matters:

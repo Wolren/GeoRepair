@@ -1,6 +1,6 @@
 # GeoRepair Architecture
 
-This document describes how GeoRepair actually works: the repair pipeline,
+This document describes how GeoRepair works: the repair pipeline,
 the routing rules that decide which path an input takes, the validation
 strictness model, the error contract, and the feature surface. It is the
 map for maintainers; code comments carry the per-site detail.
