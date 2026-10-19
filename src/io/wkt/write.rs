@@ -16,9 +16,6 @@ pub fn write_wkt_to(geom: &Geometry<f64>, writer: &mut impl Write) -> io::Result
     writer.write_all(s.as_bytes())
 }
 
-// ---------------------------------------------------------------------------
-// Serializer
-// ---------------------------------------------------------------------------
 
 /// Serialize a `Geometry<f64>` to WKT string.
 ///
@@ -59,8 +56,6 @@ fn write_linestring(s: &mut String, ls: &LineString<f64>) {
 fn write_polygon_rings(s: &mut String, poly: &Polygon<f64>) {
     s.push_str("((");
     if poly.exterior().0.is_empty() {
-        // Empty rings are written as bare EMPTY (GEOS WKTWriter syntax);
-        // the reader preserves them as empty rings.
         s.push_str("EMPTY");
     } else {
         write_coord_list(s, &poly.exterior().0);
@@ -165,8 +160,6 @@ fn write_geom(s: &mut String, geom: &Geometry<f64>) {
                 s.push(')');
             }
         }
-        // OGC WKT has no Line/Rect/Triangle types; serialize them losslessly
-        // as their closest OGC equivalents (coordinate-exact).
         Geometry::Line(line) => {
             s.push_str("LINESTRING (");
             write_coord(s, &line.start);
@@ -231,6 +224,3 @@ fn write_geom(s: &mut String, geom: &Geometry<f64>) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------

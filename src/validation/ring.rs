@@ -19,12 +19,8 @@ pub fn check_ring_validity(ring: &[Coord<f64>], is_exterior: bool) -> Vec<Geomet
     let mut errors = Vec::new();
 
     let interior_n = ring.len().saturating_sub(1);
-    // One fused pass over the interior coords: non-finite detection, the
-    // bbox/scale, the adjacent-duplicate flag, and the orientation's
-    // extremal vertex - four former full passes (measured 2026-08-08:
-    // the separate NaN + bbox + repeated + extremal scans cost ~15-25 us
-    // on a 5000-vertex ring). Error priority is preserved: NaN wins
-    // regardless of position (matches the old separate first pass).
+    // - four former full passes (measured 2026-08-08: the separate NaN + bbox + repeated + extremal scans cost ~15-25 us)
+    // Error priority is preserved: NaN wins regardless of position (matches the old separate first pass).
     let mut min_x = f64::MAX;
     let mut max_x = f64::MIN;
     let mut min_y = f64::MAX;
@@ -75,11 +71,7 @@ pub fn check_ring_validity(ring: &[Coord<f64>], is_exterior: bool) -> Vec<Geomet
     let n = interior_n;
     let scale = (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
     let eps = 1e-12 * scale;
-    // Per-axis degeneracy: an axis is collapsed only if its extent is below
-    // EPSILON × that AXIS'S OWN max magnitude. Comparing against the
-    // cross-axis scale wrongly flags thin-but-real triangles (e.g. base
-    // 8.26e7, height 8.4e-9 - representable, GEOS-valid; measured: seed
-    // 00c11200 sibling → DegenerateExterior on a triangle GEOS validates).
+    // 00c11200 sibling → DegenerateExterior on a triangle GEOS validates .
     let x_scale = max_x.abs().max(min_x.abs()).max(1.0);
     let y_scale = max_y.abs().max(min_y.abs()).max(1.0);
     if (max_x - min_x).abs() < f64::EPSILON * x_scale
@@ -97,24 +89,13 @@ pub fn check_ring_validity(ring: &[Coord<f64>], is_exterior: bool) -> Vec<Geomet
         errors.push(GeometryValidationError::RepeatedPoint);
     }
 
-    // Pinch: first non-adjacent duplicate vertex. Shared helper with the
-    // fast-path gate; -0.0-normalized keys (a pinch at the origin must be
-    // detected regardless of zero sign - differential fuzz 2026-08-07).
+    // -0.0-normalized keys (a pinch at the origin must be detected regardless of zero sign - differential fuzz 2026-08-07).
     if first_pinch_dup(&ring[..n]).is_some() {
         errors.push(GeometryValidationError::PinchPoint);
     }
 
     if n > 64 {
-        // Sweep fast path: edges sorted by padded min_x (radix sort),
-        // small x-overlap active set, padded-2D-bbox candidate gate, then
-        // the exact pair predicate. Same semantics as the tree path:
-        // adjacent ring-order pairs skipped, closing pair (0, n-1) tested,
-        // each pair tested once. Rings with pathologically dense x-overlap
-        // route to the spatial index (rstar) or brute force (non-rstar) -
-        // exact predicates in all paths, a routing decision, not a
-        // tolerance. Measured (2026-08-06): per-ring rstar bulk_load +
-        // queries cost ~320ms on the 600k-vertex giants vs ~50ms for the
-        // sweep; the biggest giant's active set averages 23 (max 63).
+        // small x-overlap active set, padded-2D-bbox candidate gate queries cost ~320ms on the 600k-vertex giants vs ~50ms
         match sweep_ring_self_intersects(ring, eps, false) {
             Some(true) => {
                 errors.push(GeometryValidationError::SelfIntersection);
@@ -146,20 +127,13 @@ pub fn check_ring_validity(ring: &[Coord<f64>], is_exterior: bool) -> Vec<Geomet
             }
         }
     } else {
-        // Small rings: brute force with a padded-bbox prefilter (the
-        // exact predicates internally require bbox overlap, so rejecting
-        // non-overlapping pairs here never changes results; the tree path
-        // applied the same filter via envelope intersection).
         #[cfg(feature = "rstar")]
         {
             for i in 0..n {
                 let a1 = ring[i];
                 let a2 = ring[(i + 1) % n];
                 for j in i + 2..n {
-                    // Closing-edge pair (0, n-1) is NOT skipped: the edges
-                    // share vertex 0 but may overlap collinearly beyond it
-                    // (backtracking closure) - a genuine self-intersection.
-                    // edges_intersect_general excludes endpoint-only touches.
+                    // share vertex 0 but may overlap collinearly beyond
                     // See the rstar branch comment (differential fuzz 2026-08-03).
                     if padded_bbox_overlap(a1, a2, ring[j], ring[(j + 1) % n])
                         && check_edge_pair_intersection(ring, i, j, eps)
@@ -190,10 +164,7 @@ pub fn check_ring_validity(ring: &[Coord<f64>], is_exterior: bool) -> Vec<Geomet
         }
     }
 
-    // Orientation: the validator's own OGC contract (CCW shells, CW
-    // holes), checked on the fused scan's extremal vertex - the separate
-    // extremal search pass is gone (2026-08-08). Only when the ring has
-    // no other errors, matching the old caller-side ordering.
+    // extremal search pass is gone (2026-08-08).
     if errors.is_empty() {
         let ccw = crate::util::robust_is_ccw_at(ring, min_idx);
         if is_exterior {
@@ -256,10 +227,8 @@ pub(crate) fn first_pinch_dup(coords: &[Coord<f64>]) -> Option<usize> {
     let cap = n.next_power_of_two() * 2;
     let mut used: Vec<u64> = vec![0; cap / 64];
     let mut slots: Vec<(u64, u64)> = vec![(0, 0); cap];
-    // The occurrence index rides in a separate array (4B vs 24B slots):
-    // the 5000-vertex table stays ~256KB and the index array is L1-warm
-    // (measured 2026-08-08: a 24B (u64,u64,u32) slot struct cost ~15 us
-    // more on the gate's 5000-vertex valid ring).
+    // The occurrence index rides in a separate array (4B vs 24B slots)
+    // (measured 2026-08-08: a 24B (u64,u64,u32) slot struct cost ~15 us more on the gate's 5000-vertex valid ring).
     let mut idxs: Vec<u32> = vec![0; cap];
     for (idx, c) in coords.iter().enumerate() {
         let kx = (c.x + 0.0).to_bits();
@@ -276,8 +245,6 @@ pub(crate) fn first_pinch_dup(coords: &[Coord<f64>]) -> Option<usize> {
                 break;
             }
             if slots[k] == (kx, ky) {
-                // Adjacent duplicate: the RepeatedPoint check owns that
-                // class; skip only the exact consecutive pair.
                 if idxs[k] as usize + 1 == idx {
                     break;
                 }
@@ -294,7 +261,6 @@ pub(crate) fn point_in_ring_exclusive(pt: Coord<f64>, ring: &[Coord<f64>]) -> bo
     if n < 2 {
         return false;
     }
-    // Boundary check (exclusive: on-edge → outside)
     for i in 0..n - 1 {
         let p1 = ring[i];
         let p2 = ring[i + 1];
@@ -430,7 +396,6 @@ pub(crate) fn is_rotated_duplicate(a: &[Coord<f64>], b: &[Coord<f64>]) -> bool {
     if n == 0 {
         return false;
     }
-    // Forward scan (same winding order)
     for start in 0..n {
         if a[start] != b[0] {
             continue;
@@ -446,7 +411,6 @@ pub(crate) fn is_rotated_duplicate(a: &[Coord<f64>], b: &[Coord<f64>]) -> bool {
             return true;
         }
     }
-    // Reverse scan (opposite winding order)
     for start in 0..n {
         if a[start] != b[0] {
             continue;

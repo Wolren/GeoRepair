@@ -18,9 +18,6 @@ use std::process::Command;
 use wkt::ToWkt;
 use wkt::TryFromWkt;
 
-// ---------------------------------------------------------------------------
-// geosop discovery
-// ---------------------------------------------------------------------------
 
 fn find_geosop() -> Option<PathBuf> {
     // 1. explicit env override
@@ -41,7 +38,7 @@ fn find_geosop() -> Option<PathBuf> {
             return Some(pb);
         }
     }
-    // 3. PATH (platform-correct splitting — `;` on Windows, `:` on Unix)
+    // 3.
     if let Ok(path) = std::env::var("PATH") {
         for dir in std::env::split_paths(&path) {
             for name in ["geosop", "geosop.exe"] {
@@ -103,9 +100,6 @@ fn geos_is_valid(geosop: &PathBuf, wkt: &str) -> Option<bool> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// normalized geometry comparison
-// ---------------------------------------------------------------------------
 
 /// Normalize a ring to a canonical coordinate-set fingerprint:
 /// rotation/reversal/closure-insensitive. Coordinates are quantized to
@@ -267,9 +261,6 @@ fn type_family_match(a: &Geometry<f64>, b: &Geometry<f64>) -> bool {
     fam(a) == fam(b)
 }
 
-// ---------------------------------------------------------------------------
-// the comparison runner
-// ---------------------------------------------------------------------------
 
 struct CompareResult {
     ok: bool,
@@ -291,16 +282,8 @@ fn compare_one(
             };
         }
     };
-    // Our output: the geometry-level dispatch (the public API path). Fixing
-    // components individually would skip the MP/GC merge logic (overlapping
-    // shells, nested components) that makeValid is contractually required to
-    // handle.
     let ours = input.make_valid_with_config(cfg);
-    // Our output validity: judged by GEOS itself (geosop), not by our
-    // validator - ours is deliberately stricter than IsValidOp
     // (WrongOrientation/NotSimple classes), which would false-fail e.g.
-    // non-simple lines that GEOS correctly keeps unchanged. Empty outputs
-    // are trivially valid (geosop's isValid on GC EMPTY prints nothing).
     let our_valid = if output_is_empty(&ours) {
         true
     } else {
@@ -314,7 +297,6 @@ fn compare_one(
             }
         }
     };
-    // GEOS output
     let geos_wkt = match geos_make_valid(geosop, input_wkt) {
         Some(w) => w,
         None => {
@@ -333,10 +315,7 @@ fn compare_one(
             };
         }
     };
-    // GEOS output validity: ask GEOS itself, NOT our validator. Our
-    // validator is deliberately stricter than GEOS IsValidOp (WrongOrientation,
-    // NotSimple, RepeatedPoint classes - 283/843 divergence measured), so
-    // judging the oracle with it produces false "oracle broken" failures.
+    // validator is deliberately stricter than GEOS IsValidOp (WrongOrientation, NotSimple, RepeatedPoint classes - 283/843 divergence measured)
     let geos_valid = match geos_is_valid(geosop, &geos_wkt) {
         Some(v) => v,
         None => {
@@ -362,10 +341,7 @@ fn compare_one(
             detail: "GEOS output invalid (oracle broken?)".into(),
         };
     }
-    // 2. type family - Polygon and MultiPolygon-with-1-component are
-    // equivalent (both valid representations of the same geometry;
-    // measured: Arrange wraps the same hole-role-swap result as MP(1)
-    // while GEOS emits Polygon). Area-only classes skip the type check.
+    // equivalent (both valid representations of the same geometry; measured: Arrange wraps the same hole-role-swap result as MP(1) while GEOS emits)
     if !area_only_fixtures().contains(&name) && !type_family_match(&ours, &geos) {
         return CompareResult {
             ok: false,
@@ -376,12 +352,8 @@ fn compare_one(
             ),
         };
     }
-    // 3. component count - strict except for (a) sliver components: components
     // whose area is below 1e-8 relative to the total are degenerate slivers
-    // (GEOS keeps them, we collapse them - measured: mixed_magnitude 7 vs
-    // 6), and (b) area-only classes where representation differs by design
-    // (figure_eight: GEOS GC vs our MP; hole_equals_shell: GEOS shell vs
-    // our empty).
+    // (GEOS keeps them, we collapse them - measured: mixed_magnitude 7 vs 6)
     let our_count = component_count(&ours);
     let geos_count = component_count(&geos);
     let our_sig = significant_component_count(&ours, total_poly_area(&ours));
@@ -394,8 +366,7 @@ fn compare_one(
             ),
         };
     }
-    // 4. area - strict match for normal classes; the area-only divergence
-    // classes get per-fixture expectations below.
+    // 4. area - strict match for normal classes; the area-only divergence classes get per-fixture expectations below.
     let our_area = total_poly_area(&ours);
     let geos_area = total_poly_area(&geos);
     let scale = geos_area.abs().max(1.0);
@@ -407,26 +378,16 @@ fn compare_one(
             };
         }
     } else {
-        // Documented divergence classes - assert OUR expected property.
         let ok = match name {
-            // GEOS returns GC(full-rect polygon 37.5 incl. overlapping lobe,
-            // dangling lines); we emit the even-odd fill of the stroke.
+            // GEOS returns GC(full-rect polygon 37.5 incl. overlapping lobe, dangling lines); we emit the even-odd fill of the stroke.
             "figure_eight" => (our_area - 28.125).abs() < 1e-9,
-            // GEOS returns the shell (edge cancellation); we return empty -
-            // set-theoretically the hole cancels the shell.
             "hole_equals_shell" => our_area == 0.0 && component_count(&ours) == 0,
-            // GEOS keeps the degenerate sliver component; we collapse it.
             // Area must match GEOS to within the sliver's share (1.6e-6).
             "mixed_magnitude" => (our_area - geos_area).abs() <= 1e-5 * geos_area.abs(),
-            // We union overlapping MP shells to a single component (JTS
-            // rule 09, area 46); GEOS even-odd EXCLUDES the overlap (42).
-            // Pinned: our union area.
+            // We union overlapping MP shells to a single component (JTS rule 09, area 46); GEOS even-odd EXCLUDES the overlap (42).
             "mp_overlapping" => (our_area - 46.0).abs() < 1e-9,
-            // All-repeated-point polygon: we emit empty; GEOS keeps a
-            // collapsed POINT(0 0). Pinned: our empty area.
+            // All-repeated-point polygon: we emit empty; GEOS keeps a collapsed POINT(0 0).
             "poly_all_repeated" => our_area == 0.0 && component_count(&ours) == 0,
-            // Self-crossing line: zero-area both sides; ours must be the
-            // noded simple pieces (never a non-simple line).
             "line_self_crossing" => {
                 our_area == 0.0
                     && matches!(ours, Geometry::MultiLineString(ref m) if !m.0.is_empty())
@@ -440,8 +401,7 @@ fn compare_one(
             };
         }
     }
-    // 5. normalized equivalence (coordinate sets, winding-insensitive) -
-    // skipped for the documented area-only divergence classes.
+    // 5. normalized equivalence (coordinate sets, winding-insensitive) -skipped for the documented area-only divergence classes.
     if !area_only_fixtures().contains(&name) && !normalized_equivalent(&ours, &geos, 1e-6) {
         return CompareResult {
             ok: false,
@@ -465,99 +425,67 @@ fn compare_one(
     }
 }
 
-// ---------------------------------------------------------------------------
-// fixtures
-// ---------------------------------------------------------------------------
 
 fn make_valid_fixtures() -> Vec<(&'static str, &'static str)> {
     vec![
-        // The two hard seeds from the port (bit-exact verified in session)
         (
             "seed2_multi_crossing",
             "POLYGON ((0 0, 100 0, 100 100, 0 100, 0 0), (20 20, 80 20, 80 80, 20 80, 20 20))",
         ),
-        // self-crossing star
         (
             "star_crossing",
             "POLYGON ((0 0, 10 0, 5 5, 15 5, 10 10, 0 10, 0 0))",
         ),
-        // bowtie / hourglass
         ("bowtie", "POLYGON ((0 0, 10 10, 10 0, 0 10, 0 0))"),
-        // figure-eight - GEOS keeps dangling lines + full rect in a GC
-        // (area 37.5 incl. overlap); we emit the even-odd fill (28.125 =
-        // 37.5 − 9.375 lobe). Divergence class: BETTER (stroke coverage),
-        // compared as area-only.
+        // (area 37.5 incl. overlap); we emit the even-odd fill (28.125 = 37.5 − 9.375 lobe).
         (
             "figure_eight",
             "POLYGON ((0 0, 5 0, 5 5, 0 5, 2.5 2.5, 5 2.5, 5 7.5, 0 7.5, 0 0))",
         ),
-        // nested holes (island case)
         (
             "nested_holes",
             "POLYGON ((0 0, 20 0, 20 20, 0 20, 0 0), (2 2, 18 2, 18 18, 2 18, 2 2), (6 6, 14 6, 14 14, 6 14, 6 6))",
         ),
-        // boundary-touching rhombus hole
         (
             "square_hole_rhombus",
             "POLYGON ((0 0, 1 0, 1 1, 0 1, 0 0), (0.5 0, 1 0.5, 0.5 1, 0 0.5, 0.5 0))",
         ),
-        // hole == shell (degenerate) - GEOS returns the shell (edge
-        // cancellation); we return empty GC. Divergence class: empty is
-        // set-theoretically correct (hole cancels shell), compared as
-        // area-only with tolerance 0.
+        // Divergence class: empty is set-theoretically correct (hole cancels shell), compared as area-only with tolerance 0.
         (
             "hole_equals_shell",
             "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (0 0, 10 0, 10 10, 0 10, 0 0))",
         ),
-        // hole larger than shell - GEOS swaps roles: big ring becomes
-        // shell, small ring becomes hole (area 300 = 400−100 even-odd).
-        // Fixed in process_shell; strict comparison.
+        // small ring becomes hole (area 300 = 400−100 even-odd).
         (
             "hole_larger_than_shell",
             "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (-5 -5, 15 -5, 15 15, -5 15, -5 -5))",
         ),
-        // mixed magnitude (the fuzz seed) - GEOS keeps a degenerate sliver
-        // component (7 comps), we collapse it (6 comps). Area matches to
-        // 1.6e-6 relative. Divergence class: sliver collapse; compared
-        // with component-count allowance for sub-1e-8-relative components.
+        // mixed magnitude (the fuzz seed) - GEOS keeps a degenerate sliver component (7 comps), we collapse it (6 comps).
+        // Area matches to 1.6e-6 relative.
         (
             "mixed_magnitude",
             "POLYGON ((84956205.27307954 -45986769.5228732, -99794971.69789362 4896957.693364016, 95593402.35083151 -37252189.83613572, 37149609.09726282 -63327990.14115548, 78418546.04729833 69380301.01700698, 0 0, 0 0, 0 5.089116040917129e-9, 84956205.27307954 -45986769.5228732))",
         ),
-        // ------------------------------------------------------------------
-        // Non-polygon and multi-part inputs (exercises the geometry-level
-        // dispatch paths that the polygon-only fixture set never reached).
-        // ------------------------------------------------------------------
-        // Overlapping MP components - GEOS makeValid unions the overlap
         // (area 46 = 25 + 25 − 4); exercises the MP merge path.
         (
             "mp_overlapping",
             "MULTIPOLYGON (((0 0, 5 0, 5 5, 0 5, 0 0)), ((3 3, 8 3, 8 8, 3 8, 3 3)))",
         ),
-        // Nested MP component (island-in-hole) - valid positive space per
-        // GEOS; GEOS returns outer shell with the inner ring as a hole
         // (area 144 = 400 − 256).
         (
             "mp_nested_island",
             "MULTIPOLYGON (((0 0, 20 0, 20 20, 0 20, 0 0)), ((2 2, 18 2, 18 18, 2 18, 2 2)))",
         ),
-        // Mixed GC (GEOS makevalid.xml case 15): empties + a polygon with a
-        // hole touching the shell at two points.
+        // Mixed GC (GEOS makevalid.xml case 15): empties + a polygon with a hole touching the shell at two points.
         (
             "gc_mixed",
             "GEOMETRYCOLLECTION (POINT EMPTY, LINESTRING EMPTY, POLYGON ((0 0, 0 1, 1 1, 1 0, 0 0), (0 0.5, 0.5 0.1, 1 0.5, 0 0.5)))",
         ),
-        // Degenerate line - GEOS makeValid collapses it to a point.
         ("line_degenerate", "LINESTRING (0 0, 0 0)"),
-        // Self-crossing line - GEOS makeValid returns lines unchanged.
         ("line_self_crossing", "LINESTRING (0 0, 2 2, 2 0, 0 2)"),
-        // MLS with a degenerate component - GEOS drops the collapsed one.
         ("mls_degenerate", "MULTILINESTRING ((0 0, 0 0), (1 1, 2 2))"),
-        // All-repeated-point polygon - GEOS makeValid → empty.
         ("poly_all_repeated", "POLYGON ((0 0, 0 0, 0 0, 0 0, 0 0))"),
-        // Ring vertex-on-edge T-junction (GEOS TestValid2 Test 22): the
-        // closing vertex (110 140) lies on edge (60 90)-(160 190). GEOS
-        // nodes the touch: outer lobe with the inner lobe as a hole.
+        // Ring vertex-on-edge T-junction (GEOS TestValid2 Test 22): the closing vertex (110 140) lies on edge (60 90)-(160 190).
         (
             "ring_tjunction",
             "POLYGON ((110 140, 110 50, 60 50, 60 90, 160 190, 20 110, 20 20, 200 20, 110 140))",
@@ -572,19 +500,12 @@ fn area_only_fixtures() -> &'static [&'static str] {
         "figure_eight",      // we emit even-odd fill; GEOS keeps overlap as lines
         "hole_equals_shell", // we emit empty; GEOS keeps the shell
         "mixed_magnitude",   // we collapse the degenerate sliver component
-        // We union overlapping MP shells to a single component; GEOS's
         // MakeValidPoly returns the noded even-odd partition (2 components).
-        // Same coverage, same area - the JTS-vs-GEOS noder difference
         // (measured: both 46.0).
         "mp_overlapping",
-        // All-repeated-point polygon: we emit GEOMETRYCOLLECTION EMPTY;
-        // GEOS keeps a collapsed POINT(0 0). Documented in geos_fixtures
-        // (geos_empty_after_fix).
+        // All-repeated-point polygon: we emit GEOMETRYCOLLECTION EMPTY; GEOS keeps a collapsed POINT(0 0).
         "poly_all_repeated",
-        // Self-crossing line: the line-validity contract (2026-08-07) -
-        // make_valid never ships a non-simple line, so the crossing is
-        // noded into simple pieces (MultiLineString); GEOS passes the
-        // non-simple line through unchanged. Zero area both sides.
+        // Self-crossing line: the line-validity contract (2026-08-07) -make_valid never ships a non-simple line
         "line_self_crossing",
     ]
 }
@@ -649,6 +570,5 @@ fn compare_geos_makevalid() {
     }
 }
 
-// Make sure unused imports from multi-geometry handling stay used
 #[allow(dead_code)]
 fn _type_uses(_: &MultiLineString<f64>, _: &Point<f64>, _: &LineString<f64>) {}

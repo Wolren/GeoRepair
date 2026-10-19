@@ -109,13 +109,11 @@ pub fn remove_repeated_points(geom: &Geometry<f64>, tolerance: f64) -> Geometry<
 /// GEOS `RepeatedPointCoordinateOperation::edit` (with the invalid-coordinate
 /// filter and end repair). Returns `None` when the component collapses.
 fn edit_sequence(coords: &[Coord<f64>], min_len: usize, tolerance: f64) -> Option<Vec<Coord<f64>>> {
-    // No way to filter short sequences.
     if coords.len() <= min_len {
         return Some(coords.to_vec());
     }
 
-    // RepeatedInvalidPointFilter: skip invalid coords (leading ones too),
-    // exact duplicates, and points within tolerance of the last kept.
+    // RepeatedInvalidPointFilter: skip invalid coords (leading ones too), exact duplicates, and points within tolerance of the last kept.
     let sq = tolerance * tolerance;
     let mut filt: Vec<Coord<f64>> = Vec::new();
     for &c in coords {
@@ -136,22 +134,16 @@ fn edit_sequence(coords: &[Coord<f64>], min_len: usize, tolerance: f64) -> Optio
         return None;
     }
 
-    // End points for comparison and sequence repair.
     let orig_end = *coords.last().unwrap();
     let orig_end_valid = orig_end.x.is_finite() && orig_end.y.is_finite();
 
-    // Fluff up overly small filtered outputs.
     if filt.len() < min_len && orig_end_valid {
         filt.push(orig_end);
     }
 
     let filt_end = *filt.last().unwrap();
 
-    // We stripped the last point, let's put it back on.
     if orig_end_valid && orig_end != filt_end {
-        // If the end of the filtered coordinates is within tolerance of
-        // the original end, drop the last filtered coordinate so the
-        // output still follows the tolerance rule.
         if (orig_end.x - filt_end.x).powi(2) + (orig_end.y - filt_end.y).powi(2) <= sq {
             filt.pop();
         }

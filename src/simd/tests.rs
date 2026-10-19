@@ -4,9 +4,6 @@
 use super::*;
 use alloc::vec::Vec;
 
-// ============================================================================
-// Tests (platform-independent)
-// ============================================================================
 
 #[cfg(test)]
 mod platform_tests {
@@ -318,9 +315,6 @@ mod platform_tests {
     }
 }
 
-// ============================================================================
-// Shuffle-transpose kernel verification + head-to-head microbench
-// ============================================================================
 
 #[cfg(all(
     not(feature = "simd-portable"),
@@ -385,7 +379,6 @@ mod shuffle_kernels {
             rng_state ^= rng_state << 17;
             ((rng_state >> 11) as f64 / (1u64 << 53) as f64) * 2000.0 - 1000.0
         };
-        // aabb: scalar vs shuffle-AVX
         let t = Instant::now();
         let mut acc = 0.0f64;
         for _ in 0..200 {
@@ -412,9 +405,7 @@ mod shuffle_kernels {
         );
         black_box((acc, acc2));
 
-        // orient2d batch: scalar vs avx2-dispatch. Inputs rotate through a
-        // table (call sites build fresh arrays per pair - loop-invariant
-        // inputs would let LLVM collapse the scalar side of the bench).
+        // orient2d batch: scalar vs avx2-dispatch.
         type Triad = ([Coord<f64>; 4], [Coord<f64>; 4], [Coord<f64>; 4]);
         let mut table: Vec<Triad> = Vec::new();
         for _ in 0..64 {

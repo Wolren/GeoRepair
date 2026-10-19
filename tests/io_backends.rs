@@ -2,10 +2,7 @@
 //! (CSV, GeoPackage, Shapefile, GML). Each module is feature-gated to match
 //! the backend it exercises.
 
-// Each helper and import is gated to the backends that use it: with no
-// io-* feature enabled the whole file compiles to nothing, and ungated
-// items showed up as `unused import` / `never used` warnings under
-// `cargo check --tests` with a reduced feature set.
+// items showed up as `unused import` / `never used` warnings
 #[cfg(feature = "io-gml")]
 use geo::Coord;
 #[cfg(any(
@@ -123,7 +120,6 @@ mod shp_tests {
         assert_eq!(loaded.len(), 1);
         if let Geometry::Polygon(p) = &loaded[0] {
             assert_eq!(p.exterior().0.len(), 6);
-            // The hole ring is preserved as an inner ring by the writer.
             assert!(!p.interiors().is_empty());
         } else {
             panic!("expected polygon");

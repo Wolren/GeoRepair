@@ -17,9 +17,6 @@ use geo::{
 use geo_repair::MakeValid;
 use geo_repair::validation::GeoValidation;
 
-// ---------------------------------------------------------------------------
-// Self-touching ring that forms a ring-within-ring
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_self_touching_ring() {
@@ -29,9 +26,6 @@ fn geos_self_touching_ring() {
     assert_not_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Polygon with zero area (all collinear)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_zero_area_collinear() {
@@ -54,9 +48,6 @@ fn geos_two_vertex() {
     assert_is_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Polygon with duplicate consecutive points
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_duplicate_consecutive_points() {
@@ -66,9 +57,6 @@ fn geos_duplicate_consecutive_points() {
     assert_simple_polygon(&result);
 }
 
-// ---------------------------------------------------------------------------
-// MultiPolygon with empty component
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_multipolygon_with_empty() {
@@ -78,9 +66,6 @@ fn geos_multipolygon_with_empty() {
     assert_simple_polygon(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Self-intersecting multi-ring polygon (interior ring crosses exterior)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_hole_crosses_shell() {
@@ -90,9 +75,6 @@ fn geos_hole_crosses_shell() {
     assert_not_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Nested polygons (geometry collection with multi-level nesting)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_nested_geometry_collection() {
@@ -107,9 +89,6 @@ fn geos_nested_geometry_collection() {
     assert_not_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Extremely large coordinate values
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_extreme_coords() {
@@ -120,9 +99,7 @@ fn geos_extreme_coords() {
     assert_simple_polygon(&result);
 }
 
-// ---------------------------------------------------------------------------
 // Polygon with only NaN coordinates
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_nan_polygon() {
@@ -155,15 +132,10 @@ fn geos_nan_polygon() {
     assert_is_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
-// LineString self-intersection
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_self_intersecting_linestring() {
-    // Line-validity contract (2026-08-07): make_valid never ships a
-    // non-simple line - the crossing is noded into simple pieces
-    // (GEOS returns the non-simple line as-is; deliberate divergence).
+    // Line-validity contract (2026-08-07): make_valid never ships a non-simple line - the crossing is noded into simple pieces
     let g = geom_from_wkt("LINESTRING (0 0, 2 2, 2 0, 0 2)");
     let result = g.make_valid_with_config(&cfg_auto());
     assert_not_empty(&result);
@@ -177,13 +149,9 @@ fn geos_self_intersecting_linestring() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// MultiLineString with one self-intersecting component
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_multilinestring_with_self_intersection() {
-    // GEOS/OGC: self-intersecting LineString components are valid, returned as-is
     let g = geom_from_wkt("MULTILINESTRING ((0 0, 1 0), (0 0, 2 2, 2 0, 0 2))");
     let result = g.make_valid_with_config(&cfg_auto());
     assert_not_empty(&result);
@@ -193,9 +161,6 @@ fn geos_multilinestring_with_self_intersection() {
     ));
 }
 
-// ---------------------------------------------------------------------------
-// Multiple polygon types with Arrange method
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_overlapping_shells_arrange() {
@@ -210,9 +175,6 @@ fn geos_overlapping_shells_arrange() {
     assert!(matches!(&result, Geometry::MultiPolygon(_)));
 }
 
-// ---------------------------------------------------------------------------
-// Polygon that remains empty after fix
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_empty_after_fix() {
@@ -221,9 +183,6 @@ fn geos_empty_after_fix() {
     assert_is_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Complex bowtie with additional points
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_complex_bowtie() {
@@ -233,9 +192,6 @@ fn geos_complex_bowtie() {
     assert_multipolygon_count(&result, 2);
 }
 
-// ---------------------------------------------------------------------------
-// Polygon with hole that exactly matches shell border
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_hole_exactly_matches_shell() {
@@ -244,9 +200,6 @@ fn geos_hole_exactly_matches_shell() {
     assert_is_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Valid linestring should pass through unchanged
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_valid_linestring_unchanged() {
@@ -257,9 +210,6 @@ fn geos_valid_linestring_unchanged() {
     assert_eq!(result, g);
 }
 
-// ---------------------------------------------------------------------------
-// Bowtie / self-intersection regression
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_bowtie_arrange() {
@@ -285,9 +235,6 @@ fn geos_figure_eight() {
     assert_not_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Ring self-intersection (hourglass)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_hourglass() {
@@ -297,9 +244,6 @@ fn geos_hourglass() {
     assert_multipolygon_count(&result, 2);
 }
 
-// ---------------------------------------------------------------------------
-// Spike (co-linear edge with spike tip)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_spike() {
@@ -309,9 +253,6 @@ fn geos_spike() {
     assert_simple_polygon(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Hole outside shell
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_hole_outside() {
@@ -323,9 +264,7 @@ fn geos_hole_outside() {
     assert_not_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
 // Self-touching ring (figure-8 without crossing)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_self_touching() {
@@ -335,9 +274,6 @@ fn geos_self_touching() {
     assert_not_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Micro / nearly-collapsed polygon
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_micro_polygon() {
@@ -346,9 +282,6 @@ fn geos_micro_polygon() {
     assert_valid_ogc(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Reversed ring (clockwise exterior)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_clockwise_exterior() {
@@ -358,9 +291,7 @@ fn geos_clockwise_exterior() {
     assert_simple_polygon(&result);
 }
 
-// ---------------------------------------------------------------------------
 // MultiPolygon with invalid component
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_multipolygon_with_invalid() {
@@ -372,9 +303,7 @@ fn geos_multipolygon_with_invalid() {
     assert!(count_geometries(&result) >= 2);
 }
 
-// ---------------------------------------------------------------------------
 // GeometryCollection with mixed valid/invalid
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_collection_mixed() {
@@ -386,9 +315,6 @@ fn geos_collection_mixed() {
     assert_not_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Repeated consecutive coordinates
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_repeated_coords() {
@@ -399,9 +325,6 @@ fn geos_repeated_coords() {
     assert_simple_polygon(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Non-closed ring
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_unclosed_ring() {
@@ -411,9 +334,6 @@ fn geos_unclosed_ring() {
     assert_simple_polygon(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Nested bowties
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_nested_bowties() {
@@ -428,9 +348,6 @@ fn geos_nested_bowties() {
     assert!(matches!(&result, Geometry::MultiPolygon(_)));
 }
 
-// ---------------------------------------------------------------------------
-// Large coordinate values
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_large_coords() {
@@ -440,9 +357,6 @@ fn geos_large_coords() {
     assert_simple_polygon(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Negative coordinate values
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_negative_coords() {
@@ -452,9 +366,6 @@ fn geos_negative_coords() {
     assert_simple_polygon(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Complex MultiPolygon with overlapping shells
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_overlapping_shells() {
@@ -469,13 +380,9 @@ fn geos_overlapping_shells() {
     assert!(matches!(&result, Geometry::MultiPolygon(_)));
 }
 
-// =========================================================================
 // JTS GeometryFixer tests: NaN/Inf, collapse, regression
-// =========================================================================
 
-// ---------------------------------------------------------------------------
 // Point with NaN coordinate -> empty
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_point_nan() {
@@ -484,9 +391,6 @@ fn geos_point_nan() {
     assert_is_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Point with Inf coordinate -> empty
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_point_inf() {
@@ -495,21 +399,17 @@ fn geos_point_inf() {
     assert_is_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
 // MultiPoint with all NaN -> empty
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_multipoint_nan() {
     let g = Geometry::MultiPoint(MultiPoint(vec![Point::new(f64::NAN, 0.0)]));
     let result = g.make_valid_with_config(&cfg_auto());
-    // NaN points are valid POINT EMPTY — MultiPoint preserves them
+    // NaN points are valid POINT EMPTY: MultiPoint preserves them
     assert!(result.is_valid());
 }
 
-// ---------------------------------------------------------------------------
 // LineString with NaN coordinate -> empty
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_linestring_nan_collapse() {
@@ -529,9 +429,6 @@ fn geos_linestring_nan_collapse() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// LineString with many repeated coords simplified
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_linestring_many_repeated() {
@@ -541,9 +438,6 @@ fn geos_linestring_many_repeated() {
     assert!(matches!(&result, Geometry::LineString(_)));
 }
 
-// ---------------------------------------------------------------------------
-// Polygon with zero-area overlapping holes (JTS GeometryFixerTest)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_polygon_zero_area_overlap_holes() {
@@ -556,9 +450,6 @@ fn geos_polygon_zero_area_overlap_holes() {
     assert_valid_ogc(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Polygon with positive and negative winding overlap
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_polygon_pos_neg_overlap() {
@@ -570,9 +461,6 @@ fn geos_polygon_pos_neg_overlap() {
     assert_not_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Complex holes touching at vertices (JTS testHolesTouching)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_holes_touching_complex() {
@@ -586,9 +474,7 @@ fn geos_holes_touching_complex() {
     assert_not_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
 // Empty MultiPolygon (GEOS MakeValidTest test<3>)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_empty_multipolygon() {
@@ -597,9 +483,6 @@ fn geos_empty_multipolygon() {
     assert_is_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
-// MULTIPOLYGON (EMPTY, EMPTY)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_multipolygon_multi_empty() {
@@ -608,9 +491,6 @@ fn geos_multipolygon_multi_empty() {
     assert_is_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
-// GEOMETRYCOLLECTION EMPTY
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_geometry_collection_empty() {
@@ -619,19 +499,12 @@ fn geos_geometry_collection_empty() {
     assert_is_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
-// GC with all empty sub-geometries
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_gc_all_empty() {
     let g = geom_from_wkt("GEOMETRYCOLLECTION (POINT EMPTY, LINESTRING EMPTY, POLYGON EMPTY)");
     let result = g.make_valid_with_config(&cfg_auto());
-    // Our canonical empty representation: POINT(NaN NaN) survives (the
-    // geo empty-point convention), while LINESTRING/POLYGON EMPTY collapse
-    // to empty GCs which are stripped. GEOS returns an empty GC here;
-    // keeping the empty point is a deliberate divergence - it preserves
-    // the original structure, and POINT(NaN NaN) is semantically empty.
+    // Our canonical empty representation: POINT(NaN NaN) survives (the geo empty-point convention)
     // (assert_eq is unusable on NaN coords - NaN != NaN - check structure.)
     match &result {
         Geometry::GeometryCollection(gc) => {
@@ -654,9 +527,7 @@ fn geos_gc_all_empty() {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Real-world regression: JTS Issue #852 case 1
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_issue_852_case1() {
@@ -676,9 +547,7 @@ fn geos_issue_852_case1() {
     assert_not_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
 // Real-world regression: JTS Issue #852 case 2
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_issue_852_case2() {
@@ -701,9 +570,7 @@ fn geos_issue_852_case2() {
     assert_not_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
 // GEOS issue #265 regression (exact coordinates from MakeValidTest.cpp)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_issue_265_actual() {

@@ -259,26 +259,12 @@ impl<'a> LineNoder<'a> {
     }
 
     fn run(&mut self) -> Option<Vec<Vec<Coord<f64>>>> {
-        // Revisit-dominated inputs (e.g. spoke wheels: half the coords are
-        // one shared vertex) have no crossings to node - the 2-D sweep
-        // would pay O(F^2) Shared classifications for nothing. The greedy
-        // filter resolves the revisits in O(n); fall back to it. Small
-        // inputs keep the full noder (the sweep is cheap there and the
-        // crossing cases need it).
+        // would pay O(F^2) Shared classifications for nothing.
         if self.n >= 32 && self.revisit_dominated() {
             return None;
         }
-        // crossing_only's chains are simple by construction: every
-        // interacting pair is classified, every crossing node is placed on
-        // both of its segments (an unplaceable node bails to the general
-        // path - the fuzz wkb seed 17790c39 dropped-split class), and the
-        // sweep re-verifies in debug (assert in crossing_only's caller).
-        // Re-validating every chain here cost ~40% on the crossing-only
-        // bench class for a check the construction already guarantees.
-        // Degenerate chains ([P, P] or single points) are the one gap:
-        // they pass the self-int predicate (n < 2 early-out) but the
-        // validator rejects them (RepeatedPoint / RingTooFewPoints), so
-        // the linear scan below is the only extra screen.
+        // both of its segments (an unplaceable node bails to the general path - the fuzz wkb seed 17790c39 dropped-split class)
+        // Re-validating every chain here cost ~40% on the crossing-only bench class for a check the construction already guarantees.
         if let Some(chains) = self.crossing_only() {
             if chains.iter().any(|c| chain_degenerate(c)) {
                 return None;
@@ -333,14 +319,10 @@ impl<'a> LineNoder<'a> {
         if self.n < 2 {
             return None;
         }
-        // Full-bbox-chord class (x-scale): the candidate scan would burn
-        // its whole budget before bailing; go straight to the general path.
         if self.full_span_dominated() {
             self.crossing_bail();
             return None;
         }
-        // Adjacent and closure collinear overlaps (out-and-back) are the
-        // nodes adjacent_pass pushes; that class keeps the general path.
         self.adjacent_pass();
         if !self.nodes.is_empty() {
             self.crossing_bail();
@@ -358,14 +340,7 @@ impl<'a> LineNoder<'a> {
             limit,
         };
         let mut revisits: Vec<Coord<f64>> = Vec::new();
-        // Chain index first (the model the polygon gate uses, cheapest when the
-        // chains are few and small). It needs the chain builder from `arrange`,
-        // and its grid over CHAIN envelopes can bail: a long chain's box covers
-        // most of the grid, which wide inputs do (a spiral's chains do), and
-        // the bail used to leave an all-pairs chain scan behind - measured
         // +43 % on `spiral ls 1000v`, and CI flagged it at +130 % (2026-10-17).
-        // Both cases fall through to the per-segment grid, which is
-        // O(n + output) regardless of chain shape.
         #[cfg(feature = "arrange")]
         let indexed = self.enumerate_by_chain_index(&mut st, &mut revisits);
         #[cfg(not(feature = "arrange"))]
@@ -378,28 +353,14 @@ impl<'a> LineNoder<'a> {
             self.crossing_bail();
             return None;
         }
-        // eps-class guard. Bit-equal points are their own clusters (an
-        // exact duplicate, including the closed-line closure anchor pair,
-        // clusters to itself), so only DISTINCT points within eps
-        // (Chebyshev, the cluster metric) force the general path.
         if self.eps_classes_present() {
             self.crossing_bail();
             return None;
         }
-        // No clustering needed: every node point is alone in its eps cell,
-        // so segment splits are direct (the pure-collinear branch fills
-        // them the same way) and `crossing_bail` can reset exactly these.
         for e in &self.nodes {
             self.splits[e.seg as usize].push(e.pt);
         }
-        // Direct chain construction. With no eps classes the output pieces
-        // are exactly the sub-segments split at their crossing points, and
-        // the only vertices with more than two incident piece-ends are
-        // crossing points and recorded revisit vertices. `reconnect` emits
-        // maximal degree-2 runs ordered by their first piece, and piece k
-        // runs from starts[k] to starts[k + 1] (the traversal is
-        // contiguous), so one array describes every piece and the chains
-        // are built without endpoint maps or a Vec per piece.
+        // runs from starts[k] to starts[k + 1] (the traversal is contiguous)
         let mut breaks: Vec<(f64, f64)> = Vec::with_capacity(self.nodes.len() + revisits.len());
         for e in &self.nodes {
             breaks.push((e.pt.x, e.pt.y));
@@ -408,14 +369,7 @@ impl<'a> LineNoder<'a> {
         breaks.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
         breaks.dedup_by(|a, b| a.0.to_bits() == b.0.to_bits() && a.1.to_bits() == b.1.to_bits());
         let mut starts: Vec<Coord<f64>> = Vec::with_capacity(self.n + self.nodes.len() + 1);
-        // Audit flag: a crossing node that cannot be placed on its own
-        // segment would leave the crossing inside the chain, breaking the
-        // "simple by construction" claim (fuzz wkb seed 17790c39: DD-mixed
-        // node points at raw^2 magnitude, dropped by these guards, release
-        // shipped NotSimple). Bit-equal repeats of an already-placed node
-        // are the same point recorded by both segments' pair - those stay
-        // a dedup. Collected, then bailed after the loop (no &mut self
-        // while borrowing splits).
+        // "simple by construction" claim (fuzz wkb seed 17790c39: DD-mixed node points at raw^2 magnitude, dropped by these guards, release shipped)
         let mut unplaceable = false;
         for seg in 0..self.n {
             let a = self.a[seg];
@@ -427,8 +381,6 @@ impl<'a> LineNoder<'a> {
             let dx = b.x - a.x;
             let dy = b.y - a.y;
             let len = (dx * dx + dy * dy).sqrt();
-            // Same span and eps-degenerate guards as `build_pieces`, so
-            // the piece set matches the general path exactly.
             self.splits[seg].sort_by(|p, q| {
                 let tp = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len;
                 let tq = ((q.x - a.x) * dx + (q.y - a.y) * dy) / len;
@@ -463,8 +415,7 @@ impl<'a> LineNoder<'a> {
         }
         starts.push(self.coords[self.n]);
         let m = starts.len() - 1;
-        // Boundary k (between piece k - 1 and piece k) sits at starts[k];
-        // boundary m closes the loop on a closed line.
+        // Boundary k (between piece k - 1 and piece k) sits at starts[k]
         let is_break = |k: usize| {
             breaks
                 .binary_search_by(|e| {
@@ -473,13 +424,7 @@ impl<'a> LineNoder<'a> {
                 })
                 .is_ok()
         };
-        // Greedy walk, the exact semantics of `reconnect`: chains start
-        // at the lowest unused piece and extend forward then backward
-        // through degree-2 (non-break) boundaries, stopping at used
-        // pieces, break vertices and vertices already on the chain (loop
-        // guard). With no eps classes the only vertices that can repeat
-        // inside a chain are its own two boundary vertices, so the visited
-        // set reduces to those two keys.
+        // through degree-2 (non-break) boundaries
         let mut used = vec![false; m];
         let mut chains: Vec<Vec<Coord<f64>>> = Vec::new();
         for s in 0..m {
@@ -543,12 +488,6 @@ impl<'a> LineNoder<'a> {
                 chains.push(pre);
             }
         }
-        // No runtime re-validation: every bbox-overlapping pair was
-        // classified (Cross pairs split at the point, everything else
-        // bailed or broke the chain), splits are strict-interior, and the
-        // walk cannot revisit a vertex (breaks plus the loop guard), so
-        // the chains are simple by construction. Debug builds still
-        // assert it; the tests and the fuzz corpus replay run in debug.
         debug_assert!(
             chains
                 .iter()
@@ -631,8 +570,6 @@ impl<'a> LineNoder<'a> {
                 if st.bail || i >= j {
                     return;
                 }
-                // `ia != ib`, so `classify_pair`'s self-pair ordering guard is
-                // inert and `i < j` holds already.
                 self.classify_pair(i, j, 0, 1, st, revisits);
             });
         }
@@ -647,12 +584,8 @@ impl<'a> LineNoder<'a> {
         st: &mut ScanState,
         revisits: &mut Vec<Coord<f64>>,
     ) -> bool {
-        // Disabled (CHAIN_INDEX_WORK_LIMIT == 0): return before building
-        // anything. The check used to live after the chain index was built,
-        // so a disabled chain index still paid for the `Vec<Line>` copy, the
-        // mono-chain construction and the chain-grid attempt on every call -
-        // measured 2026-10-17 as a ~20 % regression on `ringing` against
-        // 5a07c75, which is exactly this waste.
+        // Disabled (CHAIN_INDEX_WORK_LIMIT == 0): return before building anything.
+        // mono-chain construction and the chain-grid attempt on every call -measured 2026-10-17 as a ~20 % regression on `ringing` against
         if CHAIN_INDEX_WORK_LIMIT == 0 {
             return false;
         }
@@ -674,14 +607,6 @@ impl<'a> LineNoder<'a> {
             Some(g) => g,
             None => return false,
         };
-        // Price the cross-chain walks before paying for them. Each costs
-        // O(|A| + |B|) pointer steps over a contiguous window, so a shape whose
-        // chains are long AND whose chains meet in many combinations spends
-        // O(n * chains) here while the per-segment grid spends O(n + output).
-        // Collect the pairs first, and hand the shape to
-        // `enumerate_segment_grid` when the bill is too large: nothing has
-        // been classified yet, so the fallback starts from a clean noder.
-        // Self-pairs are O(n) in total and always affordable.
         let limit = CHAIN_INDEX_WORK_LIMIT.saturating_mul(self.n);
         let mut pairs: Vec<(u32, u32)> = Vec::new();
         let mut work: usize = 0;
@@ -705,7 +630,6 @@ impl<'a> LineNoder<'a> {
         if over {
             return false;
         }
-        // Self-pairs first in chain order, then the priced cross pairs.
         for ci in 0..nc {
             self.enumerate_chain_pair(&mc, ci, ci, st, revisits);
             if st.bail {
@@ -764,9 +688,6 @@ impl<'a> LineNoder<'a> {
         };
         let bn = be - bs;
         let bidx = |p: usize| if b_asc { bs + p } else { be - 1 - p };
-        // Candidates first: the window walk borrows the coordinate arrays
-        // immutably and classifying a pair needs `&mut self` for the node
-        // pushes.
         let mut pairs: Vec<(u32, u32)> = Vec::new();
         {
             let (lo, hi): (&[f64], &[f64]) = if use_y {
@@ -927,16 +848,11 @@ impl<'a> LineNoder<'a> {
             order.push(i as u32);
         }
         radix_sort_keys_tls(&mut keys, &mut order);
-        // Gather once so the window scan walks one contiguous array
-        // (the two-array index indirection measured 73 us on the 1000v
-        // figure-8, 2026-09-18).
+        // (the two-array index indirection measured 73 us on the 1000v figure-8, 2026-09-18).
         let mut sorted: Vec<(f64, f64)> = order.iter().map(|&o| pts[o as usize]).collect();
         let budget = EPS_CLASS_SCAN_FACTOR * total + EPS_CLASS_SCAN_FLOOR;
         let mut iters = 0usize;
-        // Runs of bit-equal x are y-sorted before scanning. A vertical
         // input run (the 1000v figure-8's 250-point legs) would otherwise
-        // make the plain x-window scan quadratic: measured 43,056
-        // iterations, 57 us, on 2026-09-18.
         let mut i = 0usize;
         while i < total {
             let xi = sorted[i].0;
@@ -987,10 +903,7 @@ impl<'a> LineNoder<'a> {
     /// The revisit pre-scan runs in `run` before this is called.
     pub(super) fn run_full(&mut self) -> Option<Vec<Vec<Coord<f64>>>> {
         self.family_pass();
-        // Pure-collinear fast path: every segment lies on one exact line.
-        // The 1-D family noding is then the complete noding - the 2-D
-        // sweep/cluster machinery adds nothing. Split points are the other
-        // members' original endpoints, which are already bit-exact anchors.
+        // The 1-D family noding is then the complete noding - the 2-D sweep/cluster machinery adds nothing.
         let pure_collinear = if self.n > 0 && self.family[0] != NO_FAMILY {
             self.family_size[self.family[0] as usize] == self.n
         } else {
@@ -1016,11 +929,8 @@ impl<'a> LineNoder<'a> {
         }
         let chains = self.reconnect(pieces);
         for chain in &chains {
-            // Degenerate chains pass the self-int predicate below
-            // (n < 2 early-out) but fail the validator (RepeatedPoint /
-            // RingTooFewPoints) - a computed [P, P] chain shipped once
-            // (fuzz 55853: eps clustering collapsed both split points of
-            // a piece onto one coordinate).
+            // (n < 2 early-out) but fail the validator (RepeatedPoint / RingTooFewPoints) - a computed [P, P] chain shipped once
+            // (fuzz 55853: eps clustering collapsed both split points of a piece onto one coordinate).
             if chain_degenerate(chain)
                 || crate::validation::impls::check_linestring_self_intersection(chain)
             {
@@ -1028,12 +938,6 @@ impl<'a> LineNoder<'a> {
             }
         }
         if chains.is_empty() {
-            // No pieces survived the cluster/dedup passes (an absolute eps
-            // floor can swallow a subnormal-scale input whole). The noder's
-            // contract is that its output validates, so an input that fails
-            // the validator must not be handed back as-is: return None and
-            // let the caller fall back to the greedy filter (or empty)
-            // rather than ship an output the harness rejects.
             if chain_degenerate(self.coords)
                 || crate::validation::impls::check_linestring_self_intersection(self.coords)
             {
@@ -1044,9 +948,7 @@ impl<'a> LineNoder<'a> {
         Some(chains)
     }
 
-    // ---------------------------------------------------------------------
     // Phase 1: exact-collinear families (1-D noding)
-    // ---------------------------------------------------------------------
 
     fn family_pass(&mut self) {
         let mut buckets: FxHashMap<(u64, u64), Vec<u32>> = FxHashMap::default();
@@ -1062,8 +964,7 @@ impl<'a> LineNoder<'a> {
                 nx = -nx;
                 ny = -ny;
             }
-            // The negation turns +0.0 into -0.0, which has different bits
-            // and would split one exact direction into two buckets.
+            // The negation turns +0.0 into -0.0, which has different bits and would split one exact direction into two buckets.
             if ny == 0.0 {
                 ny = 0.0;
             }
@@ -1080,8 +981,6 @@ impl<'a> LineNoder<'a> {
             if members.len() < 2 {
                 continue;
             }
-            // Offset (cross of the normalized direction with the anchor) +
-            // term magnitude for the merge tolerance.
             let mut os: Vec<(f64, f64, u32)> = Vec::with_capacity(members.len());
             for &i in &members {
                 let i = i as usize;
@@ -1106,12 +1005,7 @@ impl<'a> LineNoder<'a> {
             let mut cur_o = os[0].0;
             let mut cur_mag = os[0].1;
             for &(o, mag, i) in &os[1..] {
-                // Merge tolerance: ~32 ulps of the offset terms (the o value
-                // for one exact line spreads by a few ulps across anchors;
-                // real line separations above ~100 ulps stay separate - and
-                // anything within the 32-ulp band is inside the validator's
-                // collinear tolerance anyway, so merging is semantically
-                // consistent with the validator).
+                // ~32 ulps of the offset terms
                 let tol = 32.0 * f64::EPSILON * (cur_mag + mag);
                 if (o - cur_o).abs() <= tol {
                     cur.push(i);
@@ -1165,21 +1059,11 @@ impl<'a> LineNoder<'a> {
             let (t_lo, t_hi) = if t0 < t1 { (t0, t1) } else { (t1, t0) };
             let lo_i = endpts.partition_point(|e| e.0 <= t_lo + eps_t);
             let hi_i = endpts.partition_point(|e| e.0 < t_hi - eps_t);
-            // Fuzz seed regression_invalid_output_auto_146242f1 bit 5
-            // (target/crash_panic_53134.wkb): when the member's projected
-            // span collapses inside the eps merge band (t_hi - t_lo <=
-            // 2*eps_t, including eps_t = inf when len2 underflows), the
-            // two thresholds cross and hi_i < lo_i - slicing panicked with
-            // "starts at 4 but ends at 0". A span that thin has no
-            // strictly-interior room beyond eps of its own endpoints, so
-            // there is nothing to node (pre-existing at 5eab330).
+            // span collapses inside the eps merge band (t_hi - t_lo <= 2*eps_t, including eps_t = inf when len2 underflows)
             if lo_i >= hi_i {
                 continue;
             }
             for e in &endpts[lo_i..hi_i] {
-                // Strict interior: the member's own endpoints sit at the
-                // range boundaries and are excluded; another member's
-                // endpoint coinciding with this member's endpoint is too.
                 if e.2 == m as u32 {
                     continue;
                 }
@@ -1191,9 +1075,7 @@ impl<'a> LineNoder<'a> {
         }
     }
 
-    // ---------------------------------------------------------------------
     // Phase 2: adjacent + closure collinear-overlap pairs
-    // ---------------------------------------------------------------------
 
     fn adjacent_pass(&mut self) {
         let eps = self.eps;
@@ -1235,9 +1117,7 @@ impl<'a> LineNoder<'a> {
         }
     }
 
-    // ---------------------------------------------------------------------
     // Phase 3: 2-D sweep over all remaining pairs
-    // ---------------------------------------------------------------------
 
     fn sweep_pass(&mut self) -> Option<()> {
         let mut sweep_ids: Vec<u32> = Vec::new();
@@ -1276,12 +1156,7 @@ impl<'a> LineNoder<'a> {
                 active.push(ord);
             }
         }
-        // Removed members (large families) vs sweep members and vs members
-        // of other large families. Same-family pairs are already noded by
-        // the 1-D pass, so removed members are grouped by family and only
-        // cross-family pairs are tested - an all-collinear input must not
-        // pay an O(F^2) same-family scan. Cross-family products go through
-        // test_family_pair's line-geometry pruning.
+        // pay an O(F^2) same-family scan.
         let mut by_family: FxHashMap<u32, Vec<u32>> = FxHashMap::default();
         for i in 0..self.n {
             let f = self.family[i];
@@ -1291,17 +1166,7 @@ impl<'a> LineNoder<'a> {
         }
         if !by_family.is_empty() {
             self.family_members = by_family;
-            // Large-family members vs sweep members. The old form scanned
-            // every sweep member for every removed member with only
-            // bbox_gate as a filter: O(F x S), which is n^2/4 on the
-            // figure-8 class, where the two vertical runs form one family
-            // of ~n/2 (measured 3.05 ms of a 6.19 ms 4000-vertex repair,
-            // and half of the noder's time once the other quadratic was
-            // removed). A static grid over the sweep members - built once,
-            // never mutated, so it cannot degenerate the way an x-active
-            // set does - visits only cell-sharing candidates and hands
-            // them back in sweep_ids order, so the pair set and its order
-            // are unchanged. A cell too dense to index keeps the old scan.
+            // of ~n/2 (measured 3.05 ms of a 6.19 ms 4000-vertex repair, and half of the noder's time once the other)
             let mut sweep_boxes: Vec<[f64; 4]> = Vec::with_capacity(sweep_ids.len());
             for &s in &sweep_ids {
                 let s = s as usize;
@@ -1348,10 +1213,6 @@ impl<'a> LineNoder<'a> {
                     }
                 }
             }
-            // Cross-family removed-vs-removed pairs. Line-geometry pruning
-            // (test_family_pair): parallel families beyond the flag
-            // distance and non-parallel families whose members cannot
-            // reach the reference crossing point collapse to zero or a
             // few hundred pair tests instead of |F1| x |F2|.
             let fams: Vec<u32> = self.family_members.keys().copied().collect();
             for (k, &f1) in fams.iter().enumerate() {
@@ -1387,10 +1248,7 @@ impl<'a> LineNoder<'a> {
     /// exhaustive scan: the P drift budget grows as 1/sin and would need
     /// a pad comparable to the spans themselves.
     fn test_family_pair(&mut self, f1: u32, f2: u32) {
-        // Reference segments: first member of each family (insertion
-        // order - deterministic for a given input). Clone the two member
-        // lists up front: test_pair mutates self.nodes/splits, so live
-        // borrows of self.family_members cannot span the pair loop.
+        // Clone the two member lists up front: test_pair mutates self.nodes/splits, so live borrows of self.family_members cannot span the pair loop.
         let m1: Vec<u32> = self.family_members[&f1].clone();
         let m2: Vec<u32> = self.family_members[&f2].clone();
         let r1 = m1[0] as usize;
@@ -1414,7 +1272,6 @@ impl<'a> LineNoder<'a> {
         let cross = d1x * d2y - d1y * d2x;
         let sin_abs = cross.abs() / (l1 * l2);
         if sin_abs < FAMILY_SHALLOW_SIN {
-            // Parallel-to-shallow: only the parallel branch can prune.
             if sin_abs < FAMILY_PARALLEL_SIN {
                 let wx = self.a[r2].x - self.a[r1].x;
                 let wy = self.a[r2].y - self.a[r1].y;
@@ -1432,13 +1289,11 @@ impl<'a> LineNoder<'a> {
             }
             return;
         }
-        // Crossing families: locate P = intersection of the reference
-        // lines (FP point; the span pad absorbs the error).
+        // Crossing families: locate P = intersection of the reference lines (FP point; the span pad absorbs the error).
         let t = ((self.a[r2].x - self.a[r1].x) * d2y - (self.a[r2].y - self.a[r1].y) * d2x) / cross;
         let px = self.a[r1].x + t * d1x;
         let py = self.a[r1].y + t * d1y;
         let pad = FAMILY_SPAN_PAD_EPS * self.eps;
-        // Projection parameter of P along each reference direction.
         let tp1 = ((px - self.a[r1].x) * d1x + (py - self.a[r1].y) * d1y) / (l1 * l1);
         let tp2 = ((px - self.a[r2].x) * d2x + (py - self.a[r2].y) * d2y) / (l2 * l2);
         let mut cand1: SmallVec<[u32; 16]> = SmallVec::new();
@@ -1450,7 +1305,6 @@ impl<'a> LineNoder<'a> {
             let s1 = ((self.b[i].x - self.a[r1].x) * d1x + (self.b[i].y - self.a[r1].y) * d1y)
                 / (l1 * l1);
             let (lo, hi) = if s0 < s1 { (s0, s1) } else { (s1, s0) };
-            // Span contains P (+ pad projected onto the parameter axis).
             let tpad = pad / l1;
             if lo - tpad <= tp1 && tp1 <= hi + tpad {
                 cand1.push(i as u32);

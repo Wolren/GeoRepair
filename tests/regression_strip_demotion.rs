@@ -52,7 +52,6 @@ fn output_is_empty(g: &geo::Geometry<f64>) -> bool {
 #[test]
 fn subnormal_and_nan_demotion_seeds_stay_valid() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("fuzz/corpus/make_valid");
-    // (seed, must the repaired output stay non-empty?)
     let seeds = [
         ("regression_subnormal_sliver_demotion.bin", true),
         ("regression_nan_micro_triangles_demotion.bin", true),

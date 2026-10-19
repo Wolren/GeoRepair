@@ -68,10 +68,7 @@ pub(crate) fn split_edges_tuned(edges: &[Line<f64>], tuning: &core::Tuning) -> V
     }
 
     let eps_param = core::EPS_PARAM;
-    // Reconstruction is per-edge independent: sort + dedup the split points,
-    // then rebuild the sub-lines. Parallelized for large inputs (the serial
-    // rebuild was ~30ms of the 71ms noding on a 260k-edge shell); below the
-    // threshold the serial loop's lower dispatch overhead wins.
+    // Parallelized for large inputs (the serial rebuild was ~30ms of the 71ms noding on a 260k-edge shell)
     if n > tuning.split_rebuild_parallel_min {
         #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
         {
@@ -174,11 +171,7 @@ fn split_edges_rtree(edges: &[Line<f64>], split_points: &mut [SplitPoint], eps: 
         .collect();
     let tree = RTree::bulk_load(envs);
 
-    // Per-edge queries are independent — parallelize the query phase with a
-    // two-phase hit collection (a pair (i,j) may produce hits for BOTH i and
-    // j, so hits are staged flat per thread and appended after, avoiding
-    // aliased writes). Measured: noding a 260k-edge giant shell is ~100ms
-    // serial; the query phase dominates and parallelizes near-linearly.
+    // Measured: noding a 260k-edge giant shell is ~100ms serial; the query phase dominates and parallelizes near-linearly.
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     {
         use rayon::prelude::*;
@@ -408,14 +401,11 @@ fn split_edges_sweepline(edges: &[Line<f64>], split_points: &mut [SplitPoint], e
 #[inline]
 pub(crate) fn intersect_param(e1: &Line<f64>, e2: &Line<f64>, eps: f64) -> Option<(f64, f64)> {
     // Phase 1: Detection via robust orient2d (Shewchuk adaptive precision).
-    // Fast pre-check rejects obvious non-intersections (both endpoints on
-    // the same side of the other segment).
     let o1 = orient2d(e1.start, e1.end, e2.start);
     let o2 = orient2d(e1.start, e1.end, e2.end);
     let o3 = orient2d(e2.start, e2.end, e1.start);
     let o4 = orient2d(e2.start, e2.end, e1.end);
 
-    // Quick rejection: both endpoints on the same side of the other segment
     if o1.signum() == o2.signum() && o1 != 0.0 && o2 != 0.0 {
         return None;
     }
@@ -423,14 +413,11 @@ pub(crate) fn intersect_param(e1: &Line<f64>, e2: &Line<f64>, eps: f64) -> Optio
         return None;
     }
 
-    // Collinear overlap (all four orientations zero)
     if o1 == 0.0 && o2 == 0.0 && o3 == 0.0 && o4 == 0.0 {
         return intersect_param_collinear(e1, e2, eps);
     }
 
     // Phase 2: Computation via double-double arithmetic (106-bit mantissa).
-    // Handles proper crossings AND endpoint-on-segment intersections (both
-    // are valid noding events).
     if let Some((_pt, t_dd, u_dd)) =
         crate::dd::segment_intersection_dd(e1.start, e1.end, e2.start, e2.end)
     {

@@ -112,9 +112,6 @@ pub unsafe extern "C" fn geo_repair_make_valid_with_config_full(
     }
 }
 
-// ---------------------------------------------------------------------------
-// WKB: validation
-// ---------------------------------------------------------------------------
 
 /// Check whether a WKB-encoded geometry is OGC-valid.
 ///
@@ -185,13 +182,9 @@ pub unsafe extern "C" fn geo_repair_validate_reason(
     wkb_data: *const u8,
     wkb_len: usize,
 ) -> GeoRepairResult {
-    // SAFETY: same contract as geo_repair_validate.
     unsafe { geo_repair_validate(wkb_data, wkb_len) }
 }
 
-// ---------------------------------------------------------------------------
-// WKB: combined validate + fix
-// ---------------------------------------------------------------------------
 
 /// Validate a WKB geometry, then repair it if invalid.
 ///
@@ -300,9 +293,6 @@ pub unsafe extern "C" fn geo_repair_validate_and_fix_with_config(
     }
 }
 
-// ---------------------------------------------------------------------------
-// WKB: batch
-// ---------------------------------------------------------------------------
 
 pub(crate) fn repair_batch_sequential(
     inputs: &[GeoRepairWkbBuffer],

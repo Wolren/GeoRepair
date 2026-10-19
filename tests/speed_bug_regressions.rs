@@ -58,9 +58,7 @@ fn assert_geometrically_equal(a: &Geometry<f64>, b: &Geometry<f64>) {
     }
 }
 
-// ============================================================================
-// 1. Phantom segments
-// ============================================================================
+// 1.
 
 /// Valid polygon where the phantom segment (exterior closure → first vertex of
 /// hole 1) = (0,0)→(50,50) properly crosses hole 2's real edge (10,20)→(20,10)
@@ -95,8 +93,7 @@ fn phantom_crossing_polygon() -> Polygon<f64> {
 fn phantom_segment_excluded_from_sweep() {
     let poly = phantom_crossing_polygon();
     // Sanity: the phantom really would cross hole 2's edge.
-    // Segment (0,0)→(50,50) and (10,20)→(20,10) intersect at (15,15), interior
-    // to both. Assert the two line segments properly cross.
+    // Segment (0,0)→(50,50) and (10,20)→(20,10) intersect at (15,15), interior to both.
     let phantom = geo::Line::new(Coord { x: 0.0, y: 0.0 }, Coord { x: 50.0, y: 50.0 });
     let real = geo::Line::new(Coord { x: 10.0, y: 20.0 }, Coord { x: 20.0, y: 10.0 });
     assert!(
@@ -108,7 +105,6 @@ fn phantom_segment_excluded_from_sweep() {
         ),
         "test fixture broken: phantom and real edge must properly cross"
     );
-    // The polygon itself must not be flagged.
     assert!(
         !geo_repair::structure::has_proper_self_crossing(&poly),
         "valid polygon flagged for phantom-segment crossing"
@@ -123,15 +119,11 @@ fn phantom_segment_polygon_passes_fast_path() {
     let poly = phantom_crossing_polygon();
     let g: Geometry<f64> = poly.clone().into();
     let out = g.make_valid();
-    // The fast path returns the input clone; `make_valid_impl` exit then
-    // normalizes OGC winding (holes CW). So rings must be bit-identical as
-    // coordinate SETS, but orientation may differ from the input.
+    // So rings must be bit-identical as coordinate SETS, but orientation may differ from the input.
     assert_geometrically_equal(&out, &g);
 }
 
-// ============================================================================
-// 2. Tiny-edge collinearity (relative tolerance)
-// ============================================================================
+// 2.
 
 /// Two tiny rings (edge length 1.6e-7) stacked with a 1.6e-7 gap. Their
 /// closest edges are parallel but NOT collinear — the old absolute 1e-12
@@ -217,9 +209,7 @@ fn tiny_vertex_touch_not_collinear() {
     );
 }
 
-// ============================================================================
-// 3. Boundary-touching holes (inclusive validation)
-// ============================================================================
+// 3.
 
 /// Shell square with a hole whose first vertex (50,0) lies exactly ON the
 /// bottom shell edge. GEOS IsValidOp accepts this (OGC-valid).
@@ -282,7 +272,6 @@ fn large_valid_gate_accepts_boundary_touching_hole() {
         poly.exterior().0.len() + poly.interiors().iter().map(|h| h.0.len()).sum::<usize>();
     assert!(total_verts > 50_000, "test must exceed FAST_PATH_MAX_VERTS");
 
-    // Gate predicates.
     assert!(
         !geo_repair::structure::has_proper_self_crossing(&poly),
         "valid large shell must have no proper crossings"
@@ -292,14 +281,12 @@ fn large_valid_gate_accepts_boundary_touching_hole() {
         "large gate must accept the boundary-touching hole"
     );
 
-    // Repair must return the polygon byte-identical.
     let g: Geometry<f64> = poly.clone().into();
     let cfg = geo_repair::MakeValidConfig {
         poly_method: geo_repair::PolyMethod::Structure,
         ..Default::default()
     };
     let out = g.make_valid_with_config(&cfg);
-    // Same ring coordinate sets; winding may be OGC-normalized.
     assert_geometrically_equal(&out, &g);
     assert!(
         matches!(out, Geometry::Polygon(_)),
@@ -343,9 +330,7 @@ fn large_valid_gate_interior_hole() {
     assert_geometrically_equal(&out, &g);
 }
 
-// ============================================================================
 // 4. i_overlay is_fill_top panic (batch killer)
-// ============================================================================
 
 /// Seed cc 8785284c (fuzz.proptest-regressions): shell with one 6-vertex hole
 /// where the offset hole partially overlaps the shell. geo's boolean engine
@@ -446,9 +431,7 @@ fn is_fill_top_seed_no_panic() {
     }
 }
 
-// ============================================================================
-// 5. Sub-ULP spike collapse (mixed-magnitude ring, Structure-only gap)
-// ============================================================================
+// 5.
 
 /// Seed from invariant_mixed_magnitude_polygon: 5 large coords (~1e8) + 3
 /// tiny coords (~1e-9) in ONE ring. The tiny segment (0,0)→(0,5.089e-9) is

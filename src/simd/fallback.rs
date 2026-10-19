@@ -13,13 +13,8 @@ pub(crate) fn orient2d_batch_4(
     pb: &[Coord<f64>; 4],
     pc: &[Coord<f64>; 4],
 ) -> [f64; 4] {
-    // SIMD verdict (measured head-to-head, simd/tests.rs microbench_kernels,
-    // 2026-08-16): a shuffle-transpose AVX2 kernel (unpack-based, no gathers)
-    // is ~1.17x faster raw, but the runtime dispatch + non-inlinable
-    // target_feature boundary costs ~0.8ns/call on a ~3ns kernel, netting a
-    // 0.90x LOSS. For a 4-det kernel the auto-vectorized scalar path wins
-    // because it inlines into the pair predicates. The 2026-08-02 verdict
-    // stands for this kernel; only bulk scans (aabb, snap) justify dispatch.
+    // target_feature boundary costs ~0.8ns/call on a ~3ns kernel
+    // The 2026-08-02 verdict stands for this kernel; only bulk scans (aabb, snap) justify dispatch.
     scalar_orient2d_batch(pa, pb, pc)
 }
 
@@ -68,14 +63,8 @@ pub fn aabb_minmax_simd(coords: &[Coord<f64>]) -> (f64, f64, f64, f64) {
     if n == 0 {
         return (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
     }
-    // Runtime-dispatched AVX2 kernel. The head-to-head microbench (simd
-    // audit 2026-08-02, commit fe4c831) measured the hand-written AVX2
-    // bbox scan 4.5x faster than the scalar loop — the ONE kernel where
-    // intrinsics beat LLVM auto-vectorization (point_in_ring 8.4x slower,
-    // is_ring_ccw 2.8x — those stay scalar). Dispatch is runtime
-    // (is_x86_feature_detected) so the binary runs on any x86_64; the
-    // old compile-time cfg never activated because builds don't set
-    // target features.
+    // Runtime-dispatched AVX2 kernel.
+    // (is_x86_feature_detected) so the binary runs on any x86_64; the old compile-time cfg never activated because builds don't set target features.
     #[cfg(all(
         not(feature = "simd-portable"),
         target_arch = "x86_64",
@@ -83,7 +72,6 @@ pub fn aabb_minmax_simd(coords: &[Coord<f64>]) -> (f64, f64, f64, f64) {
     ))]
     {
         if std::arch::is_x86_feature_detected!("avx") {
-            // SAFETY: dispatch verified the avx feature.
             return unsafe { aabb_minmax_avx(coords) };
         }
     }
@@ -114,7 +102,6 @@ pub(crate) unsafe fn aabb_minmax_avx(coords: &[Coord<f64>]) -> (f64, f64, f64, f
     let mut max_yv = _mm256_set1_pd(f64::MIN);
     let mut i = 0usize;
     while i + 4 <= n {
-        // SAFETY: in-bounds wide loads; AoS -> SoA via lane-crossing unpacks.
         let v0 = unsafe { _mm256_loadu_pd(coords.as_ptr().add(i) as *const f64) };
         let v1 = unsafe { _mm256_loadu_pd(coords.as_ptr().add(i + 2) as *const f64) };
         let xs = _mm256_unpacklo_pd(v0, v1);
@@ -129,7 +116,6 @@ pub(crate) unsafe fn aabb_minmax_avx(coords: &[Coord<f64>]) -> (f64, f64, f64, f
     let mut mxx: [f64; 4] = [0.0; 4];
     let mut mny: [f64; 4] = [0.0; 4];
     let mut mxy: [f64; 4] = [0.0; 4];
-    // SAFETY: stack arrays, aligned pointers.
     unsafe {
         _mm256_storeu_pd(mnx.as_mut_ptr(), min_xv);
         _mm256_storeu_pd(mxx.as_mut_ptr(), max_xv);

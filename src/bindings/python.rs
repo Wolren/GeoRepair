@@ -110,9 +110,6 @@ fn error_strings(geom: &geo::Geometry<f64>) -> Vec<String> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Module definition
-// ---------------------------------------------------------------------------
 
 #[pymodule]
 #[pyo3(name = "geo_repair")]
@@ -120,7 +117,6 @@ fn geo_repair_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", VERSION)?;
     m.add_function(wrap_pyfunction!(version, m)?)?;
 
-    // WKB
     m.add_function(wrap_pyfunction!(repair_wkb, m)?)?;
     m.add_function(wrap_pyfunction!(repair_wkb_batch, m)?)?;
     m.add_function(wrap_pyfunction!(repair_validate_wkb, m)?)?;
@@ -136,7 +132,6 @@ fn geo_repair_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
         m.add_function(wrap_pyfunction!(par_repair_wkb_batch, m)?)?;
     }
 
-    // WKT
     m.add_function(wrap_pyfunction!(repair_wkt, m)?)?;
     m.add_function(wrap_pyfunction!(repair_wkt_batch, m)?)?;
     m.add_function(wrap_pyfunction!(repair_validate_wkt, m)?)?;
@@ -155,9 +150,6 @@ fn geo_repair_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// WKB
-// ---------------------------------------------------------------------------
 
 /// Repair a single WKB geometry (bytes).
 ///
@@ -381,9 +373,6 @@ fn repair_validate_wkb_batch(
     Ok(results)
 }
 
-// ---------------------------------------------------------------------------
-// WKT
-// ---------------------------------------------------------------------------
 
 /// Repair a WKT geometry string.
 ///

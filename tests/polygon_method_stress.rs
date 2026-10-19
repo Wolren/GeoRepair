@@ -52,9 +52,7 @@ fn assert_valid_for_all_methods(poly: &Polygon<f64>) {
     }
 }
 
-// =========================================================================
 // SECTION 1: Method consistency
-// =========================================================================
 
 #[test]
 fn test_all_methods_simple_square() {
@@ -123,9 +121,7 @@ fn test_all_methods_concave() {
     assert_valid_for_all_methods(&poly);
 }
 
-// =========================================================================
 // SECTION 2: Stress tests
-// =========================================================================
 
 #[test]
 fn test_stress_many_vertices() {
@@ -178,9 +174,7 @@ fn test_stress_many_holes() {
     assert_not_empty(&result);
 }
 
-// =========================================================================
 // SECTION 3: Large coordinate stress tests
-// =========================================================================
 
 #[test]
 fn test_stress_large_coords() {
@@ -233,9 +227,7 @@ fn test_stress_near_zero() {
     assert_valid(&result);
 }
 
-// =========================================================================
 // SECTION 4: Negative coordinate stress
-// =========================================================================
 
 #[test]
 fn test_stress_negative_coords() {
@@ -286,9 +278,7 @@ fn test_stress_all_negative() {
     assert_not_empty(&result);
 }
 
-// =========================================================================
 // SECTION 5: Configuration edge cases
-// =========================================================================
 
 #[test]
 fn test_explicit_default_config() {
@@ -359,9 +349,7 @@ fn test_structure_explicit() {
     assert_not_empty(&result);
 }
 
-// =========================================================================
 // SECTION 6: Extreme winding orders
-// =========================================================================
 
 #[test]
 fn test_cw_square_arrange() {
@@ -420,9 +408,7 @@ fn test_cw_hole_arrange() {
     assert_not_empty(&result);
 }
 
-// =========================================================================
 // SECTION 7: Polygon with adjacent-but-not-nested rings from bowtie split
-// =========================================================================
 
 #[test]
 fn test_bowtie_reversed_vertices() {
@@ -441,9 +427,7 @@ fn test_bowtie_reversed_vertices() {
     assert_not_empty(&result);
 }
 
-// =========================================================================
 // SECTION 8: Spike polygon
-// =========================================================================
 
 #[test]
 fn test_polygon_with_spike_arrange() {

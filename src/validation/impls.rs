@@ -20,9 +20,7 @@ impl GeoValidation for Point<f64> {
         if self.x().is_nan() && self.y().is_nan() {
             return ValidationResult::valid();
         }
-        // A point with a non-finite ordinate (NaN or inf) is invalid -
-        // GEOS reports "Invalid Coordinate" (verified: TestValid NaN cases
-        // expect isValid=false).
+        // A point with a non-finite ordinate (NaN or inf) is invalid -GEOS reports "Invalid Coordinate"
         if !self.x().is_finite() || !self.y().is_finite() {
             return ValidationResult::invalid(vec![GeometryValidationError::CoordinateNaN]);
         }
@@ -139,14 +137,8 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
         let sp = (max_x - min_x).abs().max((max_y - min_y).abs());
         (sp, sp.max(1.0))
     };
-    // Catastrophically small geometry (fuzz class: a 7-point line spanning
-    // 6e-275): the absolute 1e-12 eps floor dwarfs the whole line and every
-    // O(L^2) orient product underflows to 0, so both predicates collapse and
-    // an exactly-simple line falsely reports NotSimple (wkb seed 146242f1).
-    // Scale to unit span by an exact power of two - up-scaling never rounds
-    // (subnormal inputs map to normal) - which preserves orientation signs
-    // and collinearity bit-for-bit, then re-run. The scaled span lands in
-    // [0.5, 4), so the recursion cannot re-trigger.
+    // O(L^2) orient product underflows to 0, so both predicates collapse and an exactly-simple line falsely reports NotSimple (wkb seed 146242f1).
+    // The scaled span lands in [0.5, 4), so the recursion cannot re-trigger.
     if raw_span > 0.0 && raw_span < 1e-100 {
         let mut k = (-(raw_span.log2())).ceil() as i32;
         let mut scaled = coords.to_vec();
@@ -163,12 +155,6 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
     }
     let eps = 1e-12 * scale;
 
-    // Adjacent pairs (share a vertex): allowed to touch only at the shared
-    // vertex - collinear overlap beyond it (out-and-back) is non-simple.
-    // The shared vertex makes the first orientation identically zero, so
-    // the generic collinear gate always escalates to the robust predicate
-    // on clean data; test the single non-trivial orient with the same
-    // eps + adaptive-margin reject first.
     for i in 0..n - 1 {
         let a1 = coords[i];
         let a2 = coords[i + 1];
@@ -185,20 +171,11 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
             return true;
         }
     }
-    // Closed line: first and last segments may touch only at the closure vertex.
     if closed && segments_collinear_overlap(coords[n - 1], coords[n], coords[0], coords[1], eps) {
         return true;
     }
 
-    // Non-adjacent pairs: any intersection (crossing, vertex-on-edge,
-    // vertex revisit, collinear overlap) is non-simple. Uses the ring
-    // path's per-pair predicates (edges_intersect_general with a RELATIVE
-    // collinear gate + segment-local edges_vertex_on_edge). The global
-    // bbox eps (1e-12 * scale) inflates to an absolute length at large
-    // coordinate magnitude (measured: 1e15-scale line, eps = 1000 units,
-    // flagged a vertex 1 unit from another segment as on-edge: a false
-    // NotSimple on the fuzz-discovered mixed-magnitude collapse); the
-    // per-pair form keeps the tolerance at the pair's own edge lengths.
+    // coordinate magnitude (measured: 1e15-scale line, eps = 1000 units, flagged a vertex 1 unit from another segment as on-edge: a)
     let pair_intersects = |i: usize, j: usize| -> bool {
         if closed && i == 0 && j == n - 1 {
             return false; // closure pair handled above
@@ -212,23 +189,15 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
             return true;
         }
         if ambiguous {
-            // Vertex revisit: non-adjacent segments sharing an endpoint are
-            // non-simple ("interior intersection at vertices", GEOS
-            // TestSimple LINESTRING (20 80, 80 20, 80 80, 140 60, 80 20,
-            // 160 20)). A shared endpoint makes two fast orients exactly
-            // zero, so every revisit pair escalates - the compares run only
-            // on escalated pairs (the sweep path does the same).
+            // non-simple ("interior intersection at vertices", GEOS TestSimple LINESTRING (20 80, 80 20, 80 80, 140 60, 80 20, 160 20)).
             if a1 == b1 || a1 == b2 || a2 == b1 || a2 == b2 {
                 return true;
             }
         }
         false
     };
-    // Pairwise only for small n. Measured 2026-08-09: raising this to 512
-    // was a disaster (valid ls 500v 1.3 -> 81 us parallel) - the loop has
-    // n^2/2 pairs (~6.5 ns/pair for the lean predicate) while the radix
-    // sweep tests only the small x-overlap active set (~25-60x fewer
-    // pair tests at n=500). The sweep's 32-line floor is the crossover.
+    // sweep tests only the small x-overlap active set (~25-60x fewer pair tests at n=500).
+    // The sweep's 32-line floor is the crossover.
     if n <= 32 {
         for i in 0..n {
             for j in i + 2..n {
@@ -240,21 +209,9 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
         return false;
     }
 
-    // Vertex revisits: detected inside the sweep's pair test on
-    // lean-escalated pairs (check_revisit = true). A revisit pair shares an
-    // endpoint, which makes two fast orients exactly zero - it always
-    // escalates past the lean fast-FP head and pays the equality compares
-    // there. The former flat O(n) hash pass cost 5-9 us on every 500-vertex
-    // line (2026-08-07); escalated-only compares cost ~nothing on clean
-    // data. The dense fallbacks below keep their own revisit checks (the
-    // sweep may route to them when the x-overlap active set explodes).
+    // The former flat O(n) hash pass cost 5-9 us on every 500-vertex
 
-    // Radix-sort sweep with the ring path's exact predicates. The rstar
-    // tree is NOT the primary path: bulk_load costs ~1 us/item (measured
-    // 2026-08-07: 948 us to build the tree for a 500-vertex line), the
-    // sweep is the proven fast path (50 ms on 600k-vertex giants). Dense
-    // x-overlap falls back to the tree (rstar) or the naive pair loop
-    // (non-rstar) - same predicates, routing only.
+    // bulk_load costs ~1 us/item (measured 2026-08-07: 948 us to build the tree for a 500-vertex line)
     match crate::validation::sweep::sweep_ring_self_intersects(coords, eps, true) {
         Some(true) => true,
         Some(false) => false,
@@ -281,7 +238,6 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
                         if j <= i + 1 || (closed && i == 0 && j == n - 1) {
                             return core::ops::ControlFlow::<(), ()>::Continue(());
                         }
-                        // Vertex revisit (see the small-path pair check).
                         if a1 == coords[j]
                             || a1 == coords[j + 1]
                             || a2 == coords[j]
@@ -343,7 +299,6 @@ pub(crate) fn segments_intersect_any(
     if o1.abs() <= eps && o2.abs() <= eps {
         return segments_collinear_overlap(a1, a2, b1, b2, eps);
     }
-    // Vertex-on-segment.
     let on_seg = |p: Coord<f64>, s1: Coord<f64>, s2: Coord<f64>| -> bool {
         if !point_in_segment_bbox(p, s1, s2, eps) {
             return false;
@@ -351,7 +306,6 @@ pub(crate) fn segments_intersect_any(
         if include_endpoint_share {
             true
         } else {
-            // Cross-component: only STRICT interior contact is non-simple.
             let d1 = (p.x - s1.x).abs().max((p.y - s1.y).abs());
             let d2 = (p.x - s2.x).abs().max((p.y - s2.y).abs());
             d1 > eps && d2 > eps
@@ -381,12 +335,6 @@ pub(crate) fn segments_collinear_overlap(
     b2: Coord<f64>,
     eps: f64,
 ) -> bool {
-    // Fast-FP first: escalate to the exact predicates only when an
-    // orientation sits within eps + a relative margin of zero (the fast
-    // error is bounded by the product-sum of the orient's own terms, not
-    // the edge lengths - the L2-based margin inflated past nearly-parallel
-    // pairs when one edge was long; measured 2026-08-07, fuzz
-    // invariant_mixed_fp_in_same_ring / fuzz_inprocess_loop).
     let dx = a2.x - a1.x;
     let dy = a2.y - a1.y;
     let f1 = dx * (b1.y - a1.y) - dy * (b1.x - a1.x);
@@ -438,12 +386,6 @@ pub(crate) fn check_line_components_intersect(
         return false;
     }
 
-    // Shared-vertex contact between components. OGC/GEOS rule (verified vs
-    // geosop): an intersection point between two components is allowed ONLY
-    // when it lies on the BOUNDARY (an endpoint) of BOTH open components.
-    // A closed component has an empty boundary, so any shared vertex
-    // involving a closed component (or an interior vertex of either) is
-    // non-simple: MULTILINESTRING((0 0,1 1),(1 1,2 2)) = simple;
     // MULTILINESTRING((0 0,1 0,1 1,0 0),(0 0,1 1)) = non-simple.
     {
         let open_ends = |ls: &[Coord<f64>]| -> (bool, Coord<f64>, Coord<f64>) {
@@ -454,9 +396,6 @@ pub(crate) fn check_line_components_intersect(
         let (b_closed, b_first, b_last) = open_ends(ls2);
         let a_boundary = |p: Coord<f64>| !a_closed && (p == a_first || p == a_last);
         let b_boundary = |p: Coord<f64>| !b_closed && (p == b_first || p == b_last);
-        // Exact coordinate equality (to_bits) - the corpus uses exact
-        // coordinates; near-touches within eps still go through the segment
-        // sweep below (vertex-on-interior is always non-simple).
         let mut b_verts: rustc_hash::FxHashSet<(u64, u64)> =
             rustc_hash::FxHashSet::with_capacity_and_hasher(n2, Default::default());
         for c in ls2 {
@@ -472,7 +411,6 @@ pub(crate) fn check_line_components_intersect(
         }
     }
 
-    // Brute force when both components are small
     if n1.max(n2) <= 64 {
         for i in 0..n1 - 1 {
             let a1 = ls1[i];
@@ -480,10 +418,6 @@ pub(crate) fn check_line_components_intersect(
             for j in 0..n2 - 1 {
                 let b1 = ls2[j];
                 let b2 = ls2[j + 1];
-                // Cross-component simplicity: interior contact (crossing,
-                // vertex-on-interior, collinear overlap) is non-simple;
-                // endpoint-to-endpoint touching between components is
-                // allowed (OGC Simple Features, verified vs geosop).
                 if segments_intersect_any(a1, a2, b1, b2, eps, false) {
                     return true;
                 }
@@ -570,9 +504,7 @@ impl GeoValidation for MultiLineString<f64> {
                 }
             }
         }
-        // Cross-component intersection check
         if self.0.len() > 1 {
-            // Compute global scale for epsilon
             let (mut gmin_x, mut gmax_x, mut gmin_y, mut gmax_y) =
                 (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
             for ls in &self.0 {
@@ -637,7 +569,6 @@ impl GeoValidation for Triangle<f64> {
         if coords[0] == coords[1] || coords[1] == coords[2] || coords[0] == coords[2] {
             return ValidationResult::invalid(vec![GeometryValidationError::DegenerateExterior]);
         }
-        // Zero or near-zero area (collinear)
         let area = ((coords[1].x - coords[0].x) * (coords[2].y - coords[0].y)
             - (coords[1].y - coords[0].y) * (coords[2].x - coords[0].x))
             .abs();
@@ -648,9 +579,6 @@ impl GeoValidation for Triangle<f64> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Free functions - convenience wrappers around GeoValidation
-// ---------------------------------------------------------------------------
 
 /// Check whether a geometry is OGC-valid.
 ///

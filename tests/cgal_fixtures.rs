@@ -16,11 +16,7 @@ use geo_repair::MakeValid;
 mod common;
 use common::*;
 
-// =========================================================================
-// CGAL validation test data port
-// -------------------------------------------------------------------------
 // Non-self-intersecting hole inside square (CGAL test1.dat, expected valid)
-// =========================================================================
 
 fn square_shell() -> LineString<f64> {
     LineString::new(vec![
@@ -56,7 +52,6 @@ fn cgal_self_touching_hole_inside_shell() {
 #[test]
 fn cgal_hole_outside_shell_touching_at_one_vertex() {
     // CGAL test2.dat: Hole with one vertex outside shell at (4,12), invalid
-    // Shell: (0,0)-(8,0)-(8,8)-(6,8)-(2,8)-(0,8)
     // Hole: (1,6)-(2,8)-(4,12)-(6,8)-(7,6)
     let poly = Polygon::new(
         LineString::new(vec![
@@ -85,7 +80,6 @@ fn cgal_hole_outside_shell_touching_at_one_vertex() {
 #[test]
 fn cgal_hole_shares_edge_with_shell() {
     // CGAL test6.dat: Hole shares edge (2,0)-(4,0) with shell, invalid
-    // Shell: (0,0)-(2,0)-(4,0)-(8,0)-(8,8)-(0,8)
     // Hole: (2,0)-(2,6)-(4,6)-(4,0)
     let poly = Polygon::new(
         LineString::new(vec![
@@ -128,7 +122,6 @@ fn cgal_self_intersecting_no_holes() {
         assert_not_empty(&result);
         assert_valid_ogc(&result);
     }
-    // Structure may collapse this to empty
     let result = poly.make_valid_with_config(&cfg_structure());
     assert_valid_ogc(&result);
 }
@@ -156,8 +149,6 @@ fn cgal_valid_polygon_with_touch_at_vertex() {
 #[test]
 fn cgal_polygon_holes_touching_valid() {
     // CGAL test9.dat: Valid polygon with 2 holes touching at point (4,4)
-    // Shell: (0,0)-(4,0)-(8,0)-(8,8)-(0,8)
-    // Hole1: (4,0)-(2,2)-(4,4)-(4,2)-(4,0)
     // Hole2: (4,4)-(2,6)-(6,6)-(4,4)
     let poly = Polygon::new(
         LineString::new(vec![
@@ -201,7 +192,6 @@ fn cgal_polygon_with_repeated_mid_ring_vertex() {
         ]),
         Vec::new(),
     );
-    // Auto and Arrange should handle this repeated-vertex polygon
     for cfg in [cfg_auto(), cfg_arrange()] {
         let result = poly.make_valid_with_config(&cfg);
         assert_not_empty(&result);
@@ -305,9 +295,6 @@ fn cgal_backtracking_simple11() {
     assert_valid_ogc(&result);
 }
 
-// =========================================================================
-// CGAL hole connection tests (pgn_holes*.dat)
-// -------------------------------------------------------------------------
 
 #[test]
 fn cgal_hole_connection_complex() {
@@ -349,8 +336,6 @@ fn cgal_hole_connection_complex() {
     );
     for cfg in [cfg_auto(), cfg_arrange(), cfg_structure()] {
         let result = poly.make_valid_with_config(&cfg);
-        // Accept: some methods produce nearly-valid output with
-        // disconnected-interior-ring warnings on hole-connection patterns.
         assert_not_empty(&result);
     }
 }
@@ -485,16 +470,9 @@ fn cgal_holes_connected_via_bridges_pgn3() {
     }
 }
 
-// =========================================================================
-// Additional CGAL Polygon_repair test data port
-// These cases are from cgal/Polygon_repair/test/Polygon_repair/data/
-// =========================================================================
 
-// ---------------------------------------------------------------------------
-// Crossing polygons: two pairs of crossing rectangles
 // Input: 4 crossing 1x1 squares at (0,1), (1,0), (1,2), (2,1)
 // CGAL ref: MULTIPOLYGON with 4 components
-// ---------------------------------------------------------------------------
 #[test]
 fn cgal_crossing_polygons() {
     let g = geom_from_wkt("POLYGON ((0 1, 1 1, 1 2, 0 2, 0 1))");
@@ -503,13 +481,7 @@ fn cgal_crossing_polygons() {
     assert_not_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Hole-carved: hole carves a notch out of the shell
 // Input: Shell (0,0)-(1,0)-(1,1)-(0,1), hole (0.5,0)-(1,0.5)-(0.5,1)-(0.5,0)
-// CGAL ref: MULTIPOLYGON with carved shape
-// BUG: This test is for the Arrange method specifically since Structure
-// may produce a different result.
-// ---------------------------------------------------------------------------
 #[test]
 fn cgal_hole_carved() {
     let g = geom_from_wkt("POLYGON ((0 0, 1 0, 1 1, 0 1, 0 0), (0.5 0, 1 0.5, 0.5 1, 0.5 0))");
@@ -518,11 +490,8 @@ fn cgal_hole_carved() {
     assert_not_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Hole touches shell at two points, splitting the polygon
 // Input: Shell (0,0)-(1,0)-(1,1)-(0,1), hole touches at (0,1) and (0.75,0.75)
 // CGAL ref: MULTIPOLYGON with 2 components
-// ---------------------------------------------------------------------------
 #[test]
 fn cgal_hole_touching_twice() {
     let g = geom_from_wkt(
@@ -534,11 +503,8 @@ fn cgal_hole_touching_twice() {
     assert_is_polygon(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Hole partly outside shell
 // Input: Shell (0,0)-(1,0)-(1,1)-(0,1), hole extends beyond at top-right
 // CGAL ref: MULTIPOLYGON with 2 components
-// ---------------------------------------------------------------------------
 #[test]
 fn cgal_hole_partly_outside() {
     let g = geom_from_wkt(
@@ -549,27 +515,19 @@ fn cgal_hole_partly_outside() {
     assert_not_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
 // Star: complex 9-component MultiPolygon
-// Input: Star-shaped polygon with multiple crossing spikes (18 vertices)
 // CGAL ref: MULTIPOLYGON with 9 components
-// This is a complex test that validates the Arrange method's robustness.
-// ---------------------------------------------------------------------------
 #[test]
 fn cgal_star_complex() {
     let g = geom_from_wkt(
         "POLYGON ((0 0, 1.2 0.6, 1 1, 0.6 1.2, 0 0, 0 1.5, 0.6 1.2, 0.75 1.5, 0.6 1.8, 0 1.5, 0 3, 0.6 1.8, 1 2, 1.2 2.4, 0 3, 0.75 1.5, 1 1, 1.5 0.75, 2 1, 2.25 1.5, 2 2, 1.5 2.25, 1 2, 1.2 2.4, 1.5 2.25, 1.8 2.4, 1.5 3, 1.2 2.4, 1.8 0.6, 3 0, 2.4 1.2, 2 1, 1.8 0.6, 1.8 2.4, 2 2, 2.4 1.8, 3 3, 1.8 2.4, 2.25 1.5, 2.4 1.2, 3 1.5, 2.4 1.8, 2.25 1.5))",
     );
     let result = g.make_valid_with_config(&cfg_arrange());
-    // Arrange handles most but not all of this complex star's self-intersections.
     assert_not_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
 // Square-hole-rhombus: rhombus hole splits square into 4 parts
-// Input: 1x1 square with rhombus hole touching all 4 edges at midpoints
 // CGAL ref: MULTIPOLYGON with 4 components
-// ---------------------------------------------------------------------------
 #[test]
 fn cgal_square_hole_rhombus() {
     let g =
@@ -579,11 +537,8 @@ fn cgal_square_hole_rhombus() {
     assert_multipolygon_count(&result, 4);
 }
 
-// ---------------------------------------------------------------------------
-// Not-closed ring (CGAL not-closed.wkt)
-// Input: POLYGON((0 0,1 0,1 1,0 1)) — unclosed ring
-// CGAL ref: MULTIPOLYGON(((0 0,1 0,1 1,0 1,0 0))) — closed square
-// ---------------------------------------------------------------------------
+// Input: POLYGON((0 0,1 0,1 1,0 1)): unclosed ring
+// CGAL ref: MULTIPOLYGON(((0 0,1 0,1 1,0 1,0 0))): closed square
 #[test]
 fn cgal_not_closed_ring() {
     let g = geom_from_wkt("POLYGON ((0 0, 1 0, 1 1, 0 1))");
@@ -592,11 +547,7 @@ fn cgal_not_closed_ring() {
     assert_simple_polygon(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Spike-in (CGAL spike-in.wkt): spike pointing into the interior
 // Input: Square (0,0)-(1,0)-(1,1)-(0,1) with spike (0.5,0.2) going inward
-// CGAL ref: Simple square (spike removed)
-// ---------------------------------------------------------------------------
 #[test]
 fn cgal_spike_in() {
     let g = geom_from_wkt("POLYGON ((0 0, 1 0, 1 1, 0.5 0.2, 0.2 0.5, 0 1, 0 0))");
@@ -605,9 +556,6 @@ fn cgal_spike_in() {
     assert_is_polygon(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Float-precision spikes (CGAL spikes-fp.wkt)
-// ---------------------------------------------------------------------------
 #[test]
 fn cgal_spikes_fp() {
     let g = geom_from_wkt("POLYGON ((0.03 0.02, 0.97 0.01, 0.99 0.96, 0.04 0.98, 0.03 0.02))");
@@ -616,12 +564,8 @@ fn cgal_spikes_fp() {
     assert_simple_polygon(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Hole-as-loop: interior ring formed as a self-loop
-// Input: Outer square with interior ring (0,1)-(0.75,0.75)-(0.75,0.25)-
-//         (0.25,0.25)-(0,1)
+// Input: Outer square with interior ring (0,1)-(0.75,0.75)-(0.75,0.25)-(0.25,0.25)-(0,1)
 // CGAL ref: MULTIPOLYGON(((0 0,1 0,1 1,0 1,0 0),(0 1,0.75 0.75,0.75 0.25,0.25 0.25,0 1)))
-// ---------------------------------------------------------------------------
 #[test]
 fn cgal_hole_as_loop() {
     let g = geom_from_wkt(
@@ -632,12 +576,8 @@ fn cgal_hole_as_loop() {
     assert_is_polygon(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Overlapping-edge-inside: two overlapping rectangles forming notch
 // Input: Outer rect (0,0)-(1,0)-(1,1)-(0,1) with interior rect
 //        (0.25,0.25)-(0.75,0.25)-(0.75,0.75)-(0.25,0.75)
-// CGAL ref: Polygon with notch shape
-// ---------------------------------------------------------------------------
 #[test]
 fn cgal_overlapping_edge_inside() {
     let g = geom_from_wkt(
@@ -648,11 +588,8 @@ fn cgal_overlapping_edge_inside() {
     assert_not_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Crossing polygons with nesting
 // Input: 5 intersecting 1x1 squares arranged in a cross pattern
 // CGAL ref: MULTIPOLYGON with 5 components
-// ---------------------------------------------------------------------------
 #[test]
 fn cgal_crossing_polygons_nesting() {
     let g = geom_from_wkt(
@@ -663,11 +600,6 @@ fn cgal_crossing_polygons_nesting() {
     assert_not_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Back-and-forth degenerate (CGAL back-and-forth.wkt)
-// Input: Zero-area degenerate polygon with backtracking
-// CGAL ref: MULTIPOLYGON() (empty)
-// ---------------------------------------------------------------------------
 #[test]
 fn cgal_back_and_forth_degenerate() {
     let g = geom_from_wkt("POLYGON ((0 0, 5 0, 5 5, 0 5, 5 5, 5 0, 0 0))");
@@ -675,11 +607,6 @@ fn cgal_back_and_forth_degenerate() {
     assert_valid_ogc(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Edge-only degenerate (CGAL edge.wkt)
-// Input: Two edge-only polygons
-// CGAL ref: MULTIPOLYGON() (empty)
-// ---------------------------------------------------------------------------
 #[test]
 fn cgal_edge_only_degenerate() {
     let g = geom_from_wkt("POLYGON ((0 0, 10 0, 0 0))");

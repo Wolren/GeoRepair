@@ -80,12 +80,7 @@ pub(crate) fn robust_is_ccw_at(ring: &[Coord<f64>], min_idx: usize) -> bool {
         },
     );
     if orient.abs() <= 1e-15 || orient.is_nan() {
-        // Two cases land here: a (near-)collinear extremal triple, and a
-        // Shewchuk overflow at extreme magnitude ratios (the products
-        // exceed f64::MAX and the exact predicate degrades to NaN).
-        // Both defer to the ring's signed area - the OGC winding
-        // authority. For the overflow case the shoelace is dominated by
-        // one or few representable terms; the cancellation class the
+        // Shewchuk overflow at extreme magnitude ratios (the products exceed f64::MAX and the exact predicate degrades to NaN).
         // exact predicate exists for is caught by the non-NaN path.
         shoelace_sum(ring) > 0.0
     } else {
@@ -249,12 +244,7 @@ pub(crate) fn rings_share_collinear_edge_quantized(a: &[Coord<f64>], b: &[Coord<
 }
 
 pub(crate) fn rings_share_collinear_edge_precise(a: &[Coord<f64>], b: &[Coord<f64>]) -> bool {
-    // NO bbox prefilter here: the relative collinearity eps tolerates 1-ULP
-    // offsets at touching coordinates (adjacent holes sharing an edge whose
-    // x differs by 1 ULP — measured: 16.338582962195097 vs ...098), and an
-    // EXACT bbox test rejects such pairs outright (the shared edge would
-    // never be scanned → DisconnectedInteriorRing). The quantized variant
-    // keeps its prefilter because post-noding coordinates are exact.
+    // offsets at touching coordinates (adjacent holes sharing an edge whose x differs by 1 ULP: measured: 16.338582962195097 vs ...098)
     rings_scan(
         a,
         b,
@@ -274,7 +264,6 @@ pub(crate) fn rings_share_collinear_edge_precise(a: &[Coord<f64>], b: &[Coord<f6
          bx2,
          by1,
          by2| {
-            // Relative collinearity: |cross| / (|da| * |db|) = sin(angle).
             let da_len = (dax * dax + day * day).sqrt().max(1e-300);
             let db_len = (dbx * dbx + dby * dby).sqrt().max(1e-300);
             let rel = 1e-12 * da_len * db_len;
@@ -347,7 +336,6 @@ fn rings_scan(
     if na < 2 || nb < 2 {
         return false;
     }
-    // Work cap: only small rings get the precise scan (fuzz DIR seeds are tiny).
     if na * nb > 2048 {
         return false;
     }
@@ -392,8 +380,6 @@ pub(crate) fn point_in_ring_exclusive_even_odd(pt: Coord<f64>, ring: &[Coord<f64
         return false;
     }
     let n = ring.len() - 1;
-    // Boundary check (exclusive: on-edge → outside). Fixes NestedHoles
-    // false-positives from ray-cast hitting a vertex/edge.
     for i in 0..n {
         let (xi, yi) = (ring[i].x, ring[i].y);
         let (xj, yj) = (ring[(i + 1) % n].x, ring[(i + 1) % n].y);
@@ -528,7 +514,7 @@ mod tests {
 
     #[test]
     fn test_robust_is_ccw_extreme_fp() {
-        // Ring with coords spanning 1e12 to 1e-12 — shoelace can flip
+        // Ring with coords spanning 1e12 to 1e-12: shoelace can flip
         let ring = vec![
             Coord { x: 0.0, y: 0.0 },
             Coord { x: 1e12, y: 0.0 },
@@ -536,7 +522,6 @@ mod tests {
             Coord { x: 0.0, y: 1e-12 },
             Coord { x: 0.0, y: 0.0 },
         ];
-        // Should be CCW regardless of fp extremes
         assert!(robust_is_ccw(&ring));
     }
 }

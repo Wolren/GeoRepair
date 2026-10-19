@@ -98,7 +98,6 @@ fn ewkb_size(geom: &Geometry<f64>, dims: EwkbDims, has_srid: bool) -> usize {
         Point(_) => header + coord_bytes,
         LineString(ls) => header + 4 + ls.0.len() * coord_bytes,
         Polygon(poly) => {
-            // Empty polygon = zero rings on the wire (see write_polygon).
             if poly.exterior().0.is_empty() && poly.interiors().is_empty() {
                 header + 4
             } else {
@@ -142,8 +141,6 @@ fn ewkb_size(geom: &Geometry<f64>, dims: EwkbDims, has_srid: bool) -> usize {
             }
             sz
         }
-        // OGC WKB has no Line/Rect/Triangle types; encode them losslessly as
-        // their closest OGC equivalents, matching write_geometry.
         Line(_) => header + 4 + 2 * coord_bytes,
         Rect(_) => header + 4 + (4 + 5 * coord_bytes),
         Triangle(_) => header + 4 + (4 + 4 * coord_bytes),
@@ -214,10 +211,7 @@ fn write_linestring(buf: &mut Vec<u8>, ls: &LineString<f64>, le: bool) {
 }
 
 fn write_polygon(buf: &mut Vec<u8>, poly: &Polygon<f64>, le: bool) {
-    // GEOS wire convention: an empty polygon has zero rings (an empty
-    // exterior with no holes is written as numRings=0, NOT as one empty
-    // ring - georust/wkb writes the compact form; byte parity verified
-    // 2026-08-04 in tests/wkb_parity.rs).
+    // 2026-08-04 in tests/wkb_parity.rs .
     if poly.exterior().0.is_empty() && poly.interiors().is_empty() {
         write_u32(buf, 0, le);
         return;
@@ -281,9 +275,6 @@ fn write_geometry(geom: &Geometry<f64>, buf: &mut Vec<u8>, le: bool) {
                 write_geometry(g, buf, le);
             }
         }
-        // OGC WKB has no Line/Rect/Triangle types; encode them losslessly as
-        // their closest OGC equivalents (coordinate-exact, matching
-        // wkb_size). Reading the bytes back yields the OGC type.
         Line(l) => {
             write_u32(buf, WKB_LINESTRING, le);
             write_u32(buf, 2, le);
@@ -347,9 +338,6 @@ fn write_geometry(geom: &Geometry<f64>, buf: &mut Vec<u8>, le: bool) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// EWKB writer
-// ---------------------------------------------------------------------------
 
 fn type_code_with_flags(type_code: u32, dims: EwkbDims, has_srid: bool) -> u32 {
     let mut flags = type_code;
@@ -419,7 +407,6 @@ fn write_polygon_ewkb(
     le: bool,
 ) {
     if poly.exterior().0.is_empty() && poly.interiors().is_empty() {
-        // GEOS wire convention: empty polygon = zero rings (see write_polygon).
         write_u32(buf, 0, le);
         return;
     }
@@ -529,8 +516,6 @@ fn write_geometry_ewkb(
                 write_geometry_ewkb(buf, g, dims, None, extra, offset, le);
             }
         }
-        // OGC WKB has no Line/Rect/Triangle types; encode them losslessly as
-        // their closest OGC equivalents, matching write_geometry.
         Line(l) => {
             let tc = type_code_with_flags(WKB_LINESTRING, dims, srid.is_some());
             write_u32(buf, tc, le);
@@ -591,9 +576,6 @@ fn write_geometry_ewkb(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Multi-geometry helpers
-// ---------------------------------------------------------------------------
 
 /// Read the byte size of the next WKB geometry from `buf` without
 /// fully parsing it. Useful for skipping or chunking concatenated WKB.

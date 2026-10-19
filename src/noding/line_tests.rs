@@ -76,8 +76,7 @@ fn figure8_crossing() {
         "expected >= 4 arcs, got {}",
         chains.len()
     );
-    // The crossing node (5,5) is a degree-4 junction: every arc ends or
-    // starts there (one arc per piece around the junction).
+    // The crossing node (5,5) is a degree-4 junction
     let mut touch = 0;
     for ch in &chains {
         let f = ch[0];
@@ -125,9 +124,7 @@ fn collinear_overlap_non_adjacent() {
 #[test]
 fn t_junction_vertex_on_edge() {
     let chains = node_ok(&[(0.0, 0.0), (10.0, 0.0), (5.0, 0.0), (5.0, 10.0)]);
-    // The vertical [(5,0),(5,10)] stays whole; the horizontal splits into
-    // [0,5] and [5,10], each forming its own chain (the junction has
-    // degree 3).
+    // each forming its own chain (the junction has degree 3).
     assert_eq!(chains.len(), 3, "expected 3 chains, got {chains:?}");
     for ch in &chains {
         if (ch[0].x - 5.0).abs() < 1e-12
@@ -216,8 +213,6 @@ fn collinear_overlap_bench_shape() {
     );
     let last = ch[ch.len() - 1].x;
     assert!((last - 500.0).abs() < 1e-9, "chain must end at 500: {ch:?}");
-    // The chain must cover the span without gaps: every consecutive pair
-    // is a forward step.
     for w in ch.windows(2) {
         assert!(w[1].x > w[0].x + 1e-9, "backtracking chain: {ch:?}");
     }
@@ -253,8 +248,7 @@ fn lissajous_retrace_resolved() {
             (dx * dx + dy * dy).sqrt()
         })
         .sum();
-    // The 5:3 lissajous on [0, 2pi] covers every line twice (t and pi-t),
-    // so the valid single coverage is half the input length.
+    // The 5:3 lissajous on [0, 2pi] covers every line twice (t and pi-t)
     let ratio = out_len / input_len;
     assert!(
         (ratio - 0.5).abs() < 0.05,
@@ -280,9 +274,6 @@ fn make_valid_line_contract() {
     assert!(out.is_valid(), "make_valid output must be valid");
 }
 
-// ---------------------------------------------------------------------------
-// Crossing-only fast path: parity with the forced general path
-// ---------------------------------------------------------------------------
 
 /// Subdivide a closed coordinate loop to exactly n vertices by arc length
 /// (the bench's figure-8 construction).
@@ -421,12 +412,8 @@ fn crossing_only_splits_vertex_on_edge() {
         (5.0, 0.0),
         (5.0, 10.0),
     ]);
-    // (5.0, 0.0) rests strictly inside segment (0,0)-(10,0). This used to
-    // bail to run_full; the fast path now splits the host segment at the
-    // vertex (the same resolution test_pair applies in the general path),
-    // so crossing_only completes with valid chains. Bailing cost ringing
-    // 1000v +60% locally / +93% CI: every wave-vertex-on-chord contact
-    // tripped it (fuzz crash-9c50dad6 fix, 64c2b58).
+    // (5.0, 0.0) rests strictly inside segment (0,0)-(10,0).
+    // 1000v +60% locally / +93% CI: every wave-vertex-on-chord contact tripped it (fuzz crash-9c50dad6 fix, 64c2b58).
     let chains = LineNoder::new(&cs)
         .crossing_only()
         .expect("vertex-on-edge now splits the host segment instead of bailing");
@@ -442,8 +429,6 @@ fn crossing_only_splits_vertex_on_edge() {
 
 #[test]
 fn crossing_only_simple_line_parity() {
-    // A simple open polyline: the fast path returns the identity chain,
-    // matching the general path.
     let mut cs = Vec::new();
     for i in 0..200 {
         let t = i as f64 * 0.3;

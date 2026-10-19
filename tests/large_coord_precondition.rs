@@ -133,8 +133,6 @@ fn bowtie_at_large_magnitude_repairs_valid_and_area_honest() {
 #[test]
 fn sub_grid_feature_keeps_a_valid_result() {
     // A genuine micro feature (1e-12 x delta) inside a 1e7 span cannot
-    // survive the snap grid; the preconditioning transform must decline
-    // and the legacy route must still produce a valid geometry.
     let p = Polygon::new(
         LineString::new(vec![
             Coord { x: 0.0, y: 0.0 },

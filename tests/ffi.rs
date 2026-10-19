@@ -25,9 +25,6 @@ use geo_repair::validation::GeoValidation;
 use std::ffi::{CStr, CString};
 use std::ptr;
 
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
 
 fn square() -> Geometry<f64> {
     read_wkt("POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))").unwrap()
@@ -47,15 +44,11 @@ fn bowtie_wkb() -> Vec<u8> {
 
 /// SAFETY: the result must own a valid WKB buffer (success == true).
 unsafe fn result_wkb(res: &GeoRepairResult) -> Vec<u8> {
-    // SAFETY: the FFI contract hands back a valid (ptr, len) pair for
-    // the duration of the call; the result is copied out immediately.
     unsafe { std::slice::from_raw_parts(res.wkb_data, res.wkb_len) }.to_vec()
 }
 
 /// SAFETY: the string result must own a valid data string (success == true).
 unsafe fn string_result_data(res: &GeoRepairStringResult) -> String {
-    // SAFETY: the FFI contract returns a valid NUL-terminated string
-    // pointer for the duration of the call.
     unsafe { CStr::from_ptr(res.data) }
         .to_str()
         .unwrap()
@@ -66,9 +59,6 @@ fn is_valid_wkb_bytes(wkb: &[u8]) -> bool {
     read_wkb(wkb).map(|g| g.is_valid()).unwrap_or(false)
 }
 
-// ---------------------------------------------------------------------------
-// Version
-// ---------------------------------------------------------------------------
 
 #[test]
 fn version_matches_crate() {
@@ -80,9 +70,6 @@ fn version_matches_crate() {
     assert!(v.split('.').count() == 3, "semver shape: {v}");
 }
 
-// ---------------------------------------------------------------------------
-// is_valid
-// ---------------------------------------------------------------------------
 
 #[test]
 fn is_valid_ok_and_invalid() {
@@ -103,9 +90,6 @@ fn is_valid_garbage_returns_zero_without_panic() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// make_valid
-// ---------------------------------------------------------------------------
 
 #[test]
 fn make_valid_repairs_bowtie() {
@@ -172,9 +156,6 @@ fn free_result_is_double_free_safe() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// validate
-// ---------------------------------------------------------------------------
 
 #[test]
 fn validate_valid_geometry() {
@@ -222,9 +203,6 @@ fn validate_reason_is_validate() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// validate_and_fix
-// ---------------------------------------------------------------------------
 
 #[test]
 fn validate_and_fix_invalid_reports_reasons_and_repairs() {
@@ -261,9 +239,6 @@ fn validate_and_fix_with_config() {
     unsafe { geo_repair_free_result(&mut res) };
 }
 
-// ---------------------------------------------------------------------------
-// WKT surface
-// ---------------------------------------------------------------------------
 
 #[test]
 fn wkt_make_valid_roundtrip() {
@@ -349,9 +324,6 @@ fn free_string_result_is_double_free_safe() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Batch
-// ---------------------------------------------------------------------------
 
 #[test]
 fn batch_sequential_and_parallel_agree() {

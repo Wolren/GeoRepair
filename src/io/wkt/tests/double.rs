@@ -129,7 +129,6 @@ fn double_roundtrip_geometrycollection() {
     ])));
 }
 
-// EMPTY geometry roundtrip
 #[test]
 fn double_roundtrip_point_empty() {
     let geom = read_wkt("POINT EMPTY").unwrap();
@@ -224,16 +223,13 @@ fn parse_inf() {
     }
 }
 
-// Minimal POLYGON (()) — previously would fail
 #[test]
 fn double_roundtrip_empty_ring() {
     let geom = read_wkt("POLYGON EMPTY").unwrap();
     let wkt = write_wkt(&geom);
-    // Should write as "POLYGON EMPTY", not "POLYGON (())"
     assert_eq!(wkt, "POLYGON EMPTY");
 }
 
-// Construct empty geometries programmatically and roundtrip
 #[test]
 fn double_roundtrip_empty_point_constructed() {
     let geom = Geometry::Point(Point(Coord {
@@ -263,7 +259,6 @@ fn double_roundtrip_empty_polygon_constructed() {
     )));
 }
 
-// read_wkt_from / write_wkt_to tests
 #[test]
 fn read_wkt_from_reader() {
     let input = "POINT (1.5 2.5)";
@@ -307,7 +302,6 @@ fn write_wkt_to_write_then_read() {
     assert_eq!(write_wkt(&geom), write_wkt(&back));
 }
 
-// infer_wkt_type tests
 #[test]
 fn infer_type_point() {
     let (name, dims) = infer_wkt_type("POINT (1 2)").unwrap();
@@ -387,10 +381,6 @@ fn infer_type_unknown_fails() {
     assert!(matches!(err, WktError::ParseError { .. }));
 }
 
-// -----------------------------------------------------------------------
-// Production-readiness battery: strtod specials, case-insensitive
-// keywords, EMPTY elements, malformed inputs, non-OGC variants.
-// -----------------------------------------------------------------------
 
 #[test]
 fn special_values_strtod_semantics() {
@@ -490,7 +480,6 @@ fn empty_elements_in_collections() {
         panic!("expected geometrycollection");
     }
 
-    // All-EMPTY polygon rings parse to an empty polygon.
     let g = read_wkt("POLYGON (EMPTY, EMPTY, EMPTY)").unwrap();
     if let Geometry::Polygon(p) = g {
         assert!(p.exterior().0.is_empty());
@@ -525,18 +514,14 @@ fn malformed_wkt_rejected() {
 
 #[test]
 fn degenerate_ring_parses_but_flagged_by_validator() {
-    // A 2-coordinate ring is structurally parsed (Polygon::new
-    // auto-closes), then the validator flags it - the reader is
-    // deliberately structural; validity is the validator's gate.
+    // A 2-coordinate ring is structurally parsed (Polygon::new auto-closes), then the validator flags
     let g = read_wkt("POLYGON ((0 0, 1 1))").unwrap();
     assert!(!crate::validation::validate(&g).valid);
 }
 
 #[test]
 fn non_ogc_variants_serialized_losslessly() {
-    // OGC WKT has no Line/Rect/Triangle; they must serialize to their
-    // closest OGC equivalents (coordinate-exact), never silently drop
-    // to GEOMETRYCOLLECTION EMPTY.
+    // OGC WKT has no Line/Rect/Triangle; they must serialize to their closest OGC equivalents (coordinate-exact), never silently drop to GEOMETRYCOLLECTION EMPTY.
     let line = Geometry::Line(geo::Line::new(
         Coord { x: 1.0, y: 2.0 },
         Coord { x: 3.0, y: 4.0 },
@@ -568,7 +553,6 @@ fn non_ogc_variants_serialized_losslessly() {
         write_wkt(&tri),
         "POLYGON ((0.0 0.0, 2.0 0.0, 1.0 2.0, 0.0 0.0))"
     );
-    // And they round-trip through the reader.
     assert!(matches!(
         read_wkt(&write_wkt(&tri)).unwrap(),
         Geometry::Polygon(_)

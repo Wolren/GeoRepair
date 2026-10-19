@@ -2,9 +2,6 @@
 
 use super::*;
 
-// ============================================================================
-// Portable SIMD (nightly-only, cross-platform via core::simd)
-// ============================================================================
 
 #[cfg(feature = "simd-portable")]
 pub(crate) fn orient2d_batch_4(

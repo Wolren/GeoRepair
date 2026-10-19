@@ -4,14 +4,8 @@ use geo_repair::io::wkt::{read_wkt, write_wkt};
 use geo_repair::validation::GeoValidation;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 
-// Idempotence comparison: a single-member MultiPolygon and the plain
-// Polygon with identical coordinates are the same value in the repair
-// pipeline - pass 1 may emit a single-member MP (union result kept in
-// MultiPolygon type) where pass 2 emits the unwrapped Polygon (or vice
-// versa). The union-based repair cannot reproduce GEOS's BuildArea face
-// split (point-touching faces merge to one component), so wrapper type
-// is deliberately outside the idempotence contract; coordinates and
-// structure must match exactly.
+// - pass 1 may emit a single-member MP (union result kept in MultiPolygon type) where pass 2 emits the unwrapped
+// The union-based repair cannot reproduce GEOS's BuildArea face
 fn geom_norm_eq(a: &Geometry<f64>, b: &Geometry<f64>) -> bool {
     let av: Geometry<f64> = match a {
         Geometry::MultiPolygon(mp) if mp.0.len() == 1 => Geometry::Polygon(mp.0[0].clone()),
@@ -25,9 +19,7 @@ fn geom_norm_eq(a: &Geometry<f64>, b: &Geometry<f64>) -> bool {
 }
 
 fn coord_eq(a: &Coord<f64>, b: &Coord<f64>) -> bool {
-    // NaN payloads are not meaningful in serialized form: WKB preserves
-    // the raw payload bits, WKT writes "NaN" and reparses to the
-    // canonical payload (same as strtod/GEOS). Compare as values.
+    // NaN payloads are not meaningful in serialized form
     let x = a.x.to_bits() == b.x.to_bits() || (a.x.is_nan() && b.x.is_nan());
     let y = a.y.to_bits() == b.y.to_bits() || (a.y.is_nan() && b.y.is_nan());
     x && y
@@ -66,7 +58,6 @@ fn geom_eq(a: &Geometry<f64>, b: &Geometry<f64>) -> bool {
 
 fn check(g: &Geometry<f64>, via: &str) -> Vec<String> {
     let mut problems = Vec::new();
-    // WKB roundtrip
     let back = read_wkb(&write_wkb(g));
     if let Ok(b) = back {
         if !geom_eq(g, &b) {
@@ -75,7 +66,6 @@ fn check(g: &Geometry<f64>, via: &str) -> Vec<String> {
     } else {
         problems.push(format!("{via} WKB roundtrip failed: {back:?}"));
     }
-    // WKT roundtrip
     let back = read_wkt(&write_wkt(g));
     if let Ok(b) = back {
         if !geom_eq(g, &b) {
@@ -84,7 +74,6 @@ fn check(g: &Geometry<f64>, via: &str) -> Vec<String> {
     } else {
         problems.push(format!("{via} WKT roundtrip failed: {back:?}"));
     }
-    // Idempotence
     for method in [PolyMethod::Auto, PolyMethod::Structure] {
         let cfg = MakeValidConfig {
             poly_method: method,
@@ -111,17 +100,13 @@ fn roundtrip_and_idempotence_probe() {
         state ^= state << 17;
         state
     };
-    // Real seeds: valid WKB/WKT documents. Mutations of these parse
-    // frequently, which is what actually exercises the invariants.
     let wkb_seeds: Vec<Vec<u8>> = vec![
-        // polygon
         vec![
             1u8, 3, 0, 0, 0, 1, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0, 0, 0, 0,
             0, 240, 63, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         ],
-        // multipolygon with a hole (two polygons)
         vec![
             1u8, 6, 0, 0, 0, 2, 0, 0, 0, 1, 3, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0,
@@ -130,13 +115,11 @@ fn roundtrip_and_idempotence_probe() {
             0, 0, 0, 0, 0, 0, 30, 0, 0, 0, 0, 0, 0, 0, 30, 0, 0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0,
         ],
-        // geometry collection: point + linestring
         vec![
             1u8, 7, 0, 0, 0, 2, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 1, 2, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0,
         ],
-        // degenerate: collinear ring
         vec![
             1u8, 3, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0,
             0, 2, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -153,7 +136,6 @@ fn roundtrip_and_idempotence_probe() {
     let mut failures = 0;
     let mut parsed = 0;
     for _ in 0..1_000_000 {
-        // Mutate a seed: flip bytes, truncate, or extend.
         let mut buf: Vec<u8> = wkb_seeds[(next() as usize) % wkb_seeds.len()].clone();
         let n_mut = 1 + (next() % 4) as usize;
         for _ in 0..n_mut {

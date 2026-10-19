@@ -60,7 +60,6 @@ impl Precondition {
         if !crate::make_valid::snap_cannot_represent(poly) {
             return None;
         }
-        // Bounding box over all rings; reject non-finite or empty input.
         let mut min_x = f64::MAX;
         let mut min_y = f64::MAX;
         let mut max_x = f64::MIN;
@@ -92,8 +91,7 @@ impl Precondition {
         if !t.is_finite() {
             return None;
         }
-        // scale = 2^-k with two bits of headroom below the guard's 2^53
-        // ceiling.
+        // scale = 2^-k with two bits of headroom below the guard's 2^53 ceiling.
         let k = exp2_floor(t) - 50;
         let scale = pow2(-k)?;
         let unscale = pow2(k)?;
@@ -103,9 +101,6 @@ impl Precondition {
             scale,
             unscale,
         };
-        // One fused walk: exactness of the translation and the power-of-two
-        // scale per coordinate, the transformed rings, and the guard's own
-        // min/max-abs aggregates for the transformed space.
         let mut min_abs = f64::MAX;
         let mut max_abs = 0.0f64;
         let mut map_ring = |ring: &LineString<f64>| -> Option<LineString<f64>> {
@@ -140,9 +135,6 @@ impl Precondition {
         for h in poly.interiors() {
             holes.push(map_ring(h)?);
         }
-        // The guard's own two inequalities on the fused aggregates: the
-        // ceiling holds by construction (two bits of headroom), the floor
-        // is the real check - micro features the scale cannot keep above
         // the snap grid reject the transform and keep the CDT route.
         if max_abs * SNAP_SCALE > (1u64 << 53) as f64 {
             return None;
@@ -211,8 +203,7 @@ pub(crate) fn precondition_fix(
 ) -> Option<crate::structure::FixOutcome> {
     use crate::structure::FixOutcome;
     let (pre, tp) = Precondition::try_new(poly)?;
-    // `tp` satisfies the guard by construction (try_new checked it), so the
-    // recursive fix cannot re-enter preconditioning.
+    // `tp` satisfies the guard by construction (try_new checked it), so the recursive fix cannot re-enter preconditioning.
     match crate::structure::fix_polygon_owned(tp, config, None) {
         FixOutcome::Fast(g, _, _, _) | FixOutcome::Repaired(g) => {
             Some(FixOutcome::Repaired(pre.inverse_geometry(g)))
@@ -247,8 +238,7 @@ mod tests {
 
     #[test]
     fn accepts_uniform_small_magnitude() {
-        // 1e-12 scale: the small end fires the guard (min_abs * 1e8 < 0.5)
-        // while every delta stays exact through the upscaling transform.
+        // the small end fires the guard (min_abs * 1e8 < 0.5)
         let p = circle(64, 100.0, 1e-12, 0.0);
         assert!(
             Precondition::try_new(&p).is_some(),
@@ -258,11 +248,7 @@ mod tests {
 
     #[test]
     fn rejects_sub_grid_feature() {
-        // A genuine micro feature (1e-12-wide x delta) inside a 1e7 span:
-        // the span fits the snap grid but the feature cannot survive the
-        // scale, and the guard check in the transformed space must catch
-        // it (this is the fuzz-crash class the guard was introduced for:
-        // mixed-magnitude rings combining micro features with huge spans).
+        // A genuine micro feature (1e-12-wide x delta) inside a 1e7 span
         let p = Polygon::new(
             LineString::new(vec![
                 Coord { x: 0.0, y: 0.0 },
@@ -277,9 +263,7 @@ mod tests {
 
     #[test]
     fn accepts_small_coords_at_anchor() {
-        // 1e-9..1e7 absolute coordinates whose FEATURES are all large: the
-        // tiny coordinates sit exactly at the bbox anchor, so the transform
-        // keeps every delta intact and the guard passes.
+        // 1e-9..1e7 absolute coordinates whose FEATURES are all large
         let p = Polygon::new(
             LineString::new(vec![
                 Coord { x: 1e7, y: 1e7 },

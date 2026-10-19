@@ -18,15 +18,7 @@ pub(crate) fn edges_intersect_general(
     b2: Coord<f64>,
     eps: f64,
 ) -> bool {
-    // Cheap bbox prefilter before the robust predicates: the vast majority
-    // of pairs are envelope-disjoint, and 4 Shewchuk orient2d calls are
-    // ~100 ns. Measured (2026-08-07): without this gate, the line-simplicity
-    // naive loop ran the full predicate chain on every pair (2.7 ms for a
-    // 500-vertex line); with it, disjoint pairs cost 4 comparisons.
-    // Padded by eps: the collinear-overlap branch flags pairs separated by
-    // up to eps (e.g. a 5e-14-tall sliver over a length-10 base, eps
-    // 1e-11 - raw-disjoint y-ranges, genuinely within the gate; measured:
-    // geo_bridge stricter_than_geo_collinear_sliver).
+    // up to eps (e.g. a 5e-14-tall sliver over a length-10 base, eps 1e-11 - raw-disjoint y-ranges, genuinely within the gate;)
     {
         let (lo_x, hi_x) = if a1.x < a2.x {
             (a1.x, a2.x)
@@ -52,22 +44,7 @@ pub(crate) fn edges_intersect_general(
             return false;
         }
     }
-    // Robust (Shewchuk adaptive) orient2d. The fast f64 predicate flips
-    // signs on mixed-magnitude inputs (e.g. 1e-10-scale edges against an
-    // 8.4e7-scale ring: fast orient2d gave -6.25e-2 / +6.25e-2 for two
-    // genuinely non-crossing segments, producing a false SelfIntersection
-    // that GEOS does not report - measured: mixed4 fuzz seed). Shewchuk's
-    // adaptive version returns the exact sign for the same cost when the
-    // f64 computation is exact (the common case).
-    //
-    // Fast-FP first (GEOS IsValidOp design): when every plain cross-product
-    // orientation lies far above the relative collinear gate, its sign is
-    // exact (the error is ~4 ulps of L2; the gate is 32 ulps), so the
-    // crossing decision is identical to the robust predicates. Escalate to
-    // Shewchuk only when some orientation is near the gate. Measured
-    // (2026-08-07): the exact chain cost ~120 ns/pair; the fast path is
-    // ~5 ns, and clean synthetic data pays it for ~99% of pairs (lines:
-    // 269 us -> 10-15 us at 500 vertices).
+    // exact (the error is ~4 ulps of L2; the gate is 32 ulps)
     let dx_a = a2.x - a1.x;
     let dy_a = a2.y - a1.y;
     let dx_b = b2.x - b1.x;
@@ -76,16 +53,8 @@ pub(crate) fn edges_intersect_general(
     let f2 = dx_a * (b2.y - a1.y) - dy_a * (b2.x - a1.x);
     let f3 = dx_b * (a1.y - b1.y) - dy_b * (a1.x - b1.x);
     let f4 = dx_b * (a2.y - b1.y) - dy_b * (a2.x - b1.x);
-    // Adaptive per-orient error bound (Shewchuk's): the fast orient's
-    // rounding error is bounded by a small constant times EPS times the
-    // SUM of the absolute products that make up the orient. The old
-    // `32 * EPSILON * max(la2, lb2)` margin used the EDGE LENGTHS, which a
-    // long edge inflates far past the orient of nearly-parallel pairs:
-    // measured 2026-08-07, a 1.6e7-edge vs 219-edge pair separated by
-    // 1.8e-8 gave orient 3.9e-6 against margin ~1.8 -> false collinear
-    // overlap (fuzz_inprocess_loop divergence, Fast path shipped a
-    // polygon the validator rejected). The product-sum bound for the same
-    // pair is ~1e-20 - the orient is definitively not collinear.
+    // `32 * EPSILON * max(la2, lb2)` margin used the EDGE LENGTHS
+    // The product-sum bound for the same pair is ~1e-20 - the orient is definitively not collinear.
     #[inline(always)]
     fn orient_err(t1: f64, t2: f64) -> f64 {
         32.0 * f64::EPSILON * (t1.abs() + t2.abs())
@@ -95,7 +64,6 @@ pub(crate) fn edges_intersect_general(
     let e3 = orient_err(dx_b * (a1.y - b1.y), dy_b * (a1.x - b1.x));
     let e4 = orient_err(dx_b * (a2.y - b1.y), dy_b * (a2.x - b1.x));
     if f1.abs() > 2.0 * e1 && f2.abs() > 2.0 * e2 && f3.abs() > 2.0 * e3 && f4.abs() > 2.0 * e4 {
-        // Zero-safe strict opposite sign (matches the exact path below).
         if (f1 > 0.0 && f2 < 0.0 || f1 < 0.0 && f2 > 0.0)
             && (f3 > 0.0 && f4 < 0.0 || f3 < 0.0 && f4 > 0.0)
         {
@@ -108,38 +76,15 @@ pub(crate) fn edges_intersect_general(
     let o3 = crate::orient::orient2d(b1, b2, a1);
     let o4 = crate::orient::orient2d(b1, b2, a2);
 
-    // Proper crossing. Zero-safe strict opposite sign: the product form
-    // (o1 * o2 < 0.0) treats a -0.0 orient as negative, flagging a
-    // collinear touch as a crossing (false SelfIntersection on valid
-    // geometry with -0.0 coordinates; measured: this inflated the
-    // real-world "2,298 invalid" class: with the zero-safe form the
-    // winding-agnostic count is 1). Matches the sweep predicates
-    // (segments_properly_cross / segments_properly_cross_seg).
+    // collinear touch as a crossing (false SelfIntersection on valid geometry with -0.0 coordinates; measured: this inflated the real-world "2,298 invalid")
     if (o1 > 0.0 && o2 < 0.0 || o1 < 0.0 && o2 > 0.0)
         && (o3 > 0.0 && o4 < 0.0 || o3 < 0.0 && o4 > 0.0)
     {
         return true;
     }
 
-    // Collinear overlap (excluding endpoint-only touching). The collinearity
-    // tolerance must be RELATIVE to the pair's own edge lengths: orient2d
-    // magnitudes are O(L²) (twice the triangle area). The constant sits at
-    // the f64 noise floor — `32 * EPSILON * L²` covers ~32 ulps of
-    // coordinate rounding — NOT the historical `1e-12 * L²`, which is a
-    // perpendicular-distance tolerance of `1e-12 * L` and swallows genuinely
-    // separated near-parallel edges (measured: invariant_sliver_hole seed
-    // cc 9b38e427, scale=51.29, sliver_width=1e-12 — parallel edges 1e-12
-    // apart gave exact orients 2.05e-11 < 4.2e-10 and were flagged as
-    // overlapping, a false SelfIntersection on input GEOS validates). The
-    // caller's eps (1e-12 * bbox scale, floored at 1.0) is an ABSOLUTE
-    // length that exceeds the exact orient of genuinely non-collinear
-    // near-parallel sliver edges at large coordinate magnitude (measured:
-    // coord_wrap_around seed base=-9607183.16, step=5.47e-4, n=7 -> exact
-    // orients 8.2e-13/3.1e-13 vs caller eps 1e-12 flagged a false
-    // SelfIntersection on a MultiPolygon GEOS validates bit-for-bit).
-    // Exact-path collinearity gate: adaptive per-orient error bound
-    // (same rationale as the fast-first gate above - the L2-based margin
-    // inflates past nearly-parallel pairs when one edge is long).
+    // separated near-parallel edges (measured: invariant_sliver_hole seed cc 9b38e427, scale=51.29, sliver_width=1e-12: parallel edges 1e-12 apart gave exact orients 2.05e-11 <)
+    // (same rationale as the fast-first gate above - the L2-based margin inflates past nearly-parallel pairs when one edge is long).
     let collinear = o1.abs() <= e1 && o2.abs() <= e2;
     if collinear {
         let dx = a2.x - a1.x;
@@ -152,34 +97,7 @@ pub(crate) fn edges_intersect_general(
             let hi = 1.0f64.min(t1.max(t2));
             let overlap_a = hi - lo;
             if o1 == 0.0 && o2 == 0.0 {
-                // EXACT collinearity: o1/o2 exactly zero means the endpoints
-                // lie bit-exactly on the other edge's line - real shared
-                // topology (e.g. two MultiPolygon components sharing a
-                // sub-grid edge after snap rounding, or a ring that doubles
-                // back over its own closing edge), not near-collinear
-                // rounding noise. Any parameter span past endpoint-only
-                // touching is a real overlap and must be flagged at any
-                // scale (GEOS flags this class with exact predicates).
-                //
-                // The span is evaluated in BOTH parameterizations because a
-                // parameter fraction is a ratio to its OWN segment's length:
-                // the same physical span reads ~0 along the long segment and
-                // ~1 along the short one, so testing only the a-side made
-                // the verdict depend on segment order. The fast-path gate
-                // certifies the input ring, then enforce_ogc_winding flips
-                // every segment direction before the exit validator runs
-                // (fuzz-nightly class C, run 35578735657 on 2026-09-21:
-                // the CW ring passed the gate and the validator, the
-                // re-wound ring failed the validator on identical
-                // geometry).
-                //
-                // The span is only trusted when its LENGTH is a normal
-                // f64: a subnormal overlap distance is arithmetic
-                // garbage, not topology (2026-09-14 demotion breach: a
-                // subnormal first edge faked an exact-collinearity
-                // verdict on a real sliver, and tests/
-                // regression_strip_demotion.rs pins that a subnormal
-                // span must not change any verdict).
+                // (fuzz-nightly class C, run 35578735657 on 2026-09-21: the CW ring passed the gate and the validator, the re-wound ring failed)
                 if overlap_a > 0.0 && (overlap_a * len2.sqrt()).is_normal() {
                     return true;
                 }
@@ -196,8 +114,6 @@ pub(crate) fn edges_intersect_general(
                     }
                 }
             } else if len2 > eps && overlap_a > eps {
-                // Near-collinear (orient within the adaptive error bound):
-                // keep the historical a-side tolerance rule unchanged.
                 return true;
             }
         }
@@ -235,8 +151,6 @@ pub(crate) fn lean_pair_intersects(
     ambiguous: &mut bool,
 ) -> bool {
     *ambiguous = false;
-    // Bbox prefilter (identical to edges_intersect_general's - padded by
-    // eps for the same sliver class).
     {
         let (lo_x, hi_x) = if a1.x < a2.x {
             (a1.x, a2.x)
@@ -286,7 +200,6 @@ pub(crate) fn lean_pair_intersects(
         && f3.abs() > e3.max(voe_b) + e3
         && f4.abs() > e4.max(voe_b) + e4
     {
-        // Zero-safe strict opposite sign (matches the exact path).
         return (f1 > 0.0 && f2 < 0.0 || f1 < 0.0 && f2 > 0.0)
             && (f3 > 0.0 && f4 < 0.0 || f3 < 0.0 && f4 > 0.0);
     }
@@ -302,20 +215,11 @@ pub(crate) fn check_edge_pair_intersection(
 ) -> bool {
     let n = coords.len() - 1;
     let a1 = coords[i];
-    // min(n) instead of % n: ring slices close (coords[n] == coords[0]),
-    // so both are identical for rings; OPEN line slices must see the real
-    // last coordinate (the % n wrap turns segment n-1 into a phantom
-    // crossing chord - measured 2026-08-07, sine-wave lines flagged
-    // non-simple).
+    // last coordinate (the % n wrap turns segment n-1 into a phantom crossing chord - measured 2026-08-07, sine-wave lines flagged)
     let a2 = coords[(i + 1).min(n)];
     let b1 = coords[j];
     let b2 = coords[(j + 1).min(n)];
-    // Ring path: the lean predicate. No vertex-revisit class here - shared
-    // vertices between non-adjacent ring edges are the pinch class, owned
-    // by the caller's classification (check_ring_validity), and must not
-    // short-circuit the pair test. The T-junction class (vertex strictly on
-    // a non-adjacent edge, GEOS Test 22) escalates through the lean's
-    // vertex-on-edge gate.
+    // The T-junction class (vertex strictly on a non-adjacent edge, GEOS Test 22) escalates through the lean's vertex-on-edge gate.
     let mut ambiguous = false;
     lean_pair_intersects(a1, a2, b1, b2, eps, &mut ambiguous)
 }
@@ -431,8 +335,6 @@ pub(crate) fn point_strictly_on_segment(p: Coord<f64>, a: Coord<f64>, b: Coord<f
     }
     let (lo_x, hi_x) = if a.x < b.x { (a.x, b.x) } else { (b.x, a.x) };
     let (lo_y, hi_y) = if a.y < b.y { (a.y, b.y) } else { (b.y, a.y) };
-    // Strict interior on at least one axis (axis-aligned segments have a
-    // constant axis; diagonal segments satisfy both).
     (p.x > lo_x + eps && p.x < hi_x - eps) || (p.y > lo_y + eps && p.y < hi_y - eps)
 }
 
@@ -503,7 +405,6 @@ pub(crate) fn check_rings_intersect(ring1: &[Coord<f64>], ring2: &[Coord<f64>], 
         return false;
     }
 
-    // Brute-force when both rings are small - faster than building a tree.
     if n1.max(n2) <= 64 {
         for i in 0..n1 {
             let a1 = ring1[i];
@@ -519,8 +420,6 @@ pub(crate) fn check_rings_intersect(ring1: &[Coord<f64>], ring2: &[Coord<f64>], 
         return false;
     }
 
-    // Large rings: build tree over the smaller ring, query each edge of the
-    // larger ring via envelope intersection.
     #[cfg(feature = "rstar")]
     {
         let (build_ring, query_ring, n_query) = if n1 < n2 {

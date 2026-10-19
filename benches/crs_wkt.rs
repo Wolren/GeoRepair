@@ -56,7 +56,6 @@ fn measure(mut f: impl FnMut()) -> (f64, f64) {
     for _ in 0..WARMUP {
         f();
     }
-    // Size the batch so each timed batch is a few milliseconds.
     let start = Instant::now();
     for _ in 0..MIN_BATCH {
         f();
@@ -151,7 +150,6 @@ fn main() {
         );
     }
 
-    // Apples-to-apples: identical CRS content, two encodings.
     println!();
     println!("WKT2 vs WKT1 — same CRS, parse only:");
     for (name, _) in &crss {
@@ -177,10 +175,7 @@ fn main() {
     if let Ok(path) = std::env::var("BENCH_JSON") {
         let mut out = String::new();
         for r in &rows {
-            // `par_us` is the repo's gate field: microseconds for the run.
-            // Per-call parsing is sub-microsecond, so the gate-relevant unit
-            // is a batch of 1000 calls, whose microsecond count equals the
-            // per-call nanosecond count.
+            // is a batch of 1000 calls
             out.push_str(&format!(
                 "{{\"label\":\"{}\",\"par_us\":{:.3},\"min_ns\":{:.3},\"med_ns\":{:.3},\"bytes\":{}}}\n",
                 r.label, r.min_ns, r.min_ns, r.med_ns, r.bytes

@@ -31,9 +31,6 @@ fn main() {
                 if mp.0.is_empty() {
                     empty_mp += 1;
                 }
-                // Simulate the acceptance gate: enforce OGC winding
-                // (shoelace, reverse CW shells / CCW holes) then our
-                // validator (is_valid_with_geo is public).
                 let geom = if mp.0.len() == 1 {
                     geo::Geometry::Polygon(mp.0.into_iter().next().unwrap())
                 } else {
@@ -91,7 +88,6 @@ fn main() {
         (t4 - t3).as_secs_f64() * 1e3,
     );
 
-    // AVX vs scalar bbox equivalence check (the AVX kernel feeds eps).
     let shell = biggest.exterior().0.clone();
     let scalar = {
         let (mut mnx, mut mxx, mut mny, mut mxy) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);

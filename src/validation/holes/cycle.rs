@@ -23,15 +23,8 @@ pub(super) fn detect_hole_cycle(
     #[cfg(feature = "rstar")] shell_tree: Option<&Arc<rstar::RTree<EdgeIdx>>>,
 ) -> bool {
     let n = rings.len();
-    // Per-ring structures built ONCE (never per pair): a sorted unique
-    // vertex list (x-range probing only - shared vertices come from the
-    // by_coord pass below; the shell's shared vertices are additionally
-    // covered by ring_touch_points in check_holes_valid) and an edge tree
-    // for large rings. The shell's tree is REUSED from check_holes_valid
-    // (rings[0] is the shell) - building a second rstar bulk_load of a
-    // 600k-edge shell cost ~100ms per giant (measured 2026-08-06). The
-    // vertex lists are radix-sorted by x (std sort cost ~50ms on the
-    // giant shells; measured 2026-08-06).
+    // (rings[0] is the shell) - building a second rstar bulk_load of a 600k-edge shell cost ~100ms per giant (measured 2026-08-06).
+    // The vertex lists are radix-sorted by x (std sort cost ~50ms on the giant shells; measured 2026-08-06).
     let mut sorted: Vec<Vec<Coord<f64>>> = Vec::with_capacity(n);
     for r in rings {
         let mut v = r.to_vec();
@@ -60,13 +53,8 @@ pub(super) fn detect_hole_cycle(
         })
         .collect();
     let mut touches: Vec<Vec<(usize, Coord<f64>)>> = vec![Vec::new(); n];
-    // Exact shared vertices among the HOLES: one global pass (vertex ->
-    // containing rings), O(total vertices); -0.0 normalizes to 0.0 so both
-    // spellings match. The shell (ring 0) is skipped: its shared vertices
-    // are hole vertices lying on shell edges, already collected exactly by
-    // ring_touch_points in check_holes_valid (the shell's vertex-on-edge
-    // probes below are kept for shell vertices on hole edges). Skipping the
-    // shell removes ~600k hash inserts per giant (measured 2026-08-06).
+    // Exact shared vertices among the HOLES: one global pass (vertex -> containing rings), O(total vertices); -0.0 normalizes to 0.0
+    // The shell (ring 0) is skipped
     let mut by_coord: rustc_hash::FxHashMap<(u64, u64), Vec<usize>> =
         rustc_hash::FxHashMap::with_capacity_and_hasher(64, Default::default());
     for (ri, ring) in rings.iter().enumerate().skip(1) {
@@ -95,10 +83,6 @@ pub(super) fn detect_hole_cycle(
             }
         }
     }
-    // Vertex-on-edge contacts, both directions (duplicates deduped below).
-    // Each probe iterates only the source vertices inside the target's x
-    // range (binary search over the precomputed sorted list), so giant
-    // shells probe each hole in O(log V) + near-hole vertices.
     for (a, b) in overlap_pairs(bboxes, 0) {
         let ra = rings[a];
         let rb = rings[b];
@@ -129,8 +113,6 @@ pub(super) fn detect_hole_cycle(
         });
         t.dedup_by(|x, y| x.0 == y.0 && x.1.x == y.1.x && x.1.y == y.1.y);
     }
-    // GEOS findHoleCycleLocation: per-root DFS over the touch graph; a ring
-    // reached through two different touch paths closes a cycle.
     let mut touch_set_root: Vec<Option<usize>> = vec![None; n];
     let mut stack: Vec<(usize, Coord<f64>)> = Vec::new();
     for root in 0..n {
@@ -141,9 +123,6 @@ pub(super) fn detect_hole_cycle(
         if touches[root].is_empty() {
             continue;
         }
-        // Init: push ALL of root's touches (GEOS init; nothing is marked
-        // yet, so double-touches of the same ring at different coordinates
-        // both enter the stack and close a cycle on the second scan).
         for &(other, coord) in &touches[root] {
             stack.push((other, coord));
         }
@@ -191,10 +170,7 @@ pub(super) fn collect_on_edge_brute(
         }
         let mut hit = false;
         for i in 0..n_t {
-            // EXACT on-edge test: a touch is a zero-distance contact (GEOS
-            // parity, see point_on_segment_exact). The tolerance version
-            // fabricated touches from near-miss vertices in real cadastral
-            // giants (GEOS isValid=true, measured 2026-08-06).
+            // The tolerance version fabricated touches from near-miss vertices in real cadastral giants (GEOS isValid=true, measured 2026-08-06).
             if point_on_segment_exact(v, tgt_ring[i], tgt_ring[(i + 1) % n_t]) {
                 hit = true;
                 break;
@@ -212,9 +188,6 @@ pub(super) fn collect_on_edge_brute(
 /// precomputed sorted list); small target rings fall back to brute force
 /// over their edges for the few in-range vertices.
 #[cfg(feature = "rstar")]
-// All parameters are primitive/borrowed predicates of the cycle probe;
-// grouping them into a struct would churn six call sites for no behavior
-// gain. Internal helper, not part of the public surface.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn collect_on_edge_tree(
     src: usize,
@@ -236,10 +209,6 @@ pub(super) fn collect_on_edge_tree(
     let tree = match &edge_trees[tgt] {
         Some(t) => t,
         None => {
-            // Small target ring: brute-force its edges for the few source
-            // vertices in its x range and bbox. EXACT on-edge test - see
-            // collect_on_edge_brute for the parity note (eps fabricated
-            // touches on real cadastral giants, GEOS isValid=true).
             for &v in &src_sorted[lo..hi] {
                 if v.y < tb[1] - eps || v.y > tb[3] + eps {
                     continue;
@@ -316,8 +285,7 @@ pub(super) fn is_incident_segment_in_ring(
     if n < 2 {
         return false;
     }
-    // Segment containing p0 (GEOS intersectingSegIndex: p0 == segment end
-    // selects the NEXT segment start).
+    // Segment containing p0 (GEOS intersectingSegIndex: p0 == segment end selects the NEXT segment start).
     let mut idx = 0usize;
     for i in 0..n {
         if point_on_segment(p0, target[i], target[(i + 1) % n], eps) {
@@ -348,8 +316,6 @@ pub(super) fn is_incident_segment_in_ring(
         i_next = (i_next + 1) % n;
     }
     let (mut a0, mut a1) = (target[i_prev], target[i_next]);
-    // GEOS: interior on the right for CW rings; CCW rings swap prev/next so
-    // the corner is traversed with the interior wedge on the left.
     if crate::util::robust_is_ccw(target) {
         core::mem::swap(&mut a0, &mut a1);
     }

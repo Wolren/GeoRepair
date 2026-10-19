@@ -172,7 +172,6 @@ mod tests {
 
     #[test]
     fn test_assemble_polygons_single_cw() {
-        // CW ring becomes own exterior (flipped)
         let ring = LineString::new(vec![
             Coord { x: 0.0, y: 0.0 },
             Coord { x: 0.0, y: 1.0 },

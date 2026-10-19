@@ -2,12 +2,7 @@ use geo::{Coord, LineString, Polygon};
 use geo_repair::validation::GeoValidation;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 
-// In-process mini-fuzzer mirroring fuzz/fuzz_targets/make_valid.rs: run the
-// committed corpus seeds plus deterministic byte mutations through the
-// repair pipeline in one process. The CI libFuzzer run crashed with a
-// deadly signal on the mixed-magnitude ring below AFTER other inputs ran
-// in the same process; standalone it passes. This test tries to reproduce
-// the prior-state crash (heap corruption / stack overflow) in release mode.
+// In-process mini-fuzzer mirroring fuzz/fuzz_targets/make_valid.rs: run the committed corpus seeds plus deterministic byte mutations through the repair pipeline in one process.
 #[test]
 fn fuzz_inprocess_mutation_loop() {
     let crash_bytes: Vec<u8> = vec![
@@ -83,6 +78,5 @@ fn fuzz_inprocess_mutation_loop() {
             run_one(&m);
         }
     }
-    // Final pass: the crash input after all the prior state.
     run_one(&crash_bytes);
 }

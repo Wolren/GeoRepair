@@ -21,14 +21,11 @@ pub fn subtract_holes(shell: &Polygon<f64>, holes: &[Polygon<f64>]) -> MultiPoly
         return MultiPolygon::new(vec![shell.clone()]);
     }
 
-    // Boolean difference preserves ALL result components — a hole that
     // touches the shell in 2+ places splits the shell into multiple
-    // polygons (the classic "hourglass" hole pattern).
     let result = match crate::arrange::boolean_difference_catch(shell, holes) {
         Some(mp) => mp,
-        // i_overlay panic (is_fill_top assertion on degenerate input) — the
-        // panic must not kill the rayon batch. Route to the BuildArea
-        // fallback below, which operates on noded edges and never panics.
+        // i_overlay panic (is_fill_top assertion on degenerate input): the panic must not kill the rayon batch.
+        // Route to the BuildArea fallback below, which operates on noded edges and never panics.
         None => {
             if let Some(mp) = build_area_shell_holes(shell, holes) {
                 return mp;
@@ -50,13 +47,7 @@ pub fn subtract_holes(shell: &Polygon<f64>, holes: &[Polygon<f64>]) -> MultiPoly
         .collect();
     let result = MultiPolygon::new(valid);
 
-    // Touching/overlapping holes in the boolean RESULT → DisconnectedInteriorRing.
-    // Rebuild via BuildArea on original shell+hole edges, but ONLY when the
-    // result actually has collinear edge-sharing between rings (positive-length
-    // overlap — the real DIR trigger). Bbox-overlap alone is a terrible signal:
-    // adjacent holes in ordinary real-world polygons have overlapping bboxes
-    // (the WIP's bbox heuristic forced noding+polygonize on nearly every poly —
-    // 305s vs 5.5s on 2298 invalid polys).
+    // but ONLY when (the WIP's bbox heuristic forced noding+polygonize on nearly every poly: 305s vs 5.5s on 2298 invalid polys).
     if needs_build_area_holes(&result) {
         if let Some(mp) = build_area_shell_holes(shell, holes) {
             return mp;
@@ -72,7 +63,6 @@ pub fn subtract_holes(shell: &Polygon<f64>, holes: &[Polygon<f64>]) -> MultiPoly
 fn needs_build_area_holes(mp: &MultiPolygon<f64>) -> bool {
     for p in &mp.0 {
         let holes: Vec<&[Coord<f64>]> = p.interiors().iter().map(|h| h.0.as_slice()).collect();
-        // Hole-hole collinear edge share (positive-length overlap) → DIR.
         for i in 0..holes.len() {
             for j in (i + 1)..holes.len() {
                 if crate::util::rings_share_collinear_edge_quantized(holes[i], holes[j]) {
@@ -80,9 +70,7 @@ fn needs_build_area_holes(mp: &MultiPolygon<f64>) -> bool {
                 }
             }
         }
-        // Hole-shell collinear edge share → DIR. Only cheap when the shell is
-        // small; big shells (10k+ verts) make the pair scan prohibitive and
-        // boolean difference handles those well anyway.
+        // big shells (10k+ verts) make the pair scan prohibitive
         let shell = p.exterior().0.as_slice();
         if shell.len() <= 64 {
             for h in &holes {

@@ -33,15 +33,8 @@ pub(crate) fn repair_ring_tuned(
     if coords.len() < 4 {
         return None;
     }
-    // Barely-closed ring: a vertex within validation tolerance (1e-12 * bbox
-    // scale) of the start vertex is a needle, not a feature - the validator
-    // treats the pair as a touch (PinchPoint/SelfIntersection) and GEOS
-    // resolves it by noding the needle away. Drop the near-duplicate vertex
-    // (second-to-last: basic_cleanup guarantees the LAST vertex is the exact
-    // closure == first). The ring self-touches through a zero-area needle
-    // (measured: 7.3e-11 gap at scale 118, eps 1.18e-10,
-    // invariant_barely_closed_ring). Invalid-only repair path, O(n) scale
-    // scan - hot-path safe.
+    // a vertex within validation tolerance (1e-12 * bbox scale) of the start vertex is a needle, not a feature
+    // (measured: 7.3e-11 gap at scale 118, eps 1.18e-10, invariant_barely_closed_ring).
     if coords.len() >= 5 {
         let (mut min_x, mut max_x, mut min_y, mut max_y) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
         for c in &coords {
@@ -71,11 +64,7 @@ pub(crate) fn repair_ring_tuned(
     }
 
     // Fast path: try O(n) split for single self-intersection (70% of invalids).
-    // WARNING: a single split only fixes rings with EXACTLY one crossing. For
-    // multi-crossing rings (e.g. figure-eight chains), the split at the first
-    // crossing leaves a still-self-intersecting remainder — accepting it drops
-    // whole lobes of area (measured: 2334 → 112, 95% loss). Verify the split
-    // results are actually clean before returning them.
+    // whole lobes of area (measured: 2334 → 112, 95% loss).
     if let Some(rings) = try_fast_fix_tuned(&coords, tuning) {
         let cleaned: Vec<Polygon<f64>> = rings
             .into_iter()
@@ -91,8 +80,7 @@ pub(crate) fn repair_ring_tuned(
         }
     }
 
-    // Full graph-based fix (GEOS MakeValidPoly: node → BuildArea → even-parent).
-    // Returns polygons WITH structural holes — do not flatten to exterior rings.
+    // Returns polygons WITH structural holes: do not flatten to exterior rings.
     if let Some(polys) = fix_self_intersecting_tuned(&coords, tuning) {
         let cleaned: Vec<Polygon<f64>> = polys
             .into_iter()
@@ -175,22 +163,12 @@ pub(crate) fn collapse_sub_ulp_vertices(
         return coords.to_vec();
     }
     let mut cleaned: Vec<Coord<f64>> = Vec::with_capacity(coords.len());
-    // Keep the first vertex; scan interior vertices (skip the closure at
-    // the end — it equals the first vertex).
     let interior_len = coords.len() - 1;
     let mut i = 0usize;
     while i < interior_len {
         cleaned.push(coords[i]);
-        // Skip any run of vertices within sub_ulp of the previous run
-        // member. A run of >= 2 sub-ULP-consecutive vertices is a
-        // degenerate detour (the ring dives to a point within float noise
-        // of another and returns). Collapse the run to ONE vertex: its
-        // members are all within sub_ulp of each other, so any choice is
-        // area-preserving to sub-ULP — but the representative must be a
-        // "clean" point (the CDT chokes on a spike at a random offset,
-        // e.g. (-7.55e-9, 0) instead of (0,0) — measured: seed 00c11200
-        // → cross-component SelfIntersection). Pick the member closest to
-        // the coordinate origin.
+        // A run of >= 2 sub-ULP-consecutive vertices
+        // (-7.55e-9, 0) instead of (0,0): measured: seed 00c11200
         let mut j = i + 1;
         let mut best = coords[i];
         let mut best_mag = coords[i].x.abs().max(coords[i].y.abs());
@@ -214,19 +192,12 @@ pub(crate) fn collapse_sub_ulp_vertices(
             }
         }
         if run_len > 1 && i > 0 && snap_clean {
-            // Arrange CDT: replace the run start (already pushed) with the
-            // cleanest run member (closest to the coordinate origin).
             if let Some(last) = cleaned.last_mut() {
                 *last = best;
             }
-            // Structure repair: keep the run start as-is (collapse onto the
-            // axis-aligned first member — see doc comment).
         }
         i = j;
     }
-    // Re-close: the ring's last interior vertex connects back to the first
-    // vertex. If the last interior vertex itself is within sub_ulp of the
-    // first, drop it (spike at the closure).
     if cleaned.len() >= 2 {
         let last = *cleaned.last().unwrap();
         let first = cleaned[0];
@@ -527,11 +498,7 @@ pub(crate) fn try_fast_fix_tuned(
         find_first_intersection_bruteforce(coords, eps)?
     };
 
-    // The fast path ONLY handles rings with exactly ONE proper crossing. With
-    // 2+ crossings, splitting at the first one can put the other crossing's
-    // two edges into DIFFERENT result rings — neither ring self-intersects,
     // but the area is partitioned wrong (measured: 5609 → 116, 98% loss).
-    // Verify no second crossing exists before accepting.
     let (i0, j0, _) = pair;
     let second = if n > tuning.grid_threshold_n {
         super::sweep::find_second_intersection(coords, eps, i0, j0)
@@ -613,7 +580,6 @@ pub(crate) fn fix_self_intersecting_tuned(
         return None;
     }
 
-    // Validate noding with MCIndex-based O(n log n) validator.
     let mut validator = crate::noding::validator::NodingValidator::new(noded.clone());
     validator.validate();
     if validator.has_violations() {
@@ -630,10 +596,7 @@ pub(crate) fn fix_self_intersecting_tuned(
     if noded.is_empty() {
         return None;
     }
-    // GEOS MakeValidPoly core: BuildArea on the noded boundary + symdiff loop.
-    // Iteration 1 builds the outer faces; subtracting their boundary leaves
-    // the internal edges, whose BuildArea faces are XORed out. This is what
-    // removes inner lobes (even-winding faces) — verified: seed2 = 9931.89
+    // This is what removes inner lobes (even-winding faces): verified: seed2 = 9931.89
     // (10943.98 outer − 1012.09 inner), bit-identical to GEOS.
     let result = make_valid_poly_symdiff(&noded);
     PROFILE_FSI_NS.fetch_add(_t.ns(), Ordering::Relaxed);

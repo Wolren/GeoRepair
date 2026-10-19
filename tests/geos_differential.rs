@@ -83,15 +83,10 @@ fn geos_valid(g: &GeosGeometry) -> Option<bool> {
     g.is_valid().ok()
 }
 
-// ---------------------------------------------------------------------------
-// Polygon strategies
-// ---------------------------------------------------------------------------
 
 fn coord_strategy() -> impl Strategy<Value = (f64, f64)> {
     prop_oneof![
-        // ordinary scale
         (-1e3f64..1e3, -1e3f64..1e3),
-        // tiny and huge magnitudes (stress relative epsilons)
         (-1e-8f64..1e-8, -1e-8f64..1e-8),
         (-1e7f64..1e7, -1e7f64..1e7),
     ]
@@ -168,14 +163,10 @@ fn any_polygon() -> impl Strategy<Value = Polygon<f64>> {
     ]
 }
 
-// ---------------------------------------------------------------------------
-// Invariant checks (panics fail the test; proptest shrinks the input)
-// ---------------------------------------------------------------------------
 
 fn check_polygon(poly: &Polygon<f64>, case: usize) {
     let geom = Geometry::Polygon(poly.clone());
 
-    // Our engine must never panic.
     let (ours_valid, repaired) = catch_unwind(AssertUnwindSafe(|| {
         let valid = geo_repair::validate(&geom).valid;
         let fixed = geom.make_valid();
@@ -183,7 +174,6 @@ fn check_polygon(poly: &Polygon<f64>, case: usize) {
     }))
     .unwrap_or_else(|_| panic!("geo_repair panicked on case {case}: {}", poly.to_wkt()));
 
-    // GEOS oracle.
     let Some(geos_geom) = poly_to_geos(poly) else {
         return; // GEOS cannot represent this input; nothing to compare.
     };
@@ -268,11 +258,8 @@ proptest! {
 
 #[test]
 fn differential_deterministic_seeds() {
-    // Deterministic seeds first (the house rule): a fixed set that has
-    // historically stressed degenerate paths.
     for seed in [1u64, 42, 12345, 999_999, 0xDEADBEEF] {
         run_proptest(Some(seed));
     }
-    // Then an unseeded run at the PROPTEST_CASES count.
     run_proptest(None);
 }

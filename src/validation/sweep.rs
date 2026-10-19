@@ -207,7 +207,6 @@ pub(crate) const GRID_MAX_CELL: usize = 64;
 
 #[inline]
 fn cell_range(lo: f64, hi: f64, min: f64, inv_cell: f64, nc: usize) -> (usize, usize) {
-    // Multiply by the precomputed reciprocal: four divides per query turned
     // out to dominate the per-query cost of the grid (measured 2026-10-17).
     let idx = |v: f64| {
         let q = (v - min) * inv_cell;
@@ -239,17 +238,13 @@ impl SegGrid {
         if span <= 0.0 || !span.is_finite() {
             return None;
         }
-        // sqrt(m) cells per axis: O(m) cells, and a box covers O(1) of
-        // them whenever its extent is near the cell size.
+        // and a box covers O(1)
         let cell = (span / (m as f64).sqrt().ceil()).max(f64::MIN_POSITIVE);
         let inv_cell = 1.0 / cell;
         let nx = (((max_x - min_x) / cell).ceil() as usize).max(1);
         let ny = (((max_y - min_y) / cell).ceil() as usize).max(1);
         let nc = nx * ny;
-        // Counting sort into one flat arena rather than a Vec per cell: the
-        // per-cell Vec form costs `nx * ny` heap allocations per build and
         // measured ~2.6 us of pure allocation overhead on a 100-vertex
-        // chain, which is most of that size's whole sweep (2026-10-17).
         let mut offsets: Vec<u32> = alloc::vec![0u32; nc + 1];
         for b in boxes {
             let (x0, x1) = cell_range(b[0], b[1], min_x, inv_cell, nx);
@@ -375,16 +370,12 @@ pub(crate) fn sweep_ring_self_intersects(
         order.reserve(n);
         spans.reserve(n);
         let mut sorted = true;
-        // Longest run of consecutive segments sharing one `lo_x`, tracked
-        // during the same pass: the degeneracy screen below needs no sort
-        // and no second scan for it.
         let mut lo_run = 1usize;
         let mut lo_max_run = 1usize;
         let mut prev_lo_bits = 0u64;
         for i in 0..n {
             let a = ring[i];
-            // min(n) identical to % n for closed rings (ring[n] == ring[0]),
-            // correct for open chain slices (see check_edge_pair_intersection).
+            // min(n) identical to % n for closed rings (ring[n] == ring[0]), correct for open chain slices (see check_edge_pair_intersection).
             let b = ring[(i + 1).min(n)];
             let (lo_x, hi_x) = if a.x < b.x { (a.x, b.x) } else { (b.x, a.x) };
             let (lo_y, hi_y) = if a.y < b.y { (a.y, b.y) } else { (b.y, a.y) };
@@ -410,32 +401,13 @@ pub(crate) fn sweep_ring_self_intersects(
             spans.push([lo_x - ext, hi_x + ext, lo_y - ext, hi_y + ext]);
         }
 
-        // Degeneracy screen, before the sort: the grid path below does not
-        // need x order at all, so paying the 8-pass radix only to then hand
-        // the ring to the grid would be pure waste (measured ~16 us at
-        // n = 1000).
-        //
-        // The incremental active set is the fast path: a simple polyline
-        // keeps one or two entries, so the whole sweep is a single linear
-        // scan at ~2.4 ns/vertex. It degenerates to O(n) entries whenever a
-        // run of segments shares one lo_x - a subdivided vertical edge -
-        // because such a run can never retire, and that is what made this
-        // sweep O(n^2). A contiguous run of bit-equal `lo_x` is exactly that
-        // class, and it is detected here in one linear pass. The grid costs
-        // more per vertex in the sparse case (a build plus n cell queries),
-        // which is why it is not the default: on a valid polyline it
-        // measured 21 ns/vertex against 2.4 ns/vertex for the scan.
-        // Patterns that inflate the active set without a contiguous
-        // equal-`lo_x` run still fall through to the active-set loop and its
-        // own SWEEP_DENSE_ACTIVE_LIMIT bail, exactly as before.
+        // scan at ~2.4 ns/vertex.
+        // run of segments shares one lo_x - a subdivided vertical edge -because such a run can never retire
         if lo_max_run > SWEEP_DEGENERATE_RUN {
             return sweep_with_grid(spans, ring, n, eps, check_revisit, closed);
         }
 
-        // Sortedness skip: x-ordered input (the common valid-polyline case)
-        // needs no radix sort - the active-set logic runs in input order.
-        // Measured (2026-08-07): the 8-pass radix was ~40% of the sweep's
-        // fixed cost on a 500-vertex valid line.
+        // Measured (2026-08-07): the 8-pass radix was ~40% of the sweep's fixed cost on a 500-vertex valid line.
         if sorted {
             order.clear();
             for i in 0..n {
@@ -449,17 +421,13 @@ pub(crate) fn sweep_ring_self_intersects(
         for &ord in order.iter() {
             let r_i = ord as usize;
             let cur = spans[r_i];
-            // Limit check BEFORE the retain: a pathological ring with a
-            // growing active set would otherwise pay O(n x active) in
-            // retains before ever reaching the check.
             if active.len() > SWEEP_DENSE_ACTIVE_LIMIT {
                 return None;
             }
             active.retain(|&p| spans[p as usize][1] >= cur[0]);
             for &p in &*active {
                 let t = spans[p as usize];
-                // x-overlap is guaranteed by the retain condition; only the
-                // y gate remains (matches the tree's 2D envelope filter).
+                // x-overlap is guaranteed by the retain condition; only the y gate remains (matches the tree's 2D envelope filter).
                 if t[3] < cur[2] || t[2] > cur[3] {
                     continue;
                 }
@@ -523,9 +491,6 @@ fn sweep_with_grid(
                 return;
             }
             let t = spans[r_j];
-            // Only the y gate is left: x overlap is implied by sharing
-            // a cell, and the stored boxes carry the same padding the
-            // spans do, so the pair neighbourhood is unchanged.
             if t[3] < cur[2] || t[2] > cur[3] {
                 return;
             }

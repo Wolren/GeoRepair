@@ -1,7 +1,4 @@
 @echo off
-rem Build + run the C FFI test harness against the built cdylib.
-rem Portable: resolves vcvars via vswhere (works on local Build Tools
-rem installs and GitHub Actions windows-latest runners alike).
 cd /d "%~dp0..\.."
 for /f "usebackq tokens=*" %%i in (`"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSDIR=%%i"
 if not defined VSDIR (

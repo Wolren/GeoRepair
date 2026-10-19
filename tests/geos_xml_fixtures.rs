@@ -6,14 +6,11 @@ use geo_repair::validation::GeoValidation;
 mod common;
 use common::*;
 
-// =========================================================================
 // GEOS XML MakeValid test fixtures
 // Ported from: tests/xmltester/tests/misc/makevalid.xml
 // =========================================================================
 
-// ---------------------------------------------------------------------------
 // 1. point/already_valid
-// ---------------------------------------------------------------------------
 // Input: POINT(0 0), Expected: POINT(0 0)
 #[test]
 fn xml_point_valid() {
@@ -22,21 +19,15 @@ fn xml_point_valid() {
     assert_eq!(result, g, "valid point should return unchanged");
 }
 
-// ---------------------------------------------------------------------------
 // 2. point/empty
-// ---------------------------------------------------------------------------
-// Input: POINT EMPTY, Expected: POINT EMPTY
 #[test]
 fn xml_point_empty() {
     let g = geom_from_wkt("POINT EMPTY");
     let result = g.make_valid_with_config(&cfg_auto());
-    // POINT EMPTY → empty GeometryCollection — correct behavior
     assert_is_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
 // 3. linestring/already_valid
-// ---------------------------------------------------------------------------
 // Input: LINESTRING(0 0, 1 1), Expected: LINESTRING(0 0, 1 1)
 #[test]
 fn xml_linestring_valid() {
@@ -45,9 +36,7 @@ fn xml_linestring_valid() {
     assert_eq!(result, g, "valid linestring should return unchanged");
 }
 
-// ---------------------------------------------------------------------------
 // 4. linestring/invalid_result_point (collapsed to point)
-// ---------------------------------------------------------------------------
 // Input: LINESTRING(0 0, 0 0), Expected: POINT(0 0)
 #[test]
 fn xml_linestring_collapsed_to_point() {
@@ -60,9 +49,7 @@ fn xml_linestring_collapsed_to_point() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // 5. linestring/empty
-// ---------------------------------------------------------------------------
 #[test]
 fn xml_linestring_empty() {
     let g = geom_from_wkt("LINESTRING EMPTY");
@@ -70,9 +57,7 @@ fn xml_linestring_empty() {
     assert_is_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
 // 6. multilinestring/empty
-// ---------------------------------------------------------------------------
 #[test]
 fn xml_multilinestring_empty() {
     let g = geom_from_wkt("MULTILINESTRING EMPTY");
@@ -80,16 +65,12 @@ fn xml_multilinestring_empty() {
     assert_is_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
-// 7. multilinestring/case1: collapsed + valid components -> GC
-// ---------------------------------------------------------------------------
 // Input: MULTILINESTRING((0 0,0 0),(1 1,2 2))
 // Expected: GEOMETRYCOLLECTION(LINESTRING(1 1,2 2), POINT(0 0))
 #[test]
 fn xml_multilinestring_case1() {
     let g = geom_from_wkt("MULTILINESTRING ((0 0, 0 0), (1 1, 2 2))");
     let result = g.make_valid_with_config(&cfg_auto());
-    // GEOS exact output (makevalid.xml) - asserted, not just typed:
     let expected = geom_from_wkt("GEOMETRYCOLLECTION (LINESTRING (1 1, 2 2), POINT (0 0))");
     assert_eq!(result, expected, "GEOS makevalid.xml case 7 exact output");
 }
@@ -132,10 +113,6 @@ fn flatten_gc(g: &Geometry<f64>) -> (Vec<RingCoords>, RingCoords) {
     (lines, points)
 }
 
-// ---------------------------------------------------------------------------
-// 8. multilinestring/case2: two valid lines -> MLS (GEOS groups into MLS;
-// we emit separate LINESTRINGs - assert component-set parity)
-// ---------------------------------------------------------------------------
 // Input: MULTILINESTRING((0 0,0 0),(1 1,2 2),(2 2,3 3))
 // Expected: GEOMETRYCOLLECTION(MULTILINESTRING((2 2,3 3),(1 1,2 2)), POINT(0 0))
 #[test]
@@ -158,9 +135,6 @@ fn xml_multilinestring_case2() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// 9. multilinestring/case2 (dup name): two collapses -> MultiPoint
-// ---------------------------------------------------------------------------
 // Input: MULTILINESTRING((0 0,0 0),(1 1,2 2),(2 2,3 3),(4 4,4 4))
 // Expected: GEOMETRYCOLLECTION(MULTILINESTRING((2 2,3 3),(1 1,2 2)), MULTIPOINT(4 4,0 0))
 #[test]
@@ -287,23 +261,17 @@ fn has_empty_point(g: &Geometry<f64>) -> bool {
     }
 }
 
-// ---------------------------------------------------------------------------
 // 10. polygon/already_valid
-// ---------------------------------------------------------------------------
 #[test]
 fn xml_polygon_valid() {
     let g = geom_from_wkt("POLYGON ((0 0, 0 1, 1 1, 0 0))");
     let result = g.make_valid_with_config(&cfg_auto());
     assert_valid_ogc(&result);
-    // GEOS exact output (makevalid.xml case 10): the same triangle. GEOS
-    // preserves the CW ring; we enforce OGC orientation - fingerprint
-    // parity asserts the shape modulo winding/rotation.
+    // GEOS exact output (makevalid.xml case 10): the same triangle.
     assert_shape_parity(&result, "POLYGON ((0 0, 0 1, 1 1, 0 0))");
 }
 
-// ---------------------------------------------------------------------------
 // 11. polygon/crossing (bowtie)
-// ---------------------------------------------------------------------------
 #[test]
 fn xml_polygon_bowtie() {
     let g = geom_from_wkt("POLYGON ((0 0, 1 1, 0 1, 1 0, 0 0))");
@@ -317,27 +285,22 @@ fn xml_polygon_bowtie() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // 12. polygon/hole_touching_two_places
-// ---------------------------------------------------------------------------
 #[test]
 fn xml_hole_touching_two_places() {
     let g = geom_from_wkt("POLYGON ((0 0, 0 1, 1 1, 1 0, 0 0), (0 0.5, 0.5 0.1, 1 0.5, 0 0.5))");
     let result = g.make_valid_with_config(&cfg_auto());
     assert_valid_ogc(&result);
     assert_not_empty(&result);
-    // GEOS exact output (makevalid.xml case 12): the two components split
-    // by the hole touching the shell at two points. Fingerprint parity
-    // absorbs the 0.5 0.09999999962747 / 0.5 0.1 fp noise.
+    // GEOS exact output (makevalid.xml case 12): the two components split by the hole touching the shell at two points.
+    // Fingerprint parity absorbs the 0.5 0.09999999962747 / 0.5 0.1 fp noise.
     assert_shape_parity(
         &result,
         "MULTIPOLYGON (((0.0 0.0, 0.0 0.5, 0.5 0.1, 1.0 0.5, 1.0 0.0, 0.0 0.0)), ((0.0 0.5, 0.0 1.0, 1.0 1.0, 1.0 0.5, 0.0 0.5)))",
     );
 }
 
-// ---------------------------------------------------------------------------
 // 13. multipolygon/second_part_overlapping
-// ---------------------------------------------------------------------------
 #[test]
 fn xml_multipolygon_overlapping() {
     let g = geom_from_wkt(
@@ -346,10 +309,7 @@ fn xml_multipolygon_overlapping() {
     let result = g.make_valid_with_config(&cfg_auto());
     assert_valid_ogc(&result);
     assert_not_empty(&result);
-    // PINNED divergence (makevalid.xml case 13, XML comment "not completely
-    // sure"): GEOS emits the even-odd notch split (area 1.64); we union
-    // overlapping shells per JTS rule 09 (area 1.8 = exact set-theoretic
-    // union of the 1x1 and (0.8..2)x(0.1..0.9) rects: 1 + 0.96 - 0.16).
+    // overlapping shells per JTS rule 09
     // Mirrors the geos_compare.rs mp_overlapping pin (46.0).
     let area = total_poly_area(&result);
     let scale = area.abs().max(1.0);
@@ -364,9 +324,7 @@ fn xml_multipolygon_overlapping() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // 14. multipolygon/first_part_crossing_second_part_overlapping
-// ---------------------------------------------------------------------------
 #[test]
 fn xml_multipolygon_crossing_overlapping() {
     let g = geom_from_wkt(
@@ -377,11 +335,6 @@ fn xml_multipolygon_crossing_overlapping() {
     assert_not_empty(&result);
     // PINNED divergence (makevalid.xml case 14), measured three ways
     // (2026-08-05): XML expected WKT area 1.445; GEOS makeValid TODAY emits
-    // 1.44 (the XML expectation is stale - GEOS itself moved); we emit 1.45,
-    // which is the EXACT set-theoretic union: bowtie lobes 0.25 + 0.25 +
-    // rect 0.96, minus the two 0.005 overlap wedges (lobe1 x 0.8..0.9 and
-    // lobe2 y 0.8..0.9) = 1.45. Our union semantics are pinned; GEOS's
-    // even-odd numbers are documented, not asserted.
     let area = total_poly_area(&result);
     let scale = area.abs().max(1.0);
     assert!(
@@ -395,9 +348,7 @@ fn xml_multipolygon_crossing_overlapping() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // 15. geometry_collection with invalid polygon + empty sub-geometries
-// ---------------------------------------------------------------------------
 #[test]
 fn xml_geometry_collection_with_empties() {
     let g = geom_from_wkt(
@@ -406,10 +357,8 @@ fn xml_geometry_collection_with_empties() {
     let result = g.make_valid_with_config(&cfg_auto());
     assert_valid_ogc(&result);
     assert_not_empty(&result);
-    // GEOS expected (makevalid.xml case 15): GC(MULTIPOLYGON(two components
-    // as in case 12), LINESTRING EMPTY, POINT EMPTY). We keep POINT EMPTY
-    // (as POINT(NaN NaN)) and drop LINESTRING EMPTY - assert the polygon
-    // components by fingerprint parity plus the retained empty point.
+    // GEOS expected (makevalid.xml case 15): GC(MULTIPOLYGON(two components as in case 12), LINESTRING EMPTY, POINT EMPTY).
+    // (as POINT(NaN NaN)) and drop LINESTRING EMPTY - assert the polygon components by fingerprint parity plus the retained empty point.
     assert_shape_parity(
         &result,
         "MULTIPOLYGON (((0.0 0.0, 0.0 0.5, 0.5 0.1, 1.0 0.5, 1.0 0.0, 0.0 0.0)), ((0.0 0.5, 0.0 1.0, 1.0 1.0, 1.0 0.5, 0.0 0.5)))",
@@ -420,18 +369,10 @@ fn xml_geometry_collection_with_empties() {
     );
 }
 
-// =========================================================================
 // GEOS unit-test port: operation/valid/MakeValidTest.cpp test<1>
 // (https://github.com/libgeos/geos/issues/265 - the 12-vertex polygon).
 // GEOS asserts: input invalid, output valid.
-// Measured parity (2026-08-05, geosop 3.14.1): GEOS makeValid area
-// 34.749988580488314, ours 34.749988575662314 (diff 4.9e-9 absolute,
-// 1.4e-10 relative) - the SAME even-odd repair, including the same hole.
 // NOTE: the input's unary_union area (36.3265) is NOT the right anchor
-// here: the self-crossing ring's lobes overlap, and even-odd semantics
-// exclude double-covered regions (union counts them). GEOS and we agree
-// on the even-odd answer; the pin below is that shared answer.
-// =========================================================================
 #[test]
 fn geos_makevalid_test1_issue265_polygon() {
     use geo::Area;
@@ -440,31 +381,23 @@ fn geos_makevalid_test1_issue265_polygon() {
         "POLYGON ((2.22 2.28, 7.67 2.06, 10.98 7.70, 9.39 5.00, 7.96 7.12, 6.77 5.16, 7.43 6.24, 3.70 7.22, 5.72 5.77, 4.18 10.74, 2.20 6.83, 2.22 2.28))",
     );
 
-    // GEOS asserts !isValid() on the input.
     assert!(
         !g.validate().valid,
         "issue-265 input must be invalid (GEOS parity)"
     );
 
     let result = g.make_valid_with_config(&cfg_auto());
-    // GEOS asserts isValid() on the output.
     assert_valid_ogc(&result);
     assert_not_empty(&result);
 
-    // Repair is idempotent (GEOS contract: makeValid(makeValid(x)) == makeValid(x)).
     let result2 = result.make_valid_with_config(&cfg_auto());
     assert_eq!(result, result2, "issue-265 repair must be idempotent");
 
-    // Area parity with GEOS's measured answer (even-odd semantics, see
-    // comment above). If the repair semantics ever change, this pin flips
-    // the behavior change into a visible failure.
     let out_area = match &result {
         Geometry::Polygon(p) => p.unsigned_area(),
         other => panic!("issue-265 expected polygon output, got {other:?}"),
     };
-    // Reference area from the XML fixture; the literal keeps the
-    // source digits even though f64 rounds them (allow: the test
-    // compares with tolerance).
+    // source digits even though f64 rounds them (allow: the test compares with tolerance).
     #[allow(clippy::excessive_precision)]
     let geos_area = 34.749988580488314_f64;
     let scale = geos_area.abs().max(1.0);
@@ -474,11 +407,9 @@ fn geos_makevalid_test1_issue265_polygon() {
     );
 }
 
-// =========================================================================
 // GEOS unit-test port: operation/valid/MakeValidTest.cpp test<4>
 // (https://github.com/libgeos/geos/issues/265, WKB from PostGIS
 // liblwgeom/cunit/cu_geos.c#L147)
-// =========================================================================
 #[test]
 fn geos_makevalid_test4_postgis_ring() {
     use geo::Area;
@@ -495,27 +426,16 @@ fn geos_makevalid_test4_postgis_ring() {
         .collect();
     let g = geo_repair::io::wkb::read_wkb(&bytes).expect("GEOS test<4> WKB parses");
 
-    // GEOS asserts !isValid() on the input.
     assert!(
         !g.validate().valid,
         "test<4> input must be invalid (GEOS parity)"
     );
 
     let result = g.make_valid_with_config(&cfg_auto());
-    // GEOS asserts isValid() on the output.
     assert_valid_ogc(&result);
 
-    // GEOS expected exact output (WKTWriter trim):
-    // POLYGON((92127.546 463452.075,92117.173 463439.755,92133.675 463425.942,
-    //          92122.136 463412.826,92092.377 463437.77,92114.014 463463.469,
-    //          92115.512 463462.207,92115.51207431706 463462.2069374289,
-    //          92127.546 463452.075))
-    // Divergence (documented, not asserted bit-exact): GEOS keeps both the
-    // spike vertex (92115.512) and the noded intersection (92115.51207431706)
-    // as separate vertices (9-vertex ring); our repair merges them into one
-    // (8-vertex ring) and the merged coordinates differ from GEOS's by
-    // ~1e-9 absolute. The parity properties that DO hold are asserted:
-    // valid output and area preservation.
+    // GEOS expected exact output (WKTWriter trim): POLYGON((92127.546 463452.075,92117.173 463439.755,92133.675 463425.942, 92122.136 463412.826,92092.377 463437.77,92114.014 463463.469, 92115.512 463462.207,92115.51207431706 463462.2069374289, 92127.546 463452.075))
+    // (8-vertex ring) and the merged coordinates differ from GEOS's by ~1e-9 absolute.
     let input_area = match &g {
         Geometry::Polygon(p) => p.unsigned_area(),
         _ => unreachable!(),

@@ -12,10 +12,7 @@ use geo_repair::{MakeValid, MakeValidConfig};
 mod common;
 use common::*;
 
-// =========================================================================
 // SECTION 1: Self-touching rings forming holes
-// (GEOS ValidSelfTouchingRingFormingHoleTest)
-// =========================================================================
 
 #[test]
 fn test_self_touching_ring_forming_hole() {
@@ -105,10 +102,7 @@ fn test_holes_meeting_at_point() {
     assert_not_empty(&result);
 }
 
-// =========================================================================
 // SECTION 2: Hole edge cases
-// (GEOS GeometryFixer + CGAL validation)
-// =========================================================================
 
 #[test]
 fn test_hole_touching_two_places() {
@@ -160,11 +154,7 @@ fn test_nested_holes() {
     );
     let result = g.make_valid_with_config(&cfg_auto());
     assert_valid_ogc(&result);
-    // Nested hole → island: GEOS makeValid returns MULTIPOLYGON with 2
-    // components — the 20x20 square with the outer (2,2)-(18,18) hole, plus
-    // the inner (6,6)-(14,14) ring as a separate island polygon (total
-    // area 208, verified via geosop). A single-Polygon assertion is wrong:
-    // the island is positive space inside the hole and must survive.
+    // the inner (6,6)-(14,14) ring as a separate island polygon (total area 208, verified via geosop).
     assert_multipolygon_count(&result, 2);
     let area: f64 = match &result {
         Geometry::Polygon(p) => p.unsigned_area(),
@@ -213,9 +203,7 @@ fn test_hole_degenerate_collapse() {
     assert_not_empty(&result);
 }
 
-// =========================================================================
 // SECTION 3: Shell collapse edge cases
-// =========================================================================
 
 #[test]
 fn test_shell_collapse_to_line() {
@@ -275,9 +263,6 @@ fn test_shell_collapse_nan_keep_collapsed() {
     assert_valid_ogc(&result);
 }
 
-// ---------------------------------------------------------------------------
-// JTS-style shell collapse with backtrack (zero-area shell + valid hole)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_shell_backtrack_collapse() {
@@ -305,9 +290,6 @@ fn test_shell_backtrack_collapse_keep_collapsed() {
     assert_not_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
-// JTS-style hole collapse (valid shell + zero-area hole)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_hole_backtrack_collapse() {
@@ -337,9 +319,7 @@ fn test_hole_backtrack_collapse_keep_collapsed() {
     assert_not_empty(&result);
 }
 
-// =========================================================================
 // SECTION 4: Complex invalid polygons from CGAL validation
-// =========================================================================
 
 #[test]
 fn test_cgal_self_intersect_dup_points() {
@@ -370,9 +350,7 @@ fn test_cgal_overlapping_boundary() {
     assert_is_empty(&result);
 }
 
-// =========================================================================
 // SECTION 5: PostGIS / real-world regression cases
-// =========================================================================
 
 #[test]
 fn test_postgis_complex_self_intersect() {
@@ -392,9 +370,7 @@ fn test_geos_issue_265() {
     assert_not_empty(&result);
 }
 
-// =========================================================================
 // SECTION 6: Bowtie variants
-// =========================================================================
 
 #[test]
 fn test_bowtie_basic() {

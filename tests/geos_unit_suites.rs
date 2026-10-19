@@ -22,25 +22,8 @@ mod common;
 use common::*;
 
 // =========================================================================
-// IsValidOpTest parity port (error-class level)
-// =========================================================================
 // Port of tests/unit/operation/valid/IsValidOpTest.cpp (all active tests)
 // with the discipline the XML corpus cannot provide: the SPECIFIC error
-// class is asserted, not just the boolean. Class-name deltas vs GEOS are
-// documented per case (we flag PinchPoint where GEOS says
-// eRingSelfIntersection, HoleOutsideShell where GEOS says eSelfIntersection,
-// NotSimple for the line family where GEOS says eRingSelfIntersection,
-// DisconnectedInteriorRing where GEOS says eHoleOutsideShell on hole
-// double-touch fixtures).
-//
-// Cases GEOS marks valid but we reject must be the documented masked class
-// (WrongOrientation) AND repair to a valid, area-preserving result (the
-// same gate the XML suite applies). Cases where the ORIGINAL fixture's
-// rings are mis-oriented and our rejection rides entirely on
-// WrongOrientation (the structural class is shadowed) are marked in the
-// table; their OGC-oriented variants are tracked as gap tests below -
-// the three structural gaps were FIXED 2026-08-06 (see the gap tests at
-// the bottom of this file).
 
 struct IsValidParityCase {
     name: &'static str,
@@ -81,8 +64,7 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         geos_class: "eHoleOutsideShell",
         // note:
     },
-    // test<3> - ticket 588: GEOS-valid; we reject (CW ring) and repair. The
-    // reversed ring is covered by geos_isvalidop_ticket588_reversed below.
+    // test<3> - ticket 588: GEOS-valid; we reject (CW ring) and repair.
     IsValidParityCase {
         name: "t3_ticket588",
         wkt: "POLYGON (( -86.3958130146539250 114.3482370100377900, 64.7285128575111490 156.9678884302379600, 138.3490775437400700 43.1639042523018260, 87.9271046586986810 -10.5302909001479570, 87.9271046586986810 -10.5302909001479530, 55.7321237336437390 -44.8146215164960250, -86.3958130146539250 114.3482370100377900))",
@@ -109,10 +91,7 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         geos_class: "",
         // note:
     },
-    // test<6> - disconnected interior; structural class shadowed by
-    // WrongOrientation on the mis-oriented fixture - oriented variant is
-    // now REJECTED (gap fixed 2026-08-06, see
-    // geos_isvalidop_t6_disconnected_interior_gap).
+    // now REJECTED (gap fixed 2026-08-06, see geos_isvalidop_t6_disconnected_interior_gap).
     IsValidParityCase {
         name: "t6_disconnected_interior",
         wkt: "POLYGON((40 320,340 320,340 20,40 20,40 320),(100 120,40 20,180 100,100 120),(200 200,180 100,240 160,200 200),(260 260,240 160,300 200,260 260),(300 300,300 200,340 260,300 300))",
@@ -166,8 +145,7 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         geos_class: "",
         // note:
     },
-    // test<11> - hole properly crossing the shell: GEOS eSelfIntersection,
-    // ours HoleOutsideShell (the hole genuinely pokes out)
+    // test<11> - hole properly crossing the shell: GEOS eSelfIntersection, ours HoleOutsideShell (the hole genuinely pokes out)
     IsValidParityCase {
         name: "t11_hole_proper_intersection",
         wkt: "POLYGON ((10 90, 50 50, 10 10, 10 90), (20 50, 60 70, 60 30, 20 50))",
@@ -203,8 +181,7 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         geos_class: "",
         // note:
     },
-    // test<15> - nested shells (all vertices touch): orientation-shadowed;
-    // oriented variant = KNOWN GAP
+    // test<15> - nested shells (all vertices touch): orientation-shadowed; oriented variant = KNOWN GAP
     IsValidParityCase {
         name: "t15_nested_shells",
         wkt: "MULTIPOLYGON (((10 10, 20 30, 10 90, 90 90, 80 30, 90 10, 50 20, 10 10)), ((80 30, 20 30, 50 20, 80 30)))",
@@ -251,8 +228,6 @@ const ISVALID_PARITY_CASES: &[IsValidParityCase] = &[
         // note: hole double-touch reads as disconnected interior
     },
     // test<20> - nested holes: orientation-shadowed; oriented variant now
-    // REJECTED as DisconnectedInteriorRing (touch-cycle fires first; class
-    // delta vs GEOS eNestedHoles, boolean parity)
     IsValidParityCase {
         name: "t20_nested_holes",
         wkt: "POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), (20 80, 80 80, 80 20, 20 20, 20 80), (50 80, 80 50, 50 20, 20 50, 50 80))",
@@ -399,17 +374,12 @@ fn geos_isvalidop_error_class_parity() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// M1: ticket 588 reversal validity (GEOS IsValidOpTest test<3> asserts BOTH
-// the ring and its reverse are valid). Our validator rejects the CW ring as
-// WrongOrientation; the REVERSED ring is CCW and must be accepted outright,
-// and the CW direction must repair valid + area-preserving.
-// ---------------------------------------------------------------------------
+// M1: ticket 588 reversal validity (GEOS IsValidOpTest test<3> asserts BOTH the ring and its reverse are valid).
+// the REVERSED ring is CCW and must be accepted outright
 #[test]
 fn geos_isvalidop_ticket588_reversed() {
     let wkt = "POLYGON (( -86.3958130146539250 114.3482370100377900, 64.7285128575111490 156.9678884302379600, 138.3490775437400700 43.1639042523018260, 87.9271046586986810 -10.5302909001479570, 87.9271046586986810 -10.5302909001479530, 55.7321237336437390 -44.8146215164960250, -86.3958130146539250 114.3482370100377900))";
     let g = geom_from_wkt(wkt);
-    // Reverse the ring: GEOS asserts the reversed polygon is also valid.
     let Geometry::Polygon(p) = &g else {
         unreachable!()
     };
@@ -420,29 +390,11 @@ fn geos_isvalidop_ticket588_reversed() {
         validate(&rev).valid,
         "ticket 588 reversed ring must be valid (GEOS parity): {rev:?}"
     );
-    // And the original CW direction repairs valid + area-preserving.
     assert_masked_orientation_case("ticket588_cw", &g);
 }
 
-// ---------------------------------------------------------------------------
-// VALIDATOR GAP FIXES (2026-08-05, GEOS-parity, source-verified): with
-// OGC-correct orientation our validator previously ACCEPTED these
-// structural classes that GEOS rejects (every corpus fixture for these
-// classes is mis-oriented, so the XML suite masked them via
-// WrongOrientation and the gaps stayed invisible at "0 known gaps"). The
-// fixes, all bbox-filtered (R-tree, never unfiltered O(n^2)):
-// 1. disconnected interior via hole chains touching at vertices - ring-
-//    touch graph cycle detection (GEOS PolygonRing::findHoleCycleLocation
-//    port; touches at ONE coordinate stay valid, matching GEOS on
-//    IsValidOpTest test<17>);
-// 2. nested holes sharing boundary vertices - incident-segment topology
-//    (GEOS PolygonTopologyAnalyzer::isRingNested + PolygonNodeTopology
-//    port);
-// 3. MP component crossing another component's hole - cross-component
-//    ring intersection check covering shell-shell, shell-hole and
-//    hole-hole pairs (GEOS checkAreaIntersections scope).
-// These tests assert GEOS's expectation and now run GREEN.
-// ---------------------------------------------------------------------------
+// structural classes that GEOS rejects (every corpus fixture for these classes is mis-oriented, so the XML suite masked them via)
+// (GEOS PolygonTopologyAnalyzer::isRingNested + PolygonNodeTopology port); 3.
 #[test]
 fn geos_isvalidop_t6_disconnected_interior_gap() {
     let g = geom_from_wkt(
@@ -592,7 +544,6 @@ fn rpr_test_2_exact_dups_tail() {
 
 #[test]
 fn rpr_test_3_sequence_within_tolerance() {
-    // CoordinateSequences just retain each coordinate within the tolerance.
     assert_seq_eq(
         "LINESTRING (0 0, 1 0, 4 0, 5 0)",
         "LINESTRING (0 0, 4 0)",
@@ -602,8 +553,6 @@ fn rpr_test_3_sequence_within_tolerance() {
 
 #[test]
 fn rpr_test_4_line_keeps_last_point() {
-    // Linestrings note the last point and retain it in preference over the
-    // internal point.
     assert_geom_eq(
         "LINESTRING (0 0, 1 0, 4 0, 5 0)",
         "LINESTRING (0 0, 5 0)",
@@ -652,7 +601,6 @@ fn rpr_test_10_small_hole_collapses_away() {
 
 #[test]
 fn rpr_test_11_small_exterior_collapses_to_degenerate() {
-    // The GEOS expectation here is a 3-coordinate ring: the repair step pops
     // the within-tolerance (0 1) and re-attaches the original end (0 0).
     assert_geom_eq(
         "POLYGON ((0 0, 9 0, 10 0, 10 10, 0 10, 0 1, 0 0))",
@@ -704,10 +652,7 @@ fn rpr_test_16_ring_with_invalid_coords_collapses() {
 
 #[test]
 fn rpr_test_17_tiny_hole_collapse_no_error() {
-    // GH-1293: a valid polygon whose tiny hole collapses to a single point
-    // must not error; the hole is dropped and the shell is preserved.
-    // GEOS compares normalized geometries, so the ring rotation in the
-    // expected WKT is not part of the assertion.
+    // GH-1293
     assert_geom_eq(
         "POLYGON ((139770.26822331376024522 188334.00010800323798321, 139769.5 188338.01162790699163452, 139769.5 188338.3723930635896977, 139769.5 188338.5, 139769.81343283582828008 188338.5, 139770.375 188339.375, 139772.39924806414637715 188340.26989983080420643, 139770.26822331376024522 188334.00010800323798321),(139769.75256541155977175 188338.40516005983226933, 139769.75256541153066792 188338.40516005983226933, 139769.75256541153066792 188338.4051600598031655, 139769.75256541155977175 188338.40516005983226933))",
         "POLYGON ((139769.5 188338.011627907, 139769.5 188338.3723930636, 139769.5 188338.5, 139769.81343283583 188338.5, 139770.375 188339.375, 139772.39924806415 188340.2698998308, 139770.26822331376 188334.00010800324, 139769.5 188338.011627907))",
@@ -741,15 +686,7 @@ fn assert_has_error(geom: &Geometry<f64>, want: GeometryValidationError) {
 
 #[test]
 fn vcr_test_1_open_linear_ring_invalid() {
-    // GEOS: LINEARRING (0 0, 0 10, 10 10, 10 0, 0 0) with the first point
-    // perturbed by +0.0001 on x is invalid (ring not closed). GEOS rejects
-    // the open ring at LinearRing construction (IllegalArgumentException).
-    //
-    // Our model: geo-types Polygon::new auto-closes rings, so an open ring
-    // cannot be represented. The forced closing edge (0 0)->(0.0001 0)
-    // overlaps the tail of the bottom edge (10 0)->(0 0) - (0.0001 0) lies
-    // on that segment - so the ring is flagged SelfIntersection. Same
-    // verdict as GEOS (invalid), different mechanism, documented divergence.
+    // LINEARRING (0 0, 0 10, 10 10, 10 0, 0 0) with the first point
     let g = ring_as_polygon("LINESTRING (0 0, 0 10, 10 10, 10 0, 0 0)");
     let mut ring = g.exterior().clone();
     ring.0[0].x += 0.0001;
@@ -759,9 +696,6 @@ fn vcr_test_1_open_linear_ring_invalid() {
 
 #[test]
 fn vcr_test_2_closed_linear_ring_valid_in_geos_masked() {
-    // GEOS: closed ring is valid (orientation is irrelevant to GEOS).
-    // Ours: CW ring -> WrongOrientation (documented masked class); repair
-    // restores validity with the area preserved.
     let g = Geometry::Polygon(ring_as_polygon("LINESTRING (0 0, 0 10, 10 10, 10 0, 0 0)"));
     assert_has_error(&g, GeometryValidationError::WrongOrientation);
     let fixed = g.make_valid();
@@ -802,8 +736,6 @@ fn vcr_test_4_open_polygon_hole_invalid() {
 
 #[test]
 fn vcr_test_5_closed_polygon_valid_in_geos_masked() {
-    // GEOS: valid. Ours: CW shell -> WrongOrientation (documented masked
-    // class); repair restores validity with the area preserved.
     let g = geom_from_wkt("POLYGON ((0 0, 0 10, 10 10, 10 0, 0 0))");
     assert_has_error(&g, GeometryValidationError::WrongOrientation);
     let fixed = g.make_valid();

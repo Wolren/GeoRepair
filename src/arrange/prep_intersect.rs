@@ -29,13 +29,8 @@ fn orient4(li: &Line<f64>, lj: &Line<f64>) -> [f64; 4] {
 #[inline(always)]
 fn segments_properly_cross(li: &Line<f64>, lj: &Line<f64>) -> bool {
     let [o1, o2, o3, o4] = orient4(li, lj);
-    // Zero-safe strict opposite sign. The (o1 > 0) != (o2 > 0) form treats
-    // an EXACT zero orient (a collinear touch — e.g. a snapped vertex
-    // landing on another edge's line) as a crossing when the paired orient
-    // is positive, flagging GEOS-valid structure output. Measured: 276/300
-    // real-world repaired components rejected by the --fast gate while the
-    // full validator and GEOS accept them (2026-08-03). Matches
-    // edges_intersect_general's proper-crossing semantics.
+    // The (o1 > 0) != (o2 > 0) form treats
+    // Measured: 276/300 real-world repaired components rejected by the --fast gate while the full validator and GEOS accept them (2026-08-03).
     (o1 > 0.0 && o2 < 0.0 || o1 < 0.0 && o2 > 0.0) && (o3 > 0.0 && o4 < 0.0 || o3 < 0.0 && o4 > 0.0)
 }
 
@@ -88,12 +83,7 @@ pub(crate) fn build_mono_chains(lines: &[Line<f64>]) -> (Vec<MonoChain>, (f64, f
         return (vec![], (f64::MAX, f64::MIN, f64::MAX, f64::MIN));
     }
 
-    // Ring boundaries are detected inline (segment start != previous
-    // segment end) - no separate pass. The per-ring scale-relative eps is
-    // likewise computed from a running ring bbox at the ring's end and
-    // stamped on its chains (measured 2026-08-07: the old pre-scan cost
-    // ~15 us on a 5000-vertex ring). The GLOBAL bbox over all chains is
-    // accumulated here too, so the grid path does not re-scan the chains
+    // stamped on its chains (measured 2026-08-07: the old pre-scan cost ~15 us on a 5000-vertex ring).
     // (measured 2026-08-09: one fewer pass on the valid-polygon path).
 
     let l0 = &lines[0];
@@ -119,7 +109,6 @@ pub(crate) fn build_mono_chains(lines: &[Line<f64>]) -> (Vec<MonoChain>, (f64, f
     let mut chains = Vec::new();
 
     for (i, line) in lines.iter().enumerate().skip(1) {
-        // Force chain break at ring boundary
         let at_ring_boundary = line.start != lines[i - 1].end;
         min_x = min_x.min(line.start.x).min(line.end.x);
         max_x = max_x.max(line.start.x).max(line.end.x);
@@ -211,7 +200,6 @@ pub(crate) struct ChainSink {
     /// Flat line index of the next push; mirrors the index into the
     /// caller's `lines` vector (both are pushed in lockstep).
     flat: usize,
-    // Current chain accumulators.
     start: usize,
     quad: u8,
     min_x: f64,
@@ -219,7 +207,6 @@ pub(crate) struct ChainSink {
     min_y: f64,
     max_y: f64,
     chain_open: bool,
-    // Current ring accumulators.
     ring_idx: u32,
     ring_chain_start: usize,
     ring_min_x: f64,
@@ -227,13 +214,7 @@ pub(crate) struct ChainSink {
     ring_min_y: f64,
     ring_max_y: f64,
     ring_open: bool,
-    // Set by `begin_ring` while the previous ring is still open: the
-    // reference builder folds the NEXT ring's first line into the previous
-    // ring's last chain and into its ring bbox (hence its eps) before
-    // closing it. Deferring the flush to that line's `push_line` keeps the
-    // fused output bit-identical to `build_mono_chains`.
     pending_boundary: bool,
-    // Global envelope over every chain (the grid path's `global_bbox`).
     gmin_x: f64,
     gmax_x: f64,
     gmin_y: f64,
@@ -288,10 +269,6 @@ impl ChainSink {
         let (lm_x, lx_x) = if x0 < x1 { (x0, x1) } else { (x1, x0) };
         let (lm_y, lx_y) = if y0 < y1 { (y0, y1) } else { (y1, y0) };
         if self.pending_boundary {
-            // This line is the FIRST line of the new ring. The reference
-            // folds it into the previous ring's open chain and ring bbox
-            // first, then closes that chain, stamps its eps from the
-            // inflated bbox, and starts the new chain on this same line.
             self.min_x = self.min_x.min(lm_x);
             self.max_x = self.max_x.max(lx_x);
             self.min_y = self.min_y.min(lm_y);
@@ -487,9 +464,7 @@ fn rec_overlaps(
         if i == j {
             return false;
         }
-        // Closing pair is NOT skipped: shared vertex 0 aside, the two edges
-        // can overlap collinearly (backtracking closure), a genuine
-        // self-intersection; matches check_ring_validity.
+        // Closing pair is NOT skipped: shared vertex 0 aside
         if mc1.ring_id == mc2.ring_id && (j == i + 1 || j + 1 == i) {
             return false;
         }
@@ -498,14 +473,7 @@ fn rec_overlaps(
         if segments_properly_cross(li, lj) {
             return true;
         }
-        // Same-ring pairs use the validator's FULL pair predicate (proper
-        // crossing + eps-collinear overlap + vertex-on-edge T-junction) with
-        // the RING's own scale-relative eps - the gate must accept exactly
-        // what check_ring_validity accepts, or the Fast path could ship a
-        // polygon the exit validator would reject (2026-08-07). Cross-ring
-        // pairs stay on proper crossings only (hole vertex on shell edge is
-        // a VALID OGC touch; collinear hole-shell overlaps are caught by the
-        // hole checks in the gate).
+        // polygon the exit validator would reject (2026-08-07).
         if mc1.ring_id == mc2.ring_id {
             let eps = mc1.ring_eps;
             let mut ambiguous = false;
@@ -519,9 +487,7 @@ fn rec_overlaps(
             ) {
                 return true;
             }
-            // Repeated vertex: see `shares_repeated_vertex`. This replaces
-            // the per-ring duplicate-vertex hash table the caller used to
-            // carry (2026-10-17) - same verdicts, no table.
+            // This replaces the per-ring duplicate-vertex hash table the caller used to carry (2026-10-17) - same verdicts, no table.
             if ambiguous && shares_repeated_vertex(li, lj) {
                 return true;
             }
@@ -583,11 +549,6 @@ pub fn has_no_intersections_small(lines: &[Line<f64>]) -> bool {
     if n < 2 {
         return true;
     }
-    // Assign ring ids: a segment whose start != previous segment's end
-    // starts a new ring (same rule as build_mono_chains). Track each
-    // ring's bbox to derive its scale-relative eps (same formula as
-    // check_ring_validity - the gate must not use a poly-global eps,
-    // which would loosen micro-ring tolerances inside big shells).
     let mut ring_of = [0u32; crate::core::SMALL_RING_LINES + 1];
     let mut nrings = 1u32;
     for i in 1..n {
@@ -596,10 +557,7 @@ pub fn has_no_intersections_small(lines: &[Line<f64>]) -> bool {
         }
         ring_of[i] = nrings - 1;
     }
-    // Per-ring bboxes and eps live in stack arrays (nrings <= n <=
-    // SMALL_RING_LINES by the caller's contract above): the heap Vec
-    // versions cost 5 small allocations per gate call on the 95.6% of
-    // real-world polygons that take this path (measured 2026-09-04).
+    // versions cost 5 small allocations per gate call on the 95.6%
     let mut min_x = [f64::MAX; crate::core::SMALL_RING_LINES];
     let mut max_x = [f64::MIN; crate::core::SMALL_RING_LINES];
     let mut min_y = [f64::MAX; crate::core::SMALL_RING_LINES];
@@ -625,10 +583,7 @@ pub fn has_no_intersections_small(lines: &[Line<f64>]) -> bool {
         let ri = ring_of[i] as usize;
         for j in (i + 1)..n {
             if ri == ring_of[j] as usize {
-                // Same ring: skip adjacent edges. The closing pair (first
-                // vs last edge) is NOT skipped — the two share vertex 0 but
-                // can overlap collinearly beyond it (backtracking closure),
-                // a genuine self-intersection; matches check_ring_validity.
+                // The closing pair (first vs last edge) is NOT skipped: the two share vertex 0
                 if j == i + 1 || j + 1 == i {
                     continue;
                 }
@@ -637,13 +592,7 @@ pub fn has_no_intersections_small(lines: &[Line<f64>]) -> bool {
             if segments_properly_cross(li, lj) {
                 return false;
             }
-            // Same-ring pairs use the validator's FULL pair predicate
-            // (proper crossing + eps-collinear overlap + vertex-on-edge
-            // T-junction) with the ring's own eps - identical to
-            // check_ring_validity's sweep (2026-08-07). Cross-ring pairs
-            // stay on proper crossings only (hole vertex on shell edge is
-            // a VALID OGC touch; collinear hole-shell overlaps are caught
-            // by the hole checks in the gate).
+            // (proper crossing + eps-collinear overlap + vertex-on-edge T-junction) with the ring's own eps - identical to check_ring_validity's sweep (2026-08-07).
             if ri == ring_of[j] as usize {
                 let eps = eps_by_ring[ri];
                 let mut ambiguous = false;
@@ -657,7 +606,6 @@ pub fn has_no_intersections_small(lines: &[Line<f64>]) -> bool {
                 ) {
                     return false;
                 }
-                // Repeated vertex: see `shares_repeated_vertex`.
                 if ambiguous && shares_repeated_vertex(li, lj) {
                     return false;
                 }
@@ -728,16 +676,7 @@ pub(crate) fn has_no_intersections_nan_ok_tuned(
         return true;
     }
 
-    // Small-ring fast path: direct O(n²) pairwise sweep with no allocations.
-    // The monotone-chain + grid + R-tree machinery below allocates multiple
-    // Vecs and only pays off for large inputs (measured: 95.6% of the
-    // 1.58M real-world dataset has <= 32 vertices; the chain path costs
-    // 1.295 µs/poly there vs ~0.1 µs for the pairwise sweep). The predicate
-    // matches the chain leaf (rec_overlaps): strict proper crossing via
-    // orient2d sign flips plus the full same-ring predicate, skipping
-    // adjacent edges and testing the closing pair within each ring.
-    // The dispatch clamps at the compile-time SMALL_RING_LINES: the
-    // small-ring path uses a fixed-size stack array sized by that constant.
+    // 1.295 µs/poly there vs ~0.1 µs for the pairwise sweep .
     if n <= crate::core::SMALL_RING_LINES.min(tuning.small_ring_lines) {
         return has_no_intersections_small(lines);
     }
@@ -774,29 +713,18 @@ pub(crate) fn has_no_intersections_from_chains(
         return true;
     }
 
-    // Spiky-ring dispatch: a ring whose chains are nearly all single edges
-    // (quadrant flips every vertex or two - star/radial shapes) defeats the
-    // chain machinery. The grid co-locates each long radial edge in many
-    // cells and pays O(cells^2/2) pair tests to find the few true bbox-
-    // overlapping pairs; an x-radix sweep over the raw EDGES finds the same
-    // pairs directly (measured: star poly 500v = 63,603 grid cell-pair
-    // tests vs 5,272 sweep tests, 12x). The sweep uses the SAME per-pair
-    // predicate chain as rec_overlaps' leaf (proper crossing + same-ring
-    // full predicate), so the verdict is decision-identical.
+    // pairs directly (measured: star poly 500v = 63,603 grid cell-pair tests vs 5,272 sweep tests, 12x).
     if nc_is_spiky(chains, tuning)
         && let Some(result) = has_no_intersections_edge_sweep(lines)
     {
         return result;
-        // Sweep bailed (dense active set) - fall through to the grid/rtree.
     }
 
-    // Try fast grid path; fall back to R-tree if any cell gets too dense
     let grid_result = has_no_intersections_grid(chains, lines, global_bbox);
     if let Some(result) = grid_result {
         return result;
     }
 
-    // Fallback: R-tree
     let envs: Vec<ChainEnv> = chains
         .iter()
         .enumerate()
@@ -897,7 +825,6 @@ fn nc_is_spiky(chains: &[MonoChain], tuning: &crate::core::Tuning) -> bool {
 fn has_no_intersections_edge_sweep(lines: &[Line<f64>]) -> Option<bool> {
     let n = lines.len();
 
-    // Ring ids + per-ring eps, identical to build_mono_chains' rule.
     let mut ring_of = vec![0u32; n];
     let mut nrings = 1u32;
     for i in 1..n {
@@ -927,9 +854,6 @@ fn has_no_intersections_edge_sweep(lines: &[Line<f64>]) -> Option<bool> {
         })
         .collect();
 
-    // Spans + radix keys (sortable lo_x padded by the edge's own extent -
-    // same padding formula as validation::sweep so sub-extent separations
-    // still co-locate).
     let mut spans: Vec<[f64; 4]> = Vec::with_capacity(n);
     let mut keys: Vec<u64> = Vec::with_capacity(n);
     let mut order: Vec<u32> = Vec::with_capacity(n);
@@ -950,7 +874,6 @@ fn has_no_intersections_edge_sweep(lines: &[Line<f64>]) -> Option<bool> {
         spans.push([lo_x - ext, hi_x + ext, lo_y - ext, hi_y + ext]);
     }
 
-    // Already sorted? (x-monotone-ish input) skip the radix pass.
     let mut sorted = true;
     for i in 1..n {
         if keys[i] < keys[i - 1] {
@@ -984,10 +907,6 @@ fn has_no_intersections_edge_sweep(lines: &[Line<f64>]) -> Option<bool> {
             let i = p as usize;
             let li = &lines[i];
             let ri = ring_of[i];
-            // Adjacent same-ring edges share a vertex: only collinear overlap
-            // beyond it matters; the shared-vertex touch is legal. The closing
-            // pair (first vs last) is NOT adjacent under this rule and stays
-            // tested - matches rec_overlaps/check_ring_validity.
             if ri == rj && (j == i + 1 || j + 1 == i) {
                 continue;
             }
@@ -1007,7 +926,6 @@ fn has_no_intersections_edge_sweep(lines: &[Line<f64>]) -> Option<bool> {
                 ) {
                     return Some(false);
                 }
-                // Repeated vertex: see `shares_repeated_vertex`.
                 if ambiguous && shares_repeated_vertex(li, lj) {
                     return Some(false);
                 }
@@ -1056,20 +974,8 @@ fn has_no_intersections_grid(
         }
     }
 
-    // Per-cell pair tests with GLOBAL pair dedup: a chain pair (i, j) that
-    // co-occurs in several cells (convex rings: every chain spans most
-    // cells) was tested once PER cell - measured 2026-08-09 via hotpath:
-    // rec_overlaps got 2.5M calls on the valid-polygon rows, ~198% of
-    // wall, and a 5000-vertex circle's chain pairs were tested 4-9x
-    // redundantly. compute_overlaps is deterministic and context-free, so
-    // testing each pair once is decision-identical. Bit j of tested[i]
-    // marks pair (i, j) done (cell contents are ascending in chain index,
-    // so i < j always). The bitset is safe only when chain indices fit
-    // u64: convex rings (the redundant-pair class) have ~4-8 chains;
-    // complex rings with nc > 64 keep the per-cell behavior (their chains
-    // are small and span few cells, so the redundancy is bounded anyway).
-    // A mask of j >= 64 would silently skip pairs - never dedup by global
-    // index without this guard.
+    // and a 5000-vertex circle's chain pairs were tested 4-9x
+    // A mask of j >= 64 would silently skip pairs - never dedup by global index without this guard.
     let mut tested: Vec<u64> = Vec::new();
     if nc <= 64 {
         tested = vec![0; nc.max(1)];
@@ -1190,10 +1096,6 @@ mod chain_fusion_tests {
             "fused envelope must equal build_mono_chains's"
         );
         if s.ok {
-            // A completed walk collects every vertex twice over (each window
-            // contributes both endpoints and the ring closes onto its first
-            // vertex), so the fused envelope and the walk's own accumulator
-            // see the same set of coordinates.
             assert_eq!(
                 nz_bbox(s.fused_bbox),
                 nz_bbox(s.walk_bbox),
@@ -1202,11 +1104,6 @@ mod chain_fusion_tests {
             let all: Vec<Line<f64>> = poly.lines_iter().collect();
             assert_eq!(s.lines, all, "a completed walk collects every line");
         } else {
-            // Aborted walk: the walk's accumulator stops at the last
-            // window's start while the sink also saw that window's end, so
-            // the fused envelope can be wider. The gate returns false at
-            // the failed ring and never reads it, so containment is the
-            // only invariant that matters here.
             assert!(
                 s.fused_bbox.0 <= s.walk_bbox.0
                     && s.fused_bbox.1 >= s.walk_bbox.1
@@ -1258,8 +1155,7 @@ mod chain_fusion_tests {
 
     #[test]
     fn shell_plus_hole_travels_two_rings() {
-        // Two rings: ring_id and the per-ring eps stamp must line up with
-        // the reference's ring-boundary re-detection.
+        // Two rings: ring_id and the per-ring eps stamp must line up with the reference's ring-boundary re-detection.
         let poly = polygon_with_holes(
             circle(64, 0.0, 0.0, 100.0),
             vec![circle(48, 3.0, 7.0, 20.0)],
@@ -1271,8 +1167,6 @@ mod chain_fusion_tests {
 
     #[test]
     fn corner_heavy_ring_breaks_chains() {
-        // An L-shaped walk: axis-aligned runs force quadrant changes, so
-        // chains break far more often than on a circle.
         let mut pts = vec![geo::Coord { x: 1.0, y: 1.0 }];
         let mut t = 2.0;
         for i in 0..40 {
@@ -1307,7 +1201,6 @@ mod chain_fusion_tests {
 
     #[test]
     fn bowtie_reports_the_same_crossing_from_either_index() {
-        // Self-intersecting: both entries must say false.
         let mut pts: Vec<geo::Coord<f64>> = Vec::new();
         for i in 0..50 {
             pts.push(geo::Coord {
@@ -1315,9 +1208,6 @@ mod chain_fusion_tests {
                 y: (i as f64) * 0.3,
             });
         }
-        // Cross the first and last thirds back through the middle, offset
-        // so no vertex repeats (a repeated vertex is a pinch, and the walk
-        // rejects it before the sweep ever runs).
         for i in 0..50 {
             pts.push(geo::Coord {
                 x: (50.0 - i as f64) * 0.3,
@@ -1336,8 +1226,7 @@ mod chain_fusion_tests {
 
     #[test]
     fn tiny_ring_below_the_fuse_threshold() {
-        // The gate only fuses above small_ring_lines, but the sink itself
-        // has no such limit: a 4-vertex ring must still index identically.
+        // a 4-vertex ring must still index identically.
         assert_same_verdict(&polygon_with_holes(
             LineString::new(vec![
                 geo::Coord { x: 2.0, y: 2.0 },
@@ -1352,8 +1241,6 @@ mod chain_fusion_tests {
 
     #[test]
     fn degenerate_point_ring_aborts_cleanly() {
-        // Every vertex identical: the walk fails on the first window, so
-        // the sink never saw a line. The reference agrees (empty input).
         let pts = vec![geo::Coord { x: 4.0, y: 4.0 }; 40];
         let poly = polygon_with_holes(LineString::new(pts), vec![]);
         let s = assert_equivalent(&poly);
@@ -1364,9 +1251,7 @@ mod chain_fusion_tests {
 
     #[test]
     fn aborted_walk_indexes_only_the_prefix_it_collected() {
-        // Adjacent duplicate at window 20: the walk stops mid-ring, so both
-        // the line collection and the chain index are a prefix. They must
-        // still agree with each other.
+        // Adjacent duplicate at window 20: the walk stops mid-ring
         let mut pts: Vec<geo::Coord<f64>> = (0..40)
             .map(|i| geo::Coord {
                 x: 10.0 + (i as f64) * 0.7,
@@ -1400,8 +1285,7 @@ mod chain_fusion_tests {
                 )),
             ) {
                 let mk = |mut p: Vec<(f64, f64)>| {
-                    // Pin -0.0 to +0.0: the equivalence below compares bit
-                    // patterns, and IEEE min/max breaks ties by operand order.
+                    // Pin -0.0 to +0.0: the equivalence below compares bit patterns, and IEEE min/max breaks ties by operand order.
                     for c in p.iter_mut() {
                         if c.0 == 0.0 {
                             c.0 = 0.0;
@@ -1426,9 +1310,6 @@ mod chain_fusion_tests {
                     hole_pts.map(mk).into_iter().collect(),
                 );
                 let s = assert_same_verdict(&poly);
-                // On a completed walk, lines and chains cover the whole
-                // polygon; on an aborted one they cover the prefix. Both
-                // cases were already checked inside assert_equivalent.
                 prop_assert!(
                     s.chains.last().is_none_or(|c| c.end <= s.lines.len())
                 );

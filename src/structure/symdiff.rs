@@ -28,10 +28,7 @@ pub(crate) fn single_pass_fix_tuned(
     poly: &Polygon<f64>,
     tuning: &crate::core::Tuning,
 ) -> Option<MultiPolygon<f64>> {
-    // Routing gate: count total ring edges first (cheap O(n) scan). Above
-    // SP_MAX_EDGES the all-rings R-tree noding outweighs the boolean
-    // pipeline (measured 168 ms/poly on 200k-edge monsters vs ~36 ms) —
-    // return None so the caller's boolean pipeline handles the giants.
+    // pipeline (measured 168 ms/poly on 200k-edge monsters vs ~36 ms)
     let n_edges: usize = poly.exterior().0.len().saturating_sub(1)
         + poly
             .interiors()
@@ -42,7 +39,7 @@ pub(crate) fn single_pass_fix_tuned(
         return None;
     }
 
-    // 1. Collect + clean all ring linework (shell first, then holes).
+    // 1.
     let mut edges: Vec<Line<f64>> = Vec::new();
     for ring in core::iter::once(poly.exterior()).chain(poly.interiors()) {
         let Some(coords) = basic_cleanup(ring) else {
@@ -64,13 +61,13 @@ pub(crate) fn single_pass_fix_tuned(
         return None;
     }
 
-    // 2. Node everything together (R-tree/sweep-line, parametric splits).
+    // 2.
     let mut noded = crate::structure::edge_split::split_edges_tuned(&edges, tuning);
     if noded.is_empty() {
         return None;
     }
 
-    // 3. Noding validation with snap-round retry (same as fix_self_intersecting).
+    // 3.
     let mut validator = crate::noding::validator::NodingValidator::new(noded.clone());
     validator.validate();
     if validator.has_violations() {
@@ -87,7 +84,7 @@ pub(crate) fn single_pass_fix_tuned(
         return None;
     }
 
-    // 4. Even-odd face extraction (GEOS BuildArea port).
+    // 4.
     let mp = crate::structure::build_area::build_area(&noded)?;
     if mp.0.is_empty() {
         return None;
@@ -101,8 +98,6 @@ pub(crate) fn single_pass_fix_tuned(
 /// (even-odd rule), exactly like GEOS.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn make_valid_poly_symdiff(cut_edges: &[Line<f64>]) -> Vec<Polygon<f64>> {
-    // build_area snaps vertices to the SNAP_SCALE grid; snap the input edges
-    // the same way so boundary removal matches exactly.
     let snap = |c: Coord<f64>| Coord {
         x: (c.x * crate::core::SNAP_SCALE).round() / crate::core::SNAP_SCALE,
         y: (c.y * crate::core::SNAP_SCALE).round() / crate::core::SNAP_SCALE,
@@ -117,9 +112,6 @@ pub fn make_valid_poly_symdiff(cut_edges: &[Line<f64>]) -> Vec<Polygon<f64>> {
         guard += 1;
         if guard > 64 {
             warn!("make_valid_poly_symdiff: iteration guard exceeded");
-            // Hitting this guard means the loop is cycling rather than
-            // converging, and the answer would then depend on the guard's
-            // parity. Tests fail loudly instead of shipping that.
             #[cfg(test)]
             panic!("make_valid_poly_symdiff hit the iteration guard (non-convergence)");
             #[cfg(not(test))]
@@ -131,13 +123,7 @@ pub fn make_valid_poly_symdiff(cut_edges: &[Line<f64>]) -> Vec<Polygon<f64>> {
         if new_area.0.is_empty() {
             break;
         }
-        // XOR the new faces into the accumulated area (symdiff).
         area = symdiff_polygons(&area, &new_area.0);
-        // Remove the BOUNDARY of the built area from the cut edges. The
-        // boundary = segments appearing in exactly ONE face ring (internal
-        // edges appear in two adjacent faces, opposite directions — they
-        // stay in `remaining` for the next iteration). This mirrors GEOS's
-        // CascadedPolygonUnion dissolve before the boundary difference.
         let mut seg_counts: rustc_hash::FxHashMap<(u64, u64, u64, u64), usize> =
             rustc_hash::FxHashMap::default();
         for p in &new_area.0 {
@@ -186,7 +172,6 @@ pub fn make_valid_poly_symdiff(cut_edges: &[Line<f64>]) -> Vec<Polygon<f64>> {
         }
         remaining.retain(|l| {
             let key = segment_key(snap(l.start), snap(l.end));
-            // EXPERIMENT: consume every edge lying on the built boundary
             // (count >= 1), including count==2 internal edges.
             seg_counts.get(&key).copied().unwrap_or(0) == 0
         });
@@ -260,8 +245,6 @@ fn symdiff_polygons(a: &[Polygon<f64>], b: &[Polygon<f64>]) -> Vec<Polygon<f64>>
             out.push(q.clone());
         }
     }
-    // Faces of b not present in ORIGINAL a survive the XOR (defensive;
-    // normally none at iteration > 1 since b faces are a subset of a faces).
     let a_set: Vec<Vec<(u64, u64)>> = a.iter().map(fp).collect();
     for p in b {
         let pf = fp(p);

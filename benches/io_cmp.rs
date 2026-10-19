@@ -25,9 +25,8 @@ use geo_repair::{read_wkb_concat, read_wkt, write_wkb, write_wkt};
 
 const DATASET: &str = "benches/real_world/data_0.bin";
 
-// Kept dead on purpose: its presence pins the geo-types resolution for this
-// bench target (see benches/io_cmp.rs header). Do not remove without
-// re-verifying that `cargo bench` still compiles under both features.
+// Kept dead on purpose: its presence pins the geo-types resolution for this bench target (see benches/io_cmp.rs header).
+// Do not remove without re-verifying that `cargo bench` still compiles under both features.
 #[allow(dead_code)]
 fn load_geoms() -> Vec<Geometry<f64>> {
     if let Ok(path) = std::env::var("BENCH_FILE") {
@@ -74,13 +73,11 @@ fn main() {
     let n = geoms.len();
     eprintln!("[io_cmp] {n} geometries");
 
-    // ---- Ours: writes (timed), then shared inputs ----
     let (wkt, t_wktw) = timed(|| geoms.iter().map(write_wkt).collect::<Vec<_>>());
     let (wkb_blobs, t_wkbw) = timed(|| geoms.iter().map(write_wkb).collect::<Vec<_>>());
     let wkt_bytes: usize = wkt.iter().map(|s| s.len()).sum();
     let wkb_bytes: usize = wkb_blobs.iter().map(|b| b.len()).sum();
 
-    // Ours: reads
     let (ok_a, t_wktr) = timed(|| {
         let mut acc = 0usize;
         for s in &wkt {
@@ -103,7 +100,6 @@ fn main() {
         acc
     });
 
-    // Shared C-string lines for GEOS/GDAL (outside timed regions)
     #[cfg(any(feature = "bench-geos-system", feature = "bench-gdal-system"))]
     let wkt_lines: Vec<CString> = wkt
         .iter()
@@ -117,7 +113,6 @@ fn main() {
     eprintln!("read  WKB   : {}  (n {ok_b} concat)", fmt_us(t_wkbr, n));
     eprintln!("read  WKB   : {}  (per blob)", fmt_us(t_wkbr2, n));
 
-    // ---- GEOS (geos_c, system) ----
     #[cfg(feature = "bench-geos-system")]
     {
         use geos_ffi::*;
@@ -176,7 +171,6 @@ fn main() {
         }
     }
 
-    // ---- GDAL (OGR) ----
     #[cfg(feature = "bench-gdal-system")]
     {
         use gdal_ffi::*;
@@ -255,7 +249,6 @@ fn main() {
     }
 }
 
-// ---- Raw geos_c bindings (C API, same DLL the geos crate links) ----
 #[cfg(feature = "bench-geos-system")]
 mod geos_ffi {
     use std::ffi::{c_char, c_int, c_void};
@@ -296,7 +289,6 @@ mod geos_ffi {
     }
 }
 
-// ---- Raw OGR C API bindings (gdal.dll) ----
 #[cfg(feature = "bench-gdal-system")]
 mod gdal_ffi {
     use std::ffi::{c_char, c_int, c_void};

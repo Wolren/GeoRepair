@@ -99,27 +99,22 @@ pub fn build_graph(lines: &[Line<f64>]) -> Graph {
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn extract_all_faces_geos(graph: &Graph) -> Option<Vec<Vec<(usize, usize)>>> {
     let n_edges = graph.edges.len();
-    // Directed edge indexing: idx e = forward (from->to), idx n_edges+e = reverse.
-    // next[i] follows GEOS's PolygonizeDirectedEdge::next.
     let mut next: Vec<usize> = vec![0; n_edges * 2];
 
-    // ---- Step 1: computeNextCWEdges (maximal rings) -----------------------
+    // Step 1: computeNextCWEdges (maximal rings)
     // Edges around each node are stored in CCW order in sorted_adj (atan2 sort).
-    // For consecutive edges prev, curr in CCW order: sym(prev).next = curr.
-    // This yields the CW-facing rings (the "maximal" rings of the graph).
     for (v, neighbors) in graph.sorted_adj.iter().enumerate() {
         let deg = neighbors.len();
         if deg == 0 {
             continue;
         }
         if deg == 1 {
-            // Dangle: reverse of the single edge points back to its forward.
             let (_, e) = neighbors[0];
             let (fwd, rev) = dir_at_v(graph, e, v);
             next[rev] = fwd;
             continue;
         }
-        // neighbors sorted CCW by atan2. For i, prev = (i+deg-1)%deg.
+        // For i, prev = (i+deg-1)%deg.
         for i in 0..deg {
             let (_, e_curr) = neighbors[i];
             let (_, e_prev) = neighbors[(i + deg - 1) % deg];
@@ -129,16 +124,13 @@ pub fn extract_all_faces_geos(graph: &Graph) -> Option<Vec<Vec<(usize, usize)>>>
         }
     }
 
-    // ---- Step 2: findLabeledEdgeRings --------------------------------------
-    // Walk CW rings via `next`; assign one label per ring. Labels are stored
-    // PER DIRECTED EDGE (the sym of an edge belongs to the adjacent ring).
+    // Step 2: findLabeledEdgeRings
     let mut label: Vec<i64> = vec![-1; n_edges * 2];
     let mut next_label: i64 = 1;
     for start in 0..n_edges * 2 {
         if label[start] >= 0 {
             continue;
         }
-        // Walk the maximal ring containing `start`.
         let mut cur = start;
         let mut ring: Vec<usize> = Vec::new();
         loop {
@@ -159,10 +151,8 @@ pub fn extract_all_faces_geos(graph: &Graph) -> Option<Vec<Vec<(usize, usize)>>>
         next_label += 1;
     }
 
-    // ---- Step 3: convertMaximalToMinimalEdgeRings --------------------------
-    // For each labeled ring, rewire `next` at its intersection nodes
+    // Step 3: convertMaximalToMinimalEdgeRings
     // (nodes with degree > 1 within that label) via computeNextCCWEdges.
-    // This splits maximal rings into minimal rings (true faces).
     let mut ccw_next: Vec<usize> = next.clone();
     for v in 0..graph.verts.len() {
         let neighbors = &graph.sorted_adj[v];
@@ -170,7 +160,6 @@ pub fn extract_all_faces_geos(graph: &Graph) -> Option<Vec<Vec<(usize, usize)>>>
         if deg < 2 {
             continue;
         }
-        // Collect distinct labels present at this node.
         let mut labels_at_node: Vec<i64> = Vec::new();
         for &(_, e) in neighbors {
             let (de, sym) = dir_at_v(graph, e, v);
@@ -182,16 +171,10 @@ pub fn extract_all_faces_geos(graph: &Graph) -> Option<Vec<Vec<(usize, usize)>>>
             }
         }
         for lbl in labels_at_node {
-            // computeNextCCWEdges(node, label): iterate edges in CW order
-            // (reverse of CCW sorted_adj). For each edge: if de has the label
-            // it's an outgoing edge; if sym has the label it's incoming.
             let mut first_out: Option<usize> = None;
             let mut prev_in: Option<usize> = None;
             for i in (0..deg).rev() {
                 let (_, e) = neighbors[i];
-                // CRITICAL: the edge may be stored (v->to) or (to->v). Use
-                // dir_at_v to resolve which index is the forward (outgoing)
-                // direction at v and which is the sym (incoming).
                 let (de, sym) = dir_at_v(graph, e, v);
                 let mut out_de: Option<usize> = None;
                 if label[de] == lbl {
@@ -224,7 +207,7 @@ pub fn extract_all_faces_geos(graph: &Graph) -> Option<Vec<Vec<(usize, usize)>>>
         }
     }
 
-    // ---- Step 4: findEdgeRing — walk minimal CCW rings ---------------------
+    // Step 4: findEdgeRing: walk minimal CCW rings
     let mut used = vec![false; n_edges * 2];
     let mut faces: Vec<Vec<(usize, usize)>> = Vec::new();
     for start in 0..n_edges * 2 {
@@ -551,8 +534,7 @@ fn face_probe_point(
     if face.len() < 3 {
         return None;
     }
-    // First edge of the face: (v0 -> v1) where v1 = to0 is the traversal
-    // destination. The source vertex is the OTHER endpoint of the edge.
+    // First edge of the face: (v0 -> v1) where v1 = to0 is the traversal destination.
     let (e0, to0) = face[0];
     let (from0, to1) = graph_edges[e0];
     let v0 = if to1 == to0 { verts[from0] } else { verts[to1] };
@@ -561,11 +543,6 @@ fn face_probe_point(
         x: (v0.x + v1.x) * 0.5,
         y: (v0.y + v1.y) * 0.5,
     };
-    // WALKER CONVENTION: every face (bounded AND outer) is walked with the
-    // face interior on the RIGHT of the directed edge. Bounded faces come
-    // out CW (negative shoelace), the outer face comes out CCW (positive)
-    // — but both have their interior on the right. So the nudge is ALWAYS
-    // to the right; the shoelace sign alone would push the outer face probe
     // INTO the ring (winding 1 → mislabeled interior, measured).
     let scale = (mid.x.abs().max(mid.y.abs())).max(1.0);
     let eps = 1e-9 * scale;
@@ -602,9 +579,6 @@ fn winding_number(ring: &[Coord<f64>], pt: Coord<f64>) -> i32 {
     wn
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 #[path = "fix_ring_graph_tests.rs"]

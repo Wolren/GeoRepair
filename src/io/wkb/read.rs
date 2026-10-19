@@ -11,8 +11,6 @@ use std::io::Read;
 /// (stack overflow is an uncatchable abort).
 const MAX_WKB_NESTING: usize = 256;
 
-// Reader
-// ---------------------------------------------------------------------------
 
 /// Parse a single WKB geometry from `buf`. Returns the 2D geometry.
 ///
@@ -23,9 +21,6 @@ pub fn read_wkb(buf: &[u8]) -> Result<Geometry<f64>, WkbError> {
     let mut pos = 0;
     let mut dummy_extra = Vec::new();
     let (geom, _, _, _) = read_geometry_inner(buf, &mut pos, &mut dummy_extra, 0)?;
-    // Strict single-geometry parse: trailing bytes mean the buffer was
-    // truncated, concatenated, or garbage - surface it instead of silently
-    // dropping data. Use read_wkb_concat for multi-geometry buffers.
     if pos != buf.len() {
         return Err(WkbError::TrailingBytes {
             consumed: pos,
@@ -80,8 +75,6 @@ pub(crate) fn read_geometry_inner(
     depth: usize,
 ) -> Result<(Geometry<f64>, Option<i32>, u8, u32), WkbError> {
     if depth > MAX_WKB_NESTING {
-        // Same class as a count overflowing the buffer: the document is
-        // corrupt/abusive, not deeply meaningful geometry.
         return Err(WkbError::UnexpectedEof);
     }
     let le = read_byte_order(buf, pos)?;
@@ -114,8 +107,7 @@ pub(crate) fn read_geometry_inner(
             read_polygon_inner(buf, pos, le, dims as u32, extra_coords).map(Geometry::Polygon)
         }
         WKB_MULTIPOINT => {
-            // Each sub-geometry needs at least a 5-byte header (byte order
-            // + type code); the recursion enforces the rest.
+            // Each sub-geometry needs at least a 5-byte header (byte order + type code); the recursion enforces the rest.
             let n = read_bounded_count(buf, pos, le, 5)?;
             let mut points = Vec::with_capacity(n);
             for _ in 0..n {
@@ -227,9 +219,7 @@ fn read_u32(buf: &[u8], pos: &mut usize, le: bool) -> Result<u32, WkbError> {
     // SAFETY: bounds checked above. read_unaligned handles misalignment on x86_64/aarch64.
     let v = unsafe { (buf.as_ptr().add(*pos) as *const u32).read_unaligned() };
     *pos += 4;
-    // cfg!() is constant-folded. On x86_64 (LE), this simplifies to:
-    //   le == true  -> v (direct, no conversion)
-    //   le == false -> v.swap_bytes()
+    // On x86_64 (LE), this simplifies to: le == true -> v (direct, no conversion) le == false -> v.swap_bytes()
     Ok(if cfg!(target_endian = "little") == le {
         v
     } else {
@@ -244,7 +234,7 @@ fn read_f64(buf: &[u8], pos: &mut usize, le: bool) -> Result<f64, WkbError> {
         return Err(WkbError::UnexpectedEof);
     }
     // SAFETY: bounds checked above. read_unaligned handles misalignment on x86_64/aarch64.
-    // On x86_64 (LE) with le=true: loads directly into an XMM register — zero copy, zero conversion.
+    // On x86_64 (LE) with le=true: loads directly into an XMM register: zero copy, zero conversion.
     let v = unsafe { (buf.as_ptr().add(*pos) as *const f64).read_unaligned() };
     *pos += 8;
     Ok(if cfg!(target_endian = "little") == le {
@@ -254,9 +244,6 @@ fn read_f64(buf: &[u8], pos: &mut usize, le: bool) -> Result<f64, WkbError> {
     })
 }
 
-// ---------------------------------------------------------------------------
-// Batch coordinate reader: reads N coordinates with a single bounds check.
-// ---------------------------------------------------------------------------
 
 #[inline]
 fn read_coords_batch(
@@ -275,7 +262,7 @@ fn read_coords_batch(
     let start = *pos;
     *pos += byte_size;
 
-    // Fast path: native endian, 2D only — bulk-copy raw bytes into Vec
+    // Fast path: native endian, 2D only: bulk-copy raw bytes into Vec
     if le == cfg!(target_endian = "little") && dims == 2 {
         let mut coords = Vec::<Coord<f64>>::with_capacity(n);
         unsafe {
@@ -362,8 +349,7 @@ fn read_polygon_inner(
     extra_coords: &mut Vec<f64>,
 ) -> Result<Polygon<f64>, WkbError> {
     // Each ring needs at least its 4-byte count field; an EMPTY ring
-    // (count 0) is legal and consumes nothing more. The per-ring coord
-    // reads enforce the actual coordinate bytes.
+    // (count 0) is legal and consumes nothing more.
     let n_rings = read_bounded_count(buf, pos, le, 4)?;
     if n_rings == 0 {
         return Ok(Polygon::new(LineString::new(vec![]), vec![]));
@@ -376,9 +362,6 @@ fn read_polygon_inner(
     Ok(Polygon::new(exterior, holes))
 }
 
-// ---------------------------------------------------------------------------
-// Writer (little-endian)
-// ---------------------------------------------------------------------------
 
 pub fn read_wkb_concat(buf: &[u8]) -> Result<Vec<Geometry<f64>>, WkbError> {
     let mut offset = 0;

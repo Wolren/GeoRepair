@@ -49,7 +49,6 @@ pub(crate) fn node_line_string<T: NodingFloat>(ls: &LineString<T>) -> Geometry<T
         return empty();
     }
 
-    // Check for self-intersections by testing all non-adjacent edge pairs
     let edges: Vec<Line<T>> = deduped.windows(2).map(|w| Line::new(w[0], w[1])).collect();
 
     let has_self_intersection = check_self_intersections(&edges);
@@ -134,7 +133,6 @@ pub(crate) fn node_line_string<T: NodingFloat>(ls: &LineString<T>) -> Geometry<T
         }
     }
 
-    // Reconstruct linestrings from split edges (connect touching edges)
     let linestrings = reconnect_edges(split_edges);
 
     if linestrings.is_empty() {
@@ -422,11 +420,9 @@ fn reconnect_edges_by_key<T: NodingFloat>(edges: Vec<Line<T>>) -> Vec<LineString
         chain.push(edges[start_idx].end);
         used[start_idx] = true;
 
-        // Extend chain from its last vertex (matches old swap_remove rev-scan order)
         loop {
             let last_key = NodingFloat::coord_hash_key(&chain[chain.len() - 1]);
 
-            // Check forward start-matches (high index first, matching old rev() scan)
             let fwd: Option<usize> = start_map.get(&last_key).and_then(|cands| {
                 cands.iter().copied().rev().find(|&idx| {
                     !used[idx] && edges[idx].start == *chain.last().expect("non-empty chain")
@@ -438,7 +434,6 @@ fn reconnect_edges_by_key<T: NodingFloat>(edges: Vec<Line<T>>) -> Vec<LineString
                 continue;
             }
 
-            // Check backward end-matches (edge whose end == chain's last vertex)
             let bwd: Option<usize> = end_map.get(&last_key).and_then(|cands| {
                 cands.iter().copied().rev().find(|&idx| {
                     !used[idx] && edges[idx].end == *chain.last().expect("non-empty chain")

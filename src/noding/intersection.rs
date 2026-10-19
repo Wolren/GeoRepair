@@ -4,11 +4,7 @@ use alloc::vec::Vec;
 use core::mem;
 use geo::{Coord, GeoFloat, Line};
 
-// ── Sealed trait: safe f64 downcast ────────────────────────────────────
-//
-// Only f64 and f32 implement NodingFloat.  Inside the f64‑only helpers no
-// unsafe code appears — safe `.to_f64()` conversions are used at the
-// dispatch boundary.
+// Only f64 and f32 implement NodingFloat.
 
 mod private {
     use geo::{Coord, GeoFloat};
@@ -59,13 +55,10 @@ pub(crate) fn check_self_intersections<T: GeoFloat>(edges: &[Line<T>]) -> bool {
         return false;
     }
 
-    // Radial geometry fast path: all edges share a common endpoint so
-    // no non-adjacent pair can properly cross — only touch at that point.
     if is_radial(edges) {
         return false;
     }
 
-    // R‑tree path for large edge sets (safe conversion, no transmute)
     #[cfg(feature = "rstar")]
     if edges.len() >= 64 {
         let edges_f64: Vec<Line<f64>> = edges
@@ -86,7 +79,6 @@ pub(crate) fn check_self_intersections<T: GeoFloat>(edges: &[Line<T>]) -> bool {
         return check_self_intersections_f64(&edges_f64, 1e-12);
     }
 
-    // Brute force for smaller edge sets or when rstar unavailable
     for i in 0..edges.len() {
         for j in (i + 2)..edges.len() {
             let e1 = &edges[i];
@@ -206,8 +198,7 @@ pub(crate) fn edges_intersect<T: GeoFloat>(e1: &Line<T>, e2: &Line<T>, eps: T) -
     if e1.end == e2.end && orient2d_generic(e1.end, e1.start, e2.start) != T::zero() {
         return false;
     }
-    // For f64, use robust orient2d (Shewchuk's algorithm)
-    // to avoid false negatives with near-collinear edges at large coordinates.
+    // For f64, use robust orient2d (Shewchuk's algorithm) to avoid false negatives with near-collinear edges at large coordinates.
     if mem::size_of::<T>() == 8 {
         return edges_intersect_f64_robust(
             &Line::new(
@@ -238,17 +229,14 @@ pub(crate) fn edges_intersect<T: GeoFloat>(e1: &Line<T>, e2: &Line<T>, eps: T) -
     let o3 = orient2d_generic(e2.start, e2.end, e1.start);
     let o4 = orient2d_generic(e2.start, e2.end, e1.end);
 
-    // General case (proper crossing)
     if o1.abs() > eps && o2.abs() > eps && o3.abs() > eps && o4.abs() > eps {
         return o1.signum() != o2.signum() && o3.signum() != o4.signum();
     }
 
-    // Collinear case: check for interval overlap along the shared line
     if o1.abs() <= eps && o2.abs() <= eps && o3.abs() <= eps && o4.abs() <= eps {
         return collinear_overlap(e1, e2, eps);
     }
 
-    // Endpoint touching — not considered an intersection for noding purposes
     false
 }
 
@@ -303,7 +291,6 @@ fn collinear_overlap<T: GeoFloat>(e1: &Line<T>, e2: &Line<T>, eps: T) -> bool {
     let lo = T::zero().max(t2_min);
     let hi = T::one().min(t2_max);
 
-    // True if overlap covers more than epsilon-length
     lo + eps < hi
 }
 
@@ -380,7 +367,7 @@ pub(crate) fn compute_intersection_param<T: GeoFloat>(
     e2: &Line<T>,
     eps: T,
 ) -> Option<(T, T, Coord<T>)> {
-    // For f64: GEOS-style two-phase — orient2d detection then DD computation.
+    // For f64: GEOS-style two-phase: orient2d detection then DD computation.
     if core::mem::size_of::<T>() == 8 {
         let ef1 = Line::new(
             Coord {
@@ -402,8 +389,7 @@ pub(crate) fn compute_intersection_param<T: GeoFloat>(
                 y: e2.end.y.to_f64().expect("to_f64"),
             },
         );
-        // Phase 1: Detection via batch robust orient2d (SIMD fast path +
-        // Shewchuk adaptive-precision fallback for near-zero results).
+        // Phase 1: Detection via batch robust orient2d (SIMD fast path + Shewchuk adaptive-precision fallback for near-zero results).
         let batch = crate::simd::orient2d_batch_4_robust(
             &[ef1.start, ef1.start, ef2.start, ef2.start],
             &[ef1.end, ef1.end, ef2.end, ef2.end],
@@ -411,8 +397,6 @@ pub(crate) fn compute_intersection_param<T: GeoFloat>(
         );
         let (o1, o2, o3, o4) = (batch[0], batch[1], batch[2], batch[3]);
 
-        // Quick rejection: both endpoints of one segment on the same side
-        // of the other segment → they cannot intersect (fast path).
         if o1.signum() == o2.signum() && o1 != 0.0 && o2 != 0.0 {
             return None;
         }
@@ -420,10 +404,7 @@ pub(crate) fn compute_intersection_param<T: GeoFloat>(
             return None;
         }
 
-        // Phase 2: Computation via DD (106-bit mantissa) for any
-        // non-trivially-separated case: proper crossing, endpoint-on-
-        // segment, or near-parallel.  Let caller handle collinear
-        // overlap via `None`.
+        // Phase 2: Computation via DD (106-bit mantissa) for any non-trivially-separated case: proper crossing, endpoint-on-segment, or near-parallel.
         return compute_intersection_param_dd(&ef1, &ef2).map(|(t, u, pt)| {
             (
                 T::from(t).expect("intersection param in range"),

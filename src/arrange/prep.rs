@@ -23,7 +23,6 @@ pub fn prepare_lines(lines: Vec<Line<f64>>) -> Result<PreparedLines, MakeValidEr
             }
         }
     }
-    // Use grid-hashed spatial lookup for O(n) snap dedup
     let snap_radius = 1e-8;
     let cell_size = snap_radius * 2.0;
     let mut grid: FxHashMap<(i64, i64), Coord<f64>> = FxHashMap::default();
@@ -117,7 +116,6 @@ fn coord_cmp(a: Coord<f64>, b: Coord<f64>) -> core::cmp::Ordering {
 }
 
 fn on_segment(a: Coord<f64>, b: Coord<f64>, c: Coord<f64>, eps: f64) -> bool {
-    // Must be collinear
     if orient2d(a, b, c).abs() > eps {
         return false;
     }
@@ -142,7 +140,6 @@ fn segment_intersection(
     let o3 = orient2d(c, d, a);
     let o4 = orient2d(c, d, b);
 
-    // Proper intersection (segments cross at interior points)
     if o1.abs() > eps && o2.abs() > eps && o3.abs() > eps && o4.abs() > eps {
         let s1 = o1.signum() != o2.signum();
         let s2 = o3.signum() != o4.signum();
@@ -161,10 +158,8 @@ fn segment_intersection(
         return None;
     }
 
-    // Collinear or touching cases
     let collinear = o1.abs() < eps && o2.abs() < eps;
     if !collinear {
-        // Endpoint touching — check if any endpoint lies on the other segment
         if o1.abs() < eps && on_segment(a, b, c, eps) {
             return Some(vec![c]);
         }
@@ -180,7 +175,6 @@ fn segment_intersection(
         return None;
     }
 
-    // Collinear overlap
     let dx = b.x - a.x;
     let dy = b.y - a.y;
     let len2 = dx * dx + dy * dy;
@@ -323,9 +317,6 @@ fn project_param(line: &Line<f64>, pt: Coord<f64>) -> f64 {
 mod tests {
     use super::*;
 
-    // -------------------------------
-    // odd_even_filter
-    // -------------------------------
 
     #[test]
     fn test_odd_even_filter_empty() {
@@ -368,16 +359,12 @@ mod tests {
         let l = Line::new(Coord { x: 1.0, y: 1.0 }, Coord { x: 0.0, y: 0.0 });
         let mut lines = vec![l];
         odd_even_filter(&mut lines);
-        // Start should be < end lexicographically
         assert!(
             lines[0].start.x < lines[0].end.x
                 || (lines[0].start.x == lines[0].end.x && lines[0].start.y < lines[0].end.y)
         );
     }
 
-    // -------------------------------
-    // segment_intersection
-    // -------------------------------
 
     #[test]
     fn test_segment_intersection_proper_crossing() {
@@ -481,9 +468,6 @@ mod tests {
         assert!(result.is_none());
     }
 
-    // -------------------------------
-    // on_segment
-    // -------------------------------
 
     #[test]
     fn test_on_segment_midpoint() {
@@ -535,9 +519,6 @@ mod tests {
         ));
     }
 
-    // -------------------------------
-    // coord_greater / coord_cmp
-    // -------------------------------
 
     #[test]
     fn test_coord_greater_x() {
@@ -571,9 +552,6 @@ mod tests {
         ));
     }
 
-    // -------------------------------
-    // project_param
-    // -------------------------------
 
     #[test]
     fn test_project_param_midpoint() {
@@ -610,9 +588,6 @@ mod tests {
         assert!((t - 0.5).abs() < 1e-12);
     }
 
-    // -------------------------------
-    // snap_or_push_grid
-    // -------------------------------
 
     #[test]
     fn test_snap_or_push_new() {
@@ -658,9 +633,6 @@ mod tests {
         assert_eq!(grid.len(), 1);
     }
 
-    // -------------------------------
-    // prepare_lines integration
-    // -------------------------------
 
     #[test]
     fn test_prepare_lines_empty() {
@@ -750,7 +722,6 @@ mod tests {
 
         let lines: Vec<_> = poly.lines_iter().collect();
 
-        // warmup
         for _ in 0..100 {
             let _ = has_no_intersections(&lines);
         }
@@ -776,7 +747,6 @@ mod tests {
         let d = start.elapsed();
         println!("poly_has_basic_form x1000: {:?}, per: {:?}", d, d / 1000);
 
-        // Does has_no_intersections return true?
         let hni = has_no_intersections(&lines);
         println!("has_no_intersections returned: {hni}");
 

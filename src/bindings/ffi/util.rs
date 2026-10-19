@@ -29,7 +29,6 @@ pub(crate) fn wkt_from_cstr(wkt: *const c_char) -> Result<Geometry<f64>, GeoRepa
     if wkt.is_null() {
         return Err(GeoRepairErrorCode::InvalidInput);
     }
-    // SAFETY: caller guarantees a valid NUL-terminated string.
     let text = match unsafe { CStr::from_ptr(wkt) }.to_str() {
         Ok(t) => t,
         Err(_) => return Err(GeoRepairErrorCode::Parse),
@@ -78,6 +77,3 @@ pub(crate) fn all_error_reasons(geom: &Geometry<f64>) -> String {
         .join("; ")
 }
 
-// ---------------------------------------------------------------------------
-// WKB: repair
-// ---------------------------------------------------------------------------

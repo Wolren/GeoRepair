@@ -12,8 +12,7 @@ fn test_point_valid() {
 fn test_point_nan() {
     // Point(NaN, NaN) is the geo representation of POINT EMPTY - valid OGC
     assert!(Point::new(f64::NAN, f64::NAN).is_valid());
-    // A single NaN ordinate is invalid (GEOS TestValid: "P - invalid
-    // NaN X ordinate" expects isValid=false; CoordinateNaN).
+    // A single NaN ordinate is invalid (GEOS TestValid: "P - invalid NaN X ordinate" expects isValid=false; CoordinateNaN).
     assert!(!Point::new(f64::NAN, 2.0).is_valid());
     assert!(!Point::new(2.0, f64::NAN).is_valid());
     assert!(Point::new(1.0, 2.0).is_valid());
@@ -184,7 +183,6 @@ fn test_multipolygon_overlapping() {
 
 #[test]
 fn test_multipolygon_shells_cross() {
-    // Two shells that cross (neither contains the other's first point)
     let mp = MultiPolygon::new(vec![
         Polygon::new(
             LineString::new(vec![
@@ -575,14 +573,7 @@ fn test_degenerate_exterior_collinear_x() {
 
 #[test]
 fn retrace_ring_flags_self_intersection_both_windings() {
-    // fuzz-nightly class C (run 35578735657, 2026-09-21): the closing
-    // edge of this ring doubles back over part of the first edge. The
-    // collinear-overlap test compared a parameter fraction (a ratio to the
-    // parameterized segment's own length) on the a-side only, so the
-    // verdict flipped with segment direction: the CW input reported only
-    // WrongOrientation while the identical re-wound geometry reported
-    // SelfIntersection, and a fast-path gate certificate did not survive
-    // the OGC re-winding. Both windings must agree.
+    // fuzz-nightly class C (run 35578735657, 2026-09-21): the closing edge of this ring doubles back over part of the first edge.
     let coords = vec![
         Coord {
             x: 0.0,

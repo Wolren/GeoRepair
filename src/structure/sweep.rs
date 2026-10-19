@@ -58,8 +58,7 @@ pub(crate) fn has_proper_self_crossing_sweep(
     let tree = RTree::bulk_load(edges);
 
     for i in 0..n_edges {
-        // Skip phantom segments (closure-vertex boundary lines that don't
-        // exist in the geometry) when QUERYING too.
+        // Skip phantom segments (closure-vertex boundary lines that don't exist in the geometry) when QUERYING too.
         if is_phantom_segment(i, ring_offsets) {
             continue;
         }
@@ -69,7 +68,6 @@ pub(crate) fn has_proper_self_crossing_sweep(
             if j <= i {
                 return ::core::ops::ControlFlow::Continue(());
             }
-            // Same-ring adjacent segments share an endpoint by construction.
             if segments_adjacent_in_ring(i, j, ring_offsets) {
                 return ::core::ops::ControlFlow::Continue(());
             }
@@ -102,10 +100,7 @@ pub(crate) fn has_proper_self_crossing_sweep(
                     coords[j + 1],
                 )
             {
-                // Same-ring vertex-on-edge self-touch (T-junction): GEOS
-                // rejects a ring vertex on a non-adjacent edge (Test 22).
-                // Cross-ring pairs stay untouched (hole vertex on shell
-                // edge is a VALID OGC touch).
+                // Same-ring vertex-on-edge self-touch (T-junction): GEOS rejects a ring vertex on a non-adjacent edge (Test 22).
                 ::core::ops::ControlFlow::Break(())
             } else {
                 ::core::ops::ControlFlow::Continue(())
@@ -147,7 +142,6 @@ fn segments_adjacent_in_ring(i: usize, j: usize, ring_offsets: &[usize]) -> bool
     if is_phantom_segment(j, ring_offsets) {
         return true;
     }
-    // Find the ring containing i (offsets are sorted; last ring runs to end).
     let mut r = 0;
     for (k, &off) in ring_offsets.iter().enumerate() {
         if off > i {
@@ -157,7 +151,6 @@ fn segments_adjacent_in_ring(i: usize, j: usize, ring_offsets: &[usize]) -> bool
     }
     let start = ring_offsets[r];
     let end = ring_offsets.get(r + 1).copied().unwrap_or(usize::MAX);
-    // Segment k spans [k, k+1); the ring's real segments are [start, end-2]
     // (end-1 is the phantom spanning into the next ring).
     let seg_end = end.saturating_sub(1);
     let in_ring = |s: usize| s >= start && s < seg_end;
@@ -167,7 +160,6 @@ fn segments_adjacent_in_ring(i: usize, j: usize, ring_offsets: &[usize]) -> bool
     if j == i + 1 {
         return true;
     }
-    // First and last real segment of a closed ring share the closure vertex.
     j == start && i == seg_end - 1
 }
 
@@ -232,9 +224,7 @@ impl StrIndex {
             ca.partial_cmp(&cb).unwrap_or(::core::cmp::Ordering::Equal)
         };
 
-        // Pass 1 (top-down): sort each level's ranges by the level's axis,
-        // then split every range into sqrt(leaves-below) children. Record
-        // each range's parent node index for the child-pointer pass.
+        // Pass 1 (top-down): sort each level's ranges by the level's axis, then split every range into sqrt(leaves-below) children.
         let mut level_ranges: Vec<Vec<::core::ops::Range<usize>>> = Vec::new();
         let mut level_parents: Vec<Vec<u32>> = Vec::new();
         let mut ranges: Vec<::core::ops::Range<usize>> = ::core::iter::once(0..n).collect();
@@ -244,12 +234,8 @@ impl StrIndex {
             #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
             {
                 use rayon::prelude::*;
-                // Ranges partition `order` without overlap (consecutive
-                // splits of a partition), so each worker may sort its own
-                // disjoint slice. The base pointer travels as usize (Sync).
                 let order_base = order.as_mut_ptr() as usize;
                 ranges.par_iter().for_each(|r| {
-                    // SAFETY: disjoint ranges, one worker per range.
                     let slice: &mut [u32] = unsafe {
                         std::slice::from_raw_parts_mut(
                             (order_base as *mut u32).add(r.start),
@@ -288,9 +274,7 @@ impl StrIndex {
         level_ranges.push(ranges);
         level_parents.push(parents);
 
-        // Pass 2 (bottom-up): leaves first, then internal levels. Node k's
-        // children are the contiguous block in the level below whose parent
-        // indices equal k (ranges are created in parent order).
+        // Pass 2 (bottom-up): leaves first, then internal levels.
         let n_levels = level_ranges.len();
         let mut levels: Vec<Vec<StrNode>> = Vec::with_capacity(n_levels);
 
@@ -319,7 +303,6 @@ impl StrIndex {
 
         while let Some(ranges) = level_ranges.pop() {
             let node_count = ranges.len();
-            // Child blocks into the already-built level below.
             let mut counts = vec![0u32; node_count];
             for &p in &next_parents {
                 counts[p as usize] += 1;
@@ -423,10 +406,7 @@ pub(crate) fn has_self_intersections(coords: &[Coord<f64>], eps: f64) -> bool {
         );
     }
 
-    // Per-edge queries are independent — parallelize with find_any, which
-    // short-circuits the whole search on the first crossing while still
-    // splitting the 260k-edge giant shells across workers. Same pair
-    // semantics as the serial loop below (identical closure body).
+    // splitting the 260k-edge giant shells across workers.
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     {
         use rayon::prelude::*;
@@ -536,8 +516,7 @@ pub(crate) fn find_second_intersection(
             if j <= i {
                 return false;
             }
-            // The pair try_fast_fix already split at is not a "second"
-            // crossing (i0 < j0 by construction of find_first_intersection).
+            // The pair try_fast_fix already split at is not a "second" crossing (i0 < j0 by construction of find_first_intersection).
             if i == i0 && j == j0 {
                 return false;
             }

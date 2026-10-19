@@ -59,8 +59,7 @@ pub struct GeoRepairResult {
 impl GeoRepairResult {
     pub(crate) fn success(wkb: Vec<u8>) -> Self {
         if wkb.is_empty() {
-            // Empty output (valid-input validate): no buffer at all. The
-            // contract is wkb_data non-null iff wkb_len > 0.
+            // The contract is wkb_data non-null iff wkb_len > 0.
             return Self {
                 success: true,
                 error_code: GeoRepairErrorCode::None,
@@ -227,6 +226,3 @@ impl GeoRepairBatchResult {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Input helpers
-// ---------------------------------------------------------------------------

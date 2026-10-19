@@ -51,7 +51,6 @@ static void check_result_valid(GeoRepairResult *r, const char *what)
     }
 }
 
-/* Little-endian WKB polygon with a single ring of (x, y) pairs. */
 static uint8_t *wkb_polygon(const double *pts, size_t n_pts, size_t *out_len)
 {
     size_t len = 1 + 4 + 4 + 4 + n_pts * 2 * 8;
@@ -91,19 +90,16 @@ int main(void)
     uint8_t *bt = wkb_polygon(bowtie_pts, 5, &bt_len);
     uint8_t garbage[] = {0x01, 0x02, 0x03, 0x04};
 
-    /* --- Version --- */
     const char *v = geo_repair_version();
     CHECK(v != NULL && strlen(v) > 0, "version must be non-empty");
     CHECK(strchr(v, '.') != NULL, "version must be semver-shaped");
 
-    /* --- is_valid --- */
     CHECK(is_valid_wkb_bytes(sq, sq_len) == 1, "square must be valid");
     CHECK(is_valid_wkb_bytes(bt, bt_len) == 0, "bowtie must be invalid");
     CHECK(geo_repair_is_valid(garbage, sizeof(garbage)) == 0,
           "garbage must not crash is_valid");
     CHECK(geo_repair_is_valid(NULL, 0) == 0, "null input must not crash is_valid");
 
-    /* --- make_valid --- */
     GeoRepairResult r = geo_repair_make_valid(bt, bt_len);
     check_result_valid(&r, "geo_repair_make_valid(bowtie)");
     CHECK(r.wkb_len > 0, "repaired output must have bytes");
@@ -117,7 +113,6 @@ int main(void)
           "valid square must stay valid");
     geo_repair_free_result(&r);
 
-    /* --- make_valid with config (Auto/Arrange/Structure) --- */
     for (uint8_t method = 0; method <= 2; method++) {
         r = geo_repair_make_valid_with_config(bt, bt_len, 0, method);
         check_result_valid(&r, "make_valid_with_config");
@@ -130,7 +125,6 @@ int main(void)
     check_result_valid(&r, "make_valid_with_config_full");
     geo_repair_free_result(&r);
 
-    /* --- Error paths --- */
     r = geo_repair_make_valid(NULL, 0);
     CHECK(!r.success && r.error_code == GeoRepairErrorCode_InvalidInput,
           "null input must be InvalidInput");
@@ -142,7 +136,6 @@ int main(void)
           "garbage must be Parse");
     geo_repair_free_result(&r);
 
-    /* --- validate --- */
     r = geo_repair_validate(sq, sq_len);
     CHECK(r.success && r.error_code == GeoRepairErrorCode_None,
           "valid geometry must validate clean");
@@ -157,7 +150,6 @@ int main(void)
           "invalid geometry must carry reasons");
     geo_repair_free_result(&r);
 
-    /* --- validate_reason (alias of validate) --- */
     {
         GeoRepairResult a = geo_repair_validate(bt, bt_len);
         GeoRepairResult b = geo_repair_validate_reason(bt, bt_len);
@@ -169,7 +161,6 @@ int main(void)
         geo_repair_free_result(&b);
     }
 
-    /* --- validate_and_fix --- */
     r = geo_repair_validate_and_fix(bt, bt_len);
     CHECK(r.success, "validate_and_fix(bowtie)");
     CHECK(r.error_code == GeoRepairErrorCode_InvalidGeometry,
@@ -193,14 +184,12 @@ int main(void)
           "configured validate_and_fix must be valid");
     geo_repair_free_result(&r);
 
-    /* --- Double-free safety --- */
     r = geo_repair_make_valid(bt, bt_len);
     CHECK(r.success, "make_valid for double-free test");
     geo_repair_free_result(&r);
     geo_repair_free_result(&r); /* must be a no-op */
     geo_repair_free_result(NULL); /* must be a no-op */
 
-    /* --- WKT surface --- */
     {
         GeoRepairStringResult sr = geo_repair_make_valid_wkt(
             "POLYGON((0 0, 5 5, 5 0, 0 5, 0 0))");
@@ -245,14 +234,12 @@ int main(void)
               "bad WKT must be Parse");
         geo_repair_free_string_result(&sr);
 
-        /* string double-free safety */
         sr = geo_repair_make_valid_wkt("POINT(1 2)");
         geo_repair_free_string_result(&sr);
         geo_repair_free_string_result(&sr);
         geo_repair_free_string_result(NULL);
     }
 
-    /* --- Batch --- */
     {
         GeoRepairWkbBuffer inputs[3] = {
             {sq, sq_len},
@@ -287,7 +274,6 @@ int main(void)
         CHECK(br.success && br.count == 0, "empty batch must succeed");
         geo_repair_free_batch_result(&br);
 
-        /* batch double-free safety */
         br = geo_repair_make_valid_batch(inputs, 1, 0);
         CHECK(br.success, "batch for double-free test");
         geo_repair_free_batch_result(&br);

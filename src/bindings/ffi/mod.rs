@@ -67,10 +67,8 @@ pub unsafe extern "C" fn geo_repair_free_result(result: *mut GeoRepairResult) {
     if result.is_null() {
         return;
     }
-    // SAFETY: caller guarantees result is a valid, non-null pointer.
     let r = unsafe { &mut *result };
     if !r.wkb_data.is_null() {
-        // SAFETY: the WKB buffer was allocated by Vec in success().
         unsafe { drop(Vec::from_raw_parts(r.wkb_data, r.wkb_len, r.wkb_len)) };
     }
     if !r.error_msg.is_null() {
@@ -99,10 +97,8 @@ pub unsafe extern "C" fn geo_repair_free_string_result(result: *mut GeoRepairStr
     if result.is_null() {
         return;
     }
-    // SAFETY: caller guarantees result is a valid, non-null pointer.
     let r = unsafe { &mut *result };
     if !r.data.is_null() {
-        // SAFETY: the string was allocated by CString.
         unsafe { drop(CString::from_raw(r.data)) };
     }
     if !r.error_msg.is_null() {
@@ -131,11 +127,8 @@ pub unsafe extern "C" fn geo_repair_free_batch_result(result: *mut GeoRepairBatc
     if result.is_null() {
         return;
     }
-    // SAFETY: caller guarantees result is a valid, non-null pointer.
     let r = unsafe { &mut *result };
     if !r.items.is_null() && r.count > 0 {
-        // SAFETY: the item array was allocated by Vec in success(). Each
-        // item owns its own buffers; free them before the array itself.
         let items = unsafe { std::slice::from_raw_parts_mut(r.items, r.count) };
         for item in items.iter_mut() {
             if !item.wkb_data.is_null() {

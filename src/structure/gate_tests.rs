@@ -79,8 +79,7 @@ mod gate_completeness {
     }
 
     fn t_junction_ring() -> Polygon<f64> {
-        // Closing vertex (110, 140) lies on edge (60, 90)-(160, 190):
-        // the GEOS XML Test 22 class - vertex-on-edge self-touch.
+        // Closing vertex (110, 140) lies on edge (60, 90)-(160, 190): the GEOS XML Test 22 class - vertex-on-edge self-touch.
         Polygon::new(
             ring(&[(60.0, 90.0), (160.0, 190.0), (260.0, 90.0), (110.0, 140.0)]),
             Vec::new(),
@@ -88,8 +87,7 @@ mod gate_completeness {
     }
 
     fn eps_collinear_sliver() -> Polygon<f64> {
-        // Two same-ring edges within 5e-14 of collinear overlap (the
-        // 32*EPS*scale collinear gate class; geo_bridge catches it).
+        // Two same-ring edges within 5e-14 of collinear overlap (the 32*EPS*scale collinear gate class; geo_bridge catches it).
         Polygon::new(
             ring(&[
                 (0.0, 0.0),
@@ -126,7 +124,6 @@ mod gate_completeness {
     }
 
     fn hole_touching_shell() -> Polygon<f64> {
-        // OGC-valid: a hole touching the shell at a single point.
         Polygon::new(
             ring(&[(0.0, 0.0), (0.0, 10.0), (10.0, 10.0), (10.0, 0.0)]),
             vec![ring(&[(0.0, 2.0), (2.0, 2.0), (2.0, 4.0), (0.0, 4.0)])],
@@ -134,7 +131,6 @@ mod gate_completeness {
     }
 
     fn hole_edge_overlapping_shell() -> Polygon<f64> {
-        // Hole edge collinear-overlapping the shell edge - invalid.
         Polygon::new(
             ring(&[(0.0, 0.0), (0.0, 10.0), (10.0, 10.0), (10.0, 0.0)]),
             vec![ring(&[(0.0, 2.0), (5.0, 2.0), (5.0, 4.0), (0.0, 4.0)])],
@@ -163,8 +159,6 @@ mod gate_completeness {
     }
 
     fn mixed_magnitude() -> Polygon<f64> {
-        // Big shell, micro ring inside: the poly-global eps would swamp
-        // the micro ring's tolerance - the gate must use per-ring eps.
         Polygon::new(
             ring(&[
                 (-5.0e6, -5.0e6),
@@ -203,10 +197,7 @@ mod gate_completeness {
         cases.push(bowtie_subdivided(4));
         cases.push(bowtie_subdivided(125));
         cases.push(mixed_magnitude());
-        // Extreme-magnitude closed triangle: exact orient ~1e-631, the
-        // robust predicate's collinear fallback sign is garbage - the
-        // Fast path must route it to arrange (fuzz
-        // invariant_mixed_fp_in_same_ring perm=1, keep_collapsed=true).
+        // Fast path must route it to arrange (fuzz invariant_mixed_fp_in_same_ring perm=1, keep_collapsed=true).
         cases.push(Polygon::new(
             LineString::new(vec![
                 Coord {
@@ -225,9 +216,7 @@ mod gate_completeness {
             ]),
             Vec::new(),
         ));
-        // Micro-magnitude sliver: the validator rejects envelopes thinner
-        // than f64::EPSILON (DegenerateExterior) even though the ring is
-        // valid at its own scale - the gate must route it to repair
+        // than f64::EPSILON (DegenerateExterior) even though the ring
         // (fuzz_inprocess_loop, 2026-08-07).
         cases.push(Polygon::new(
             LineString::new(vec![
@@ -251,10 +240,7 @@ mod gate_completeness {
             ]),
             Vec::new(),
         ));
-        // Near-parallel mixed-magnitude pair (the adaptive error bound
-        // class): a long edge + a short edge separated by ~1e-8 - the
-        // L2-based collinear margin flagged it, the product-sum bound
-        // does not (fuzz_inprocess_loop, 2026-08-07).
+        // Near-parallel mixed-magnitude pair (the adaptive error bound class): a long edge + a short edge separated by ~1e-8
         cases.push(Polygon::new(
             LineString::new(vec![
                 Coord { x: 5e-9, y: 9e-9 },
@@ -289,10 +275,7 @@ mod gate_completeness {
             match out {
                 crate::structure::FixOutcome::Fast(g, _, _, _) => {
                     let (g, ok) = enforce_ogc_winding(g);
-                    // The production contract: Fast + orientation-ok must be
-                    // validator-clean (the arms check orientation AFTER
-                    // re-winding; rings in the exact-orient ~0 zone route to
-                    // arrange there - e.g. case 31, the extreme triangle).
+                    // validator-clean (the arms check orientation AFTER re-winding; rings in the exact-orient ~0 zone route to arrange there - e.g. case)
                     if ok {
                         assert!(
                             is_valid_with_geo(&g),
@@ -313,12 +296,7 @@ mod gate_completeness {
 
     #[test]
     fn gate_rejects_negative_zero_pinch() {
-        // A (-0.0, y) / (+0.0, y) non-adjacent vertex pair is a pinch: the
-        // validator's key normalization (c.x + 0.0).to_bits() treats the
-        // two zeros as the same vertex. The gate's duplicate scan must
-        // agree or the Fast path ships a polygon the exit validator
-        // rejects (found by audit 2026-08-08; the fuzz never generated
-        // the sign-flipped pair).
+        // A (-0.0, y) / (+0.0, y) non-adjacent vertex pair is a pinch
         let mut coords = vec![
             Coord { x: 0.0, y: 0.0 },
             Coord { x: 10.0, y: 0.0 },
@@ -373,15 +351,11 @@ mod gate_completeness {
     fn gate_rejects_repeated_vertex_on_chain_path() {
         let clean = Polygon::new(LineString::new(ngon(40, 100.0, 500.0, 500.0)), Vec::new());
 
-        // Repeat vertex 1 at position 21: a non-adjacent repeat, so the ring
-        // touches itself at exactly that point. Both incident edges must be
-        // paired by the chain sweep for the gate to reject it.
+        // Repeat vertex 1 at position 21: a non-adjacent repeat, so the ring touches itself at exactly that point.
         let mut coords = ngon(40, 100.0, 500.0, 500.0);
         coords[21] = coords[1];
         let pinched = Polygon::new(LineString::new(coords), Vec::new());
 
-        // The clean ring must actually take the fast path, or the test is
-        // vacuous (it would pass by rejecting everything).
         match crate::structure::fix_polygon_owned(clean.clone(), &MakeValidConfig::default(), None)
         {
             crate::structure::FixOutcome::Fast(g, _, _, _) => {
@@ -399,8 +373,6 @@ mod gate_completeness {
             ),
         }
 
-        // The validator must agree that the pinched ring is invalid, or the
-        // gate is being asked to certify something the contract allows.
         assert!(
             !pinched.validate().valid,
             "validator accepted a non-adjacent repeated vertex"
@@ -515,8 +487,6 @@ mod ring_guards_agreement {
     #[test]
     fn matches_the_naive_rule_and_the_precollapse_pass() {
         let cases: Vec<Vec<Coord<f64>>> = vec![
-            // Unit square at the origin: axis-aligned edges plus zero
-            // ordinates, so both halves of the min rule are exercised.
             closed(vec![
                 Coord { x: 0.0, y: 0.0 },
                 Coord { x: 1.0, y: 0.0 },
@@ -539,8 +509,7 @@ mod ring_guards_agreement {
                     y: 1e12 + 4.0,
                 },
             ]),
-            // 1e-8 spike at 1e8 magnitude: the noise class the guard exists
-            // for (1e-8 < EPSILON * 1e8).
+            // 1e-8 spike at 1e8 magnitude: the noise class the guard exists for (1e-8 < EPSILON * 1e8).
             closed(vec![
                 Coord { x: 1e8, y: 1e8 },
                 Coord {
@@ -556,9 +525,8 @@ mod ring_guards_agreement {
                     y: 1e8 + 1.0,
                 },
             ]),
-            // Valid ring with a distant spike: the 2026-08-04 false positive
-            // the local rule was introduced to fix. Its 1-unit base edge must
-            // NOT read as sub-ULP.
+            // Valid ring with a distant spike: the 2026-08-04 false positive the local rule was introduced to fix.
+            // Its 1-unit base edge must
             closed(vec![
                 Coord { x: 0.0, y: 0.0 },
                 Coord { x: 1.0, y: 0.0 },

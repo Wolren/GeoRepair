@@ -99,7 +99,6 @@ fn corpus() -> Vec<Polygon<f64>> {
                 (5.0, 5.0),
             ])],
         ),
-        // Bowtie (proper crossing).
         Polygon::new(
             ring_of(&[
                 (0.0, 0.0),
@@ -140,12 +139,10 @@ fn corpus() -> Vec<Polygon<f64>> {
         ),
         // Short ring (2 distinct verts + closure).
         Polygon::new(ring_of(&[(1.0, 2.0), (3.0, 4.0), (1.0, 2.0)]), vec![]),
-        // Fully collinear ring (collapses).
         Polygon::new(
             ring_of(&[(0.0, 0.0), (5.0, 0.0), (10.0, 0.0), (0.0, 0.0)]),
             vec![],
         ),
-        // Repeated consecutive points.
         Polygon::new(
             ring_of(&[
                 (0.0, 0.0),
@@ -157,12 +154,10 @@ fn corpus() -> Vec<Polygon<f64>> {
             ]),
             vec![],
         ),
-        // Huge-magnitude valid shell.
         Polygon::new(
             ring_of(&[(100.0, 100.0), (1e15, 110.0), (1e15, 100.0), (100.0, 100.0)]),
             vec![],
         ),
-        // Micro-sliver at unit scale.
         Polygon::new(
             ring_of(&[
                 (0.0, 0.0),

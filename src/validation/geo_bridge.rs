@@ -165,16 +165,8 @@ mod tests {
 
     #[test]
     fn stricter_than_geo_collinear_sliver() {
-        // A 5e-14-tall sliver over a length-10 base: the two long edges lie
-        // 5e-14 apart (about 28 ulps at this scale) - genuinely separated,
-        // geometrically VALID, and GEOS accepts it. The old
+        // 5e-14 apart (about 28 ulps at this scale) - genuinely separated, geometrically VALID, and GEOS accepts it.
         // `32 * EPSILON * L^2` collinear gate swallowed near-parallel pairs
-        // (orient 5e-13 vs gate ~7.1e-13) and flagged a false
-        // SelfIntersection; with the adaptive per-orient error bound
-        // (2026-08-07) the orient 5e-13 is ~26 orders of magnitude above
-        // its rounding bound, so the sliver is correctly accepted - the
-        // strictness differential vs geo is the T-junction and exact-
-        // collinear classes, not length-inflated margins.
         let poly = Polygon::new(
             LineString::from(vec![
                 (0.0, 0.0),
@@ -187,14 +179,12 @@ mod tests {
         );
         let geometry = Geometry::Polygon(poly);
 
-        // geo's own engine: exact-only, accepts.
         use geo::algorithm::validation::Validation as GeoValidation;
         assert!(
             geometry.is_valid(),
             "geo exact validator accepts this input"
         );
 
-        // geo_repair engine through the bridge: accepts too (adaptive bound).
         let adapter = GeoRepairValidation(&geometry);
         assert!(
             adapter.is_valid(),
@@ -204,10 +194,7 @@ mod tests {
 
     #[test]
     fn flags_true_t_junction_that_geo_accepts() {
-        // The strictness differential: a ring vertex lying EXACTLY on a
-        // non-adjacent edge (T-junction). geo's exact validator passes it
-        // (no area test), geo_repair flags SelfIntersection (GEOS
-        // IsValidOp Test 22 also rejects it).
+        // geo_repair flags SelfIntersection (GEOS IsValidOp Test 22 also rejects it).
         let poly = Polygon::new(
             LineString::from(vec![
                 (0.0, 0.0),
@@ -228,10 +215,6 @@ mod tests {
 
     #[test]
     fn unmappable_classes_are_skipped_not_fabricated() {
-        // Clockwise exterior ring: geo_repair flags WrongOrientation (its
-        // rule table includes ring orientation); geo has no orientation rule
-        // in its InvalidPolygon taxonomy, so the adapter must stay silent
-        // rather than fabricate a wrong geo error.
         let geometry = poly(vec![
             (0.0, 0.0),
             (0.0, 10.0),

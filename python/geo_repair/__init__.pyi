@@ -13,7 +13,6 @@ __version__: str
 
 def version() -> str: ...
 
-# --- WKB (bytes) ---
 def repair_wkb(
     wkb: bytes, method: Optional[str] = None, keep_collapsed: Optional[bool] = None
 ) -> bytes: ...
@@ -40,7 +39,6 @@ def validate_and_fix_wkb_batch(
     wkbs: List[bytes], method: Optional[str] = None, keep_collapsed: Optional[bool] = None
 ) -> List[Tuple[bool, List[str], bytes]]: ...
 
-# --- WKT (text) ---
 def repair_wkt(
     wkt: str, method: Optional[str] = None, keep_collapsed: Optional[bool] = None
 ) -> str: ...

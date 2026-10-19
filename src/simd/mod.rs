@@ -28,9 +28,6 @@ use geo::{Coord, GeoFloat};
 
 use crate::orient::orient2d as orient2d_robust;
 
-// ============================================================================
-// Shared scalar helpers
-// ============================================================================
 
 #[cfg(not(feature = "simd-portable"))]
 fn scalar_orient2d_batch<T: GeoFloat>(
@@ -100,7 +97,6 @@ pub(crate) fn point_in_ring_inclusive(pt: Coord<f64>, coords: &[Coord<f64>]) -> 
     if n < 3 {
         return false;
     }
-    // Boundary check: point on any segment → inside.
     let eps = 1e-12;
     for i in 0..n - 1 {
         let a = coords[i];
@@ -116,12 +112,8 @@ pub(crate) fn point_in_ring_inclusive(pt: Coord<f64>, coords: &[Coord<f64>]) -> 
             }
         }
     }
-    // Strict interior via winding number.
     point_in_ring_exclusive(pt, coords)
 }
-// ============================================================================
-// Robust hybrid: fast path + error-bound check → exact fallback
-// ============================================================================
 
 pub(crate) fn orient2d_batch_4_robust(
     pa: &[Coord<f64>; 4],

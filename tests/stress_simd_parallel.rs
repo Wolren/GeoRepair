@@ -46,9 +46,7 @@ fn cfg_structure() -> MakeValidConfig {
     }
 }
 
-// =========================================================================
 // SECTION 1: Large polygon stress (1000+ vertices)
-// =========================================================================
 
 /// Regular polygon with 10000 vertices - stress test
 #[test]
@@ -95,9 +93,7 @@ fn stress_many_small_polygons() {
     }
 }
 
-// =========================================================================
 // SECTION 2: Serial vs Parallel consistency
-// =========================================================================
 
 /// Verify that serial and parallel MakeValid produce consistent valid results
 /// for MultiPoint
@@ -208,9 +204,7 @@ fn parallel_geometry_collection_consistency() {
     assert_valid(&parallel_result);
 }
 
-// =========================================================================
 // SECTION 3: All methods on large complex inputs
-// =========================================================================
 
 /// Complex bowtie with many segments
 #[test]
@@ -241,8 +235,6 @@ fn stress_complex_bowtie() {
             ..Default::default()
         };
         let result = poly.make_valid_with_config(&config);
-        // Complex bowtie: pipeline handles structural repair but our
-        // stricter validator may flag remaining winding or intersection issues.
         assert_not_empty(&result);
     }
 }

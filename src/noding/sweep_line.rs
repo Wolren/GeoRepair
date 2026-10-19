@@ -13,7 +13,6 @@ use geo::Line;
 
 use crate::orient::orient2d;
 
-// ── Events ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq)]
 enum EventKind {
@@ -31,7 +30,6 @@ struct Event {
     other: usize,
 }
 
-// ── Active set ──────────────────────────────────────────────────────────
 
 struct ActiveSet<'a> {
     edges: &'a [Line<f64>],
@@ -108,7 +106,6 @@ impl<'a> ActiveSet<'a> {
     }
 }
 
-// ── Crossing detection ──────────────────────────────────────────────────
 
 fn edges_cross(e1: &Line<f64>, e2: &Line<f64>, _eps: f64) -> bool {
     if e1.start == e2.start || e1.start == e2.end || e1.end == e2.start || e1.end == e2.end {
@@ -150,7 +147,6 @@ fn edge_intersection_xy(e1: &Line<f64>, e2: &Line<f64>) -> Option<(f64, f64)> {
     }
 }
 
-// ── Event ordering ──────────────────────────────────────────────────────
 
 fn event_cmp(a: &Event, b: &Event) -> core::cmp::Ordering {
     a.x.partial_cmp(&b.x)
@@ -180,7 +176,6 @@ fn pair_key(i: usize, j: usize) -> u64 {
     }
 }
 
-// ── Main sweep ──────────────────────────────────────────────────────────
 
 pub(crate) fn find_intersecting_pairs(edges: &[Line<f64>], eps: f64) -> Vec<(usize, usize)> {
     let n = edges.len();
@@ -188,7 +183,7 @@ pub(crate) fn find_intersecting_pairs(edges: &[Line<f64>], eps: f64) -> Vec<(usi
         return vec![];
     }
 
-    // 1. Build endpoint events
+    // 1.
     let mut events: Vec<Event> = Vec::with_capacity(n * 2);
     for (i, e) in edges.iter().enumerate() {
         let (left_pt, right_pt) =
@@ -215,8 +210,7 @@ pub(crate) fn find_intersecting_pairs(edges: &[Line<f64>], eps: f64) -> Vec<(usi
 
     events.sort_by(event_cmp);
 
-    // 2. Sweep — use a separate pending list for crossing events to avoid
-    //    borrow conflicts with the main event list.
+    // 2.
     let mut active = ActiveSet::new(edges);
     let mut results: Vec<(usize, usize)> = Vec::new();
     let mut seen: FxHashSet<u64> = FxHashSet::default();

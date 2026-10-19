@@ -33,9 +33,6 @@ use geo_repair::validation::{GeoValidation, GeometryValidationError};
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 use proptest::prelude::*;
 
-// =========================================================================
-// Assertion helpers
-// =========================================================================
 
 /// Assert geometry is valid per OGC Simple Features.
 /// Accepts empty GeometryCollection as valid (graceful degradation).
@@ -179,8 +176,6 @@ fn assert_valid_ogc(g: &Geometry<f64>) {
 fn assert_idempotent(g: &Geometry<f64>, config: &MakeValidConfig) {
     let first = g.make_valid_with_config(config);
     let second = first.make_valid_with_config(config);
-    // Idempotency contract: a valid first output must be a no-op on the
-    // second fix - this is what makes repair stable.
     if first.validate().valid {
         assert_eq!(
             first, second,
@@ -268,9 +263,6 @@ fn cfg_auto() -> MakeValidConfig {
     MakeValidConfig::default()
 }
 
-// =========================================================================
-// Random coordinate generators
-// =========================================================================
 
 fn coord_range(range: std::ops::RangeInclusive<f64>) -> impl Strategy<Value = Coord<f64>> {
     (range.clone(), range).prop_map(|(x, y)| Coord { x, y })
@@ -344,14 +336,10 @@ fn ring_strategy(
     })
 }
 
-// =========================================================================
 // ITERATION 1: Core invariants
-// =========================================================================
 
 proptest! {
-    // -----------------------------------------------------------------------
-    // 1.1  Idempotency: fixing an already-fixed geometry is a no-op
-    // -----------------------------------------------------------------------
+    // 1.1 Idempotency: fixing an already-fixed geometry is a no-op
     #[test]
     fn invariant_idempotent_polygon(
             coords in proptest::collection::vec(coord_range(-100.0..=100.0), 3..=12),
@@ -363,21 +351,12 @@ proptest! {
             for cfg in &cfg_all() {
                 let first = poly.make_valid_with_config(cfg);
                 let second = first.make_valid_with_config(cfg);
-                // Valid INPUT: strict idempotency (second fix is a no-op).
                 if was_valid {
                     assert_eq!(&first, &second,
                         "idempotency: valid input changed on second fix (cfg={:?})",
                         cfg.poly_method);
                 } else if first.validate().valid {
-                    // KNOWN PIPELINE LIMITATION (measured 2026-08-01): for
-                    // some invalid inputs the first repair is valid but a
-                    // second pass re-repairs differently (snap-1e-8 repair
-                    // output can fail the fast-path hole gate, so the repair
-                    // re-runs and re-nodes). GEOS is idempotent here; our
-                    // pipeline is not yet. Tracked: fuzz seed in
-                    // fuzz.proptest-regressions (invariant_idempotent_polygon).
-                    // When the fast-path/validator gate disagreement is
-                    // fixed, tighten this to assert_eq! unconditionally.
+                    // second pass re-repairs differently (snap-1e-8 repair output can fail the fast-path hole gate, so the repair re-runs and re-nodes).
                     assert!(
                         second.validate().valid,
                         "second fix degraded a valid first result (cfg={:?})",
@@ -387,9 +366,7 @@ proptest! {
             }
         }
 
-    // -----------------------------------------------------------------------
-    // 1.2  Valid input must pass through unchanged (all geometry types)
-    // -----------------------------------------------------------------------
+    // 1.2 Valid input must pass through unchanged (all geometry types)
     #[test]
     fn invariant_valid_input_unchanged_polygon(
         coords in proptest::collection::vec(coord_range(-100.0..=100.0), 3..=8),
@@ -397,10 +374,8 @@ proptest! {
         let mut ring = coords;
         if ring.len() >= 3 && ring.first() != ring.last() { ring.push(ring[0]); }
         let poly = Polygon::new(LineString::new(ring), Vec::new());
-        // Two oracles: our strict validator AND geo's is_valid (winding-
-        // agnostic, catches CW-valid inputs our validator rejects). If either
-        // says valid, every config must pass the polygon through unchanged
-        // modulo OGC winding enforcement (coordinate sets identical).
+        // Two oracles: our strict validator AND geo's is_valid (winding-agnostic, catches CW-valid inputs our validator rejects).
+        // If either says valid, every config must pass the polygon through unchanged modulo OGC winding enforcement (coordinate sets identical).
         if poly.validate().valid || poly.is_valid() {
             for cfg in &cfg_all() {
                 let result = poly.make_valid_with_config(cfg);
@@ -455,9 +430,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 1.3  After repair: output is always OGC-valid with proper winding
-    // -----------------------------------------------------------------------
+    // 1.3 After repair: output is always OGC-valid with proper winding
     #[test]
     fn invariant_output_valid_simple_polygon(
         coords in proptest::collection::vec(coord_range(-100.0..=100.0), 3..=10),
@@ -517,9 +490,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 1.4  Point invariants
-    // -----------------------------------------------------------------------
+    // 1.4 Point invariants
     #[test]
     fn invariant_point_always_valid(
         x in -1e10f64..1e10f64, y in -1e10f64..1e10f64,
@@ -533,9 +504,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 1.5  Line invariants
-    // -----------------------------------------------------------------------
+    // 1.5 Line invariants
     #[test]
     fn invariant_line_valid_after_repair(
         x1 in -1e8f64..1e8f64, y1 in -1e8f64..1e8f64,
@@ -547,14 +516,10 @@ proptest! {
     }
 }
 
-// =========================================================================
 // ITERATION 2: Type-specific invariants + geometry-invalidity patterns
-// =========================================================================
 
 proptest! {
-    // -----------------------------------------------------------------------
-    // 2.1  LineString: no NaN, no consecutive duplicates
-    // -----------------------------------------------------------------------
+    // 2.1 LineString: no NaN, no consecutive duplicates
     #[test]
     fn invariant_linestring_no_nan_no_dup(
         coords in proptest::collection::vec(coord_range(-1000.0..=1000.0), 0..=20),
@@ -569,9 +534,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 2.2  MultiPoint: no NaN, no duplicates
-    // -----------------------------------------------------------------------
+    // 2.2 MultiPoint: no NaN, no duplicates
     #[test]
     fn invariant_multipoint_clean(
         points in proptest::collection::vec(point_range(-1000.0..=1000.0), 0..=20),
@@ -590,9 +553,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 2.3  MultiLineString: valid after repair
-    // -----------------------------------------------------------------------
+    // 2.3 MultiLineString: valid after repair
     #[test]
     fn invariant_multilinestring_valid(
         lss in proptest::collection::vec(linestring_points(-500.0..=500.0, 2, 8), 0..=10),
@@ -602,9 +563,7 @@ proptest! {
         assert_valid(&result);
     }
 
-    // -----------------------------------------------------------------------
-    // 2.4  Triangle: valid after repair
-    // -----------------------------------------------------------------------
+    // 2.4 Triangle: valid after repair
     #[test]
     fn invariant_triangle_valid(
         coords in proptest::collection::vec(coord_range(-100.0..=100.0), 3..=3),
@@ -616,9 +575,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 2.5  Rect: valid after repair
-    // -----------------------------------------------------------------------
+    // 2.5 Rect: valid after repair
     #[test]
     fn invariant_rect_valid(
         min_coord in coord_range(-1000.0..=1000.0),
@@ -636,10 +593,7 @@ proptest! {
     // 2.6-2.10: Specific invalidity patterns ported from JTS/GEOS test suites
     // =======================================================================
 
-    // -----------------------------------------------------------------------
-    // 2.6  Self-touching ring (figure-8 / barbed arrow pattern)
-    //      Two valid CCW rings that share a single vertex.
-    // -----------------------------------------------------------------------
+    // 2.6 Self-touching ring (figure-8 / barbed arrow pattern)
     #[test]
     fn invariant_self_touching_ring(
         scale in 1.0f64..100.0f64,
@@ -665,17 +619,13 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 2.7  Figure-8 crossing at a single interior point (not vertex)
-    //      Two triangles crossing at a non-vertex point.
-    // -----------------------------------------------------------------------
+    // 2.7 Figure-8 crossing at a single interior point (not vertex)
     #[test]
     fn invariant_figure_eight_crossing(
         scale in 1.0f64..100.0f64,
         _eps in 0.1f64..10.0f64,
     ) {
-        // Triangle (0,0)-(s,0)-(s/2,s) crossing triangle (s/2,0)-(0,s)-(s,s)
-        // with crossing point at (s/2, s/2) - not a shared vertex.
+        // Triangle (0,0)-(s,0)-(s/2,s) crossing triangle (s/2,0)-(0,s)-(s,s) with crossing point at (s/2, s/2) - not a shared vertex.
         let poly = Polygon::new(
             LineString::new(vec![
                 Coord { x: 0.0, y: 0.0 },
@@ -694,9 +644,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 2.8  Hole touching shell at a single vertex (valid OGC)
-    // -----------------------------------------------------------------------
+    // 2.8 Hole touching shell at a single vertex (valid OGC)
     #[test]
     fn invariant_hole_touches_shell_at_one_vertex(
         scale in 1.0f64..100.0f64,
@@ -720,10 +668,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 2.9  Hole touching shell at two vertices (DisconnectedInteriorRing)
-    //      Pipeline must either merge the hole or split the polygon.
-    // -----------------------------------------------------------------------
+    // 2.9 Hole touching shell at two vertices (DisconnectedInteriorRing)
     #[test]
     fn invariant_hole_touches_shell_at_two_vertices(
         scale in 2.0f64..50.0f64,
@@ -747,9 +692,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
     // 2.10 Hole completely outside shell - pipeline must split into two polys
-    // -----------------------------------------------------------------------
     #[test]
     fn invariant_hole_outside_shell(
         scale in 1.0f64..100.0f64,
@@ -768,10 +711,8 @@ proptest! {
         );
         for cfg in &cfg_all() {
             let result = poly.make_valid_with_config(cfg);
-            // Pipeline should produce valid output (Auto and Arrange can handle this)
             match cfg.poly_method {
                 PolyMethod::Structure => {
-                    // Structure may or may not handle this - just check no panic
                 }
                 _ => assert_valid_ogc(&result),
             }
@@ -779,14 +720,10 @@ proptest! {
     }
 }
 
-// =========================================================================
 // ITERATION 3: Multi-component invariants - GC, nested, holes, overlaps
-// =========================================================================
 
 proptest! {
-    // -----------------------------------------------------------------------
-    // 3.1  GeometryCollection: no crash, valid output
-    // -----------------------------------------------------------------------
+    // 3.1 GeometryCollection: no crash, valid output
     #[test]
     fn invariant_geometry_collection_valid(
         points in proptest::collection::vec(point_range(-100.0..=100.0), 0..=5),
@@ -805,9 +742,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 3.2  Nested GeometryCollection (depth 0..5)
-    // -----------------------------------------------------------------------
+    // 3.2 Nested GeometryCollection (depth 0..5)
     #[test]
     fn invariant_nested_gc_valid(
         inner_point in point_range(-100.0..=100.0),
@@ -823,9 +758,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 3.3  Polygons with random holes (1-4 holes, random position)
-    // -----------------------------------------------------------------------
+    // 3.3 Polygons with random holes (1-4 holes, random position)
     #[test]
     fn invariant_polygon_with_holes_valid(
         shell in proptest::collection::vec(coord_range(-100.0..=100.0), 4..=8),
@@ -856,9 +789,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 3.4  MultiPolygon with random overlapping components
-    // -----------------------------------------------------------------------
+    // 3.4 MultiPolygon with random overlapping components
     #[test]
     fn invariant_overlapping_multipolygon(
             polys in proptest::collection::vec(polygon_points(-50.0..=50.0, 3, 6), 2..=5),
@@ -884,20 +815,15 @@ proptest! {
             }
         }
 
-    // =======================================================================
     // 3.5-3.10: Multi-component edge cases from JTS/GEOS
-    // =======================================================================
 
-    // -----------------------------------------------------------------------
-    // 3.5  MultiPolygon where one component is fully inside another
+    // 3.5 MultiPolygon where one component is fully inside another
     //      (invalid per OGC - nested shells in MultiPolygon)
-    // -----------------------------------------------------------------------
     #[test]
     fn invariant_nested_multipolygon_components(
         scale in 2.0f64..100.0f64,
         offset in -50.0f64..50.0f64,
     ) {
-        // Outer large square + inner small square fully contained
         let outer = Polygon::new(
             LineString::new(vec![
                 Coord { x: offset, y: offset },
@@ -925,9 +851,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 3.6  Multiple components sharing exact duplicate rings
-    // -----------------------------------------------------------------------
+    // 3.6 Multiple components sharing exact duplicate rings
     #[test]
     fn invariant_duplicate_shells(
         scale in 1.0f64..100.0f64,
@@ -947,9 +871,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 3.7  Holes that are exact copies of the shell (invalid hole = shell)
-    // -----------------------------------------------------------------------
+    // 3.7 Holes that are exact copies of the shell (invalid hole = shell)
     #[test]
     fn invariant_hole_equals_shell(
         scale in 1.0f64..100.0f64,
@@ -959,24 +881,19 @@ proptest! {
             Coord { x: 0.0, y: 0.0 }, Coord { x: s, y: 0.0 },
             Coord { x: s, y: s }, Coord { x: 0.0, y: s }, Coord { x: 0.0, y: 0.0 },
         ]);
-        // Identical ring used as hole
         let poly = Polygon::new(shell.clone(), vec![shell]);
         for cfg in &cfg_all() {
             let result = poly.make_valid_with_config(cfg);
-            // Pipeline must at minimum not panic; valid output is expected
             assert_valid(&result);
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 3.8  Holes that extend outside the shell (inverse nesting)
-    // -----------------------------------------------------------------------
+    // 3.8 Holes that extend outside the shell (inverse nesting)
     #[test]
     fn invariant_hole_larger_than_shell(
         scale in 1.0f64..100.0f64,
     ) {
         let s = scale;
-        // Shell is small, hole is large and partially outside
         let poly = Polygon::new(
             LineString::new(vec![
                 Coord { x: 0.0, y: 0.0 }, Coord { x: s, y: 0.0 },
@@ -994,15 +911,12 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 3.9  Multiple holes that overlap each other
-    // -----------------------------------------------------------------------
+    // 3.9 Multiple holes that overlap each other
     #[test]
     fn invariant_overlapping_holes(
         scale in 2.0f64..100.0f64,
     ) {
         let s = scale;
-        // Two holes that overlap inside the shell
         let poly = Polygon::new(
             LineString::new(vec![
                 Coord { x: 0.0, y: 0.0 }, Coord { x: s, y: 0.0 },
@@ -1027,10 +941,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 3.10 Hollow shell (shell with multiple rings, no interior), then
-    //      many small holes (stress test for hole processing pipeline)
-    // -----------------------------------------------------------------------
+    // 3.10 Hollow shell (shell with multiple rings, no interior), then many small holes (stress test for hole processing pipeline)
     #[test]
     fn invariant_many_small_holes(
         n_holes in 1usize..=12usize,
@@ -1062,14 +973,10 @@ proptest! {
     }
 }
 
-// =========================================================================
 // ITERATION 4: Extremal fuzz - boundary conditions + mixed magnitudes
-// =========================================================================
 
 proptest! {
-    // -----------------------------------------------------------------------
-    // 4.1  Extreme coordinates (up to ±1e15)
-    // -----------------------------------------------------------------------
+    // 4.1 Extreme coordinates (up to ±1e15)
     #[test]
     fn invariant_extreme_coords_no_panic(
         coords in proptest::collection::vec(coord_wide(), 3..=8),
@@ -1083,9 +990,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 4.2  Near-zero / subnormal coordinates
-    // -----------------------------------------------------------------------
+    // 4.2 Near-zero / subnormal coordinates
     #[test]
     fn invariant_subnormal_coords_no_panic(
         coords in proptest::collection::vec(coord_small(), 3..=8),
@@ -1099,9 +1004,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 4.3  NaN/Inf coordinates - must not panic
-    // -----------------------------------------------------------------------
+    // 4.3 NaN/Inf coordinates - must not panic
     #[test]
     fn invariant_nan_inf_no_panic(
         coords in proptest::collection::vec(proptest::num::f64::ANY, 0..=8),
@@ -1117,9 +1020,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 4.4  Empty geometries - all types
-    // -----------------------------------------------------------------------
+    // 4.4 Empty geometries - all types
     #[test]
     fn invariant_empty_geometries(kind in 0u8..10u8) {
         let g: Geometry<f64> = match kind {
@@ -1142,9 +1043,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 4.5  Single-vertex polygon (all coords equal)
-    // -----------------------------------------------------------------------
+    // 4.5 Single-vertex polygon (all coords equal)
     #[test]
     fn invariant_single_vertex_polygon(
         x in -1000.0f64..1000.0f64,
@@ -1159,9 +1058,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 4.6  All-coordinates-equal ring (n ≥ 3)
-    // -----------------------------------------------------------------------
+    // 4.6 All-coordinates-equal ring (n ≥ 3)
     #[test]
     fn invariant_all_equal_ring(
         x in -1000.0f64..1000.0f64, y in -1000.0f64..1000.0f64,
@@ -1175,9 +1072,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 4.7  Zero-area collinear ring
-    // -----------------------------------------------------------------------
+    // 4.7 Zero-area collinear ring
     #[test]
     fn invariant_collinear_ring(
         x1 in -100.0f64..100.0f64, x2 in -100.0f64..100.0f64,
@@ -1195,13 +1090,9 @@ proptest! {
         }
     }
 
-    // =======================================================================
     // 4.8-4.12: Mixed-magnitude and precision-edge cases
-    // =======================================================================
 
-    // -----------------------------------------------------------------------
-    // 4.8  Coordinates mixing large and small magnitudes (fp precision stress)
-    // -----------------------------------------------------------------------
+    // 4.8 Coordinates mixing large and small magnitudes (fp precision stress)
     #[test]
     fn invariant_mixed_magnitude_polygon(
         large_coords in proptest::collection::vec(coord_range(-1e8..=1e8), 3..=6),
@@ -1217,9 +1108,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 4.9  Integer-coordinate grid (no fp issues, exact arithmetic)
-    // -----------------------------------------------------------------------
+    // 4.9 Integer-coordinate grid (no fp issues, exact arithmetic)
     #[test]
     fn invariant_integer_coord_polygon(
         coords in proptest::collection::vec(coord_int(), 3..=10),
@@ -1233,10 +1122,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
     // 4.10 Exact duplicate consecutive coords at various positions
-    //      (start, middle, end, across closure)
-    // -----------------------------------------------------------------------
     #[test]
     fn invariant_ring_with_exact_duplicates(
         base in proptest::collection::vec(coord_range(-100.0..=100.0), 3..=6),
@@ -1244,7 +1130,6 @@ proptest! {
     ) {
         if base.is_empty() || dup_pos >= base.len() { return Ok(()); }
         let mut ring: Vec<Coord<f64>> = base.to_vec();
-        // Insert a duplicate at position dup_pos
         ring.insert(dup_pos, ring[dup_pos]);
         if ring.len() >= 3 && ring.first() != ring.last() { ring.push(ring[0]); }
         let poly = Polygon::new(LineString::new(ring), Vec::new());
@@ -1254,9 +1139,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
     // 4.11 Ring that is just barely closed (last coord ≈ first with fp error)
-    // -----------------------------------------------------------------------
     #[test]
     fn invariant_barely_closed_ring(
             coords in proptest::collection::vec(coord_range(-100.0..=100.0), 3..=6),
@@ -1264,7 +1147,6 @@ proptest! {
     ) {
         if coords.is_empty() { return Ok(()); }
         let mut ring = coords.clone();
-        // Close the ring by pushing a coord epsilon-close to the first
         let first = ring[0];
         ring.push(Coord { x: first.x + epsilon, y: first.y - epsilon });
         let poly = Polygon::new(LineString::new(ring), Vec::new());
@@ -1274,9 +1156,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
     // 4.12 Polygon with tiny sliver hole (near-zero area)
-    // -----------------------------------------------------------------------
     #[test]
     fn invariant_sliver_hole(
         scale in 1.0f64..100.0f64,
@@ -1284,7 +1164,6 @@ proptest! {
     ) {
         let s = scale;
         let w = sliver_width;
-        // Shell: normal square, Hole: extremely thin rectangle
         let poly = Polygon::new(
             LineString::new(vec![
                 Coord { x: 0.0, y: 0.0 }, Coord { x: s, y: 0.0 },
@@ -1303,14 +1182,10 @@ proptest! {
     }
 }
 
-// =========================================================================
 // ITERATION 5: Strategy comparison + configuration matrix + stress
-// =========================================================================
 
 proptest! {
-    // -----------------------------------------------------------------------
-    // 5.1  Auto must produce valid for any input Arrange or Structure can handle
-    // -----------------------------------------------------------------------
+    // 5.1 Auto must produce valid for any input Arrange or Structure can handle
     #[test]
     fn invariant_auto_at_least_as_good_as_individual(
         coords in proptest::collection::vec(coord_range(-100.0..=100.0), 3..=10),
@@ -1326,14 +1201,10 @@ proptest! {
             &MakeValidConfig { poly_method: PolyMethod::Structure, ..Default::default() }
         ).validate().valid;
         if arrange_valid || structure_valid {
-            // Quality target: Auto should match best of Arrange/Structure
-            // (soft check - documented pipeline limit)
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 5.2  keep_collapsed must not cause crashes
-    // -----------------------------------------------------------------------
+    // 5.2 keep_collapsed must not cause crashes
     #[test]
     fn invariant_keep_collapsed_matrix(
         coords in proptest::collection::vec(coord_range(-100.0..=100.0), 0..=10),
@@ -1345,9 +1216,7 @@ proptest! {
         assert_valid(&result);
     }
 
-    // -----------------------------------------------------------------------
-    // 5.3  All strategies on all geometry types: no panic
-    // -----------------------------------------------------------------------
+    // 5.3 All strategies on all geometry types: no panic
     #[test]
     fn invariant_all_strategies_all_types(
         kind in 0u8..8u8,
@@ -1386,9 +1255,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 5.4  Bowtie must always produce 2 components when using Auto/Arrange
-    // -----------------------------------------------------------------------
+    // 5.4 Bowtie must always produce 2 components when using Auto/Arrange
     #[test]
     fn invariant_bowtie_always_two_components(
         scale in 1.0f64..100.0f64,
@@ -1416,9 +1283,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 5.5  Geometry dispatch: all 10 types
-    // -----------------------------------------------------------------------
+    // 5.5 Geometry dispatch: all 10 types
     #[test]
     fn invariant_geometry_dispatch_all_types(
         coord in coord_range(-1e6..=1e6),
@@ -1456,9 +1321,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 5.6  ValidateOrFix: must always produce valid on success path
-    // -----------------------------------------------------------------------
+    // 5.6 ValidateOrFix: must always produce valid on success path
     #[test]
     fn invariant_validate_or_fix_always_ok(
         coords in proptest::collection::vec(coord_range(-100.0..=100.0), 3..=8),
@@ -1484,9 +1347,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 5.7  Winding: after repair, OGC winding must be correct
-    // -----------------------------------------------------------------------
+    // 5.7 Winding: after repair, OGC winding must be correct
     #[test]
     fn invariant_winding_always_ogc(
         coords in proptest::collection::vec(coord_range(-100.0..=100.0), 3..=8),
@@ -1514,13 +1375,9 @@ proptest! {
         }
     }
 
-    // =======================================================================
     // 5.8-5.12: Stress tests and strategy-specific edge cases
-    // =======================================================================
 
-    // -----------------------------------------------------------------------
-    // 5.8  CW exterior ring input: must be reversed to CCW
-    // -----------------------------------------------------------------------
+    // 5.8 CW exterior ring input: must be reversed to CCW
     #[test]
     fn invariant_cw_input_reversed_to_ccw(
         coords in proptest::collection::vec(coord_range(-100.0..=100.0), 3..=8),
@@ -1528,7 +1385,6 @@ proptest! {
     ) {
         let mut ring = coords;
         if ring.len() >= 3 && ring.first() != ring.last() { ring.push(ring[0]); }
-        // If make_cw, reverse ring to make it CW
         if make_cw {
             let mut r: Vec<Coord<f64>> = ring.iter().rev().copied().collect();
             if let Some(first) = r.first().copied() { r.push(first); }
@@ -1547,15 +1403,11 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 5.9  MultiPolygon where individual polys are valid but together form
-    //      an invalid MultiPolygon (touching only at a point - valid per OGC)
-    // -----------------------------------------------------------------------
+    // an invalid MultiPolygon (touching only at a point - valid per OGC)
     #[test]
     fn invariant_touching_multipolygons(
         scale in 1.0f64..100.0f64,
     ) {
-        // Two squares touching at a single vertex
         let p1 = Polygon::new(
             LineString::new(vec![
                 Coord { x: 0.0, y: 0.0 }, Coord { x: scale, y: 0.0 },
@@ -1579,9 +1431,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
     // 5.10 Bowtie handled by Structure mode (not just Auto/Arrange)
-    // -----------------------------------------------------------------------
     #[test]
     fn invariant_bowtie_structure_mode(
         scale in 1.0f64..100.0f64,
@@ -1599,9 +1449,7 @@ proptest! {
         assert_valid(&result);
     }
 
-    // -----------------------------------------------------------------------
     // 5.11 Polygon with hole degenerated to a line (hole has < 3 unique verts)
-    // -----------------------------------------------------------------------
     #[test]
     fn invariant_degenerate_hole(
         scale in 1.0f64..100.0f64,
@@ -1624,9 +1472,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
     // 5.12 Structure mode on all invalidity patterns: must not panic
-    // -----------------------------------------------------------------------
     #[test]
     fn invariant_structure_mode_all_patterns(
         kind in 0u8..6u8,
@@ -1634,7 +1480,6 @@ proptest! {
     ) {
         let s = scale;
         let poly: Polygon<f64> = match kind {
-            // Bowtie
             0 => Polygon::new(
                 LineString::new(vec![
                     Coord { x: 0.0, y: 0.0 }, Coord { x: s, y: s },
@@ -1642,7 +1487,6 @@ proptest! {
                 ]),
                 Vec::new(),
             ),
-            // Self-touching
             1 => Polygon::new(
                 LineString::new(vec![
                     Coord { x: 0.0, y: 0.0 }, Coord { x: s, y: 0.0 },
@@ -1652,7 +1496,6 @@ proptest! {
                 ]),
                 Vec::new(),
             ),
-            // Hole outside shell
             2 => Polygon::new(
                 LineString::new(vec![
                     Coord { x: 0.0, y: 0.0 }, Coord { x: s, y: 0.0 },
@@ -1675,7 +1518,6 @@ proptest! {
                     Coord { x: s * 0.75, y: 0.0 }, Coord { x: s * 0.25, y: 0.0 },
                 ])],
             ),
-            // Multiple overlapping holes
             4 => {
                 let holes = vec![
                     LineString::new(vec![
@@ -1697,7 +1539,6 @@ proptest! {
                     holes,
                 )
             }
-            // Collapsed triangle (all three vertices nearly identical)
             _ => Polygon::new(
                 LineString::new(vec![
                     Coord { x: 0.0, y: 0.0 }, Coord { x: 1e-12, y: 0.0 },
@@ -1712,17 +1553,10 @@ proptest! {
     }
 }
 
-// =========================================================================
-// ITERATION 6: Additional stress patterns - JTS regression patterns,
-// hole collapse, mixed violations, linear ring self-crossing, wraps
-// =========================================================================
+// ITERATION 6: Additional stress patterns - JTS regression patterns, hole collapse, mixed violations, linear ring self-crossing, wraps
 
 proptest! {
-    // -----------------------------------------------------------------------
-    // 6.1  Shell collapse with holes: exterior degenerates to line/point
-    //      but holes remain valid. Pipeline must handle collapse first,
-    //      then process remaining valid geometry.
-    // -----------------------------------------------------------------------
+    // 6.1 Shell collapse with holes: exterior degenerates to line/point but holes remain valid.
     #[test]
     fn invariant_shell_collapse_with_holes(
         shell_coords in proptest::collection::vec(coord_range(-100.0..=100.0), 3..=4),
@@ -1739,10 +1573,8 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 6.2  Hole collapse: valid exterior ring, interior ring is degenerate
-    //      (< 3 unique verts or collinear). Pipeline should remove the hole.
-    // -----------------------------------------------------------------------
+    // 6.2 Hole collapse: valid exterior ring, interior ring is degenerate
+    // (< 3 unique verts or collinear).
     #[test]
     fn invariant_hole_collapsed(
         _n_ext in 4usize..8usize,
@@ -1750,13 +1582,11 @@ proptest! {
         dx in -50.0f64..50.0f64,
         dy in -50.0f64..50.0f64,
     ) {
-        // Build a valid shell (square) with a collapsed hole
         let shell = LineString::new(vec![
             Coord { x: -100.0, y: -100.0 }, Coord { x: 100.0, y: -100.0 },
             Coord { x: 100.0, y: 100.0 }, Coord { x: -100.0, y: 100.0 },
             Coord { x: -100.0, y: -100.0 },
         ]);
-        // Hole: all coords along the same line (collinear)
         let mut hole_coords: Vec<Coord<f64>> = (0..n_hole).map(|i| {
             let t = i as f64 / (n_hole - 1) as f64;
             Coord { x: dx + t * 50.0, y: dy }
@@ -1769,10 +1599,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 6.3  Mixed hole violations: one polygon with overlapping holes,
-    //      holes outside shell, and holes touching shell boundary.
-    // -----------------------------------------------------------------------
+    // 6.3 Mixed hole violations: one polygon with overlapping holes, holes outside shell, and holes touching shell boundary.
     #[test]
     fn invariant_mixed_hole_violations(
         scale in 4.0f64..50.0f64,
@@ -1782,9 +1609,7 @@ proptest! {
             Coord { x: 0.0, y: 0.0 }, Coord { x: s, y: 0.0 },
             Coord { x: s, y: s }, Coord { x: 0.0, y: s }, Coord { x: 0.0, y: 0.0 },
         ]);
-        // Holes: overlapping pairs + one outside + one on boundary
         let holes = vec![
-            // Two overlapping holes
             LineString::new(vec![
                 Coord { x: s * 0.2, y: s * 0.2 }, Coord { x: s * 0.6, y: s * 0.2 },
                 Coord { x: s * 0.6, y: s * 0.6 }, Coord { x: s * 0.2, y: s * 0.6 },
@@ -1795,13 +1620,11 @@ proptest! {
                 Coord { x: s * 0.8, y: s * 0.8 }, Coord { x: s * 0.4, y: s * 0.8 },
                 Coord { x: s * 0.4, y: s * 0.4 },
             ]),
-            // Hole outside shell
             LineString::new(vec![
                 Coord { x: s * 2.0, y: s * 2.0 }, Coord { x: s * 2.5, y: s * 2.0 },
                 Coord { x: s * 2.5, y: s * 2.5 }, Coord { x: s * 2.0, y: s * 2.5 },
                 Coord { x: s * 2.0, y: s * 2.0 },
             ]),
-            // Hole touching shell at boundary
             LineString::new(vec![
                 Coord { x: s * 0.25, y: 0.0 }, Coord { x: s * 0.5, y: s * 0.5 },
                 Coord { x: s * 0.75, y: 0.0 }, Coord { x: s * 0.25, y: 0.0 },
@@ -1814,10 +1637,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 6.4  Flat ring: every vertex on the same line (all-collinear shell).
-    //      Pipeline must detect collapse and return empty.
-    // -----------------------------------------------------------------------
+    // 6.4 Flat ring: every vertex on the same line (all-collinear shell).
     #[test]
     fn invariant_flat_ring(
         x1 in -100.0f64..100.0f64,
@@ -1836,10 +1656,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 6.5  Holes touching each other at a vertex (not overlapping interiors).
-    //      Valid OGC - two holes share a single vertex.
-    // -----------------------------------------------------------------------
+    // 6.5 Holes touching each other at a vertex (not overlapping interiors).
     #[test]
     fn invariant_holes_touching_at_vertex(
         scale in 2.0f64..100.0f64,
@@ -1869,10 +1686,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 6.6  CW hole input: holes given in CCW (wrong per OGC) must be
-    //      reversed to CW by the pipeline.
-    // -----------------------------------------------------------------------
+    // 6.6 CW hole input: holes given in CCW (wrong per OGC) must be reversed to CW by the pipeline.
     #[test]
     fn invariant_hole_ccw_input_corrected_to_cw(
         scale in 1.0f64..100.0f64,
@@ -1883,14 +1697,12 @@ proptest! {
             Coord { x: 0.0, y: 0.0 }, Coord { x: s, y: 0.0 },
             Coord { x: s, y: s }, Coord { x: 0.0, y: s }, Coord { x: 0.0, y: 0.0 },
         ]);
-        // Hole: a square centered in the shell
         let mut hole_coords = vec![
             Coord { x: s * 0.3, y: s * 0.3 }, Coord { x: s * 0.7, y: s * 0.3 },
             Coord { x: s * 0.7, y: s * 0.7 }, Coord { x: s * 0.3, y: s * 0.7 },
             Coord { x: s * 0.3, y: s * 0.3 },
         ];
         let mut hole = LineString::new(hole_coords.clone());
-        // Default hole is CCW (OGC violation). If reverse, make it CW (correct).
         if reverse {
             hole_coords.reverse();
             hole = LineString::new(hole_coords);
@@ -1912,10 +1724,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 6.7  Many holes (up to 20) in a single shell. Stress hole dedup
-    //      and processing pipeline.
-    // -----------------------------------------------------------------------
+    // 6.7 Many holes (up to 20) in a single shell.
     #[test]
     fn invariant_many_holes(
         n_holes in 5usize..=20usize,
@@ -1946,10 +1755,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 6.8  Coordinate wrap-around: coords spanning extreme range in small
-    //      steps, stressing precision of intersection/snap logic.
-    // -----------------------------------------------------------------------
+    // 6.8 Coordinate wrap-around: coords spanning extreme range in small steps, stressing precision of intersection/snap logic.
     #[test]
     fn invariant_coord_wrap_around(
         base in -1e10f64..1e10f64,
@@ -1970,16 +1776,7 @@ proptest! {
                 && r.errors.len() == 1
                 && matches!(r.errors[0], geo_repair::validation::GeometryValidationError::WrongOrientation)
             {
-                // KNOWN PRE-EXISTING LIMITATION (verified at dac7b84, parent
-                // of the 2026-08-01 test-audit session; Arrange case measured
-                // again 2026-08-03 on seed cc 5cf953d1 with src stashed):
-                // exactly-collinear rings at large magnitude (base ~2e6,
-                // step ~0.05) can survive Structure AND Arrange as a CW
-                // MultiPolygon instead of degrading to a LineString. The
-                // strip_degenerate bbox-threshold degeneracy check does not
-                // fire (bbox is wide); an area-relative check is the planned
-                // fix (see georepair-fuzz-workflow: exactly-collinear rings).
-                // Auto degrades correctly. Reported, not failed.
+                // KNOWN PRE-EXISTING LIMITATION (verified at dac7b84, parent of the 2026-08-01 test-audit session; Arrange case measured again 2026-08-03 on seed cc)
                 eprintln!(
                     "[coord_wrap_around] known limitation: CW MP for collinear ring (base={base}, step={step}, n={n})"
                 );
@@ -1989,10 +1786,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 6.9  Denormal coordinates: values near f64::MIN_POSITIVE
-    //      (subnormals and denormals).
-    // -----------------------------------------------------------------------
+    // 6.9 Denormal coordinates: values near f64::MIN_POSITIVE
     #[test]
     fn invariant_denormal_coords(
         coords in proptest::collection::vec(coord_range(-1e-300..=1e-300), 3..=8),
@@ -2006,10 +1800,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
     // 6.10 MultiPolygon with valid + collapsed + empty components.
-    //      Pipeline must handle mixed-component MPs.
-    // -----------------------------------------------------------------------
     #[test]
     fn invariant_mp_mixed_components(
         n_valid in 0usize..3usize,
@@ -2030,7 +1821,6 @@ proptest! {
             ));
         }
         for _ in 0..n_collapsed {
-            // Collapsed: all vertices identical
             components.push(Polygon::new(
                 LineString::new(vec![
                     Coord { x: 0.0, y: 0.0 }, Coord { x: 0.0, y: 0.0 },
@@ -2048,18 +1838,13 @@ proptest! {
     }
 }
 
-// =========================================================================
-// ITERATION 7: Final batch - coincident edges, GC collapse, integer bowtie,
-// self-crossing ring, hole touching at 3+ shell vertices
-// =========================================================================
+// ITERATION 7: Final batch - coincident edges, GC collapse, integer bowtie, self-crossing ring, hole touching at 3+ shell vertices
 
 proptest! {
 
-    // -----------------------------------------------------------------------
 
-    // 7.1  Exactly coincident edges: two non-adjacent edges on the same line.
+    // 7.1 Exactly coincident edges: two non-adjacent edges on the same line.
 
-    // -----------------------------------------------------------------------
 
     #[test]
 
@@ -2105,11 +1890,9 @@ proptest! {
 
 
 
-    // -----------------------------------------------------------------------
 
-    // 7.2  MultiLineString self-crossing: separate lines forming an X.
+    // 7.2 MultiLineString self-crossing: separate lines forming an X.
 
-    // -----------------------------------------------------------------------
 
     #[test]
 
@@ -2147,11 +1930,9 @@ proptest! {
 
 
 
-    // -----------------------------------------------------------------------
 
-    // 7.3  GC with keep_collapsed: collapsed linestring + point.
+    // 7.3 GC with keep_collapsed: collapsed linestring + point.
 
-    // -----------------------------------------------------------------------
 
     #[test]
 
@@ -2195,11 +1976,9 @@ proptest! {
 
 
 
-    // -----------------------------------------------------------------------
 
-    // 7.4  Integer-coordinate bowtie: exact arithmetic self-intersection.
+    // 7.4 Integer-coordinate bowtie: exact arithmetic self-intersection.
 
-    // -----------------------------------------------------------------------
 
     #[test]
 
@@ -2249,11 +2028,9 @@ proptest! {
 
 
 
-    // -----------------------------------------------------------------------
 
-    // 7.5  Self-crossing linear ring: closed LineString that self-intersects.
+    // 7.5 Self-crossing linear ring: closed LineString that self-intersects.
 
-    // -----------------------------------------------------------------------
 
     #[test]
 
@@ -2289,11 +2066,9 @@ proptest! {
 
 
 
-    // -----------------------------------------------------------------------
 
-    // 7.6  Hole touching shell at 3 vertices: stress touch-point dedup.
+    // 7.6 Hole touching shell at 3 vertices: stress touch-point dedup.
 
-    // -----------------------------------------------------------------------
 
     #[test]
 
@@ -2343,16 +2118,10 @@ proptest! {
 
 }
 
-// =========================================================================
-// ITERATION 8: Stress at fp bounds - Shewchuk limits, f64 extremes,
-// edge-sharing MP, fp limits
-// =========================================================================
+// ITERATION 8: Stress at fp bounds - Shewchuk limits, f64 extremes, edge-sharing MP, fp limits
 
 proptest! {
-    // -----------------------------------------------------------------------
-    // 8.1  Shewchuk-bound bowtie: coordinates at 1e15 where orient2d
-    //      approaches its precision limit.
-    // -----------------------------------------------------------------------
+    // 8.1 Shewchuk-bound bowtie: coordinates at 1e15 where orient2d approaches its precision limit.
     #[test]
     fn invariant_shewchuk_bound_bowtie(
         scale in 1e12f64..1e15f64,
@@ -2374,9 +2143,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 8.2  Orient2d near-collinear at large magnitude.
-    // -----------------------------------------------------------------------
+    // 8.2 Orient2d near-collinear at large magnitude.
     #[test]
     fn invariant_orient2d_near_collinear(
         scale in 1e6f64..1e14f64,
@@ -2395,9 +2162,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 8.3  F64 max range: MP mixing 1e15 and 1e-10 coordinates.
-    // -----------------------------------------------------------------------
+    // 8.3 F64 max range: MP mixing 1e15 and 1e-10 coordinates.
     #[test]
     fn invariant_f64_mixed_range(
         big in 1e10f64..1e15f64,
@@ -2425,10 +2190,7 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 8.4  Edge-sharing MultiPolygon: two polygons sharing exact
-    //      boundary edge.
-    // -----------------------------------------------------------------------
+    // 8.4 Edge-sharing MultiPolygon: two polygons sharing exact boundary edge.
     #[test]
     fn invariant_edge_sharing_multipolygon(
         scale in 1.0f64..100.0f64,
@@ -2458,19 +2220,11 @@ proptest! {
     }
 }
 
-// =========================================================================
-// =========================================================================
 
-// =========================================================================
-// ITERATION 9: Arithmetic extreme stress - mixed fp categories, large
-// coordinate ratio stress, fp-special-value combinatorial stress
-// =========================================================================
+// ITERATION 9: Arithmetic extreme stress - mixed fp categories, large coordinate ratio stress, fp-special-value combinatorial stress
 
 proptest! {
-    // -----------------------------------------------------------------------
-    // 9.1  Mixed fp categories in same ring: alternate between NAN, MAX, MIN,
-    //      INF, 0, subnormal to ensure all degenerate paths are exercised.
-    // -----------------------------------------------------------------------
+    // 9.1 Mixed fp categories in same ring: alternate between NAN, MAX
     #[test]
     fn invariant_mixed_fp_in_same_ring(
         perm in 0u8..8u8,
@@ -2493,10 +2247,8 @@ proptest! {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 9.2  F64 ratio stress: adjacent vertices with ~1e300 ratio between their
-    //      coordinate magnitudes. Stress orient2d and intersection logic.
-    // -----------------------------------------------------------------------
+    // 9.2 F64 ratio stress: adjacent vertices with ~1e300 ratio between their coordinate magnitudes.
+    // Stress orient2d and intersection logic.
     #[test]
     fn invariant_extreme_ratio_stress(
         tiny_val in -1e100f64..1e100f64,
@@ -2516,16 +2268,11 @@ proptest! {
         for cfg in &cfg_all() {
             let result = poly.make_valid_with_config(cfg);
             if result.is_valid() {
-                // At extreme ratios empty output is acceptable - no-panic guarantee only
             }
         }
     }
 }
 
-// =========================================================================
-// =========================================================================
-// Legacy diagnostic module (preserved for debugging specific failures)
-// =========================================================================
 
 #[cfg(test)]
 mod diag_all_methods_fail {
@@ -2609,7 +2356,6 @@ mod diag_all_methods_fail {
             }
         }
 
-        // Assert that Auto produces valid for the full polygon
         let cfg_auto = MakeValidConfig::default();
         let result = poly.make_valid_with_config(&cfg_auto);
         assert!(
@@ -2620,13 +2366,7 @@ mod diag_all_methods_fail {
 }
 
 proptest! {
-    // =======================================================================
-    // 5.1  Area preservation: repair must not silently destroy polygon area
-    // -----------------------------------------------------------------------
-    // GEOS/JTS MakeValid contract: the fixed geometry covers the same area as
-    // the input (the unary union of its polygon parts). An implementation that
-    // returns GEOMETRYCOLLECTION EMPTY for everything passes assert_valid
-    // (empty is OGC-valid) but destroys data - this invariant closes that hole.
+    // 5.1 Area preservation: repair must not silently destroy polygon area
     #[test]
     fn invariant_area_preserved(
         polys in proptest::collection::vec(polygon_points(-100.0..=100.0, 3, 8), 1..=3),
@@ -2647,12 +2387,7 @@ proptest! {
             }
             let out_area = total_polygon_area(&result);
             if is_valid_input {
-                // Valid input: repair must be EXACT (area preserved to fp
-                // noise). The reference is geo's union, which itself carries
-                // ~1e-6-relative triangulation fp error - measured: a single
-                // triangle's union came in 1.3e-6 below its shoelace area
-                // (regression 5c8c8b72). The 1e-5 band is fp headroom, not
-                // repair slack.
+                // The 1e-5 band is fp headroom, not repair slack.
                 let scale = geo_union.abs().max(1.0);
                 assert!(
                     out_area >= geo_union - 1e-5 * scale,
@@ -2665,10 +2400,8 @@ proptest! {
                     cfg.poly_method
                 );
             } else {
-                // Invalid input: loose sanity bound - must not destroy >90% of
-                // the per-shell shoelace sum. (Legit union of 2 identical
-                // shells = 50% of the sum; 10% leaves huge margin. Catches
-                // the 95%-lobe-loss class and empty collapse.)
+                // (Legit union of 2 identical shells = 50% of the sum; 10% leaves huge margin.)
+                // Catches the 95%-lobe-loss class and empty collapse.
                 let floor = 0.10 * shoelace_sum;
                 let scale = floor.abs().max(1.0);
                 assert!(
@@ -2755,8 +2488,6 @@ fn union_area_of(mp: &MultiPolygon<f64>) -> f64 {
         return 0.0;
     }
     if mp.0.len() == 1 {
-        // Single shell: normalize winding, union still needed if it
-        // self-crosses (OverlayNG nodes it and returns the covered area).
         let mut p = mp.0[0].clone();
         use geo::Winding;
         if p.exterior().0.len() >= 4 {

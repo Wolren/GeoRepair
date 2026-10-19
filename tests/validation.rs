@@ -7,9 +7,6 @@ use geo_repair::validation::GeoValidation;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 use wkt::TryFromWkt;
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 fn assert_valid<T: GeoValidation + std::fmt::Debug>(geom: &T) {
     let r = geom.validate();
@@ -45,9 +42,6 @@ fn config_auto() -> MakeValidConfig {
     MakeValidConfig::default()
 }
 
-// ---------------------------------------------------------------------------
-// Point tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_point_valid() {
@@ -58,8 +52,7 @@ fn test_point_valid() {
 
 #[test]
 fn test_point_nan() {
-    // A single NaN ordinate is invalid (GEOS parity: CoordinateNaN) and
-    // makeValid demotes it to the canonical empty point POINT(NaN NaN).
+    // A single NaN ordinate is invalid (GEOS parity: CoordinateNaN) and makeValid demotes it to the canonical empty point POINT(NaN NaN).
     let p = Point::new(f64::NAN, 2.0);
     let result = p.make_valid();
     if let Geometry::Point(rp) = result {
@@ -69,7 +62,6 @@ fn test_point_nan() {
         panic!("expected Point, got {:?}", result);
     }
     assert!(!p.is_valid());
-    // The canonical empty point itself is valid and unchanged.
     // (assert_eq is unusable on NaN coords - NaN != NaN - check fields.)
     let empty = Point::new(f64::NAN, f64::NAN);
     assert!(empty.is_valid());
@@ -83,8 +75,7 @@ fn test_point_nan() {
 
 #[test]
 fn test_point_infinite_x() {
-    // Non-finite ordinates are invalid (GEOS parity); makeValid demotes
-    // to the canonical empty point.
+    // Non-finite ordinates are invalid (GEOS parity); makeValid demotes to the canonical empty point.
     let p = Point::new(f64::INFINITY, 2.0);
     let result = p.make_valid();
     if let Geometry::Point(rp) = result {
@@ -109,9 +100,6 @@ fn test_point_infinite_y() {
     assert!(!p.is_valid());
 }
 
-// ---------------------------------------------------------------------------
-// Line tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_line_valid() {
@@ -140,9 +128,6 @@ fn test_line_nan_start() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// LineString tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_linestring_valid() {
@@ -220,9 +205,6 @@ fn test_linestring_nan_filtered() {
     assert_eq!(result, Geometry::LineString(expected));
 }
 
-// ---------------------------------------------------------------------------
-// MultiPoint tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_multipoint_valid() {
@@ -233,8 +215,7 @@ fn test_multipoint_valid() {
 
 #[test]
 fn test_multipoint_filters_nan() {
-    // NaN-ordinate points are invalid (GEOS parity) and makeValid drops
-    // them; the canonical empty point (NaN NaN) is preserved.
+    // NaN-ordinate points are invalid (GEOS parity) and makeValid drops them; the canonical empty point (NaN NaN) is preserved.
     let mp = MultiPoint::new(vec![
         Point::new(0.0, 0.0),
         Point::new(f64::NAN, 1.0),
@@ -264,9 +245,6 @@ fn test_multipoint_all_invalid() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// MultiLineString tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_multilinestring_valid() {
@@ -285,9 +263,6 @@ fn test_multilinestring_valid() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Rect tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_rect_valid() {
@@ -296,9 +271,6 @@ fn test_rect_valid() {
     assert_eq!(result, Geometry::Rect(r));
 }
 
-// ---------------------------------------------------------------------------
-// Triangle tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_triangle_valid() {
@@ -308,7 +280,6 @@ fn test_triangle_valid() {
         Coord { x: 2.5, y: 5.0 },
     );
     let result = t.make_valid();
-    // Triangle is returned as Polygon (closed ring) by MakeValid
     assert!(matches!(result, Geometry::Polygon(_)));
     assert_geometry_valid(&result);
 }
@@ -358,9 +329,6 @@ fn test_triangle_nan() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Polygon tests — always valid
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_valid_polygon_arrange() {
@@ -413,9 +381,6 @@ fn test_valid_polygon_auto() {
     assert_not_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Polygon tests — self-intersecting (bowtie)
-// ---------------------------------------------------------------------------
 
 fn make_bowtie() -> Polygon<f64> {
     Polygon::new(
@@ -450,7 +415,6 @@ fn test_bowtie_arrange() {
 fn test_bowtie_structure() {
     let poly = make_bowtie();
     let result = poly.make_valid_with_config(&config_structure());
-    // Structure method cannot fix self-intersecting shells — returns empty
     assert_geometry_valid(&result);
 }
 
@@ -462,9 +426,6 @@ fn test_bowtie_auto() {
     assert_not_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Polygon with holes
-// ---------------------------------------------------------------------------
 
 fn make_polygon_with_hole() -> Polygon<f64> {
     Polygon::new(
@@ -501,9 +462,6 @@ fn test_polygon_with_hole_structure() {
     assert_not_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Polygon with ring that has repeated coords
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_polygon_repeated_ring_coords() {
@@ -524,9 +482,7 @@ fn test_polygon_repeated_ring_coords() {
     assert_not_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
 // Polygon with NaN ring coords
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_polygon_nan_ring() {
@@ -547,9 +503,6 @@ fn test_polygon_nan_ring() {
     assert_geometry_valid(&result);
 }
 
-// ---------------------------------------------------------------------------
-// MultiPolygon tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_valid_multipolygon() {
@@ -589,9 +542,6 @@ fn test_multipolygon_with_bowtie() {
     assert_not_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Geometry dispatch tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_geometry_dispatch_point() {
@@ -628,8 +578,7 @@ fn test_geometry_dispatch_bowtie() {
 
 #[test]
 fn test_geometry_dispatch_empty() {
-    // A single NaN ordinate is invalid; makeValid demotes it to the
-    // canonical empty point POINT(NaN NaN).
+    // A single NaN ordinate is invalid; makeValid demotes it to the canonical empty point POINT(NaN NaN).
     let g = Geometry::Point(Point::new(f64::NAN, 0.0));
     let result = g.make_valid();
     if let Geometry::Point(rp) = result {
@@ -694,9 +643,6 @@ fn test_geometrycollection_all_empty() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Validation short-circuit tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_valid_geom_short_circuits_validation() {
@@ -723,9 +669,6 @@ fn test_valid_polygon_short_circuits() {
     assert_geometry_valid(&result);
 }
 
-// ---------------------------------------------------------------------------
-// WKT-based tests
-// ---------------------------------------------------------------------------
 
 fn geom_from_wkt(s: &str) -> Geometry<f64> {
     Geometry::<f64>::try_from_wkt_str(s).unwrap()
@@ -787,9 +730,6 @@ fn test_wkt_geometry_collection() {
     assert_geometry_valid(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Config tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_keep_collapsed_default_false() {
@@ -803,9 +743,6 @@ fn test_default_poly_method_auto() {
     assert_eq!(config.poly_method, PolyMethod::Auto);
 }
 
-// ---------------------------------------------------------------------------
-// Specific invalid polygon shapes
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_polygon_spike() {
@@ -865,9 +802,6 @@ fn test_hole_outside_shell() {
     assert_not_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
-// Stress — many polygons
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_many_valid_polygons() {
@@ -890,15 +824,11 @@ fn test_many_valid_polygons() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Multiple config combinations
-// ---------------------------------------------------------------------------
 
 #[test]
 
 fn test_all_poly_methods_on_bowtie() {
     let poly = make_bowtie();
-    // Arrange and Auto handle self-intersection; Structure returns empty
     for method in &[PolyMethod::Auto, PolyMethod::Arrange] {
         let config = MakeValidConfig {
             poly_method: *method,
@@ -939,9 +869,6 @@ fn test_all_poly_methods_on_valid() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Edge: already-valid short-circuit returns exact same object
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_valid_returns_original_geom() {
@@ -959,9 +886,6 @@ fn test_valid_returns_original_geom() {
     assert_eq!(result, Geometry::Polygon(poly.clone()));
 }
 
-// ---------------------------------------------------------------------------
-// Edge: degenerate polygons
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_degenerate_ring_too_few_points() {
@@ -973,9 +897,6 @@ fn test_degenerate_ring_too_few_points() {
     assert_geometry_valid(&result);
 }
 
-// ---------------------------------------------------------------------------
-// ValidateAndFix trait tests
-// ---------------------------------------------------------------------------
 
 use geo_repair::ValidateAndFix;
 
@@ -1060,7 +981,6 @@ fn test_validate_or_fix_bowtie_returns_fixed() {
         Vec::new(),
     );
     let result = poly.validate_or_fix();
-    // Bowtie should be fixable, so validate_or_fix returns Ok
     assert!(result.is_ok());
     let geom = result.unwrap();
     assert_geometry_valid(&geom);
@@ -1090,8 +1010,7 @@ fn test_validate_or_fix_line_invalid() {
         Coord { x: 10.0, y: 10.0 },
     );
     let result = line.validate_or_fix();
-    // NaN line is valid according to geo validation? Or does it fix?
-    // Just verify it doesn't panic
+    // NaN line is valid according to geo validation?
     let _ = result;
 }
 
@@ -1183,7 +1102,6 @@ fn test_validate_or_fix_geometrycollection_valid() {
 
 #[test]
 fn test_zm_roundtrip_stress() {
-    // Z/M roundtrip with extreme coordinate values
     let coords = vec![
         Coord { x: 1e14, y: 1e14 },
         Coord {
@@ -1221,7 +1139,6 @@ fn test_zm_roundtrip_stress() {
 
 #[test]
 fn test_large_coord_polygon_with_hole() {
-    // Large magnitude coords with a hole — tests CDT range guard
     let shell = LineString::new(vec![
         Coord { x: 1e10, y: 1e10 },
         Coord {
@@ -1275,17 +1192,14 @@ fn test_large_coord_polygon_with_hole() {
 #[test]
 fn test_validate_and_fix_always_multiply_types() {
     use geo_repair::ValidateAndFix;
-    // Point
     let pt = Point::new(1.0, 2.0);
     let (_, geom) = pt.validate_and_fix_always();
     assert_geometry_valid(&geom);
 
-    // Rect
     let rect = Rect::new(Point::new(0.0, 0.0), Point::new(10.0, 10.0));
     let (_, geom) = rect.validate_and_fix_always();
     assert_geometry_valid(&geom);
 
-    // Triangle
     let tri = Triangle::new(
         Coord { x: 0.0, y: 0.0 },
         Coord { x: 5.0, y: 10.0 },
@@ -1294,12 +1208,10 @@ fn test_validate_and_fix_always_multiply_types() {
     let (_, geom) = tri.validate_and_fix_always();
     assert_geometry_valid(&geom);
 
-    // MultiPoint (valid)
     let mp = MultiPoint::new(vec![Point::new(0.0, 0.0), Point::new(1.0, 1.0)]);
     let (_, geom) = mp.validate_and_fix_always();
     assert_geometry_valid(&geom);
 
-    // MultiLineString (with crossing components — may or may not be fixable)
     let mls = MultiLineString::new(vec![
         LineString::new(vec![Coord { x: 0.0, y: 0.0 }, Coord { x: 2.0, y: 2.0 }]),
         LineString::new(vec![Coord { x: 0.0, y: 2.0 }, Coord { x: 2.0, y: 0.0 }]),
@@ -1307,7 +1219,6 @@ fn test_validate_and_fix_always_multiply_types() {
     let (_, geom) = mls.validate_and_fix_always();
     let _ = geom;
 
-    // GeometryCollection
     let gc = GeometryCollection(vec![Geometry::Point(Point::new(0.0, 0.0))]);
     let (_, geom) = gc.validate_and_fix_always();
     assert_geometry_valid(&geom);

@@ -10,7 +10,6 @@ fn poly_from_coords(coords: Vec<[f64; 2]>) -> Polygon<f64> {
 
 #[test]
 fn test_fuzz_nestedholes_seed1() {
-    // Proptest seed from invariant_overlapping_multipolygon:
     let p1 = poly_from_coords(vec![
         [0.0, 10.70211681880726],
         [39.87837224853243, -13.667191282084643],

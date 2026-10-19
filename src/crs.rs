@@ -404,7 +404,6 @@ fn last_identifier(wkt: &str) -> Option<(&str, u32)> {
     while i < n {
         let b = s[i];
         if b == b'"' {
-            // Skip the quoted span.
             i += 1;
             while i < n && s[i] != b'"' {
                 i += 1;
@@ -422,8 +421,6 @@ fn last_identifier(wkt: &str) -> Option<(&str, u32)> {
             i += 1;
         }
         let word = &wkt[start..i];
-        // Keep the LAST identifier: the CRS-level one is the outermost and
-        // is therefore written last.
         if (word == "ID" || word == "AUTHORITY")
             && let Some((org, code)) = parse_clause(wkt, i)
         {
@@ -464,8 +461,7 @@ fn parse_clause(wkt: &str, mut i: usize) -> Option<(&str, u32)> {
     }
     i += 1;
     skip_ws(s, &mut i);
-    // WKT2 writes the code unquoted (`ID["EPSG",4326]`); WKT1 quotes it
-    // (`AUTHORITY["EPSG","4326"]`). Accept both.
+    // WKT2 writes the code unquoted (`ID["EPSG",4326]`); WKT1 quotes it (`AUTHORITY["EPSG","4326"]`).
     if i < n && s[i] == b'"' {
         i += 1;
         skip_ws(s, &mut i);
@@ -520,7 +516,6 @@ pub fn transform_geometry(
 /// - UTM zones: 32600-32760 (WGS 84 / UTM north/south) are projected
 fn epsg_is_geographic(code: u32) -> bool {
     match code {
-        // Explicitly geographic — commonly used codes
         4326 | 4258 | 4269 | 4267 | 4275 | 4617 | 4618 | 4619 | 4620 | 4937 | 4936 | 4979
         | 4980 | 4152 | 4121 | 4122 | 4141 | 4148 | 4171 | 4167 | 4170 | 4173 | 4176 | 4181
         | 4188 | 4190 | 4191 | 4192 | 4193 | 4195 | 4197 | 4199 | 4200 | 4201 | 4202 | 4203
@@ -542,11 +537,9 @@ fn epsg_is_geographic(code: u32) -> bool {
         c if (4400..=4999).contains(&c) => true,
         // WGS 84 / Pseudo-Mercator
         3857..=3859 => false,
-        // UTM zones (north and south) — projected
         c if (32600..=32760).contains(&c) => false,
         // ED50 / UTM zones
         c if (23000..=23099).contains(&c) => false,
-        // All other codes default to projected
         _ => false,
     }
 }
@@ -679,8 +672,7 @@ mod tests {
     fn test_to_wkt2_none_for_unbundled_code() {
         assert_eq!(Crs::from_epsg(32633).to_wkt2(), None);
         assert_eq!(Crs::unknown().to_wkt2(), None);
-        // A non-EPSG authority that happens to carry an EPSG code must not
-        // be served the EPSG definition.
+        // A non-EPSG authority that happens to carry an EPSG code must not be served the EPSG definition.
         assert_eq!(Crs::from_authority("ESRI:4326").to_wkt2(), None);
     }
 
@@ -714,16 +706,14 @@ mod tests {
 
     #[test]
     fn test_from_wkt_prefers_crs_level_identifier() {
-        // EPSG:3857 nests ID["EPSG",4326] in BASEGEOGCRS and ID["EPSG",1024]
-        // plus parameter IDs in the conversion; the CRS-level ID is last.
+        // EPSG:3857 nests ID["EPSG",4326] in BASEGEOGCRS and ID["EPSG",1024] plus parameter IDs in the conversion; the CRS-level ID is last.
         let wkt = Crs::from_epsg(3857).to_wkt2().unwrap();
         assert_eq!(Crs::from_wkt(&wkt).unwrap().srid(), Some(3857));
     }
 
     #[test]
     fn test_from_wkt_ignores_quoted_and_substring_id() {
-        // "ELLIPSOID" ends in ID but is a distinct token; an ID-shaped
-        // sequence inside a quoted value must be skipped.
+        // "ELLIPSOID" ends in ID but is a distinct token; an ID-shaped sequence inside a quoted value must be skipped.
         let wkt = r#"GEOGCRS["ID test",REMARK["see ID["ESRI",9999]"],ID["ESRI",102100]]"#;
         assert_eq!(Crs::from_wkt(wkt), Some(Crs::from_authority("ESRI:102100")));
     }
@@ -731,8 +721,7 @@ mod tests {
     #[test]
     fn test_from_wkt_none_without_identifier() {
         assert_eq!(Crs::from_wkt(r#"GEOGCRS["No identifier here"]"#), None);
-        // Hand-authored ESRI WKT1 with no AUTHORITY clause (as found in
-        // real `.prj` files, e.g. an Albers definition).
+        // Hand-authored ESRI WKT1 with no AUTHORITY clause (as found in real `.prj` files, e.g. an Albers definition).
         let esri = r#"PROJCS["Albers Equal Area",GEOGCS["clark66",DATUM["D_North_American_1927",SPHEROID["Clarke_1866",6378206.4,294.9786982]]]]"#;
         assert_eq!(Crs::from_wkt(esri), None);
     }

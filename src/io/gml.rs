@@ -52,9 +52,6 @@ pub fn save_gml(path: &str, geoms: &[Geometry<f64>]) -> Result<(), String> {
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Reader
-// ---------------------------------------------------------------------------
 
 /// Local (namespace-stripped) element name from a QName.
 fn local<'a>(n: quick_xml::name::QName<'a>) -> &'a [u8] {
@@ -278,9 +275,6 @@ fn read_members(
                 if is_geometry(l) {
                     out.push(parse_geometry(reader, l)?);
                 } else {
-                    // Member wrapper (or unknown container): descend one
-                    // level, parse the first geometry found inside, then
-                    // consume the wrapper's end tag.
                     loop {
                         match reader.read_event().map_err(|e| e.to_string())? {
                             Event::Start(inner) if is_geometry(local(inner.name())) => {
@@ -337,9 +331,6 @@ fn coords_from_flat(nums: &[f64], ctx: &[u8], dim: usize) -> Result<Vec<Coord<f6
         .collect())
 }
 
-// ---------------------------------------------------------------------------
-// Writer
-// ---------------------------------------------------------------------------
 
 fn write_geometry(
     out: &mut String,
@@ -431,8 +422,7 @@ fn write_polygon(
 }
 
 fn fmt(v: f64) -> String {
-    // ryu: shortest round-trip formatting (same as the WKT writer);
-    // std's Display float path is 5-10x slower per number.
+    // ryu: shortest round-trip formatting (same as the WKT writer); std's Display float path is 5-10x slower per number.
     let mut buf = ryu::Buffer::new();
     buf.format(v).to_string()
 }

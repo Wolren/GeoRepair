@@ -26,7 +26,6 @@ pub fn eps_test(coords: &[Coord<f64>]) -> f64 {
     crate::core::EPS * scale
 }
 pub fn has_proper_self_crossing(p: &geo::Polygon<f64>) -> bool {
-    // Flatten exterior + holes into one coord slice, remembering ring starts.
     let mut coords: Vec<Coord<f64>> = Vec::with_capacity(
         p.exterior().0.len() + p.interiors().iter().map(|h| h.0.len()).sum::<usize>(),
     );
@@ -72,8 +71,7 @@ pub(crate) fn hole_vertex_strictly_outside(
         if point_in_ring_exclusive(pt, ring) {
             continue;
         }
-        // On the boundary? Exact-vertex touch: distance to the nearest shell
-        // segment within the validation tolerance (1e-12 * L^2 relative).
+        // Exact-vertex touch: distance to the nearest shell segment within the validation tolerance (1e-12 * L^2 relative).
         let mut on_boundary = false;
         for w in ring.windows(2) {
             if w[0] == w[1] {
@@ -138,10 +136,8 @@ pub(crate) fn resolve_nesting(
         return (holes.to_vec(), Vec::new());
     }
 
-    // Build parent relationship: hole[j] is inside hole[i] → parent_of[j] = Some(i)
     let n = holes.len();
 
-    // Precompute bbox + area for each hole, then build R-tree for O(log n) lookup
     #[derive(Clone, Copy)]
     struct HoleEnv {
         idx: usize,
@@ -206,7 +202,6 @@ pub(crate) fn resolve_nesting(
         }
     };
 
-    // Compute containment depth for each hole via BFS topological sort
     let mut depth = vec![0usize; n];
     let mut children = vec![Vec::new(); n];
     let mut queue: Vec<usize> = Vec::with_capacity(n);
@@ -228,14 +223,11 @@ pub(crate) fn resolve_nesting(
         }
     }
 
-    // Group holes by depth parity:
-    // even depth (2, 4, ...): separate polygons (islands)
-    // odd depth (1, 3, ...): subtract-from-parent (holes/voids)
+    // Group holes by depth parity: even depth (2, 4, ...): separate polygons (islands) odd depth (1, 3, ...): subtract-from-parent (holes/voids)
     let mut subtract = Vec::new();
     let mut island_indices = Vec::new();
     for (i, &d) in depth.iter().enumerate() {
         if d == 0 {
-            // Unreachable (shouldn't happen), treat as top-level hole
             subtract.push(i);
         } else if d % 2 == 1 {
             subtract.push(i);
@@ -245,7 +237,6 @@ pub(crate) fn resolve_nesting(
     }
 
     // For depth-2+ holes (islands), assign depth-3+ children as interior rings
-    // Build island polygons with proper sub-hole nesting
     let mut islands: Vec<Polygon<f64>> = Vec::new();
     for &ii in &island_indices {
         let children: Vec<LineString<f64>> = (0..n)

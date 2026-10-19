@@ -21,8 +21,6 @@ pub fn par_fix_multi_point<T: GeoFloat + Send + Sync>(
     mp: &MultiPoint<T>,
     _config: &MakeValidConfig,
 ) -> Geometry<T> {
-    // Same GEOS-parity rule as the serial MultiPoint impl: a point with a
-    // single non-finite ordinate is invalid (CoordinateNaN) and dropped; a
     // true empty point (NaN, NaN) is valid and preserved.
     let filtered: Vec<Point<T>> =
         mp.0.par_iter()
@@ -33,7 +31,6 @@ pub fn par_fix_multi_point<T: GeoFloat + Send + Sync>(
                 finite || empty_point
             })
             .collect();
-    // Serial dedup: a shared hash set inside par_iter would race.
     use rustc_hash::FxHashSet;
     let mut seen: FxHashSet<(u64, u64)> = FxHashSet::default();
     let points: Vec<Point<T>> = filtered
@@ -127,16 +124,10 @@ pub fn par_fix_multi_polygon(mp: &MultiPolygon<f64>, config: &MakeValidConfig) -
         return Geometry::Polygon(shells.pop().expect("len==1 verified"));
     }
     let mp = MultiPolygon::new(shells);
-    // Fast-path: already valid, return unchanged (idempotency) — mirrors the
-    // serial MultiPolygon impl. Without this the unconditional unary_union
-    // reorders/rotates components (and re-winds them) that the serial path
-    // keeps verbatim, breaking par==serial parity on e.g. bowtie repairs
-    // whose lobes touch at a single vertex.
     if crate::make_valid::is_valid_with_geo(&Geometry::MultiPolygon(mp.clone())) {
         return crate::make_valid::enforce_ogc_winding(Geometry::MultiPolygon(mp)).0;
     }
-    // Normalize winding first: geo's unary_union silently drops area on CW
-    // input shells (verified 0.84 vs 1.80 for square+rect overlap).
+    // Normalize winding first: geo's unary_union silently drops area on CW input shells (verified 0.84 vs 1.80 for square+rect overlap).
     let ccw: Vec<Polygon<f64>> =
         mp.0.iter()
             .map(|p| {

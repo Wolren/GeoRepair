@@ -349,9 +349,6 @@ fn ewkb_roundtrip_polygon_with_hole_xyz() {
     assert_eq!(back.extra_coords, extra);
 }
 
-// -----------------------------------------------------------------------
-// WriteOptions / BE writing tests
-// -----------------------------------------------------------------------
 
 #[test]
 fn write_wkb_with_opts_be_roundtrip_point() {
@@ -465,9 +462,6 @@ fn write_wkb_with_opts_mixed_endian_explicit() {
     assert_ne!(le_wkb, be_wkb, "LE and BE output should differ");
 }
 
-// -----------------------------------------------------------------------
-// read_wkb_from / write_wkb_to tests
-// -----------------------------------------------------------------------
 
 #[test]
 fn read_wkb_from_reader() {
@@ -521,12 +515,9 @@ fn write_wkb_to_writer_be_via_opts() {
 
 #[test]
 fn mixed_byte_order_multipolygon() {
-    // Outer: LE
-    // Inner polygon 1: BE
-    // Inner polygon 2: LE
+    // Inner polygon 1: BE Inner polygon 2: LE
     let mut wkb = Vec::new();
 
-    // Header: LE, MultiPolygon
     wkb.push(1);
     wkb.extend_from_slice(&6u32.to_le_bytes()); // MultiPolygon
     wkb.extend_from_slice(&2u32.to_le_bytes()); // 2 polygons
@@ -571,10 +562,7 @@ fn mixed_byte_order_multipolygon() {
     }
 }
 
-// -----------------------------------------------------------------------
-// Production-readiness battery: truncation, garbage, trailing bytes,
-// non-OGC variants, empty geometries, precise error codes.
-// -----------------------------------------------------------------------
+// Production-readiness battery: truncation, garbage, trailing bytes, non-OGC variants, empty geometries, precise error codes.
 
 /// Every strict prefix of a valid WKB buffer must fail cleanly (no
 /// panics, no silent truncation acceptance).
@@ -629,7 +617,6 @@ fn trailing_bytes_rejected() {
     let g = make_test_polygon();
     let wkb = write_wkb(&g);
 
-    // One trailing byte.
     let mut buf = wkb.clone();
     buf.push(0x00);
     let err = read_wkb(&buf).unwrap_err();
@@ -638,7 +625,6 @@ fn trailing_bytes_rejected() {
         "expected TrailingBytes, got {err:?}"
     );
 
-    // A second complete geometry behind the first.
     let mut buf = wkb.clone();
     buf.extend_from_slice(&write_wkb(&make_test_geom()));
     let err = read_wkb(&buf).unwrap_err();
@@ -646,14 +632,11 @@ fn trailing_bytes_rejected() {
         matches!(err, WkbError::TrailingBytes { .. }),
         "expected TrailingBytes for concatenation, got {err:?}"
     );
-    // ...but the concat API reads both.
     assert_eq!(read_wkb_concat(&buf).unwrap().len(), 2);
 }
 
 #[test]
 fn non_ogc_variants_roundtrip_wkb() {
-    // Line/Rect/Triangle serialize to their OGC equivalents
-    // (coordinate-exact), never silently to an empty collection.
     let line = Geometry::Line(geo::Line::new(
         Coord { x: 1.0, y: 2.0 },
         Coord { x: 3.0, y: 4.0 },
@@ -693,7 +676,6 @@ fn non_ogc_variants_roundtrip_wkb() {
         panic!("expected polygon for triangle WKB");
     }
 
-    // Big-endian variants too.
     let opts = WriteOptions {
         endianness: Endianness::BigEndian,
     };
@@ -725,8 +707,7 @@ fn empty_geometries_roundtrip_wkb() {
 
 #[test]
 fn wrong_subtype_reports_real_code() {
-    // MULTIPOINT containing a LINESTRING sub-geometry: the error must
-    // carry the actual sub type code (2 = LINESTRING), not 0.
+    // MULTIPOINT containing a LINESTRING sub-geometry: the error must carry the actual sub type code (2 = LINESTRING), not 0.
     let mut buf = Vec::new();
     buf.push(1u8); // NDR
     buf.extend_from_slice(&WKB_MULTIPOINT.to_le_bytes());

@@ -107,7 +107,6 @@ impl rstar::RTreeObject for HpEntry {
     }
 }
 
-// ── MCIndex: monotone-chain spatial indexing for O(n log n) intersection ──
 
 /// Direction quadrant (0-3) for a segment vector.
 #[cfg(feature = "rstar")]
@@ -230,7 +229,6 @@ fn check_chain_pair(
     coords: &mut Vec<Coord<f64>>,
     checked: &mut FxHashSet<(usize, usize)>,
 ) {
-    // Bounding box overlap test
     if mc1.min_x > mc2.max_x + 1e-12
         || mc1.max_x < mc2.min_x - 1e-12
         || mc1.min_y > mc2.max_y + 1e-12
@@ -239,14 +237,12 @@ fn check_chain_pair(
         return;
     }
 
-    // Leaf case: single segment in each chain
     if mc1.end - mc1.start == 1 && mc2.end - mc2.start == 1 {
         let i = mc1.start;
         let j = mc2.start;
         if i >= j || !checked.insert((i, j)) {
             return;
         }
-        // Skip adjacent pairs sharing an endpoint
         if j == i + 1 && segments[i].end == segments[j].start {
             return;
         }
@@ -264,7 +260,6 @@ fn check_chain_pair(
         return;
     }
 
-    // Subdivide the larger chain using actual segment bounds
     if (mc1.end - mc1.start) >= (mc2.end - mc2.start) {
         let mid = (mc1.start + mc1.end) / 2;
         if mid > mc1.start {
@@ -552,7 +547,6 @@ mod tests {
 
     #[test]
     fn test_snap_round_no_change() {
-        // Non-intersecting segments should pass through unchanged
         let lines = vec![
             Line::new(Coord { x: 0.0, y: 0.0 }, Coord { x: 1.0, y: 0.0 }),
             Line::new(Coord { x: 0.0, y: 1.0 }, Coord { x: 1.0, y: 1.0 }),
@@ -563,7 +557,6 @@ mod tests {
 
     #[test]
     fn test_snap_round_close_coords() {
-        // Two coordinates within hot pixel radius
         let lines = vec![
             Line::new(
                 Coord {
@@ -616,7 +609,6 @@ mod tests {
 
     #[test]
     fn test_snap_round_near_grid_point() {
-        // A point near a grid intersection should snap to it
         let grid_x = 1.2345678912;
         let grid_y = 5.0;
         let offset = 1e-11; // within hot pixel (5e-11)
@@ -650,7 +642,6 @@ mod tests {
             ));
         }
         let result = snap_round_lines(&lines);
-        // Segments are subdivided at hot pixels they pass through
         assert!(!result.is_empty());
     }
 
@@ -674,7 +665,6 @@ mod tests {
 
     #[test]
     fn test_segment_passes_near_hot_pixel() {
-        // A segment that passes close to a hot pixel should be subdivided
         let lines = vec![
             Line::new(Coord { x: 0.0, y: 0.0 }, Coord { x: 10.0, y: 0.0 }),
             Line::new(Coord { x: 5.0, y: 1e-11 }, Coord { x: 5.0, y: -1e-11 }),
@@ -686,25 +676,21 @@ mod tests {
 
     #[test]
     fn test_hot_pixel_merges_nearby_intersections() {
-        // Two lines intersecting very close to each other
         let lines = vec![
             Line::new(Coord { x: 0.0, y: 0.0 }, Coord { x: 10.0, y: 10.0 }),
             Line::new(Coord { x: 0.0, y: 10.0 }, Coord { x: 10.0, y: 0.0 }),
         ];
         let result = snap_round_lines(&lines);
-        // Should still have the same number of unique nodes
         assert_eq!(result.len(), 4);
     }
 
     #[test]
     fn test_subdivision_at_hot_pixel() {
-        // A single line near a vertex from another line
         let lines = vec![
             Line::new(Coord { x: 0.0, y: 0.0 }, Coord { x: 1.0, y: 0.0 }),
             Line::new(Coord { x: 0.5, y: 1e-11 }, Coord { x: 0.5, y: 1.0 }),
         ];
         let result = snap_round_lines(&lines);
-        // First segment should be subdivided
         assert!(!result.is_empty());
     }
 }

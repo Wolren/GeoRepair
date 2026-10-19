@@ -32,9 +32,6 @@ fn cfg_auto() -> MakeValidConfig {
     MakeValidConfig::default()
 }
 
-// =========================================================================
-// par_fix_multi_point
-// =========================================================================
 
 #[test]
 fn test_par_fix_multi_point_valid() {
@@ -67,14 +64,10 @@ fn test_par_fix_multi_point_mixed() {
 fn test_par_fix_multi_point_all_invalid() {
     let mp = MultiPoint::new(vec![Point::new(f64::NAN, 0.0)]);
     let result = parallel::par_fix_multi_point(&mp, &cfg_auto());
-    // NaN-ordinate points are invalid (GEOS parity: CoordinateNaN) and
-    // dropped by makeValid; all-invalid -> empty output (still valid)
+    // NaN-ordinate points are invalid (GEOS parity: CoordinateNaN) and dropped by makeValid; all-invalid -> empty output (still valid)
     assert!(result.is_valid());
 }
 
-// =========================================================================
-// par_fix_multi_line_string
-// =========================================================================
 
 #[test]
 fn test_par_fix_multi_line_string_valid() {
@@ -105,9 +98,6 @@ fn test_par_fix_multi_line_string_mixed() {
     assert_not_empty(&result);
 }
 
-// =========================================================================
-// par_fix_multi_polygon
-// =========================================================================
 
 #[test]
 fn test_par_fix_multi_polygon_valid() {
@@ -179,9 +169,6 @@ fn test_par_fix_multi_polygon_overlapping() {
     assert_not_empty(&result);
 }
 
-// =========================================================================
-// par_fix_collection
-// =========================================================================
 
 #[test]
 fn test_par_fix_collection_valid() {
@@ -225,9 +212,6 @@ fn test_par_fix_collection_mixed() {
     assert_not_empty(&result);
 }
 
-// =========================================================================
-// par_fix_collection with bowtie polygon
-// =========================================================================
 
 #[test]
 fn test_par_fix_collection_bowtie() {
@@ -246,9 +230,6 @@ fn test_par_fix_collection_bowtie() {
     assert_not_empty(&result);
 }
 
-// =========================================================================
-// Par vs serial consistency: parallel results must match serial
-// =========================================================================
 
 #[test]
 fn test_par_equals_serial_multipoint() {

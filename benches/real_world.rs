@@ -38,9 +38,6 @@ use std::time::Instant;
 use geo::{Coord, Geometry, Polygon};
 use geo_repair::GeoValidation;
 use geo_repair::dd::{dd_call_count, reset_dd_count};
-// The validation head-to-head section is GEOS-gated; the import must
-// carry the same cfg or the bench fails to compile under the default
-// feature set (bench-geos on, io-geojson-style sets off).
 #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
 use geo_repair::arrange::validate_polygon;
 use geo_repair::io::load_bin;
@@ -267,11 +264,6 @@ fn load_polys(path: &str) -> Vec<Polygon<f64>> {
             panic!("Failed to load {path}: {e}");
         }),
         other => {
-            // Original-data sources (.shp/.gpkg/.wkb) go through the crate's
-            // extension-detecting loader instead of the custom .bin
-            // transcription, which flattens MultiPolygons and skips empty
-            // records. The GEOS comparison should measure the original
-            // dataset, not a derived transcription of it.
             let geoms = geo_repair::io::load(path).unwrap_or_else(|e| {
                 panic!("Failed to load {path} ('.{other}'): {e}");
             });
@@ -289,14 +281,11 @@ fn load_polys(path: &str) -> Vec<Polygon<f64>> {
 }
 
 fn main() {
-    // Resolve input file: env var BENCH_FILE, or first CLI arg, or default
     let path = env::var("BENCH_FILE")
         .ok()
         .or_else(|| env::args().skip(1).find(|a| !a.starts_with("--")))
         .unwrap_or_else(|| "benches/real_world/data_0.gpkg".into());
-    // --fast: skip every GEOS comparison section (see header comment).
     let fast = env::args().any(|a| a == "--fast");
-    // BENCH_N: cap the dataset to the first N polys for smoke runs.
     let cap_n: Option<usize> = env::var("BENCH_N").ok().and_then(|v| v.parse().ok());
     eprintln!("Dataset: {path}");
     if fast {
@@ -316,24 +305,12 @@ fn main() {
     let n_polys = polys.len();
     eprintln!("[1/5] Loaded {n_polys} polys in {load_time:.3}s");
 
-    // Pre-compute validity and vertex counts in parallel. The classifier is
-    // the winding-agnostic full-validator verdict (any error other than
-    // WrongOrientation): the real-world dataset is essentially all-CW
-    // (GEOS-valid), so a winding-sensitive count would flag every polygon.
-    // validate_polygon is NOT used here: its zero-orient false positive
-    // inflated the count to 2,298 (fixed 2026-08-03; the true count is 1).
+    // The classifier is the winding-agnostic full-validator verdict (any error other than WrongOrientation)
     eprint!("[2/5] Validating {n_polys} polys...");
     let t0 = Instant::now();
     #[cfg(feature = "parallel")]
     let infos: Vec<_> = {
-        // Batch-level size partition: one balanced pass over the small
-        // polys, then the big ones (descending by vertex count so the
-        // giants spread across the pool instead of serializing inside
-        // random chunks). Measured 2026-08-06: interleaved par_iter 3.17s,
-        // two-pass ~2.3-2.6s - the giants' serial per-poly cost is the
-        // imbalance anchor and partitioning is the lever that fixes it.
-        // (Nested per-poly parallelism was measured as a REGRESSION and
-        // reverted - the pool is saturated, see check_holes_valid notes.)
+        // interleaved par_iter 3.17s
         let mut by_size: Vec<(usize, &Polygon<f64>)> =
             polys.iter().map(|p| (poly_n_vert(p), p)).collect();
         by_size.sort_unstable_by_key(|(n, _)| *n);
@@ -355,10 +332,7 @@ fn main() {
                 })
                 .collect::<Vec<_>>(),
         );
-        // Big pass: descending, then round-robin interleaved so contiguous
-        // rayon chunks each get a MIX of giant + medium work. A contiguous
-        // descending run puts ~20 mega giants (300-600k verts, ~190ms
-        // serial each) in ONE chunk - measured 7.2s vs 3.17s (2026-08-06).
+        // descending run puts ~20 mega giants (300-600k verts, ~190ms serial each) in ONE chunk
         let mut big_items: Vec<&Polygon<f64>> = big.iter().map(|(_, p)| *p).collect();
         big_items.reverse();
         let n_threads = rayon::current_num_threads();
@@ -416,9 +390,6 @@ fn main() {
         t0.elapsed().as_secs_f64()
     );
 
-    // =========================================================================
-    // Validation head-to-head: our validate_polygon vs GEOS isValid
-    // =========================================================================
     #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
     {
         if fast {
@@ -428,7 +399,6 @@ fn main() {
             std::io::stderr().flush().ok();
             use rayon::prelude::*;
 
-            // Time our validator (parallel)
             let t0 = Instant::now();
             let our_valid: u64 = polys
                 .par_iter()
@@ -436,13 +406,11 @@ fn main() {
                 .sum();
             let our_time = t0.elapsed().as_secs_f64();
 
-            // Pre-build GEOS geometries in parallel
             let t0 = Instant::now();
             let geos_geoms: Vec<Option<geos::Geometry>> =
                 polys.par_iter().map(poly_to_geos).collect();
             let geos_build_time = t0.elapsed().as_secs_f64();
 
-            // Time GEOS isValid (parallel)
             let t0 = Instant::now();
             let geos_valid: u64 = geos_geoms
                 .par_iter()
@@ -450,7 +418,6 @@ fn main() {
                 .sum();
             let geos_time = t0.elapsed().as_secs_f64();
 
-            // Agreement (parallel)
             let (both_valid, both_invalid, our_valid_geos_invalid, our_invalid_geos_valid): (
                 u64,
                 u64,
@@ -513,9 +480,6 @@ fn main() {
     #[cfg(not(any(feature = "bench-geos", feature = "bench-geos-system")))]
     eprintln!("  (skip: bench-geos feature not enabled)");
 
-    // =========================================================================
-    // Deep-dive analysis of a specific polygon (ANALYZE_POLY env var)
-    // =========================================================================
     if let Ok(target_str) = env::var("ANALYZE_POLY") {
         if let Ok(target) = target_str.parse::<usize>() {
             if target < n_polys {
@@ -571,9 +535,6 @@ fn main() {
         }
     }
 
-    // =========================================================================
-    // Sample fast-path time
-    // =========================================================================
     eprint!("\n[3/5] Sampling fast-path (100 polys)...");
     let cfg = MakeValidConfig {
         poly_method: PolyMethod::Structure,
@@ -582,9 +543,7 @@ fn main() {
     let fp_time = sample_fastpath(&polys, &valid_idx, &cfg, 100);
     eprintln!(" {:.6}s avg per valid poly", fp_time);
 
-    // =========================================================================
     // Method comparison: Structure vs GEOS on invalid polys
-    // =========================================================================
     let sample_n = n_invalid;
     let sample_idx: Vec<usize> = invalid_idx.iter().copied().take(sample_n).collect();
 
@@ -595,10 +554,8 @@ fn main() {
     }
     std::io::stderr().flush().ok();
 
-    // Collect invalid polys
     let invalid_polys: Vec<&Polygon<f64>> = sample_idx.iter().map(|&idx| &polys[idx]).collect();
 
-    // Parallel Structure batch processing
     reset_dd_count();
     #[cfg(feature = "structure")]
     geo_repair::structure::reset_profile();
@@ -625,7 +582,6 @@ fn main() {
     #[cfg(feature = "structure")]
     geo_repair::structure::print_profile(sample_n);
 
-    // Validate all Structure outputs through GEOS is_valid()
     // (--fast: use our validator instead - no GEOS oracle in fast mode)
     let mut stru_invalid_outputs = 0usize;
     #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
@@ -652,10 +608,7 @@ fn main() {
     }
     #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
     if fast {
-        // Lightweight gate only (arrange::validate_polygon): the full
-        // Shewchuk validator on the repaired outputs costs ~35s on the
-        // giant invalid polys (187k verts) - defeats the purpose of
-        // --fast. The GEOS verdict stays the canonical one in full mode.
+        // Shewchuk validator on the repaired outputs costs ~35s
         let mut invalid = 0usize;
         for g in &results {
             let mut bad = false;
@@ -685,7 +638,6 @@ fn main() {
         stru_invalid_outputs = invalid;
     }
 
-    // Pre-create GEOS geometries outside GEOS timer
     let geos_total: f64;
     #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
     {
@@ -715,9 +667,6 @@ fn main() {
         geos_total = 0.0;
     }
 
-    // =========================================================================
-    // Full-dataset timing: process N random polys through both methods
-    // =========================================================================
     let full_n = n_polys;
     eprintln!("\n[5/5] Full dataset: {full_n} polys (parallel Structure vs parallel GEOS)");
 
@@ -759,9 +708,7 @@ fn main() {
         full_geos_total = 0.0;
     }
 
-    // Structure full pass — runs LAST because it CONSUMES `polys` for the
-    // zero-copy owned batch path (valid polygons move into the output
-    // instead of being cloned, matching GEOS's shared-geometry return).
+    // zero-copy owned batch path (valid polygons move into the output instead of being cloned, matching GEOS's shared-geometry return).
     let t0 = Instant::now();
     let cfg = MakeValidConfig {
         poly_method: PolyMethod::Structure,
@@ -769,12 +716,6 @@ fn main() {
     };
     #[cfg(feature = "parallel")]
     let _full_results = {
-        // Same size-partition + round-robin interleave as the validation
-        // section: the big polys' serial fast-path cost (12.8ms avg for
-        // >4096 verts, measured 2026-08-06) is the repair batch's
-        // imbalance anchor - 1,164 bigs = ~15s summed vs ~1.2s for the
-        // 1.58M smalls. Interleaving stops contiguous chunks from
-        // stacking mega giants (measured 7.2s pathology in [2/5]).
         // NOTE: sort (size, index) pairs, NOT (size, Polygon) tuples -
         // the owned-tuple sort moves ~100B per element x log(n) levels
         // (~3GB of copying, measured 4.47s regression 2026-08-06).
@@ -795,15 +736,11 @@ fn main() {
         let perm: Vec<usize> = small_idxs.into_iter().chain(interleaved).collect();
         let mut reordered: Vec<Polygon<f64>> = Vec::with_capacity(polys.len());
         for &i in &perm {
-            // SAFETY: each index appears exactly once in `perm`; the source
-            // slot is never read again, and `polys` is forgotten below so
-            // no double-drop.
+            // SAFETY: each index appears exactly once in `perm`; the source slot is never read again
             reordered.push(unsafe { std::ptr::read(&polys[i]) });
         }
         std::mem::forget(polys);
         let results = par_fix_polygon_batch_owned(reordered, &cfg);
-        // BENCH_OUTPUT=<path.gpkg>: export the repaired geometries in the
-        // ORIGINAL input order (the interleave scrambled the batch order)
         // so the file lines up feature-for-feature with data_0.gpkg in QGIS.
         if let Ok(out_path) = env::var("BENCH_OUTPUT") {
             let mut ordered: Vec<Option<Geometry<f64>>> = vec![None; results.len()];
@@ -837,9 +774,6 @@ fn main() {
         .collect();
     let full_stru = t0.elapsed().as_secs_f64();
 
-    // =========================================================================
-    // Summary
-    // =========================================================================
     let full_ratio = if full_geos_total > 0.0 {
         full_stru / full_geos_total
     } else {

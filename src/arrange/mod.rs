@@ -74,12 +74,8 @@ fn build_cdt_safe(
 }
 
 pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Geometry<f64> {
-    // Sub-ULP gate FIRST (before poly_has_basic_form): mixed-magnitude rings
     // (1e8 + 1e-9 coords) have sub-precision spikes that fail basic form
-    // (consecutive duplicates) AND poison the CDT with crossing triangles
-    // (measured: seed 00c11200 → MultiPolygon with cross-component
-    // SelfIntersection; GEOS snaps the spike to the grid). Collapsing the
-    // run up front routes everything downstream through clean geometry.
+    // (measured: seed 00c11200 → MultiPolygon with cross-component SelfIntersection; GEOS snaps the spike to the grid).
     if has_sub_ulp_edge(poly, None) {
         let ext: LineString<f64> = LineString::new(
             crate::structure::fix_ring::collapse_sub_ulp_vertices(&poly.exterior().0, true),
@@ -102,18 +98,12 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Geom
                 ext.0.len()
             );
         }
-        // No-op collapse guard: if the ring is unchanged, recursion would be
-        // infinite (measured: invariant_mixed_fp_in_same_ring stack
-        // overflow). Fall through to the normal path instead.
+        // No-op collapse guard: if the ring is unchanged, recursion would be infinite (measured: invariant_mixed_fp_in_same_ring stack overflow).
         let collapsed = Polygon::new(ext, holes);
         if collapsed.exterior().0.len() != poly.exterior().0.len() {
             return fix_polygon(&collapsed, config);
         }
     }
-    // Basic form + line collection in ONE pass (the separate `collect`
-    // was a full extra read of the coords - measured 2026-08-07:
-    // ~10-15 us on a 5000-vertex ring). The repair path re-collects
-    // when the basic form fails (the partial lines are unusable there).
     let cap = poly
         .exterior()
         .0
@@ -143,8 +133,7 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Geom
     {
         return Geometry::Polygon(poly.clone());
     }
-    // Fallback: if intersection check false-positives (known fp precision issue
-    // with near-collinear vertices from CDT output), verify with our own validator.
+    // Fallback: if intersection check false-positives (known fp precision issue with near-collinear vertices from CDT output), verify with our own validator.
     if holes_are_valid(poly) && poly_has_basic_form(poly) {
         let v = poly.validate();
         if v.valid {
@@ -189,9 +178,7 @@ pub(crate) fn fallback_polygon_fix(poly: &Polygon<f64>) -> Geometry<f64> {
         .collect();
     match boolean_difference_catch(&shell, &holes) {
         Some(diff) if !diff.0.is_empty() => Geometry::MultiPolygon(diff),
-        // boolean difference panicked (i_overlay is_fill_top assertion on
-        // degenerate input) or produced empty — polygon split failed for
-        // hole-touching-2-places.
+        // boolean difference panicked (i_overlay is_fill_top assertion on degenerate input) or produced empty: polygon split failed for hole-touching-2-places.
         _ => empty(),
     }
 }
@@ -304,12 +291,8 @@ pub(crate) fn holes_contained_cheap(poly: &Polygon<f64>, tuning: &crate::core::T
 /// Does NOT check OGC winding (CCW exterior) — GEOS isValid accepts both
 /// winding orders, and winding is enforced on repair output separately.
 pub fn validate_polygon(poly: &Polygon<f64>) -> bool {
-    // One pass over the coords does the basic form (closure, adjacent
-    // duplicates, NaN) AND the bit-exact duplicate scan AND the line
-    // collection for the intersection sweep - the gate's separate
-    // `lines_iter` collect is fused into the plausibility scan
-    // (measured 2026-08-07: the collect was a full extra read, ~10-15 us
-    // on a 5000-vertex ring).
+    // One pass over the coords does the basic form (closure, adjacent duplicates, NaN) AND the bit-exact duplicate scan
+    // (measured 2026-08-07: the collect was a full extra read, ~10-15 us on a 5000-vertex ring).
     let cap = poly
         .exterior()
         .0
@@ -330,16 +313,11 @@ pub fn validate_polygon(poly: &Polygon<f64>) -> bool {
             return false;
         }
     }
-    // Self-intersection check
     if lines.is_empty() || !prep::has_no_intersections(&lines) {
         return false;
     }
-    // Hole containment checks (GEOS-aligned inclusive: a hole may touch the
-    // shell at a point — OGC polygon validity — so the first-vertex probe
-    // must not disqualify boundary-touching holes. The exclusive variant
-    // rejects GEOS-valid repaired outputs; measured: --fast gate flagged
-    // 24/300 real-world structure components that the full validator and
-    // GEOS accept, 2026-08-03).
+    // The exclusive variant rejects GEOS-valid repaired outputs; measured: --fast gate flagged
+    // 24/300 real-world structure components that the full validator and GEOS accept, 2026-08-03 .
     if poly.interiors().is_empty() {
         return true;
     }
@@ -437,11 +415,6 @@ fn holes_valid_impl(poly: &Polygon<f64>, inclusive: bool) -> bool {
                 return false;
             }
         }
-        // Hole-hole collinear edge sharing (positive-length overlap) → the holes
-        // touch each other → DisconnectedInteriorRing. The R-tree above only
-        // catches one hole's vertex strictly inside another; touching holes
-        // share an edge with no vertex containment. Bbox-prefilter + small-ring
-        // cap keeps this cheap: valid multi-hole polys have no edge sharing.
         for i in 0..holes.len() {
             for j in (i + 1)..holes.len() {
                 if crate::util::rings_share_collinear_edge_precise(holes[i], holes[j]) {
@@ -669,40 +642,26 @@ pub(crate) fn ring_is_plausible(ring: &geo::LineString<f64>, acc: &mut GateAccum
         return false;
     }
     let n = coords.len() - 1;
-    // Fused chain index: when the caller wants chains, they are opened here
-    // and closed on success, so the gate's single walk over this ring also
-    // produces the monotone-chain index (ring boundaries are known, unlike
-    // the re-detection build_mono_chains does on a flat line array).
     if let Some(s) = acc.chains.as_deref_mut() {
         s.begin_ring();
     }
-    // The non-adjacent duplicate-vertex class is closed by the pair
-    // predicates (`prep_intersect::shares_repeated_vertex`), so the walk no
-    // longer builds a per-ring hash table. Only the bounded small-ring scan
-    // in `plausible_body` stays.
     plausible_body(coords, n, acc)
 }
 
 /// The shared windows loop of [`ring_is_plausible`].
 fn plausible_body(coords: &[geo::Coord<f64>], n: usize, acc: &mut GateAccum) -> bool {
-    // Extremal recording (min-x, tie min-y, strict <, candidate 0,
-    // interior range [1..n)) — matches min_x_vertex in util.rs EXACTLY so
-    // the caller's winding normalization can skip its own search. Only
-    // tracked when the caller asked (gate path); None = no overhead.
+    // Extremal recording (min-x, tie min-y, strict <, candidate 0, interior range [1..n)): matches min_x_vertex in util.rs EXACTLY
     let track_ext = acc.extremal.is_some();
     let mut ext_min_x = coords[0].x;
     let mut ext_min_y = coords[0].y;
     let mut ext_idx = 0usize;
     for (i, w) in coords.windows(2).enumerate() {
-        // Adjacent duplicates AND non-finite coords (the gate's
-        // separate NaN scan is folded here - measured 2026-08-07: one
-        // fewer full pass over the ring on the valid-polygon path).
+        // Adjacent duplicates AND non-finite coords (the gate's separate NaN scan is folded here - measured 2026-08-07: one fewer full pass)
         if w[0] == w[1] || !w[0].x.is_finite() || !w[0].y.is_finite() {
             return false;
         }
         if track_ext && i >= 1 {
-            // w[0] is coords[i]; the closure coord (index n) never
-            // appears as w[0], and index 0 is the default candidate.
+            // w[0] is coords[i]; the closure coord (index n) never appears as w[0], and index 0 is the default candidate.
             let c = w[0];
             if c.x < ext_min_x || (c.x == ext_min_x && c.y < ext_min_y) {
                 ext_min_x = c.x;
@@ -761,7 +720,6 @@ pub(crate) fn fix_from_lines(lines: Vec<geo::Line<f64>>) -> Option<MultiPolygon<
         .into_iter()
         .flat_map(extract::split_ring_at_pinch_points)
         .filter(|coords| {
-            // O(n log n): discard rings with self-intersections from CDT precision
             let lines: Vec<geo::Line<f64>> = coords
                 .windows(2)
                 .map(|w| geo::Line::new(w[0], w[1]))

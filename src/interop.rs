@@ -132,7 +132,6 @@ mod tests {
         assert!(is_valid_geometry(&geom));
         let result = validate_geometry(&geom);
         assert!(result.valid);
-        // Repair is a no-op on valid input.
         let fixed = make_valid_geometry(&geom);
         assert_eq!(fixed, geom);
     }
@@ -174,8 +173,6 @@ mod tests {
 
     #[test]
     fn wkb_source_is_repairable() {
-        // Drive the engine from a non-geo geometry source: the `wkb` crate
-        // implements geo-traits, so its geometry works directly.
         use wkb::reader::read_wkb;
         let poly = bowtie();
         let bytes = crate::write_wkb(&Geometry::Polygon(poly));

@@ -12,9 +12,6 @@ use geo_repair::validation::GeoValidation;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 use wkt::TryFromWkt;
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 fn assert_valid(g: &Geometry<f64>) {
     assert!(
@@ -56,10 +53,7 @@ fn cfg_keep_collapsed() -> MakeValidConfig {
     }
 }
 
-// ---------------------------------------------------------------------------
 // SECTION 1: Repeated point removal
-// (GEOS RepeatedPointRemoverTest)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_repeated_points_deduplicated() {
@@ -95,10 +89,7 @@ fn test_all_repeated_points_becomes_empty() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // SECTION 2: Ring-specific tests
-// (GEOS ValidClosedRingTest + GeometryFixer)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_valid_triangle_ring() {
@@ -149,9 +140,7 @@ fn test_self_crossing_ring() {
     assert_not_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
 // SECTION 3: Collinear points (tolerance-based removal)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_collinear_triangle_becomes_line() {
@@ -165,12 +154,7 @@ fn test_collinear_triangle_becomes_line() {
         Vec::new(),
     );
     let result = poly.make_valid_with_config(&cfg_auto());
-    // Fully-collinear zero-area ring: the closing edge backtracks over edge 0
-    // and is now flagged as a self-intersection (closing-edge pair check,
-    // differential fuzz 2026-08-03). GEOS MakeValid drops collapsed rings, so
-    // the correct output is EMPTY - or a degenerate polygon with opposing
-    // winding on paths that predate the closing-edge check. Either is
-    // structurally sound; the assertion is "valid and not a panic".
+    // and is now flagged as a self-intersection (closing-edge pair check, differential fuzz 2026-08-03).
     assert!(result.validate().valid, "output must be valid: {result:?}");
 }
 
@@ -191,9 +175,7 @@ fn test_collinear_quadrilateral() {
     assert_not_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
 // SECTION 4: NaN/inf in rings
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_ring_with_nan_becomes_empty() {
@@ -233,9 +215,7 @@ fn test_ring_with_inf_becomes_empty() {
     assert_valid(&result);
 }
 
-// ---------------------------------------------------------------------------
 // SECTION 5: MultiLineString edge cases
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_multilinestring_all_empty() {
@@ -280,9 +260,7 @@ fn test_multilinestring_keep_collapsed() {
     assert_not_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
 // SECTION 6: MultiPolygon edge cases
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_multipolygon_all_empty() {
@@ -373,9 +351,7 @@ fn test_multipolygon_collapsed_keep_collapsed() {
     assert_not_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
 // SECTION 7: Geometry collection edge cases
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_geometry_collection_mixed_empty() {

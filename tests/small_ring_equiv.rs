@@ -41,14 +41,8 @@ fn lines_of(coords: &[(f64, f64)]) -> Vec<Line<f64>> {
 /// small inputs too, so the test compares the two algorithms, not the
 /// dispatch.
 fn chain_path(lines: &[Line<f64>]) -> bool {
-    // Force the chain machinery by checking a synthetic large input is not
-    // needed: replicate build_mono_chains + grid + R-tree via the public
-    // entry on a padded copy? No — instead reimplement the dispatch by
-    // calling has_no_intersections on a copy padded with a far-away ring.
-    // Padding with a disjoint ring at distance 1e9 cannot change the
-    // intersection verdict for any pair of original segments: the original
-    // pairs are checked identically, and the pad ring shares no segment
-    // with them. So: pad -> public function -> same verdict.
+    // No: instead reimplement the dispatch by calling has_no_intersections on a copy padded with a far-away ring.
+    // Padding with a disjoint ring at distance 1e9 cannot change
     let mut padded = lines.to_vec();
     let base = 1e9;
     let pad = [
@@ -130,7 +124,6 @@ fn small_detects_proper_crossings() {
     assert!(has_no_intersections_small(&square));
     assert!(chain_path(&square));
 
-    // Self-touch at a vertex: not a proper crossing.
     let pinch = lines_of(&[(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (1.0, 1.0), (0.0, 2.0)]);
     assert!(has_no_intersections_small(&pinch));
     assert!(chain_path(&pinch));
@@ -159,8 +152,6 @@ fn all_small_sizes_dispatched_correctly() {
     }
     let big = random_ring(999, SMALL_RING_LINES + 8, 5.0);
     let lines = lines_of(&big);
-    // Above the threshold: public entry must dispatch to the chain path and
-    // agree with it (small path is out of scope for inputs this large).
     assert_eq!(has_no_intersections(&lines), chain_path(&lines));
 }
 

@@ -15,7 +15,6 @@ fn roundtrip_point_le() {
 #[test]
 fn roundtrip_point_be() {
     let g = Geometry::Point(Point::new(1.0, 2.0));
-    // Manually construct big-endian WKB
     let mut wkb = Vec::new();
     wkb.push(0); // byte order = BE
     wkb.extend_from_slice(&1u32.to_be_bytes()); // Point type
@@ -154,7 +153,6 @@ fn read_wkb_concat_works() {
 
 #[test]
 fn ewkb_srid_stripped() {
-    // EWKB point with SRID flag and SRID value
     let mut wkb = Vec::new();
     wkb.push(1); // LE
     // type = Point (1) | SRID flag (0x20000000)
@@ -170,7 +168,7 @@ fn ewkb_srid_stripped() {
 
 #[test]
 fn ewkb_z_flag_now_returns_2d() {
-    // read_wkb no longer rejects Z dimension — silently returns 2D
+    // read_wkb no longer rejects Z dimension: silently returns 2D
     let mut wkb = Vec::new();
     wkb.push(1);
     let type_with_z = 1u32 | WKB_Z_FLAG;
@@ -227,8 +225,5 @@ fn ewkb_z_in_multi_sub_geom_now_returns_2d() {
     }
 }
 
-// -----------------------------------------------------------------------
-// EWKB roundtrip tests
-// -----------------------------------------------------------------------
 
 mod ewkb;

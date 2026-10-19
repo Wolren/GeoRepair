@@ -269,8 +269,6 @@ fn save_output(path: &str, geoms: &[Geometry<f64>]) -> Result<(), String> {
             std::fs::write(path, &buf).map_err(|e| format!("cannot write {path}: {e}"))
         }
         "bin" => {
-            // .bin is a polygons-only format; flatten every polygon
-            // component (MultiPolygon, GeometryCollection) in order.
             fn extract_polygons(g: &Geometry<f64>) -> Vec<Polygon<f64>> {
                 match g {
                     Geometry::Polygon(p) => vec![p.clone()],
@@ -292,8 +290,7 @@ fn save_output(path: &str, geoms: &[Geometry<f64>]) -> Result<(), String> {
             }
             std::fs::write(path, out).map_err(|e| format!("cannot write {path}: {e}"))
         }
-        // gpkg save needs the backend (absent on wasm32 / without io-gpkg);
-        // the fallback arm reports the format as unsupported there.
+        // gpkg save needs the backend (absent on wasm32 / without io-gpkg); the fallback arm reports the format as unsupported there.
         #[cfg(all(feature = "io-gpkg", not(target_arch = "wasm32")))]
         "gpkg" => geo_repair::io::gpkg::save_gpkg(path, geoms),
         other => Err(format!(

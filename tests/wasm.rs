@@ -9,9 +9,6 @@
 //! arrange,structure,simd,validate,wasm --test wasm` with the
 //! wasm-bindgen-test-runner installed.
 
-// Native test runs also compile this file (the crate's battery); without
-// the gate the `geo_repair::wasm` module is configured out and the file
-// fails to link. On non-wasm targets this compiles to an empty test crate.
 #![cfg(target_arch = "wasm32")]
 
 use geo::{Coord, LineString, Polygon};
@@ -138,7 +135,6 @@ fn fetch_geometry_available_in_browser() {
             }
         }
         Err(e) => {
-            // Node harness: no XMLHttpRequest/window - skip.
             assert!(
                 e.contains("no window") || e.contains("XHR"),
                 "unexpected fetch error: {e}"

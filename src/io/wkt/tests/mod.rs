@@ -260,15 +260,11 @@ fn roundtrip_all_types_vs_wkt_crate() {
 
         let our_out = write_wkt(&ours);
         let their_out = theirs.to_wkt().to_string();
-        // Our output format may differ in whitespace — re-parse both to compare
         let ours_reparsed = read_wkt(&our_out).unwrap();
         let theirs_reparsed: Geometry<f64> = wkt::TryFromWkt::try_from_wkt_str(&their_out).unwrap();
         assert_eq!(ours_reparsed, theirs_reparsed, "output mismatch for {wkt}");
     }
 }
 
-// ---------------------------------------------------------------------------
-// Comprehensive double-roundtrip tests
-// ---------------------------------------------------------------------------
 
 mod double;

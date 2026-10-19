@@ -46,14 +46,10 @@ fn cfg_all() -> Vec<MakeValidConfig> {
     ]
 }
 
-// ========================================================================
-// 1. ring_dup_fingerprint stress (tested through Polygon validation
-//    which calls this function for duplicate ring detection)
-// ========================================================================
+// 1. ring_dup_fingerprint stress (tested through Polygon validation which calls this function for duplicate ring detection)
 
 #[test]
 fn stress_ring_dup_detection_empty() {
-    // Empty polygon should not panic the duplicate ring detector
     for cfg in &cfg_all() {
         assert_no_panic(move || {
             let poly = Polygon::new(LineString::new(Vec::new()), Vec::new());
@@ -67,7 +63,6 @@ fn stress_ring_dup_at_extreme_coords() {
     for &(x, y, _name) in FP_SPECIALS {
         for cfg in &cfg_all() {
             assert_no_panic(move || {
-                // Two shells that are identical — triggers duplicate detection
                 let shell = LineString::new(vec![
                     Coord { x, y },
                     Coord { x: x + 10.0, y },
@@ -88,17 +83,13 @@ fn stress_ring_dup_at_extreme_coords() {
     }
 }
 
-// ========================================================================
-// 2. point_in_ring_exclusive stress (tested through validator's
-//    hole containment check and repair's vertex-inside check)
-// ========================================================================
+// 2. point_in_ring_exclusive stress (tested through validator's hole containment check and repair's vertex-inside check)
 
 #[test]
 fn stress_hole_containment_at_extreme() {
     for &(x, y, _name) in FP_SPECIALS {
         for cfg in &cfg_all() {
             assert_no_panic(move || {
-                // Shell at extreme + hole also at extreme — triggers containment check
                 let poly = Polygon::new(
                     LineString::new(vec![
                         Coord { x, y },
@@ -141,7 +132,6 @@ fn stress_hole_containment_at_extreme() {
 
 #[test]
 fn stress_hole_hole_overlap_at_extreme() {
-    // Two holes that overlap — triggers hole-hole intersection check
     for &(x, y, _name) in FP_SPECIALS {
         for cfg in &cfg_all() {
             assert_no_panic(move || {
@@ -209,20 +199,15 @@ fn stress_hole_hole_overlap_at_extreme() {
     }
 }
 
-// ========================================================================
-// 3. orient2d stress (tested through bowtie repair which exercises
-//    orientation predicates at extreme coordinate ratios)
-// ========================================================================
+// 3. orient2d stress (tested through bowtie repair which exercises orientation predicates at extreme coordinate ratios)
 
 #[test]
 fn stress_orient2d_at_extreme_ratio() {
-    // Coordinates where orient2d may have precision issues due to
-    // extreme magnitude differences between coordinates
+    // Coordinates where orient2d may have precision issues due to extreme magnitude differences between coordinates
     for &(x, y, _name) in FP_SPECIALS {
         for cfg in &cfg_all() {
             assert_no_panic(move || {
-                // Bowtie with extreme coordinates — forces orient2d in
-                // segment intersection detection
+                // Bowtie with extreme coordinates: forces orient2d in segment intersection detection
                 let poly = Polygon::new(
                     LineString::new(vec![
                         Coord { x, y },
@@ -242,14 +227,10 @@ fn stress_orient2d_at_extreme_ratio() {
     }
 }
 
-// ========================================================================
-// 4. MultiPolygon bbox overlap + vertex containment at extreme
-// ========================================================================
+// 4.
 
 #[test]
 fn stress_bbox_vertex_at_extreme_ratio() {
-    // Two polygons with extreme ratio between their coordinate magnitudes.
-    // The bbox check may overflow when computing min/max.
     for cfg in &cfg_all() {
         assert_no_panic(move || {
             let p1 = Polygon::new(
@@ -308,14 +289,11 @@ fn stress_bbox_vertex_at_extreme_ratio() {
     }
 }
 
-// ========================================================================
-// 5. Massive geometry with alternating extreme/normal vertices
-// ========================================================================
+// 5.
 
 #[test]
 fn stress_alternating_extreme_vertices() {
-    // A large ring where every other vertex is f64::MAX vs 0.0, creating
-    // extreme coordinate differences between adjacent vertices
+    // A large ring where every other vertex is f64::MAX vs 0.0, creating extreme coordinate differences between adjacent vertices
     let mut coords = Vec::new();
     for i in 0..50 {
         if i % 2 == 0 {
@@ -337,14 +315,11 @@ fn stress_alternating_extreme_vertices() {
     }
 }
 
-// ========================================================================
-// 6. Ring where NaN filtering leaves exactly 2 coords (edge case for
-//    point_in_ring_exclusive)
-// ========================================================================
+// 6.
 
 #[test]
 fn stress_nan_filter_leaves_two_coords() {
-    // Ring: valid, NaN, NaN, valid — after NaN filter: 2 coords
+    // Ring: valid, NaN, NaN, valid: after NaN filter: 2 coords
     // This specifically exercises the n < 2 guard in point_in_ring_exclusive
     for cfg in &cfg_all() {
         assert_no_panic(move || {
@@ -372,14 +347,11 @@ fn stress_nan_filter_leaves_two_coords() {
     }
 }
 
-// ========================================================================
-// 7. MultiPolygon where unary_union would have extreme input
-// ========================================================================
+// 7.
 
 #[test]
 fn stress_unary_union_at_extreme() {
-    // Two overlapping polygons at extreme coordinates — forces unary_union
-    // which internally uses orient2d and segment intersection
+    // Two overlapping polygons at extreme coordinates: forces unary_union which internally uses orient2d and segment intersection
     for cfg in &cfg_all() {
         assert_no_panic(move || {
             let p1 = Polygon::new(

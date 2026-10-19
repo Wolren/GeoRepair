@@ -38,9 +38,6 @@ BOWTIE = "POLYGON((0 0, 5 5, 5 0, 0 5, 0 0))"
 SQUARE = "POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))"
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 def wkb_polygon(points):
     """Little-endian WKB POLYGON with a single ring."""
@@ -57,9 +54,6 @@ BOWTIE_WKB = wkb_polygon([(0, 0), (5, 5), (5, 0), (0, 5), (0, 0)])
 GARBAGE = b"\x01\x02\x03\x04"
 
 
-# ---------------------------------------------------------------------------
-# Version
-# ---------------------------------------------------------------------------
 
 def test_version():
     assert version() == __version__
@@ -68,9 +62,6 @@ def test_version():
     assert all(p.isdigit() for p in parts)
 
 
-# ---------------------------------------------------------------------------
-# WKB: validity
-# ---------------------------------------------------------------------------
 
 def test_is_valid_wkb():
     assert is_valid_wkb(SQUARE_WKB) is True
@@ -86,9 +77,6 @@ def test_is_valid_wkb_batch():
     assert is_valid_wkb_batch([SQUARE_WKB, BOWTIE_WKB, GARBAGE]) == [True, False, False]
 
 
-# ---------------------------------------------------------------------------
-# WKB: validation
-# ---------------------------------------------------------------------------
 
 def test_validate_wkb():
     valid, errors = validate_wkb(SQUARE_WKB)
@@ -111,9 +99,6 @@ def test_validate_wkb_batch():
     assert results[2][0] is False  # parse failure reported as errors
 
 
-# ---------------------------------------------------------------------------
-# WKB: repair
-# ---------------------------------------------------------------------------
 
 def test_repair_wkb_bowtie():
     fixed = repair_wkb(BOWTIE_WKB)
@@ -163,9 +148,6 @@ def test_par_repair_wkb_batch_matches_sequential():
     assert all(is_valid_wkb(w) for w in par)
 
 
-# ---------------------------------------------------------------------------
-# WKB: repair + validate
-# ---------------------------------------------------------------------------
 
 def test_repair_validate_wkb():
     fixed, was_valid, errors = repair_validate_wkb(BOWTIE_WKB)
@@ -188,9 +170,6 @@ def test_repair_validate_wkb_batch():
     assert all(is_valid_wkb(r[0]) for r in results)
 
 
-# ---------------------------------------------------------------------------
-# WKB: validate + fix
-# ---------------------------------------------------------------------------
 
 def test_validate_and_fix_wkb():
     was_valid, errors, fixed = validate_and_fix_wkb(BOWTIE_WKB)
@@ -213,9 +192,6 @@ def test_validate_and_fix_wkb_batch():
     assert all(is_valid_wkb(r[2]) for r in results)
 
 
-# ---------------------------------------------------------------------------
-# WKT: validity
-# ---------------------------------------------------------------------------
 
 def test_is_valid_wkt():
     assert is_valid_wkt("POINT(1 2)") is True
@@ -231,9 +207,6 @@ def test_is_valid_wkt_bad_input_raises():
         is_valid_wkt("NOTVALID")
 
 
-# ---------------------------------------------------------------------------
-# WKT: validation
-# ---------------------------------------------------------------------------
 
 def test_validate_wkt():
     assert validate_wkt(SQUARE) == []
@@ -248,9 +221,6 @@ def test_validate_wkt_batch():
     assert len(results[2]) == 1  # parse failure reported as an error string
 
 
-# ---------------------------------------------------------------------------
-# WKT: repair
-# ---------------------------------------------------------------------------
 
 def test_repair_wkt():
     assert repair_wkt("POINT(1 2)") == "POINT (1.0 2.0)"
@@ -294,9 +264,6 @@ def test_par_repair_wkt_batch_matches_sequential():
     assert all(is_valid_wkt(w) for w in par)
 
 
-# ---------------------------------------------------------------------------
-# WKT: repair + validate
-# ---------------------------------------------------------------------------
 
 def test_repair_validate_wkt():
     fixed, was_valid, errors = repair_validate_wkt(BOWTIE)
@@ -319,9 +286,6 @@ def test_repair_validate_wkt_batch():
     assert all(is_valid_wkt(r[0]) for r in results)
 
 
-# ---------------------------------------------------------------------------
-# WKT: validate + fix
-# ---------------------------------------------------------------------------
 
 def test_validate_and_fix_wkt():
     was_valid, errors, fixed = validate_and_fix_wkt(BOWTIE)
@@ -344,9 +308,7 @@ def test_validate_and_fix_wkt_batch():
     assert all(is_valid_wkt(r[2]) for r in results)
 
 
-# ---------------------------------------------------------------------------
 # Cross-format consistency: WKB and WKT surfaces must agree
-# ---------------------------------------------------------------------------
 
 def test_wkb_wkt_agree_on_bowtie():
     assert is_valid_wkb(BOWTIE_WKB) == is_valid_wkt(BOWTIE)
@@ -355,9 +317,6 @@ def test_wkb_wkt_agree_on_bowtie():
     assert is_valid_wkb(fixed_wkb) == is_valid_wkt(fixed_wkt)
 
 
-# ---------------------------------------------------------------------------
-# Post-repair validity contract
-# ---------------------------------------------------------------------------
 
 def test_repair_output_always_valid():
     for make in (repair_wkb, repair_wkt):

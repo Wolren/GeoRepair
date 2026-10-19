@@ -21,7 +21,6 @@ pub fn load_gpkg(path: &str) -> Result<Vec<Geometry<f64>>, String> {
     let conn = open_readonly(path)?;
     let mut out = Vec::new();
     {
-        // Which tables carry geometry, and which column in each.
         let mut stmt = conn
             .prepare("SELECT table_name, column_name FROM gpkg_geometry_columns")
             .map_err(|e| format!("{path}: cannot read gpkg_geometry_columns: {e}"))?;
@@ -125,7 +124,6 @@ pub fn save_gpkg(path: &str, geoms: &[Geometry<f64>]) -> Result<(), String> {
     )
     .map_err(|e| format!("{path}: schema: {e}"))?;
 
-    // Bounding box over all geometries (only polygons contribute).
     let mut min_x = f64::MAX;
     let mut min_y = f64::MAX;
     let mut max_x = f64::MIN;
@@ -157,8 +155,6 @@ pub fn save_gpkg(path: &str, geoms: &[Geometry<f64>]) -> Result<(), String> {
     .map_err(|e| format!("{path}: geom cols: {e}"))?;
 
     {
-        // One transaction for the whole batch: autocommit per insert does a
-        // journal commit + fsync PER FEATURE - 1.58M rows measured at
         // minutes instead of seconds (2026-08-06, QGIS-export run).
         let tx = conn
             .transaction()
@@ -168,9 +164,8 @@ pub fn save_gpkg(path: &str, geoms: &[Geometry<f64>]) -> Result<(), String> {
                 .prepare("INSERT INTO \"georepair\" (geom) VALUES (?1)")
                 .map_err(|e| format!("{path}: {e}"))?;
             for g in geoms {
-                // GeoPackage binary header (OGC 12-128r15 6.1): 'GP',
-                // version 0, flags 0x01 (little-endian, no envelope),
-                // SRS id 4326 LE. GDAL/QGIS reject headerless blobs.
+                // GeoPackage binary header (OGC 12-128r15 6.1): 'GP', version 0, flags 0x01 (little-endian, no envelope), SRS id 4326 LE.
+                // GDAL/QGIS reject headerless blobs.
                 let mut blob = Vec::with_capacity(8 + 64);
                 blob.extend_from_slice(&[0x47, 0x50, 0x00, 0x01]);
                 blob.extend_from_slice(&4326i32.to_le_bytes());

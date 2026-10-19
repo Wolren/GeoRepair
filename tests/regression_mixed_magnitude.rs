@@ -3,13 +3,7 @@ use geo_repair::validation::GeoValidation;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 
 // Fuzz-discovered (crash-eaab5472, CI 2026-08-04): a VALID ring whose
-// 1-unit base sits at 1e15 while one vertex spikes to y=4.9e208. The
-// bbox-scale degeneracy gates (make_valid pre-gate, strip bbox_ok,
-// sub-ULP edge) compared extents against the max spread, so the spike
-// dominated the base: every repair mode collapsed the valid polygon to
-// GEOMETRYCOLLECTION EMPTY (and later to a LINESTRING after the pre-gate
-// fix). GEOS IsValid keeps it; the preservation contract says valid in,
-// polygonal out. All three modes must return the polygon unchanged.
+// 1-unit base sits at 1e15 while one vertex spikes to y=4.9e208.
 #[test]
 fn fuzz_valid_spike_ring_preserved() {
     let ring = vec![
@@ -52,10 +46,7 @@ fn fuzz_valid_spike_ring_preserved() {
     }
 }
 
-// Fuzz-discovered deadly signal: a ring mixing denormals (7e-321),
-// extreme magnitudes (5.5e+303, 1.9e+289), and normal coordinates.
-// The repair pipeline must not crash (stack overflow / foreign assert)
-// on any input, and must ship valid-or-empty output.
+// Fuzz-discovered deadly signal: a ring mixing denormals (7e-321), extreme magnitudes (5.5e+303, 1.9e+289), and normal coordinates.
 #[test]
 fn fuzz_mixed_magnitude_deadly_signal() {
     let mut ring = vec![
@@ -92,7 +83,6 @@ fn fuzz_mixed_magnitude_deadly_signal() {
             y: 5.0,
         },
     ];
-    // Mirror the fuzz target: append the closure vertex when unclosed.
     if ring.first() != ring.last() {
         ring.push(ring[0]);
     }

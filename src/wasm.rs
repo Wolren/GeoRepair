@@ -45,7 +45,6 @@ pub fn fetch_bytes(url: &str) -> Result<Vec<u8>, String> {
     if body.is_array() {
         Ok(js_sys::Uint8Array::new(&body).to_vec())
     } else {
-        // Response is not an ArrayBuffer (e.g. empty body) - try text.
         xhr.response_text()
             .ok()
             .flatten()

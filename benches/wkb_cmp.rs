@@ -63,7 +63,6 @@ fn load_geoms() -> Vec<Geometry<f64>> {
 fn main() {
     let t_start = Instant::now();
 
-    // ── Load ──
     let t0 = Instant::now();
     let polys: Vec<Geometry<f64>> = load_geoms();
     let n = polys.len();
@@ -77,7 +76,6 @@ fn main() {
     eprintln!("  load      {:?}", t0.elapsed());
     eprintln!();
 
-    // ── Pre-serialize WKB ──
     let t0 = Instant::now();
     let our_wkb: Vec<Vec<u8>> = polys.iter().map(geo_repair::write_wkb).collect();
     let their_wkb: Vec<Vec<u8>> = polys
@@ -93,7 +91,6 @@ fn main() {
         .collect();
     eprintln!("  WKB ser      {:?}", t0.elapsed());
 
-    // Verify roundtrip equivalence
     for (a, b) in our_wkb.iter().zip(their_wkb.iter()) {
         let our_rt = geo_repair::read_wkb(a).unwrap();
         let w = wkb::reader::read_wkb(b).unwrap();
@@ -103,7 +100,6 @@ fn main() {
     eprintln!("  WKB verify   ✓");
     eprintln!();
 
-    // ── Pre-serialize WKT ──
     let t0 = Instant::now();
     let our_wkt: Vec<String> = polys.iter().map(geo_repair::write_wkt).collect();
     let wkt_ser_our = t0.elapsed();
@@ -132,13 +128,9 @@ fn main() {
 
     let mut results: Vec<(&str, f64, f64)> = Vec::new();
 
-    // ═══════════════════════════════════════════════
-    //  WKB
-    // ═══════════════════════════════════════════════
     eprintln!("  ──── WKB ────");
     eprintln!();
 
-    // ── WKB read (cross-tested) ──
     eprintln!("  ── Read (cross) ──");
     let warmup = |b: &[u8]| {
         let _ = geo_repair::read_wkb(b);
@@ -153,12 +145,6 @@ fn main() {
     let our_rt = bench_ns(&their_wkb, |b| {
         let _ = geo_repair::read_wkb(b).unwrap();
     });
-    // Fair-comparison breakdown for georust/wkb: their read_wkb alone is a
-    // ZERO-COPY borrowed view (no allocation) - it does not produce a
-    // geo::Geometry. The public path to geo::Geometry is read + to_geometry,
-    // which is what the cross-tests above time. Separating the two shows
-    // exactly where the cost sits (the conversion is a second full pass
-    // with per-coordinate trait dispatch).
     let their_bare = bench_ns(&our_wkb, |b| {
         let w = wkb::reader::read_wkb(b).unwrap();
         std::hint::black_box(w.dimension());
@@ -188,7 +174,6 @@ fn main() {
     eprintln!();
     results.push(("WKB read", our_wkb_avg, their_wkb_avg));
 
-    // ── WKB write ──
     eprintln!("  ── Write ──");
     for g in &polys {
         let _ = geo_repair::write_wkb(g);
@@ -214,7 +199,6 @@ fn main() {
     eprintln!();
     results.push(("WKB write", our_w, their_w));
 
-    // ── WKB roundtrip ──
     eprintln!("  ── Roundtrip ──");
     for g in &polys {
         let bytes = geo_repair::write_wkb(g);
@@ -240,13 +224,9 @@ fn main() {
     eprintln!();
     results.push(("WKB roundtrip", our_rt, their_rt));
 
-    // ═══════════════════════════════════════════════
-    //  WKT
-    // ═══════════════════════════════════════════════
     eprintln!("  ──── WKT ────");
     eprintln!();
 
-    // ── WKT read (cross-tested) ──
     eprintln!("  ── Read (cross) ──");
     for s in &our_wkt {
         let _ = geo_repair::read_wkt(s);
@@ -278,7 +258,6 @@ fn main() {
     eprintln!();
     results.push(("WKT read", our_wkt_avg, their_wkt_avg));
 
-    // ── WKT write ──
     eprintln!("  ── Write ──");
     for g in &polys {
         let _ = geo_repair::write_wkt(g);
@@ -297,7 +276,6 @@ fn main() {
     eprintln!();
     results.push(("WKT write", ww_o, ww_t));
 
-    // ── WKT roundtrip (subset) ──
     let n_sub = our_wkt.len().min(WKT_RT_SUBSET);
     eprintln!("  ── Roundtrip (n={n_sub}) ──");
     for s in &our_wkt[..n_sub] {
@@ -320,9 +298,6 @@ fn main() {
     eprintln!();
     results.push(("WKT roundtrip", rt_o, rt_t));
 
-    // ═══════════════════════════════════════════════
-    //  Summary
-    // ═══════════════════════════════════════════════
     let total = t_start.elapsed();
     eprintln!("  ═══ Summary ═══");
     eprintln!("  Total wall time: {total:?}");

@@ -104,9 +104,6 @@ impl fmt::Display for WktError {
 #[cfg(feature = "std")]
 impl std::error::Error for WktError {}
 
-// ---------------------------------------------------------------------------
-// Parser
-// ---------------------------------------------------------------------------
 
 mod read;
 #[cfg(test)]

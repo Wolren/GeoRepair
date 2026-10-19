@@ -18,9 +18,6 @@ use geo::{
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 use std::panic::{self, AssertUnwindSafe};
 
-// ========================================================================
-// Panic-catch helper
-// ========================================================================
 
 /// Assert that an expression does NOT panic.
 fn assert_no_panic<F: FnOnce() + std::panic::UnwindSafe>(f: F) {
@@ -28,9 +25,6 @@ fn assert_no_panic<F: FnOnce() + std::panic::UnwindSafe>(f: F) {
     assert!(r.is_ok(), "PANIC detected! Fix the pipeline.");
 }
 
-// ========================================================================
-// FP class generators
-// ========================================================================
 
 /// All the fp value classes that could cause panics.
 struct FpClass {
@@ -98,9 +92,7 @@ fn all_configs() -> Vec<MakeValidConfig> {
     vec![auto, auto_keep, arrange, structure]
 }
 
-// ========================================================================
-// 1. Point with extreme fp values
-// ========================================================================
+// 1.
 
 #[test]
 fn panic_point_all_fp_classes() {
@@ -116,7 +108,6 @@ fn panic_point_all_fp_classes() {
 
 #[test]
 fn panic_point_mixed_coords() {
-    // x extreme, y normal
     for &x in &[f64::NAN, f64::INFINITY, f64::MAX, f64::MIN] {
         for &y in &[-1e6, 0.0, 1e6] {
             for cfg in &all_configs() {
@@ -129,9 +120,7 @@ fn panic_point_mixed_coords() {
     }
 }
 
-// ========================================================================
-// 2. Line with extreme fp values
-// ========================================================================
+// 2.
 
 #[test]
 fn panic_line_all_fp_classes() {
@@ -156,9 +145,7 @@ fn panic_line_zero_length_with_extreme() {
     }
 }
 
-// ========================================================================
-// 3. LineString with extreme fp values
-// ========================================================================
+// 3.
 
 fn make_ls_with(fp: &FpClass, n: usize) -> LineString<f64> {
     let coords: Vec<Coord<f64>> = (0..n)
@@ -207,9 +194,7 @@ fn panic_linestring_two_points_all_fp() {
     }
 }
 
-// ========================================================================
-// 4. Polygon with extreme fp values
-// ========================================================================
+// 4.
 
 fn make_poly_with(fp: &FpClass, n: usize) -> Polygon<f64> {
     let coords: Vec<Coord<f64>> = (0..n)
@@ -361,9 +346,7 @@ fn panic_polygon_max_coords_multiple_holes() {
     }
 }
 
-// ========================================================================
-// 5. MultiPoint with extreme fp
-// ========================================================================
+// 5.
 
 #[test]
 fn panic_multipoint_all_fp_classes() {
@@ -381,9 +364,7 @@ fn panic_multipoint_all_fp_classes() {
     }
 }
 
-// ========================================================================
-// 6. MultiLineString with extreme fp
-// ========================================================================
+// 6.
 
 #[test]
 fn panic_multilinestring_all_fp_classes() {
@@ -397,9 +378,7 @@ fn panic_multilinestring_all_fp_classes() {
     }
 }
 
-// ========================================================================
-// 7. MultiPolygon with extreme fp
-// ========================================================================
+// 7.
 
 #[test]
 fn panic_multipolygon_all_fp_classes() {
@@ -470,9 +449,7 @@ fn panic_multipolygon_extreme_bbox_overlap() {
     }
 }
 
-// ========================================================================
-// 8. GeometryCollection with extreme fp
-// ========================================================================
+// 8.
 
 #[test]
 fn panic_gc_all_fp_classes() {
@@ -490,9 +467,7 @@ fn panic_gc_all_fp_classes() {
     }
 }
 
-// ========================================================================
-// 9. Rect and Triangle with extreme fp
-// ========================================================================
+// 9.
 
 #[test]
 fn panic_rect_all_fp_classes() {
@@ -533,13 +508,11 @@ fn panic_triangle_all_fp_classes() {
     }
 }
 
-// ========================================================================
-// 10. Degenerate rings (structural panic sources)
-// ========================================================================
+// 10.
 
 #[test]
 fn panic_ring_with_only_nans_removed_to_empty() {
-    // Ring where all coords are NaN — after filtering, < 3 coords remain
+    // Ring where all coords are NaN: after filtering, < 3 coords remain
     for cfg in &all_configs() {
         assert_no_panic(move || {
             let poly = Polygon::new(
@@ -570,7 +543,7 @@ fn panic_ring_with_only_nans_removed_to_empty() {
 
 #[test]
 fn panic_ring_with_mixed_nan_and_valid() {
-    // Ring with NaNs interleaved — filtering leaves 2 or fewer coords
+    // Ring with NaNs interleaved: filtering leaves 2 or fewer coords
     let patterns = [
         // 3 coords: valid, NaN, valid → after filter: 2 coords (edges)
         vec![
@@ -641,7 +614,6 @@ fn panic_ring_with_inf_and_neg_inf() {
 
 #[test]
 fn panic_ring_with_f64_max_overflow_ops() {
-    // Values that might overflow when subtracted or added
     for cfg in &all_configs() {
         assert_no_panic(move || {
             let poly = Polygon::new(
@@ -674,13 +646,10 @@ fn panic_ring_with_f64_max_overflow_ops() {
     }
 }
 
-// ========================================================================
-// 11. Combinatorial stress: mixed fp classes in same geometry
-// ========================================================================
+// 11.
 
 #[test]
 fn panic_polygon_mixed_fp_classes_in_same_ring() {
-    // Each vertex is a different fp class
     let vertices = [
         (
             "nan+nan",
@@ -732,7 +701,6 @@ fn panic_polygon_mixed_fp_classes_in_same_ring() {
             },
         ),
     ];
-    // Test each vertex as the first vertex (can trigger different paths)
     for i in 0..vertices.len() {
         for cfg in &all_configs() {
             let verts = vertices.to_vec();
@@ -751,9 +719,7 @@ fn panic_polygon_mixed_fp_classes_in_same_ring() {
     }
 }
 
-// ========================================================================
-// 12. Empty geometry types — indexing panics
-// ========================================================================
+// 12.
 
 #[test]
 fn panic_empty_all_types() {
@@ -779,9 +745,7 @@ fn panic_empty_all_types() {
     }
 }
 
-// ========================================================================
-// 13. Polygon with hole that becomes degenerate after NaN removal
-// ========================================================================
+// Polygon with hole that becomes degenerate after NaN removal
 
 #[test]
 fn panic_hole_collapses_after_nan_removal() {
@@ -815,9 +779,7 @@ fn panic_hole_collapses_after_nan_removal() {
     }
 }
 
-// ========================================================================
-// 14. Very large coordinate values with additive/subtractive ops
-// ========================================================================
+// 14.
 
 #[test]
 fn panic_f64_max_subtraction_chain() {
@@ -853,9 +815,7 @@ fn panic_f64_max_subtraction_chain() {
     });
 }
 
-// ========================================================================
-// 15. Coordinates at exactly 0, 0 with extreme second coordinate
-// ========================================================================
+// Coordinates at exactly 0, 0 with extreme second coordinate
 
 #[test]
 fn panic_origin_to_extreme() {
@@ -895,9 +855,7 @@ fn panic_origin_to_extreme() {
     }
 }
 
-// ========================================================================
-// 16. Saturated subtraction: x - y with both near f64::MAX
-// ========================================================================
+// 16.
 
 #[test]
 fn panic_near_max_subtraction() {
@@ -929,9 +887,7 @@ fn panic_near_max_subtraction() {
     }
 }
 
-// ========================================================================
-// 17. All three coords identical but at extreme fp
-// ========================================================================
+// 17.
 
 #[test]
 fn panic_single_vertex_at_extreme() {
@@ -957,9 +913,7 @@ fn panic_single_vertex_at_extreme() {
     }
 }
 
-// ========================================================================
-// 18. CDT-specific panic tests (known to crash spade)
-// ========================================================================
+// CDT-specific panic tests (known to crash spade)
 
 #[test]
 fn panic_cdt_all_collinear() {
@@ -1031,9 +985,7 @@ fn panic_cdt_extreme_collinear() {
     }
 }
 
-// ========================================================================
-// 19. ValidateOrFix panic stress
-// ========================================================================
+// ValidateOrFix panic stress
 
 #[test]
 fn panic_validate_or_fix_all_extreme() {
@@ -1046,9 +998,7 @@ fn panic_validate_or_fix_all_extreme() {
     }
 }
 
-// ========================================================================
-// 20. Massive ring size with degenerate coordinates
-// ========================================================================
+// 20.
 
 #[test]
 fn panic_massive_ring_1000_vertices_all_nan() {
@@ -1106,9 +1056,7 @@ fn panic_massive_ring_1000_vertices_mixed_extreme() {
     });
 }
 
-// ========================================================================
-// 20. Cross-module stress: GC with deeply nested extreme coords
-// ========================================================================
+// 20.
 
 #[test]
 fn panic_gc_nested_deep_with_extreme() {
@@ -1126,9 +1074,7 @@ fn panic_gc_nested_deep_with_extreme() {
     }
 }
 
-// ========================================================================
-// 21. GC with mixed types containing extreme fp values
-// ========================================================================
+// 21.
 
 #[test]
 fn panic_gc_mixed_types_extreme() {
@@ -1162,9 +1108,7 @@ fn panic_gc_mixed_types_extreme() {
     }
 }
 
-// ========================================================================
-// 22. ValidateOrFix on multiple geometry types with extreme fp
-// ========================================================================
+// 22.
 
 #[test]
 fn panic_validate_or_fix_all_types_extreme() {
@@ -1193,9 +1137,7 @@ fn panic_validate_or_fix_all_types_extreme() {
     }
 }
 
-// ========================================================================
-// 23. MultiPolygon extreme overlapping shells with fp extremes
-// ========================================================================
+// 23.
 
 #[test]
 fn panic_mp_extreme_overlap() {
@@ -1254,9 +1196,7 @@ fn panic_mp_extreme_overlap() {
     }
 }
 
-// ========================================================================
-// 24. Rect and Triangle with invalid/extreme fp dimensions
-// ========================================================================
+// 24.
 
 #[test]
 fn panic_rect_triangle_extreme() {
@@ -1290,9 +1230,7 @@ fn panic_rect_triangle_extreme() {
     }
 }
 
-// ========================================================================
-// 25. Empty GC with all-mixed-empty sub-geometries
-// ========================================================================
+// 25.
 
 #[test]
 fn panic_gc_all_empty_types() {

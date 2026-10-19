@@ -37,19 +37,13 @@ pub unsafe extern "C" fn geo_repair_make_valid_batch(
         );
     }
     match catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: caller guarantees a valid array of `count` buffers.
         let slice = unsafe { std::slice::from_raw_parts(inputs, count) };
         let config = make_config(false, 0, 0, 0);
         let items = if parallel != 0 {
             #[cfg(feature = "parallel")]
             {
                 use rayon::prelude::*;
-                // Parse first (sequential, cheap), then repair the parsed
-                // geometries in parallel. GeoRepairWkbBuffer holds raw
-                // pointers (!Send/!Sync) so the raw slice cannot enter a
-                // rayon closure directly; GeoRepairResult is also !Send,
-                // so the parallel stage produces plain Send values and the
-                // result structs are assembled sequentially after.
+                // GeoRepairWkbBuffer holds raw pointers (!Send/!Sync) so the raw slice cannot enter a rayon closure directly; GeoRepairResult is also !Send
                 let parsed: Vec<Result<Geometry<f64>, GeoRepairErrorCode>> = slice
                     .iter()
                     .map(|buf| geometry_from_wkb(buf.data, buf.len))
@@ -90,6 +84,3 @@ pub unsafe extern "C" fn geo_repair_make_valid_batch(
     }
 }
 
-// ---------------------------------------------------------------------------
-// WKT
-// ---------------------------------------------------------------------------

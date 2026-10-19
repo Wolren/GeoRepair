@@ -45,12 +45,8 @@ pub fn save_shp(path: &str, geoms: &[Geometry<f64>]) -> Result<(), String> {
     }
     let mut writer = ShapeWriter::from_path(path).map_err(|e| format!("{path}: {e}"))?;
     for g in &polys {
-        // Shape::try_from maps Polygon -> Polygon record and MultiPolygon ->
-        // one Polygon record with several outer rings (shapefile semantics).
         let shape =
             Shape::try_from(g.clone()).map_err(|e| format!("{path}: shape conversion: {e}"))?;
-        // Each polygon variant carries a different point type but all
-        // implement EsriShape, so write through a match on the record.
         match shape {
             Shape::Polygon(p) => writer.write_shape(&p),
             Shape::PolygonM(p) => writer.write_shape(&p),
@@ -59,7 +55,6 @@ pub fn save_shp(path: &str, geoms: &[Geometry<f64>]) -> Result<(), String> {
         }
         .map_err(|e| format!("{path}: {e}"))?;
     }
-    // Headers are finalized on drop (flush returns nothing usable here).
     Ok(())
 }
 

@@ -202,7 +202,6 @@ fn ewkb_z_and_srid_parity() {
 #[test]
 fn wkb_parity_both_writers() {
     for (i, g) in corpus().iter().enumerate() {
-        // Our writer -> both readers.
         let our_bytes = write_wkb(g);
         let ours = our_parse(&our_bytes);
         let theirs = their_parse(&our_bytes);
@@ -212,7 +211,6 @@ fn wkb_parity_both_writers() {
         );
         assert!(geom_eq(&ours, g), "case {i}: our write->read lost data");
 
-        // Their writer -> both readers.
         let their_bytes = their_write(g);
         let theirs = their_parse(&their_bytes);
         let ours2 = our_parse(&their_bytes);
@@ -229,12 +227,9 @@ fn wkb_parity_both_writers() {
 
 #[test]
 fn wkb_cross_parse_byte_equality() {
-    // For the canonical cases the two writers must produce byte-identical
-    // output (both write 2D NDR WKB, same structure). This pins the wire
-    // format: any drift in either writer is a compatibility break.
+    // For the canonical cases the two writers must produce byte-identical output (both write 2D NDR WKB, same structure).
     for (i, g) in corpus().iter().enumerate() {
-        // Skip NaN payload cases: NaN bit patterns are implementation
-        // specific and not comparable across writers.
+        // Skip NaN payload cases: NaN bit patterns are implementation specific and not comparable across writers.
         let has_nan = || {
             fn geom_has_nan(g: &Geometry<f64>) -> bool {
                 match g {

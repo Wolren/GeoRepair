@@ -139,8 +139,7 @@ impl DD {
         let inv_approx = 1.0 / other.hi;
         let mut x = DD::from_f64(inv_approx);
 
-        // Two Newton steps for ~106 bits of precision in the reciprocal
-        // x = x * (2 - other * x)
+        // Two Newton steps for ~106 bits of precision in the reciprocal x = x * (2 - other * x)
         let two = DD::from_f64(2.0);
         x = x.mul(two.sub(other.mul(x)));
         x = x.mul(two.sub(other.mul(x)));
@@ -289,32 +288,26 @@ pub(crate) fn segment_intersection_dd(
     let dx = DD::from_f64(nd.x);
     let dy = DD::from_f64(nd.y);
 
-    // Direction vectors
     let abx = bx.sub(ax);
     let aby = by.sub(ay);
     let cdx = dx.sub(cx);
     let cdy = dy.sub(cy);
 
-    // Denominator = cross(b-a, d-c)
     let denom = DD::cross(abx, aby, cdx, cdy);
     if denom.signum() == 0 {
         return None;
     }
 
-    // t = cross(c-a, d-c) / denom
     let acx = cx.sub(ax);
     let acy = cy.sub(ay);
     let num_t = DD::cross(acx, acy, cdx, cdy);
     let t = num_t.div(denom);
 
-    // u = cross(c-a, b-a) / denom
     let num_u = DD::cross(acx, acy, abx, aby);
     let u = num_u.div(denom);
 
-    // Compute intersection point in DD: p = a + t * (b - a)
     let px = ax.add(abx.mul(t));
     let py = ay.add(aby.mul(t));
-    // De-normalize: p = p' * scale + origin
     let result = Coord {
         x: px.to_f64() * scale + origin.x,
         y: py.to_f64() * scale + origin.y,
@@ -326,11 +319,8 @@ pub(crate) fn segment_intersection_dd(
 mod tests {
     use super::*;
 
-    // DD_CALL_COUNT is process-global and three tests here reset it. Without
-    // this lock one test's reset lands inside another's before/after window
-    // and the snapshot assertion reads (0, 0): a race that snapshot deltas
-    // (ed73e76) could not tolerate, since a concurrent reset destroys the
-    // delta itself.
+    // and the snapshot assertion reads (0, 0)
+    // (ed73e76) could not tolerate, since a concurrent reset destroys the delta itself.
     static COUNTER_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn lock_counter() -> std::sync::MutexGuard<'static, ()> {
@@ -424,7 +414,6 @@ mod tests {
 
     #[test]
     fn test_segment_intersection_dd_near_degenerate() {
-        // Very near-parallel segments at large coordinates
         let a = Coord { x: 1e10, y: 1e10 };
         let b = Coord {
             x: 1e10 + 1.0,
@@ -439,14 +428,12 @@ mod tests {
             y: 1e10 + 0.0,
         };
         let result = segment_intersection_dd(a, b, c, d);
-        // These should intersect — cross product is ~1e-10, which f64 can represent
-        // but the intersection point should still be computed accurately
+        // These should intersect: cross product is ~1e-10
         assert!(
             result.is_some(),
             "near-degenerate intersection should be found"
         );
         if let Some((pt, _t, _u)) = result {
-            // The intersection point should be near the crossing region
             let eps = 1e-6;
             assert!(
                 pt.x >= 1e10 - eps && pt.x <= 1e10 + 2.0 + eps,
@@ -458,7 +445,6 @@ mod tests {
 
     #[test]
     fn test_segment_intersection_dd_large_coords() {
-        // Large coordinates with precise intersection
         let a = Coord { x: 0.0, y: 0.0 };
         let b = Coord { x: 2e14, y: 2e14 };
         let c = Coord { x: 0.0, y: 2e14 };
@@ -497,7 +483,6 @@ mod tests {
         let result = segment_intersection_dd(a, b, c, d);
         assert!(result.is_some(), "small-angle intersection should be found");
         if let Some((pt, _t, _u)) = result {
-            // Should intersect near the middle
             assert!((pt.y).abs() < 1.0, "y should be near 0, got {}", pt.y);
         }
     }
@@ -527,7 +512,6 @@ mod tests {
 
     #[test]
     fn test_dd_call_counter() {
-        // Verify that segment_intersection_dd increments the call counter.
         let _guard = lock_counter();
         let before = dd_call_count();
         segment_intersection_dd(
@@ -541,7 +525,6 @@ mod tests {
             after > before,
             "counter should show at least one call (before={before}, after={after})",
         );
-        // Reset and verify the counter doesn't show a stale huge number.
         reset_dd_count();
         let reset = dd_call_count();
         assert!(
@@ -556,7 +539,6 @@ mod tests {
         let _guard = lock_counter();
         use crate::MakeValid;
         use geo::Polygon;
-        // Bowtie polygon — classic self-intersecting case
         let poly = Polygon::new(
             geo::LineString::new(vec![
                 Coord { x: 0.0, y: 0.0 },

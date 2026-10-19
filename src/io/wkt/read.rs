@@ -56,14 +56,11 @@ impl<'a> Parser<'a> {
         }
         let kw = &self.s[start..self.i];
         let dims = self.read_dims()?;
-        // Case-insensitive keywords (the corpus carries "MultiPolygon").
         let kw_upper: Vec<u8> = kw.iter().map(|b| b.to_ascii_uppercase()).collect();
         let kw = kw_upper.as_slice();
         let kw = match kw {
             b"POINT" => Keyword::Point,
             b"LINESTRING" => Keyword::LineString,
-            // LINEARING is OGC WKT for a ring - parsed as a LineString;
-            // ring validity semantics are the caller's concern.
             b"LINEARRING" => Keyword::LineString,
             b"POLYGON" => Keyword::Polygon,
             b"MULTIPOINT" => Keyword::MultiPoint,
@@ -104,15 +101,7 @@ impl<'a> Parser<'a> {
             return Err(self.err("expected number"));
         }
 
-        // strtod-style token walk: optional sign, then digits with
-        // optional fraction and exponent, or nan/inf/infinity
-        // (case-insensitive). The token slice is parsed with
-        // std::str::parse, which is CORRECTLY ROUNDED (Eisel-Lemire),
-        // matching strtod/GEOS. The historical hand-rolled u64
-        // accumulator + 10f64.powi(exp) assembly was not: measured
-        // 2026-08-04, "4.919094327364069e208" parsed 1 ULP off the
-        // correctly-rounded value, and the writer's own round-trip
-        // output re-parsed to a DIFFERENT f64 (roundtrip fuzz target).
+        // The historical hand-rolled u64 accumulator + 10f64.powi(exp) assembly was not: measured output re-parsed to a DIFFERENT f64 (roundtrip fuzz target).
         let bytes = &self.s;
         let n = bytes.len();
         if self.i < n && (bytes[self.i] == b'-' || bytes[self.i] == b'+') {
@@ -138,14 +127,12 @@ impl<'a> Parser<'a> {
                 .map_err(|_| self.err("expected number"));
         }
 
-        // Integer part.
         let mut parsed_any = false;
         while self.i < n && bytes[self.i].is_ascii_digit() {
             parsed_any = true;
             self.i += 1;
         }
 
-        // Fractional part.
         if self.i < n && bytes[self.i] == b'.' {
             self.i += 1;
             while self.i < n && bytes[self.i].is_ascii_digit() {
@@ -158,7 +145,6 @@ impl<'a> Parser<'a> {
             return Err(self.err("expected digit"));
         }
 
-        // Exponent.
         if self.i < n && (bytes[self.i] == b'e' || bytes[self.i] == b'E') {
             self.i += 1;
             if self.i < n && (bytes[self.i] == b'-' || bytes[self.i] == b'+') {
@@ -172,14 +158,8 @@ impl<'a> Parser<'a> {
             }
         }
 
-        // Correctly rounded (strtod-equivalent); overflow -> inf,
-        // underflow -> 0, same as strtod and std's parser. fast_float is
-        // an Eisel-Lemire implementation (correctly rounded, ~2x faster
-        // than std's float parsing - measured 2026-08-04: float parsing
-        // is ~88% of WKT read cost). The tokenizer above guarantees a
-        // well-formed decimal token, so the parser only sees digits,
-        // '.', exponent, and sign. Note: hex floats ("0x1p3") are
-        // rejected - WKT has no hex form and GEOS never emits one.
+        // an Eisel-Lemire implementation (correctly rounded, ~2x faster than std's float parsing - measured 2026-08-04: float parsing is ~88% of WKT)
+        // Note: hex floats ("0x1p3") are rejected - WKT has no hex form and GEOS never emits one.
         fast_float2::parse::<f64, _>(&self.s[start..self.i])
             .map_err(|_| self.err("expected number"))
     }
@@ -191,9 +171,7 @@ impl<'a> Parser<'a> {
 
     fn read_coord_list(&mut self, dims: u32) -> Result<Vec<Coord<f64>>, WktError> {
         self.skip_ws();
-        // A bare '(' ')' coordinate list is rejected (GEOS rejects it too);
-        // emptiness is expressed with the EMPTY keyword. POLYGON (EMPTY)
-        // is handled by the ring parsers before reaching this point.
+        // A bare '(' ')' coordinate list is rejected (GEOS rejects it too); emptiness is expressed with the EMPTY keyword.
         let mut coords = Vec::new();
         coords.push(self.read_coord(dims)?);
         loop {
@@ -275,13 +253,7 @@ impl<'a> Parser<'a> {
             if self.i < self.s.len() && self.s[self.i] == b')' {
                 break;
             }
-            // EMPTY ring element (POLYGON ((...), EMPTY) or POLYGON
-            // (EMPTY, EMPTY)) - preserved as an empty ring, GEOS-style:
-            // POLYGON (EMPTY, (0 0, 1 1, 0 1, 0 0)) is a polygon with an
-            // empty shell and a hole. Dropping EMPTY rings here made
-            // empty-shell polygons unrepresentable and broke the WKT
-            // roundtrip for WKB-parsed degenerate polygons (measured
-            // 2026-08-04, roundtrip fuzz target).
+            // POLYGON (EMPTY, (0 0, 1 1, 0 1, 0 0)) is a polygon
             if self.i < self.s.len() && (self.s[self.i] == b'E' || self.s[self.i] == b'e') {
                 let rest = &self.s[self.i..];
                 if rest.starts_with(b"EMPTY") || rest.starts_with(b"empty") {
@@ -295,8 +267,6 @@ impl<'a> Parser<'a> {
                     continue;
                 }
             }
-            // Parenthesized empty ring "(EMPTY)" - accepted for writers
-            // that wrap the empty ring in its own parens.
             if self.i < self.s.len() && self.s[self.i] == b'(' {
                 let rest = &self.s[self.i + 1..];
                 if rest.len() >= 5 && rest[..5].eq_ignore_ascii_case(b"EMPTY") {
@@ -319,8 +289,7 @@ impl<'a> Parser<'a> {
             saw_any = true;
         }
         self.expect(b')')?;
-        // POLYGON () is rejected (GEOS rejects it too); POLYGON (EMPTY)
-        // is a valid empty polygon.
+        // POLYGON () is rejected (GEOS rejects it too); POLYGON (EMPTY) is a valid empty polygon.
         if !saw_any {
             return Err(self.err("expected at least one ring"));
         }
@@ -351,8 +320,7 @@ impl<'a> Parser<'a> {
             if self.i >= self.s.len() || self.s[self.i] == b')' {
                 break;
             }
-            // EMPTY element (MULTIPOINT (EMPTY, (1 2), ...)) - an empty
-            // point component; geo's empty-point convention is NaN coords.
+            // EMPTY element (MULTIPOINT (EMPTY, (1 2), ...)) - an empty point component; geo's empty-point convention is NaN coords.
             if self.s[self.i] == b'E' || self.s[self.i] == b'e' {
                 let rest = &self.s[self.i..];
                 if rest.starts_with(b"EMPTY") || rest.starts_with(b"empty") {
@@ -415,8 +383,7 @@ impl<'a> Parser<'a> {
             if self.i < self.s.len() && self.s[self.i] == b')' {
                 break;
             }
-            // EMPTY element (MULTILINESTRING (EMPTY, (1 1, 2 2))) - an
-            // empty line component.
+            // EMPTY element (MULTILINESTRING (EMPTY, (1 1, 2 2))) - an empty line component.
             if self.i < self.s.len() && (self.s[self.i] == b'E' || self.s[self.i] == b'e') {
                 let rest = &self.s[self.i..];
                 if rest.starts_with(b"EMPTY") || rest.starts_with(b"empty") {
@@ -466,8 +433,7 @@ impl<'a> Parser<'a> {
             if self.i < self.s.len() && self.s[self.i] == b')' {
                 break;
             }
-            // EMPTY element (MULTIPOLYGON (EMPTY, ((0 0, ...)))) - an
-            // empty polygon component.
+            // EMPTY element (MULTIPOLYGON (EMPTY, ((0 0, ...)))) - an empty polygon component.
             if self.i < self.s.len() && (self.s[self.i] == b'E' || self.s[self.i] == b'e') {
                 let rest = &self.s[self.i..];
                 if rest.starts_with(b"EMPTY") || rest.starts_with(b"empty") {
@@ -494,8 +460,6 @@ impl<'a> Parser<'a> {
                 if self.i < self.s.len() && self.s[self.i] == b')' {
                     break;
                 }
-                // EMPTY ring element (MULTIPOLYGON ((...), EMPTY)) -
-                // preserved as an empty ring (GEOS keeps empty shells).
                 if self.i < self.s.len() && (self.s[self.i] == b'E' || self.s[self.i] == b'e') {
                     let rest = &self.s[self.i..];
                     if rest.starts_with(b"EMPTY") || rest.starts_with(b"empty") {
@@ -505,8 +469,6 @@ impl<'a> Parser<'a> {
                         continue;
                     }
                 }
-                // Parenthesized empty ring "(EMPTY)" - accepted for
-                // writers that wrap the empty ring in its own parens.
                 if self.i < self.s.len() && self.s[self.i] == b'(' {
                     let rest = &self.s[self.i + 1..];
                     if rest.len() >= 5 && rest[..5].eq_ignore_ascii_case(b"EMPTY") {
@@ -529,7 +491,6 @@ impl<'a> Parser<'a> {
                 saw_ring = true;
             }
             self.expect(b')')?;
-            // An empty-paren polygon inside MULTIPOLYGON is rejected
             // (GEOS rejects it too); (EMPTY) is a valid empty component.
             if !saw_ring {
                 return Err(self.err("expected at least one ring"));
@@ -576,8 +537,7 @@ impl<'a> Parser<'a> {
             if self.i < self.s.len() && self.s[self.i] == b')' {
                 break;
             }
-            // EMPTY element (GEOMETRYCOLLECTION (EMPTY, POINT (1 2))) -
-            // an empty point component (geo convention: NaN coords).
+            // EMPTY element (GEOMETRYCOLLECTION (EMPTY, POINT (1 2))) -an empty point component (geo convention: NaN coords).
             if self.i < self.s.len() && (self.s[self.i] == b'E' || self.s[self.i] == b'e') {
                 let rest = &self.s[self.i..];
                 if rest.starts_with(b"EMPTY") || rest.starts_with(b"empty") {
@@ -599,11 +559,8 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_any(&mut self, depth: usize) -> Result<Geometry<f64>, WktError> {
-        // GEOMETRYCOLLECTION nests recursively; a crafted document can
-        // nest arbitrarily deep and overflow the stack (uncatchable
-        // abort). GEOS bounds its reader similarly. A flat collection's
-        // members each parse at depth+1, so the cap is on nesting, not
-        // element count.
+        // GEOMETRYCOLLECTION nests recursively; a crafted document can nest arbitrarily deep and overflow the stack (uncatchable abort).
+        // A flat collection's members each parse at depth+1, so the cap is on nesting, not element count.
         if depth > MAX_WKT_NESTING {
             return Err(self.err("geometry nesting exceeds limit"));
         }

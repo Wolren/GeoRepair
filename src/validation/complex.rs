@@ -26,28 +26,15 @@ impl GeoValidation for Polygon<f64> {
     fn validate(&self) -> ValidationResult {
         let mut errors = Vec::new();
 
-        // An empty exterior is an empty polygon - valid OGC (same as
-        // POINT EMPTY / LINESTRING EMPTY; GEOS isValid=true on
-        // POLYGON (EMPTY, EMPTY, EMPTY)).
         if self.exterior().0.is_empty() {
             return ValidationResult::valid();
         }
 
-        // Giant shells: the shell's own checks and the hole checks are
-        // independent validity conditions. NOTE (2026-08-06): running them
-        // in parallel (rayon::join + per-hole par_iter) was MEASURED as a
-        // regression (3.83s vs 3.17s on the 1.58M dataset) - the batch's
-        // pool is already saturated, so nested parallelism only adds join
-        // and split overhead. The batch-level size partition (bench) is the
-        // parallelism lever that works; per-poly stays serial.
+        // regression (3.83s vs 3.17s on the 1.58M dataset)
         let ext_errors = check_ring_validity(&self.exterior().0, true);
         if !ext_errors.is_empty() {
-            // The fused ring check folds the shell orientation into the
-            // same pass; the pre-fusion code early-returned on structural
-            // ring errors but continued to the holes when ONLY the
-            // orientation was wrong. Preserve the error-set parity
-            // (IsValidOp t2 expects HoleOutsideShell alongside the
-            // shell's WrongOrientation).
+            // ring errors but continued to the holes when ONLY
+            // (IsValidOp t2 expects HoleOutsideShell alongside the shell's WrongOrientation).
             let only_orientation = ext_errors
                 .iter()
                 .all(|e| matches!(e, GeometryValidationError::WrongOrientation));
@@ -57,8 +44,6 @@ impl GeoValidation for Polygon<f64> {
             }
         }
 
-        // Ring orientation is part of check_ring_validity's verdict (the
-        // OGC winding contract) - no separate extremal-search pass
         // (2026-08-08).
 
         if self.interiors().is_empty() {
@@ -116,7 +101,6 @@ pub(crate) fn has_duplicate_rings(interiors: &[&[Coord<f64>]], shell: &[Coord<f6
             }
         }
     }
-    // Also check each hole against the shell
     for h in interiors {
         if ring_dup_fingerprint(h) == ring_dup_fingerprint(shell) && is_rotated_duplicate(h, shell)
         {
@@ -140,7 +124,6 @@ impl GeoValidation for MultiPolygon<f64> {
 
         let shells: Vec<&[Coord<f64>]> = self.0.iter().map(|p| &p.exterior().0[..]).collect();
 
-        // Check for duplicate shells (including rotated-start duplicates)
         if shells.len() > 1 {
             let mut groups: rustc_hash::FxHashMap<(usize, u64), Vec<usize>> =
                 rustc_hash::FxHashMap::with_capacity_and_hasher(shells.len(), Default::default());
@@ -160,7 +143,6 @@ impl GeoValidation for MultiPolygon<f64> {
         }
 
         if shells.len() > 1 {
-            // Compute global scale for intersection epsilon
             let (mut gmin_x, mut gmax_x, mut gmin_y, mut gmax_y) =
                 (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
             for s in &shells {
@@ -177,15 +159,7 @@ impl GeoValidation for MultiPolygon<f64> {
                 .max(1.0);
             let eps = 1e-12 * scale;
 
-            // Cross-component ring intersection check (GEOS
-            // checkAreaIntersections covers ALL ring pairs across
-            // components: shell-shell, shell-hole, hole-hole - a proper
-            // crossing between any two rings of different components is
-            // invalid, eSelfIntersection). Pure vertex touches are NOT
-            // crossings (edges_intersect_general semantics), so MP
-            // touch-at-vertices cases stay valid. Candidate pairs are
-            // bounding-box filtered (R-tree when many rings) - never an
-            // unfiltered O(m^2) pair loop.
+            // Candidate pairs are bounding-box filtered (R-tree when many rings) - never an unfiltered O(m^2) pair loop.
             let mut all_rings: Vec<(usize, bool, &[Coord<f64>])> = Vec::new();
             let mut comp_holes: Vec<Vec<&[Coord<f64>]>> = Vec::with_capacity(self.0.len());
             for (ci, p) in self.0.iter().enumerate() {
@@ -208,18 +182,7 @@ impl GeoValidation for MultiPolygon<f64> {
                     errors.push(GeometryValidationError::SelfIntersection);
                     return ValidationResult::invalid(errors);
                 }
-                // Interior-overlap probe (GEOS checkAreaIntersections also
-                // flags containment without an edge crossing, e.g. a
-                // component whose shell shares vertices with another
-                // component's hole ring - t21). Only (shell, hole) pairs are
-                // probed, and only the HOLE side's vertices inside the
-                // shell's FILL (holes of the shell's own component are
-                // excised and do not count): a shell entirely inside another
-                // shell's hole is a valid island (Test 616/641 in
-                // general_TestValid2.xml) whose own hole may also sit in the
-                // outer hole - both are valid. Hole-hole edge crossings are
-                // already caught above; nested shells are the nesting
-                // check's job.
+                // shell's hole is a valid island (Test 616/641 in general_TestValid2.xml) whose own hole may also sit
                 if all_rings[a].1 != all_rings[b].1 {
                     if all_rings[a].1
                         && ring_has_vertex_inside(ra, rb2, rb[b], &comp_holes[all_rings[b].0])
@@ -236,7 +199,6 @@ impl GeoValidation for MultiPolygon<f64> {
                 }
             }
 
-            // Nesting check: one shell fully inside another
             #[cfg(feature = "rstar")]
             {
                 struct ShellEnv {
@@ -270,20 +232,11 @@ impl GeoValidation for MultiPolygon<f64> {
                     let Some(pt) = s2.first().copied() else {
                         continue;
                     };
-                    // Strictly-interior probe of shell j for the hole test:
-                    // the first vertex lies ON a hole ring for islands that
-                    // touch it, and exclusive semantics misread that as fill
-                    // (island-in-hole falsely flagged NestedHoles).
                     let probe = crate::util::ring_interior_probe(s2).unwrap_or(pt);
                     let query = rstar::AABB::from_corners([pt.x, pt.y], [pt.x, pt.y]);
                     let mut overlaps = false;
                     let _ = tree.locate_in_envelope_intersecting_int(query, |c| {
                         if c.idx != i && point_in_ring_exclusive(pt, shells[c.idx]) {
-                            // Hole-aware: a shell inside ANOTHER SHELL'S HOLE is
-                            // an island — valid positive space, NOT nesting
-                            // (GEOS isValid=true on square-with-hole ∪ island).
-                            // Only a probe in the other shell's FILL (exterior
-                            // minus holes) counts as nested.
                             let p_other = &self.0[c.idx];
                             let in_hole = p_other
                                 .interiors()
@@ -312,12 +265,6 @@ impl GeoValidation for MultiPolygon<f64> {
                         if let Some(pt) = shells[j].first().copied()
                             && point_in_ring_exclusive(pt, shells[i])
                         {
-                            // Hole-aware: island inside another shell's hole is
-                            // valid positive space (GEOS isValid=true). The
-                            // hole test uses a strictly-interior probe of
-                            // shell j: its first vertex lies ON a hole ring
-                            // for islands touching the hole, and exclusive
-                            // semantics misread that as fill.
                             let probe = crate::util::ring_interior_probe(shells[j]).unwrap_or(pt);
                             let in_hole = self.0[i]
                                 .interiors()
@@ -396,8 +343,6 @@ impl ValidateDepth for GeometryCollection<f64> {
         for g in &self.0 {
             let r = g.validate_at_depth(depth + 1, max_depth);
             if !r.valid {
-                // OGC: GeometryCollection doesn't enforce simplicity.
-                // Filter out NotSimple from sub-geometry validation.
                 for e in r.errors {
                     if !matches!(e, GeometryValidationError::NotSimple) {
                         errors.push(e);

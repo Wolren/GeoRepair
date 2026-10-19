@@ -134,13 +134,9 @@ pub(super) fn strip_degenerate(g: Geometry<f64>) -> Geometry<f64> {
                 // Guard: fewer than 3 unique vertices can never form a valid polygon.
                 // (interior_n == 3 with positive area is a valid triangle.)
                 if interior_n < 3 {
-                    // Fall through to boundary output below.
                 } else {
                     let (mut min_x, mut max_x, mut min_y, mut max_y) =
                         (ext[0].x, ext[0].x, ext[0].y, ext[0].y);
-                    // Extreme indices ride along: the collinearity test below
-                    // anchors on the widest vertex pair, never the first edge
-                    // (see ring_is_exactly_collinear).
                     let (mut imin_x, mut imax_x, mut imin_y, mut imax_y) =
                         (0usize, 0usize, 0usize, 0usize);
                     let mut has_nan = !ext[0].x.is_finite() || !ext[0].y.is_finite();
@@ -166,26 +162,13 @@ pub(super) fn strip_degenerate(g: Geometry<f64>) -> Geometry<f64> {
                             has_nan = true;
                         }
                     }
-                    // Bbox degeneracy is per-axis LOCAL (same rule as the
-                    // make_valid pre-gate): an axis is degenerate when its
-                    // extent is at or below the coordinate rounding at that
-                    // axis's own magnitude. The old rule compared against the
-                    // max spread, so a 4.9e208 spike dominated the 1-unit
-                    // x-extent of a valid ring and demoted it to a line.
+                    // so a 4.9e208 spike dominated the 1-unit
                     let x_scale = max_x.abs().max(min_x.abs());
                     let y_scale = max_y.abs().max(min_y.abs());
                     let bbox_ok = (max_x - min_x).abs() > f64::EPSILON * x_scale
                         && (max_y - min_y).abs() > f64::EPSILON * y_scale;
-                    // Area degeneracy: a ring is degenerate iff its vertices lie
-                    // bit-exactly on one line (robust orient == 0). The
-                    // historical magnitude-based noise bound demoted real
-                    // slivers at large coordinate magnitude (0.14.2 changelog).
-                    // Anchor on the dominant axis's extreme vertex pair, never
-                    // the first edge: a subnormal-length leading edge (e.g.
-                    // (0,0) -> (1.366e-319,0)) underflows every orientation
-                    // to zero, so a real 1000 x 2e-9 sliver read as collinear
-                    // and was demoted into a NotSimple line (fuzz-nightly
-                    // crash 2026-09-14).
+                    // Area degeneracy: a ring is degenerate iff its vertices lie bit-exactly on one line (robust orient == 0).
+                    // The historical magnitude-based noise bound demoted real slivers at large coordinate magnitude (0.14.2 changelog).
                     let (ia, ib) = if (max_x - min_x).abs() >= (max_y - min_y).abs() {
                         (imin_x, imax_x)
                     } else {
@@ -193,7 +176,6 @@ pub(super) fn strip_degenerate(g: Geometry<f64>) -> Geometry<f64> {
                     };
                     let area_ok = !ring_is_exactly_collinear(ext, interior_n, ia, ib);
                     if area_ok && bbox_ok && !has_nan {
-                        // Non-degenerate polygon - return as-is after hole cleanup
                         let holes: Vec<LineString<f64>> = p
                             .interiors()
                             .iter()
@@ -211,9 +193,6 @@ pub(super) fn strip_degenerate(g: Geometry<f64>) -> Geometry<f64> {
                     }
                 } // end interior_n >= 3
             }
-            // Degenerate: demote to open LineString (drop closing vertex). Closed
-            // collapsed rings are often NotSimple under OGC; open path is cleaner.
-            // If still not simple → empty (keep_collapsed=false default).
             let mut lines: Vec<LineString<f64>> = Vec::new();
             if let Some(l) = ring_demotion_candidate(ext) {
                 lines.push(l);
@@ -232,10 +211,7 @@ pub(super) fn strip_degenerate(g: Geometry<f64>) -> Geometry<f64> {
                 if polygon_component_is_kept(&p) {
                     valid_polys.push(p);
                 } else {
-                    // Demote a degenerate component's boundary to open lines.
-                    // The raw closed rings used to ship unchecked and read
-                    // NotSimple the moment two closed components shared a
-                    // vertex (fuzz-nightly crash 2026-09-18).
+                    // NotSimple the moment two closed components shared a vertex (fuzz-nightly crash 2026-09-18).
                     if let Some(l) = ring_demotion_candidate(&p.exterior().0) {
                         boundary_lines.push(l);
                     }
@@ -250,8 +226,6 @@ pub(super) fn strip_degenerate(g: Geometry<f64>) -> Geometry<f64> {
             match (valid_polys.len(), boundary_lines.is_empty()) {
                 (0, true) => empty_geom::<f64>(),
                 (0, false) => emit_lines(boundary_lines),
-                // Keep MultiPolygon type even for a single component - Geometry
-                // dispatch runs strip_degenerate after MultiPolygon::make_valid.
                 (1, true) => Geometry::MultiPolygon(MultiPolygon::new(valid_polys)),
                 (1, false) => {
                     let geoms: Vec<Geometry<f64>> = vec![
@@ -275,21 +249,12 @@ pub(super) fn strip_degenerate(g: Geometry<f64>) -> Geometry<f64> {
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(super) fn enforce_ccw(mut ring: LineString<f64>) -> (LineString<f64>, usize, bool) {
-    // Use Shewchuk's orient2d (adaptive precision) on the extremal vertex
-    // to determine winding order. The shoelace sum in geo's winding_order()
-    // can flip sign at extreme fp ratios (e.g. 1e12 and 1e-12 in same ring).
-    // Returns the extremal index + whether the ring was reversed so the
-    // caller can verify the post-winding orientation without re-searching
+    // 1e12 and 1e-12 in same ring .
     // (winding fusion, 2026-08-08).
     let (is_ccw, idx) = crate::util::robust_is_ccw_with_index(&ring.0);
     let reversed = !is_ccw;
     if reversed {
-        // Direct reversal, not geo's make_ccw_winding(): that method
-        // re-derives the winding from its own shoelace and silently
-        // no-ops when the sum is indeterminate (NaN/overflow) - leaving
-        // a ring the validator rejects. The robust verdict here is the
-        // authority (it is the validator's own check); reversal must
-        // follow it unconditionally.
+        // no-ops when the sum is indeterminate (NaN/overflow)
         ring.0.reverse();
     }
     (ring, idx, reversed)

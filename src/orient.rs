@@ -67,7 +67,6 @@ mod tests {
         };
         let r_fast = orient2d_fast(pa, pb, pc);
         let r_robust = orient2d(pa, pb, pc);
-        // Both should have the same sign, but robust may differ in magnitude
         assert_eq!(r_robust.signum(), r_fast.signum());
     }
 
@@ -114,7 +113,6 @@ mod tests {
         let pa = Coord { x: 0.0, y: 0.0 };
         let pb = Coord { x: 1.0, y: 0.0 };
         let pc = Coord { x: 0.5, y: 1.0 };
-        // Swapping pb and pc should flip the sign
         assert_eq!(orient2d(pa, pb, pc), -orient2d(pa, pc, pb));
     }
 }

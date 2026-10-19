@@ -47,9 +47,6 @@ fn assert_not_empty(g: &Geometry<f64>) {
     );
 }
 
-// =========================================================================
-// Config combination matrix
-// =========================================================================
 
 #[test]
 fn test_config_auto_keep_false() {
@@ -82,7 +79,6 @@ fn test_config_structure_keep_false_bowtie() {
     assert_valid(&result);
 }
 
-// Polygon with ring too small — keep_collapsed variants
 #[test]
 fn test_config_degenerate_ring_keep_collapsed_true() {
     let poly = Polygon::new(
@@ -113,9 +109,6 @@ fn make_bowtie() -> Polygon<f64> {
     )
 }
 
-// =========================================================================
-// Point edge cases
-// =========================================================================
 
 #[test]
 fn test_point_both_nan() {
@@ -141,9 +134,6 @@ fn test_point_zero() {
     assert!(!matches!(p.make_valid(), Geometry::GeometryCollection(_)));
 }
 
-// =========================================================================
-// Line edge cases
-// =========================================================================
 
 #[test]
 fn test_line_nan_end() {
@@ -232,10 +222,7 @@ fn test_linestring_collinear() {
 
 #[test]
 fn test_linestring_self_intersecting_is_repaired() {
-    // Validity contract (fuzz gate 2026-08-07): make_valid output must be
-    // simple - a self-intersecting line is repaired by dropping the
-    // conflicting segments, never shipped as NotSimple. (GEOS MakeValid
-    // passes such lines through unchanged; our contract is valid-or-empty.)
+    // Validity contract (fuzz gate 2026-08-07)
     let ls = LineString::new(vec![
         Coord { x: 0.0, y: 0.0 },
         Coord { x: 10.0, y: 10.0 },
@@ -280,8 +267,6 @@ fn test_linestring_dedup_keeps_non_adjacent_duplicates() {
         Coord { x: 2.0, y: 2.0 },
     ]);
     let result = ls.make_valid();
-    // Our GeoValidation catches MultiLineString component interior overlap
-    // that the old geo crate missed. Result is structurally correct.
     assert_not_empty(&result);
 }
 
@@ -332,9 +317,6 @@ fn test_linestring_valid_across_configs() {
     }
 }
 
-// =========================================================================
-// LineString edge cases
-// =========================================================================
 
 #[test]
 fn test_linestring_all_nan() {
@@ -412,11 +394,8 @@ fn test_linestring_nan_filtered_leaves_single_keep_collapsed() {
 
 #[test]
 fn test_linestring_self_intersecting() {
-    // The line-validity contract (2026-08-07): make_valid never ships a
-    // non-simple line - the self-intersection is noded into simple pieces.
-    // (GEOS passes non-simple lines through; that is the deliberate
-    // divergence. The line-family validity rule keeps NotSimple valid,
-    // so the pieces must also be validator-clean.)
+    // The line-validity contract (2026-08-07): make_valid never ships a non-simple line - the self-intersection is noded into simple pieces.
+    // The line-family validity rule keeps NotSimple valid, so the pieces must also be validator-clean.
     let ls = LineString::new(vec![
         Coord { x: 0.0, y: 0.0 },
         Coord { x: 2.0, y: 2.0 },
@@ -434,9 +413,6 @@ fn test_linestring_self_intersecting() {
     }
 }
 
-// =========================================================================
-// MultiPoint edge cases
-// =========================================================================
 
 #[test]
 fn test_multipoint_empty() {
@@ -479,7 +455,6 @@ fn test_multipoint_all_nan_inf() {
     ]);
     assert!(!mp.validate().valid);
     let result = mp.make_valid();
-    // All components invalid -> empty output
     assert!(
         matches!(
             &result,
@@ -490,9 +465,6 @@ fn test_multipoint_all_nan_inf() {
     );
 }
 
-// =========================================================================
-// MultiLineString edge cases
-// =========================================================================
 
 #[test]
 fn test_multilinestring_empty() {
@@ -529,8 +501,6 @@ fn test_multilinestring_mixed() {
 
 #[test]
 fn test_multilinestring_self_intersecting_component() {
-    // Line-validity contract: the bowtie component is noded into simple
-    // pieces (GEOS returns the non-simple component as-is).
     let mls = MultiLineString::new(vec![LineString::new(vec![
         Coord { x: 0.0, y: 0.0 },
         Coord { x: 2.0, y: 2.0 },
@@ -548,9 +518,6 @@ fn test_multilinestring_self_intersecting_component() {
     }
 }
 
-// =========================================================================
-// Rect edge cases
-// =========================================================================
 
 #[test]
 fn test_rect_nan_min() {
@@ -573,7 +540,6 @@ fn test_rect_infinite() {
 #[test]
 fn test_rect_zero_area() {
     let r = Rect::new(Point::new(5.0, 5.0), Point::new(5.0, 5.0));
-    // Zero-area rect is degenerate → empty (GEOS-aligned type degradation)
     assert_empty(&r.make_valid());
 }
 
@@ -583,9 +549,6 @@ fn test_rect_reversed() {
     assert_not_empty(&r.make_valid());
 }
 
-// =========================================================================
-// Triangle edge cases
-// =========================================================================
 
 #[test]
 fn test_triangle_infinity_vertex() {
@@ -628,9 +591,6 @@ fn test_triangle_keep_collapsed_degenerate() {
     assert_valid(&result);
 }
 
-// =========================================================================
-// Geometry dispatch edge cases
-// =========================================================================
 
 #[test]
 fn test_geometry_dispatch_rect() {
@@ -678,9 +638,6 @@ fn test_geometry_dispatch_multilinestring() {
     assert_valid(&result);
 }
 
-// =========================================================================
-// GeometryCollection edge cases
-// =========================================================================
 
 #[test]
 fn test_geometrycollection_includes_rect() {
@@ -729,7 +686,6 @@ fn test_geometrycollection_nested_empty_inside() {
     ]);
     let result = gc.make_valid();
     assert_not_empty(&result);
-    // Nested empty should be filtered out
     if let Geometry::GeometryCollection(ref gc) = result {
         assert_eq!(gc.0.len(), 1);
     }
@@ -745,11 +701,7 @@ fn test_geometrycollection_all_nested_empty() {
 
 #[test]
 fn test_geometrycollection_over_deep_nesting_is_repaired() {
-    // The validator accepts GeometryCollection nesting only up to
-    // MAX_COLLECTION_DEPTH (depths 0..=100); one level deeper and the input
-    // is invalid with ExcessiveNesting. Repair used to rebuild the same tree
-    // verbatim, so make_valid handed back geometry that still failed
-    // validate() — the "invalid output in mode Auto" assertion that turned
+    // is invalid with ExcessiveNesting.
     // fuzz-nightly red (runs 35973600308 / 36113501091, 2026-09-24/25).
     let mut gc = GeometryCollection(vec![Geometry::Point(Point::new(1.0, 2.0))]);
     for _ in 0..200 {
@@ -760,13 +712,9 @@ fn test_geometrycollection_over_deep_nesting_is_repaired() {
     let out = gc.make_valid();
     assert_valid(&out);
 
-    // Repair has to be idempotent once it has collapsed below the limit.
     assert_valid(&out.make_valid());
 }
 
-// =========================================================================
-// Polygon edge cases
-// =========================================================================
 
 #[test]
 fn test_polygon_empty_exterior() {
@@ -881,9 +829,6 @@ fn test_polygon_negative_extreme_coordinates() {
     assert_not_empty(&result);
 }
 
-// =========================================================================
-// MultiPolygon edge cases
-// =========================================================================
 
 #[test]
 fn test_multipolygon_empty() {
@@ -903,7 +848,6 @@ fn test_multipolygon_all_invalid_components() {
 
 #[test]
 fn test_multipolygon_with_multipolygon_result() {
-    // Multiple invalid components that each produce valid but separate polygons
     let mp = MultiPolygon::new(vec![
         make_bowtie(),
         Polygon::new(
@@ -922,9 +866,6 @@ fn test_multipolygon_with_multipolygon_result() {
     assert_not_empty(&result);
 }
 
-// =========================================================================
-// Config defaults
-// =========================================================================
 
 #[test]
 fn test_config_default_fill_rule() {

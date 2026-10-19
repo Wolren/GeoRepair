@@ -99,9 +99,6 @@ pub use wkt::{WktError, infer_wkt_type, read_wkt, write_wkt};
 #[cfg(feature = "std")]
 pub use wkt::{read_wkt_from, write_wkt_to};
 
-// ---------------------------------------------------------------------------
-// File-format dispatch by extension
-// ---------------------------------------------------------------------------
 
 #[cfg(feature = "std")]
 fn extension(path: &str) -> &str {
@@ -302,9 +299,6 @@ pub fn diagnose_file(path: &str) -> Result<Vec<ValidationResult>, String> {
     Ok(geoms.iter().map(validate).collect())
 }
 
-// ---------------------------------------------------------------------------
-// Feature-gated backends
-// ---------------------------------------------------------------------------
 
 #[cfg(feature = "std")]
 fn load_wkt(path: &str) -> Result<Vec<Geometry<f64>>, String> {
@@ -313,9 +307,6 @@ fn load_wkt(path: &str) -> Result<Vec<Geometry<f64>>, String> {
     Ok(vec![geom])
 }
 
-// ---------------------------------------------------------------------------
-// Geometry area utilities (used by tests and benchmarks)
-// ---------------------------------------------------------------------------
 
 /// Compute the signed area of a polygon ring using the shoelace formula.
 /// Positive values indicate CCW winding, negative values CW winding.

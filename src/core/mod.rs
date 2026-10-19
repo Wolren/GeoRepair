@@ -14,9 +14,6 @@ use thiserror::Error;
 
 use crate::crs::Crs;
 
-// ---------------------------------------------------------------------------
-// Numeric constants
-// ---------------------------------------------------------------------------
 
 /// Default geometric epsilon for robust equality / zero checks.
 pub(crate) const EPS: f64 = 1e-12;
@@ -119,9 +116,6 @@ impl Default for Tuning {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Config
-// ---------------------------------------------------------------------------
 
 /// Configuration for geometry repair operations.
 ///
@@ -211,9 +205,6 @@ pub enum PolyMethod {
     Arrange,
 }
 
-// ---------------------------------------------------------------------------
-// Errors
-// ---------------------------------------------------------------------------
 
 /// Errors that can occur during geometry repair, validation, or I/O.
 ///

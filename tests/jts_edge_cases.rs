@@ -19,19 +19,14 @@ use geo_repair::{MakeValid, MakeValidConfig};
 mod common;
 use common::*;
 
-// =========================================================================
-// SECTION 1: JTS GeometryFixerTest — Zero-area overlapping holes
-// =========================================================================
 //
 // Port of JTS testPolygonHolesZeroAreaOverlapping.
 // Two holes that are zero-area (backtrack on themselves) AND overlap each
-// other. JTS removes both degenerate holes, returning shell-only polygon.
 
 #[test]
 fn jts_zero_area_overlapping_holes() {
-    // Two zero-area holes that share space.
-    // Hole 1: (80 70, 30 70, 30 20, 30 70, 80 70) — goes out and back
-    // Hole 2: (70 80, 70 30, 20 30, 70 30, 70 80) — goes out and back
+    // Hole 1: (80 70, 30 70, 30 20, 30 70, 80 70): goes out and back
+    // Hole 2: (70 80, 70 30, 20 30, 70 30, 70 80): goes out and back
     let g = geom_from_wkt(
         "POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), \
                   (80 70, 30 70, 30 20, 30 70, 80 70), \
@@ -41,7 +36,6 @@ fn jts_zero_area_overlapping_holes() {
         let result = g.make_valid_with_config(&cfg);
         assert_valid_ogc(&result);
         assert_not_empty(&result);
-        // Both holes are degenerate — result should be shell only
         match &result {
             Geometry::Polygon(p) => {
                 assert!(
@@ -63,14 +57,9 @@ fn jts_zero_area_overlapping_holes() {
     }
 }
 
-// =========================================================================
-// SECTION 2: JTS GeometryFixerTest — Positive and negative overlap
-// =========================================================================
 //
 // Port of JTS testPolygonPosAndNegOverlap.
 // A self-touching ring that creates BOTH a positive region (outside the
-// touch) AND a negative region (hole inside). Distinct from a bowtie
-// because the ring touches at vertices rather than crossing through edges.
 
 #[test]
 fn jts_pos_neg_overlap() {
@@ -82,8 +71,6 @@ fn jts_pos_neg_overlap() {
         let result = g.make_valid_with_config(&cfg);
         assert_valid_ogc(&result);
         assert_not_empty(&result);
-        // JTS produces a Polygon with one hole. Verify output has
-        // at least one component and that geometry is structurally valid.
         assert!(
             matches!(&result, Geometry::Polygon(_) | Geometry::MultiPolygon(_)),
             "expected Polygon/MultiPolygon, got: {:?}",
@@ -92,41 +79,24 @@ fn jts_pos_neg_overlap() {
     }
 }
 
-// =========================================================================
 // SECTION 3: Self-intersection at existing vertex (CGAL + JTS)
-// =========================================================================
-//
-// A ring where the self-intersection point coincides with an existing
-// ring vertex (not at an edge midpoint). This triggers a different code
-// path than standard bowties because the noding pipeline must handle
-// vertex-on-edge overlap, not edge-edge crossing.
-//
-// Pattern: vertex (5,5) is both a ring vertex AND the self-intersection
-// point where two edges meet.
+// Pattern: vertex (5,5) is both a ring vertex AND the self-intersection point where two edges meet.
 
 #[test]
 fn jts_self_intersection_at_vertex() {
-    // Vertex (5,5) is visited twice: once as a normal ring vertex, once
-    // as the crossing point. This is LIKE a bowtie but the intersection
-    // is at an existing coordinate, not at an edge interior point.
+    // Vertex (5,5) is visited twice: once as a normal ring vertex, once as the crossing point.
     let g = geom_from_wkt("POLYGON ((0 0, 10 10, 10 0, 5 5, 0 10, 0 0))");
     for cfg in [cfg_auto(), cfg_arrange()] {
         let result = g.make_valid_with_config(&cfg);
         assert_valid_ogc(&result);
         assert_not_empty(&result);
     }
-    // Structure: at minimum must not panic or produce empty
     let result = g.make_valid_with_config(&cfg_structure());
     assert_valid_ogc(&result);
 }
 
-// =========================================================================
-// SECTION 4: JTS issue #852 — real-world regressions
-// =========================================================================
-//
-// These two polygons are from JTS GitHub issue #852. They caused
-// GeometryFixer to produce invalid output. GeoRepair must handle them
-// without panicking or producing invalid geometry.
+// SECTION 4: JTS issue #852: real-world regressions
+// These two polygons are from JTS GitHub issue #852.
 
 #[test]
 fn jts_issue_852_case1() {
@@ -171,14 +141,8 @@ fn jts_issue_852_case2() {
     }
 }
 
-// =========================================================================
-// SECTION 5: JTS — MultiPolygon collapse output type precision
-// =========================================================================
-//
-// When a MultiPolygon has one valid + one collapsed component, the output
-// type depends on keepMulti semantics. Our pipeline must not retain
-// a single valid polygon wrapped in MultiPolygon when it could be a
-// plain Polygon.
+// SECTION 5: JTS: MultiPolygon collapse output type precision
+// When a MultiPolygon has one valid + one collapsed component, the output type depends on keepMulti semantics.
 
 #[test]
 fn jts_multipolygon_one_collapsed_unwrap_to_polygon() {
@@ -190,8 +154,6 @@ fn jts_multipolygon_one_collapsed_unwrap_to_polygon() {
         let result = g.make_valid_with_config(&cfg);
         assert_valid_ogc(&result);
         assert_not_empty(&result);
-        // With keep_collapsed=false (default), the collapsed component
-        // should be dropped and the valid one unwrapped to Polygon.
         match &result {
             Geometry::Polygon(_) => {} // preferred
             Geometry::MultiPolygon(mp) => {
@@ -211,13 +173,9 @@ fn jts_multipolygon_one_collapsed_unwrap_to_polygon() {
     }
 }
 
-// =========================================================================
-// SECTION 6: JTS — Holes touching at multiple points
-// =========================================================================
 //
 // Port of JTS testHolesTouching. Three holes that touch each other at
-// vertices — the repair must produce valid output without disconnecting
-// interior rings.
+// vertices: the repair must produce valid output without disconnecting
 
 #[test]
 fn jts_holes_touching() {
@@ -233,24 +191,13 @@ fn jts_holes_touching() {
         assert_valid_ogc(&result);
         assert_not_empty(&result);
     }
-    // Arrange: retains the degenerate hole ring as-is (known limitation:
-    // the CDT pipeline does not fix hole rings that revisit a vertex 3x).
-    // Output is kept and not-empty; the production pipeline uses Auto which
-    // catches this via Structure's fast-path.
     let result = g.make_valid_with_config(&cfg_arrange());
     assert_not_empty(&result);
 }
 
-// =========================================================================
-// SECTION 7: JTS — NaN-filtered shell collapse
-// =========================================================================
 //
 // Port of JTS testPolygonShellCollapseNaN. Shell ring contains NaN
 // that causes collapse; even with keepCollapsed the valid result is
-// a Point (the first valid coordinate).
-//
-// WKT parsers reject NaN coordinates, so we construct the geometry
-// directly.
 
 #[test]
 fn jts_shell_collapse_nan_keep_collapsed_point() {
@@ -281,7 +228,6 @@ fn jts_shell_collapse_nan_keep_collapsed_point() {
     // JTS: keepCollapsed=true → POINT (10 10)
     assert_valid_ogc(&result);
     assert_not_empty(&result);
-    // Should be a Point, not still a polygon
     assert!(
         matches!(&result, Geometry::Point(_)),
         "NaN-collapsed shell with keep_collapsed should produce Point, got: {:?}",
@@ -289,17 +235,12 @@ fn jts_shell_collapse_nan_keep_collapsed_point() {
     );
 }
 
-// =========================================================================
-// SECTION 8: JTS — Shell backtrack collapse with valid hole
-// =========================================================================
-//
-// Shell that backtracks on itself (creating zero area) but contains a
-// valid hole. The hole becomes the sole surviving polygon.
+// SECTION 8: JTS: Shell backtrack collapse with valid hole
 
 #[test]
 fn jts_shell_backtrack_collapse_hole_preserved() {
-    // Shell: (10 10, 10 90, 90 90, 10 90, 10 10) — backtracks, zero area
-    // Hole:  (20 80, 60 80, 60 40, 20 40, 20 80) — valid interior
+    // Shell: (10 10, 10 90, 90 90, 10 90, 10 10): backtracks, zero area
+    // Hole: (20 80, 60 80, 60 40, 20 40, 20 80): valid interior
     let g = geom_from_wkt(
         "POLYGON ((10 10, 10 90, 90 90, 10 90, 10 10), \
                   (20 80, 60 80, 60 40, 20 40, 20 80))",
@@ -311,17 +252,14 @@ fn jts_shell_backtrack_collapse_hole_preserved() {
     }
 }
 
-// =========================================================================
-// SECTION 9: JTS — Hole backtrack collapse (shell valid, hole zero-area)
-// =========================================================================
 //
 // Port of JTS testPolygonHoleCollapse. Shell is valid but hole ring
 // backtracks to form zero area. Hole must be removed.
 
 #[test]
 fn jts_hole_backtrack_collapse_removed() {
-    // Shell: (10 90, 90 90, 90 10, 10 10, 10 90) — valid
-    // Hole:  (80 80, 20 80, 20 20, 20 80, 80 80) — backtrack, zero area
+    // Shell: (10 90, 90 90, 90 10, 10 10, 10 90): valid
+    // Hole: (80 80, 20 80, 20 20, 20 80, 80 80): backtrack, zero area
     let g = geom_from_wkt(
         "POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), \
                   (80 80, 20 80, 20 20, 20 80, 80 80))",
@@ -330,7 +268,6 @@ fn jts_hole_backtrack_collapse_removed() {
         let result = g.make_valid_with_config(&cfg);
         assert_valid_ogc(&result);
         assert_not_empty(&result);
-        // The zero-area hole must be removed — output should have no holes
         if let Geometry::Polygon(p) = &result {
             assert!(
                 p.interiors().is_empty(),
@@ -340,18 +277,11 @@ fn jts_hole_backtrack_collapse_removed() {
     }
 }
 
-// =========================================================================
-// SECTION 10: CGAL-style — Self-intersecting polygon with multi-bowtie
-// =========================================================================
-//
-// A ring with TWO self-intersection points (five separate segments
-// crossing). This stress-tests the noding pipeline with multiple
-// intersection events.
+// SECTION 10: CGAL-style: Self-intersecting polygon with multi-bowtie
 
 #[test]
 fn cgal_multi_bowtie() {
-    // A star-shaped self-intersecting figure where 5 spikes cross
-    // at the center point.
+    // A star-shaped self-intersecting figure where 5 spikes cross at the center point.
     let mut coords = Vec::new();
     for i in 0..10 {
         let angle = 2.0 * std::f64::consts::PI * i as f64 / 10.0;
@@ -368,18 +298,11 @@ fn cgal_multi_bowtie() {
         assert_valid_ogc(&result);
         assert_not_empty(&result);
     }
-    // Structure: must not panic
     let result = poly.make_valid_with_config(&cfg_structure());
     assert_valid_ogc(&result);
 }
 
-// =========================================================================
-// SECTION 11: CGAL — Polygon with repeated vertex + self-intersection
-// =========================================================================
-//
-// A non-simple polygon where a vertex is revisited mid-ring AND the ring
-// self-intersects. This is the intersection of:
-// - CGAL simple8.dat (repeated mid-ring vertex)
+// SECTION 11: CGAL: Polygon with repeated vertex + self-intersection
 // - CGAL simple10.dat (self-intersecting with duplicate point)
 
 #[test]
@@ -406,14 +329,8 @@ fn cgal_self_intersect_with_repeated_vertex() {
     assert_valid_ogc(&result);
 }
 
-// =========================================================================
-// SECTION 12: PostGIS-style — Polygon with ring self-intersection where
-// edges cross exactly at coordinate grid intersection
-// =========================================================================
-//
-// This pattern produces a self-intersection at the integer coordinate
-// (5,5) where four segments cross. Real-world OSM data often has this
-// after coordinate rounding.
+// SECTION 12: PostGIS-style: Polygon with ring self-intersection where edges cross exactly at coordinate grid intersection
+// (5,5) where four segments cross.
 
 #[test]
 fn postgis_grid_cross_self_intersection() {
@@ -427,20 +344,11 @@ fn postgis_grid_cross_self_intersection() {
     assert_valid_ogc(&result);
 }
 
-// =========================================================================
 // SECTION 13: CGAL epsilon-sensitive near-self-intersection
-// =========================================================================
-//
-// Edges that almost intersect but the distance is below the robustness
-// threshold of the orientation test. These patterns trigger floating-point
-// edge cases in CGAL's exact kernel and in robust orientation libraries.
 
 #[test]
 fn cgal_near_self_intersection() {
-    // Slightly perturbed polygon — almost self-intersecting but not quite.
-    // The bottom edge is at y=9.999999999999 instead of y=10, so the
-    // fourth vertex is 1e-12 below the first vertex's y. This tests
-    // epsilon thresholds in the self-intersection detection.
+    // The bottom edge is at y=9.999999999999 instead of y=10, so the fourth vertex is 1e-12 below the first vertex's y.
     let near = Polygon::new(
         LineString::new(vec![
             Coord { x: 0.0, y: 0.0 },
@@ -463,8 +371,7 @@ fn cgal_near_self_intersection() {
 
 #[test]
 fn cgal_nearly_collinear_degenerate() {
-    // Ring where three points are nearly collinear (within 1e-14 of being
-    // on a line). This tests the epsilon thresholds in the collapse check.
+    // Ring where three points are nearly collinear (within 1e-14 of being on a line).
     let near_collinear = Polygon::new(
         LineString::new(vec![
             Coord { x: 0.0, y: 0.0 },
@@ -480,16 +387,10 @@ fn cgal_nearly_collinear_degenerate() {
     }
 }
 
-// =========================================================================
 // SECTION 14: MultiPolygon cross-component non-intersection invariant
-// =========================================================================
-//
-// After repair, no two components in a MultiPolygon should have shells
-// that intersect. They may touch at vertices but not cross or overlap.
 
 #[test]
 fn multipolygon_no_cross_component_intersection() {
-    // Create a MultiPolygon where two components overlap.
     let g = geom_from_wkt(
         "MULTIPOLYGON (\
             ((0 0, 5 0, 5 5, 0 5, 0 0)), \
@@ -500,22 +401,17 @@ fn multipolygon_no_cross_component_intersection() {
         let result = g.make_valid_with_config(&cfg);
         assert_valid_ogc(&result);
         assert_not_empty(&result);
-        // After repair, verify no component shells intersect
         match &result {
             Geometry::MultiPolygon(mp) => {
                 for i in 0..mp.0.len() {
                     for j in (i + 1)..mp.0.len() {
                         let ext_i = &mp.0[i].exterior().0;
                         let ext_j = &mp.0[j].exterior().0;
-                        // Simple bbox check: bounding boxes must not overlap
                         let (min_ix, max_ix, min_iy, max_iy) = bbox_coords(ext_i);
                         let (min_jx, max_jx, min_jy, max_jy) = bbox_coords(ext_j);
                         let overlap_x = min_ix <= max_jx && min_jx <= max_ix;
                         let overlap_y = min_iy <= max_jy && min_jy <= max_iy;
                         if overlap_x && overlap_y {
-                            // Bboxes overlap — they may touch at a point,
-                            // but must not have shared area. Check that
-                            // the first vertex of shell i is NOT inside shell j.
                             if let Some(first) = ext_i.first() {
                                 let in_j = point_in_ring_exclusive(*first, ext_j);
                                 assert!(
@@ -570,13 +466,8 @@ fn point_in_ring_exclusive(pt: Coord<f64>, ring: &[Coord<f64>]) -> bool {
     inside
 }
 
-// =========================================================================
 // SECTION 15: PostGIS overlap-and-invalid MultiPolygon
-// =========================================================================
-//
-// A MultiPolygon where components overlap AND some components have
-// invalid shells. This exercises both the per-component repair and the
-// post-repair unary_union merge path simultaneously.
+// A MultiPolygon where components overlap AND some components have invalid shells.
 
 #[test]
 fn postgis_overlapping_invalid_multipolygon() {
@@ -592,31 +483,22 @@ fn postgis_overlapping_invalid_multipolygon() {
         let result = g.make_valid_with_config(&cfg);
         assert_valid_ogc(&result);
         assert_not_empty(&result);
-        // Must produce valid output — either merged polygon or multi-polygon
         assert!(
             matches!(&result, Geometry::Polygon(_) | Geometry::MultiPolygon(_)),
             "expected Polygon/MultiPolygon, got: {:?}",
             result
         );
     }
-    // Structure: must not panic
     let result = g.make_valid_with_config(&cfg_structure());
     assert_valid_ogc(&result);
 }
 
-// =========================================================================
 // SECTION 16: Exact output type assertion matrix
-// =========================================================================
-//
-// Systematic test of what geometry TYPE is produced for each combination
-// of input type, poly_method, and keep_collapsed. Ensures no regression
-// where a valid single polygon stays wrapped in MultiPolygon, etc.
 
 #[test]
 fn exact_output_type_auto_default() {
     let g = geom_from_wkt("POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))");
     let result = g.make_valid_with_config(&cfg_auto());
-    // Valid polygon should remain a Polygon, not get wrapped
     assert!(
         matches!(&result, Geometry::Polygon(_)),
         "valid polygon with Auto should stay Polygon, got: {:?}",
@@ -686,12 +568,8 @@ fn exact_output_type_mp_one_collapsed_auto() {
     );
 }
 
-// =========================================================================
 // SECTION 17: Large hole count stress test
-// =========================================================================
-//
-// Polygon with 200 small random holes. Stress-tests the hole
-// classification and face walking code paths at scale.
+// Polygon with 200 small random holes.
 
 #[test]
 fn stress_200_holes_in_one_polygon() {
@@ -755,20 +633,12 @@ fn stress_200_holes_in_one_polygon() {
     assert_not_empty(&result);
 }
 
-// =========================================================================
-// SECTION 27: GDAL geometry validity examples
-// =========================================================================
 //
 // Ported from https://gdal.org/en/latest/user/geometry_validity.html
 // "Invalid geometry examples" section. Each test verifies our pipeline
-// handles the same inputs that GDAL/GEOS processes.
 
-// ---------------------------------------------------------------------------
 // GDAL §2: Self-touching ring (touches on an edge, not at a vertex)
-// Input: POLYGON ((10 10,90 10,90 40,80 20,70 40,80 60,90 40,90 90,10 90,10 10))
 // Error: Self-intersection at MULTIPOINT (90 40)
-// The ring touches itself on edge (90,40) creating a hole-forming touch.
-// ---------------------------------------------------------------------------
 
 #[test]
 fn gdal_self_touching_ring_on_edge() {
@@ -782,13 +652,8 @@ fn gdal_self_touching_ring_on_edge() {
     }
 }
 
-// ---------------------------------------------------------------------------
 // GDAL §4: Hole partially outside polygon shell
-// Input: POLYGON ((10 90,60 90,60 10,10 10,10 90),(30 70,90 70,90 30,30 30,30 70))
 // Error: Self-intersection at MULTIPOINT (60 70)
-// The hole extends past the shell boundary on the right, creating an
-// edge crossing where the hole exits and re-enters the shell.
-// ---------------------------------------------------------------------------
 
 #[test]
 fn gdal_hole_partially_outside_shell() {
@@ -803,12 +668,8 @@ fn gdal_hole_partially_outside_shell() {
     }
 }
 
-// ---------------------------------------------------------------------------
 // GDAL §8: Self-crossing polygon shell (multi-cross)
-// Input: POLYGON ((10 70,90 70,90 50,30 50,30 30,50 30,50 90,70 90,70 10,10 10,10 70))
 // Error: Self-intersection at MULTIPOINT (50 70)
-// The shell crosses itself at multiple points creating a complex multi-island shape.
-// ---------------------------------------------------------------------------
 
 #[test]
 fn gdal_self_crossing_shell() {
@@ -816,24 +677,15 @@ fn gdal_self_crossing_shell() {
         "POLYGON ((10 70, 90 70, 90 50, 30 50, 30 30, 50 30, \
                    50 90, 70 90, 70 10, 10 10, 10 70))",
     );
-    // This complex multi-cross ring is at the known limit of what our
-    // pipeline can fully repair. GDAL's linework method produces a
-    // 3-part MultiPolygon; our Structure path converges but may leave
-    // a SelfIntersection in the result's hole rings.
-    // No-crash guarantee: all strategies produce non-empty output.
+    // 3-part MultiPolygon
     for cfg in [cfg_auto(), cfg_arrange(), cfg_structure()] {
         let result = g.make_valid_with_config(&cfg);
         assert_not_empty(&result);
     }
 }
 
-// ---------------------------------------------------------------------------
 // GDAL §10: Polygon shell inside hole (reversed structure)
 // Input: POLYGON ((30 70,70 70,70 30,30 30,30 70),(10 90,90 90,90 10,10 10,10 90))
-// Error: Hole lies outside shell
-// The "hole" ring is actually the outer boundary and the "shell" ring
-// is the inner one. Valid output should swap them or produce empty.
-// ---------------------------------------------------------------------------
 
 #[test]
 fn gdal_shell_inside_hole() {
@@ -858,12 +710,8 @@ fn assert_valid_soft(g: &Geometry<f64>) -> bool {
     r.valid
 }
 
-// ---------------------------------------------------------------------------
 // GDAL §12: MultiPolygon with multiple overlapping polygons (3-way overlap)
 // Input: MULTIPOLYGON of 3 overlapping squares
-// Error: Self-intersection
-// Three polygons overlapping in a complex arrangement.
-// ---------------------------------------------------------------------------
 
 #[test]
 fn gdal_multiple_overlapping_multipolygons() {
@@ -884,12 +732,8 @@ fn gdal_multiple_overlapping_multipolygons() {
     assert_not_empty(&result);
 }
 
-// ---------------------------------------------------------------------------
 // GDAL §13: MultiPolygon with two adjacent (edge-touching) polygons
-// Input: Two polygons sharing an edge boundary
 // Error: Self-intersection at MULTIPOINT (50 80)
-// Two polygons that touch along an edge, not overlapping.
-// ---------------------------------------------------------------------------
 
 #[test]
 fn gdal_adjacent_multipolygons_touching() {
@@ -906,14 +750,10 @@ fn gdal_adjacent_multipolygons_touching() {
     }
 }
 
-// =========================================================================
 // SECTION 28: JTS/GEOS GitHub issue regressions
-// =========================================================================
 
-// ---------------------------------------------------------------------------
 // JTS #904: Polygon with hole that has reversed orientation
-// Both shell and hole rings are specified CCW — hole orientation is wrong.
-// ---------------------------------------------------------------------------
+// Both shell and hole rings are specified CCW: hole orientation is wrong.
 
 #[test]
 fn jts_issue_904_reversed_hole_orientation() {
@@ -929,10 +769,7 @@ fn jts_issue_904_reversed_hole_orientation() {
     }
 }
 
-// ---------------------------------------------------------------------------
 // GEOS #658: Very narrow gap between hole and shell (epsilon proximity)
-// A hole that is extremely close to the shell boundary without touching.
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_issue_658_narrow_gap_hole() {
@@ -959,11 +796,8 @@ fn geos_issue_658_narrow_gap_hole() {
     }
 }
 
-// ---------------------------------------------------------------------------
 // GEOS #662: Polygon at antipodal coordinate extents
 // Coordinates at opposite ends of typical f64 safe range (-1e14 to 1e14).
-// Tests Shewchuk orientation at its precision boundary.
-// ---------------------------------------------------------------------------
 
 #[test]
 fn geos_issue_662_antipodal_extents() {
@@ -976,13 +810,8 @@ fn geos_issue_662_antipodal_extents() {
     }
 }
 
-// =========================================================================
-// SECTION 19: Subnormal coordinate stress — near f64 min positive
-// =========================================================================
-//
-// Coordinates in the subnormal range (< 2.2e-308) can cause hardware
-// arithmetic to be 10-100x slower and introduce precision loss. The
-// pipeline must handle them without crashing or producing invalid output.
+// SECTION 19: Subnormal coordinate stress: near f64 min positive
+// Coordinates in the subnormal range (< 2.2e-308) can cause hardware arithmetic to be 10-100x slower and introduce precision loss.
 
 #[test]
 fn fp_subnormal_polygon() {
@@ -1020,7 +849,6 @@ fn fp_subnormal_polygon() {
 
 #[test]
 fn fp_subnormal_bowtie() {
-    // Subnormal bowtie — self-intersection at subnormal scale
     let poly = Polygon::new(
         LineString::new(vec![
             Coord {
@@ -1048,22 +876,16 @@ fn fp_subnormal_bowtie() {
     );
     for cfg in [cfg_auto(), cfg_arrange()] {
         let result = poly.make_valid_with_config(&cfg);
-        // May collapse to empty at this extreme — that's acceptable
         assert_valid_ogc(&result);
     }
 }
 
-// =========================================================================
 // SECTION 20: Near-f64::MAX coordinate stress
-// =========================================================================
-//
-// Coordinates near f64::MAX (~1.79e308) can cause overflow in
-// orientation computations. Pipelines must fall back gracefully
-// without crashing.
+// Coordinates near f64::MAX (~1.79e308) can cause overflow in orientation computations.
 
 #[test]
 fn fp_extreme_large_polygon() {
-    // Large but not extreme — ~1e12 is the upper bound for safe Shewchuk
+    // Large but not extreme: ~1e12 is the upper bound for safe Shewchuk
     let poly = Polygon::new(
         LineString::new(vec![
             Coord { x: -1e12, y: -1e12 },
@@ -1083,7 +905,7 @@ fn fp_extreme_large_polygon() {
 
 #[test]
 fn fp_extreme_large_bowtie() {
-    // Bowtie at 1e12 scale — large but within safe orient2d range
+    // Bowtie at 1e12 scale: large but within safe orient2d range
     let g = geom_from_wkt(
         "POLYGON ((0 0, 1000000000000 1000000000000, 1000000000000 0, 0 1000000000000, 0 0))",
     );
@@ -1118,18 +940,10 @@ fn fp_f64_max_square() {
     }
 }
 
-// =========================================================================
 // SECTION 21: GeometryCollection with intersecting components
-// =========================================================================
-//
-// OGC states that components of a GeometryCollection should not intersect.
-// This is a documented limitation of the current pipeline. These tests
-// verify that the pipeline handles such input without crashing and
-// produces valid output for each individual component.
 
 #[test]
 fn gc_intersecting_components_no_crash() {
-    // Two polygons that overlap inside a GC
     let gc = GeometryCollection(vec![
         geom_from_wkt("POLYGON ((0 0, 5 0, 5 5, 0 5, 0 0))"),
         geom_from_wkt("POLYGON ((3 3, 8 3, 8 8, 3 8, 3 3))"),
@@ -1141,7 +955,6 @@ fn gc_intersecting_components_no_crash() {
 
 #[test]
 fn gc_bowtie_and_point_no_crash() {
-    // GC mixing a bowtie polygon with a point
     let gc = GeometryCollection(vec![
         geom_from_wkt("POLYGON ((0 0, 10 10, 10 0, 0 10, 0 0))"),
         Geometry::Point(Point::new(5.0, 5.0)),
@@ -1153,24 +966,20 @@ fn gc_bowtie_and_point_no_crash() {
 
 #[test]
 fn gc_nested_deeply_no_crash() {
-    // Deeply nested GC — depth 6
+    // Deeply nested GC: depth 6
     let inner = Geometry::Point(Point::new(1.0, 2.0));
     let mut gc = GeometryCollection(vec![inner]);
     for _ in 0..5 {
         gc = GeometryCollection(vec![Geometry::GeometryCollection(gc)]);
     }
     let result = gc.make_valid_with_config(&cfg_auto());
-    // Deep nesting is valid, pipeline should handle recursion
     assert_not_empty(&result);
 }
 
-// =========================================================================
 // SECTION 22: Triangle edge cases
-// =========================================================================
 
 #[test]
 fn fp_triangle_nearly_degenerate() {
-    // Triangle with two points nearly equal
     let tri = geo::Triangle::new(
         Coord { x: 0.0, y: 0.0 },
         Coord { x: 10.0, y: 10.0 },
@@ -1185,7 +994,6 @@ fn fp_triangle_nearly_degenerate() {
 
 #[test]
 fn fp_triangle_extreme_aspect_ratio() {
-    // Very thin triangle
     let tri = geo::Triangle::new(
         Coord { x: 0.0, y: 0.0 },
         Coord { x: 1000.0, y: 0.0 },
@@ -1195,9 +1003,7 @@ fn fp_triangle_extreme_aspect_ratio() {
     assert_valid_ogc(&result);
 }
 
-// =========================================================================
-// SECTION 23: LineString edge cases — NaN filtering extremes
-// =========================================================================
+// SECTION 23: LineString edge cases: NaN filtering extremes
 
 #[test]
 fn linestring_all_nan_filtered_to_empty() {
@@ -1232,7 +1038,6 @@ fn linestring_mixed_nan_and_valid_filters_cleanly() {
     let result = ls.make_valid_with_config(&cfg_auto());
     assert_valid_ogc(&result);
     assert_not_empty(&result);
-    // Should produce a linestring with valid-only coords
     if let Geometry::LineString(l) = &result {
         assert!(
             l.0.len() >= 2,
@@ -1247,13 +1052,10 @@ fn linestring_mixed_nan_and_valid_filters_cleanly() {
     } // could collapse to Point, that's ok
 }
 
-// =========================================================================
 // SECTION 24: MultiPoint edge cases
-// =========================================================================
 
 #[test]
 fn multipoint_single_valid_element_unwraps() {
-    // Single valid point in a MultiPoint — stays as MultiPoint
     // (design choice: our pipeline preserves MultiPoint even with 1 element)
     let mp = MultiPoint::new(vec![Point::new(5.0, 5.0)]);
     let result = mp.make_valid_with_config(&cfg_auto());
@@ -1276,13 +1078,10 @@ fn multipoint_deduplicates_exact_matches() {
     assert_valid_ogc(&result);
 }
 
-// =========================================================================
-// SECTION 25: Rect edge cases — degenerate rectangles
-// =========================================================================
+// SECTION 25: Rect edge cases: degenerate rectangles
 
 #[test]
 fn rect_zero_width() {
-    // Zero-width rectangle produces degenerate polygon
     let r = Rect::new(
         Point::new(0.0, 0.0),
         Point::new(10.0, 10.0), // use small non-zero width instead
@@ -1293,7 +1092,6 @@ fn rect_zero_width() {
 
 #[test]
 fn rect_zero_height() {
-    // Zero-height rectangle is degenerate
     let r = Rect::new(
         Point::new(0.0, 0.0),
         Point::new(10.0, 1e-10), // tiny non-zero height
@@ -1309,9 +1107,7 @@ fn rect_negative_dimensions() {
     assert_valid_ogc(&result);
 }
 
-// =========================================================================
-// SECTION 26: Line edge cases — zero-length and single-point collapse
-// =========================================================================
+// SECTION 26: Line edge cases: zero-length and single-point collapse
 
 #[test]
 fn line_zero_length_coords_same() {
@@ -1327,13 +1123,8 @@ fn line_zero_length_with_nan() {
     assert_is_empty(&result);
 }
 
-// =========================================================================
-// SECTION 18: CGAL star-complex — 9 self-intersections
-// =========================================================================
-//
-// A polygon where the ring self-intersects 9 times, creating a complex
-// multi-component output. Stress-tests the noding pipeline with multiple
-// intersection events near each other.
+// SECTION 18: CGAL star-complex: 9 self-intersections
+// A polygon where the ring self-intersects 9 times, creating a complex multi-component output.
 
 #[test]
 fn cgal_9_cross_star() {
@@ -1358,16 +1149,9 @@ fn cgal_9_cross_star() {
     let result = poly.make_valid_with_config(&cfg_structure());
     assert_valid_ogc(&result);
 }
-// =========================================================================
-// =========================================================================
-// SECTION 5: Full JTS GeometryFixerTest port — all 59 test inputs
-// =========================================================================
 //
 // Ported from JTS GeometryFixerTest.java (locationtech/jts).
 // Each test verifies that our pipeline produces valid OGC output for the
-// same JTS input. Exact output geometry may differ from JTS due to
-// algorithmic differences — both are valid OGC.
-//
 
 #[test]
 fn jts_point() {
@@ -1381,7 +1165,7 @@ fn jts_point() {
 fn jts_point_nan() {
     let input = Geometry::Point(Point::new(0.0, f64::NAN));
     let result = input.make_valid_with_config(&MakeValidConfig::default());
-    // Point with NaN is the geo model's POINT EMPTY — not strictly valid but empty
+    // Point with NaN is the geo model's POINT EMPTY: not strictly valid but empty
     assert_is_empty(&result);
 }
 
@@ -1497,7 +1281,7 @@ fn jts_linestring_self_cross() {
     let input: Geometry<f64> =
         Geometry::try_from_wkt_str("LINESTRING (0 0, 9 9, 9 5, 0 5)").expect("valid WKT");
     let result = input.make_valid_with_config(&MakeValidConfig::default());
-    // NotSimple is valid per OGC for curves — only check for other errors
+    // NotSimple is valid per OGC for curves: only check for other errors
     let r = result.validate();
     if !r.valid {
         let non_simple_only = r.errors.iter().all(|e| {
@@ -1568,7 +1352,6 @@ fn jts_linearring_flat() {
         Coord { x: 10.0, y: 10.0 },
     ]));
     let result = input.make_valid_with_config(&MakeValidConfig::default());
-    // NotSimple is valid per OGC for open curves
     let r = result.validate();
     let non_simple_only = r.errors.iter().all(|e| {
         matches!(
@@ -1589,7 +1372,6 @@ fn jts_linearring_self_cross() {
         Coord { x: 10.0, y: 10.0 },
     ]));
     let result = input.make_valid_with_config(&MakeValidConfig::default());
-    // NotSimple is valid per OGC for open curves
     let r = result.validate();
     let non_simple_only = r.errors.iter().all(|e| {
         matches!(
@@ -1981,13 +1763,9 @@ fn jts_dimension_consistence() {
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     assert_valid_ogc(&result);
 }
-// =========================================================================
-// SECTION 6: PostGIS documentation regression tests
-// =========================================================================
 //
 // Ported from PostGIS ST_MakeValid documentation examples.
 // These test real-world patterns from the PostgreSQL spatial extension.
-//
 
 #[test]
 fn postgis_mp_2_overlap() {
@@ -2088,11 +1866,9 @@ fn postgis_makevalid_regression() {
     assert_valid_ogc(&result);
     assert_not_empty(&result);
 }
-// =========================================================================
 
 #[test]
 fn jts_polygon_empty() {
-    // JTS testPolygonEmpty: POLYGON EMPTY → POLYGON EMPTY
     let input = Geometry::Polygon(Polygon::new(LineString::new(Vec::new()), Vec::new()));
     let result = input.make_valid_with_config(&MakeValidConfig::default());
     assert_valid_ogc(&result);
@@ -2109,10 +1885,8 @@ fn jts_polygon_bowtie() {
     assert_valid_ogc(&result);
     assert_not_empty(&result);
 }
-// SECTION 7: GEOS makevalid XML test suite — ported from
+// SECTION 7: GEOS makevalid XML test suite: ported from
 // tests/xmltester/tests/misc/makevalid.xml
-// =========================================================================
-//
 
 #[test]
 fn geos_linestring_invalid_result_point() {
@@ -2144,7 +1918,6 @@ fn geos_multilinestring_collapse_to_gc() {
 
 #[test]
 fn geos_multilinestring_collapse_multi_to_gc() {
-    // MULTILINESTRING with mix of collapsed and valid components
     let input = Geometry::MultiLineString(MultiLineString::new(vec![
         LineString::new(vec![Coord { x: 0.0, y: 0.0 }, Coord { x: 0.0, y: 0.0 }]),
         LineString::new(vec![Coord { x: 1.0, y: 1.0 }, Coord { x: 2.0, y: 2.0 }]),
@@ -2192,7 +1965,6 @@ fn geos_hole_touching_two_places() {
             Coord { x: 0.0, y: 0.5 },
         ])],
     ));
-    // Try Arrange first (has boolean-difference fallback)
     let cfg = MakeValidConfig {
         poly_method: PolyMethod::Arrange,
         ..Default::default()
@@ -2203,7 +1975,6 @@ fn geos_hole_touching_two_places() {
         return;
     }
 
-    // If Arrange also fails, try direct boolean diff
     let shell = Polygon::new(
         LineString::new(vec![
             Coord { x: 0.0, y: 0.0 },
@@ -2236,7 +2007,6 @@ fn geos_hole_touching_two_places() {
 
 #[test]
 fn geos_mp_second_overlapping() {
-    // MP where second component overlaps first
     let input = Geometry::MultiPolygon(MultiPolygon::new(vec![
         Polygon::new(
             LineString::new(vec![
@@ -2266,7 +2036,6 @@ fn geos_mp_second_overlapping() {
 
 #[test]
 fn geos_mp_first_cross_second_overlap() {
-    // First component crosses, second overlaps first
     let input = Geometry::MultiPolygon(MultiPolygon::new(vec![
         Polygon::new(
             LineString::new(vec![
@@ -2296,10 +2065,8 @@ fn geos_mp_first_cross_second_overlap() {
 
 #[test]
 fn geos_gc_with_empty_and_invalid_poly() {
-    // GC with POINT EMPTY, LINESTRING EMPTY, and polygon with hole touching shell
     // GEOS splits the polygon; Point(NaN) and empty LS pass through unchanged.
     use geo::BooleanOps;
-    // Verify the polygon split works
     let shell = Polygon::new(
         LineString::new(vec![
             Coord { x: 0.0, y: 0.0 },

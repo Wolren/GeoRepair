@@ -86,18 +86,13 @@ pub(crate) fn empty_geom<T: CoordNum>() -> Geometry<T> {
     Geometry::GeometryCollection(GeometryCollection(Vec::new()))
 }
 
-// ---------------------------------------------------------------------------
-// Point
-// ---------------------------------------------------------------------------
 
 impl<T: GeoFloat> MakeValid for Point<T> {
     type Scalar = T;
 
     fn make_valid_with_config(&self, _config: &MakeValidConfig) -> Geometry<T> {
         // POINT(NaN NaN) is the canonical empty point - valid, unchanged.
-        // A point with a single non-finite ordinate is invalid (GEOS
-        // "Invalid Coordinate"); makeValid demotes it to the canonical
-        // empty point so the output is always valid.
+        // A point with a single non-finite ordinate is invalid (GEOS "Invalid Coordinate")
         if (self.x().is_finite() && self.y().is_finite())
             || (self.x().is_nan() && self.y().is_nan())
         {
@@ -108,9 +103,6 @@ impl<T: GeoFloat> MakeValid for Point<T> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// MultiPoint
-// ---------------------------------------------------------------------------
 
 impl<T: GeoFloat> MakeValid for MultiPoint<T> {
     type Scalar = T;
@@ -123,10 +115,7 @@ impl<T: GeoFloat> MakeValid for MultiPoint<T> {
             .iter()
             .copied()
             .filter(|p| {
-                // GEOS parity: a point with a single non-finite ordinate is
-                // invalid (CoordinateNaN) and makeValid drops it; a true
-                // empty point (NaN, NaN) is valid and preserved. Dedup
-                // unchanged.
+                // empty point (NaN, NaN) is valid and preserved.
                 let finite = p.0.x.is_finite() && p.0.y.is_finite();
                 let empty_point = p.0.x.is_nan() && p.0.y.is_nan();
                 if !(finite || empty_point) {
@@ -148,9 +137,6 @@ impl<T: GeoFloat> MakeValid for MultiPoint<T> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Line
-// ---------------------------------------------------------------------------
 
 impl<T: GeoFloat> MakeValid for Line<T> {
     type Scalar = T;
@@ -173,19 +159,13 @@ impl<T: GeoFloat> MakeValid for Line<T> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// LineString
-// ---------------------------------------------------------------------------
 
 impl<T: NodingFloat> MakeValid for LineString<T> {
     type Scalar = T;
 
     fn make_valid_with_config(&self, _config: &MakeValidConfig) -> Geometry<T> {
-        // ONE pass: finite filter + consecutive-duplicate removal fused
-        // (the old two-step collect + remove_consecutive_duplicates paid
-        // two Vecs and two walks for every line - measured 2026-08-09, the
-        // valid-ls wrapper was ~1/3 of the 500v row). Semantics identical:
-        // dropping NaN coords first, then dedup of consecutive equals.
+        // (the old two-step collect + remove_consecutive_duplicates paid two Vecs and two walks for every line - measured 2026-08-09, the valid-ls)
+        // Semantics identical: dropping NaN coords first, then dedup of consecutive equals.
         let mut deduped: Vec<Coord<T>> = Vec::with_capacity(self.0.len());
         let mut prev: Option<Coord<T>> = None;
         for c in &self.0 {
@@ -206,13 +186,7 @@ impl<T: NodingFloat> MakeValid for LineString<T> {
             return Geometry::Point(Point(deduped[0]));
         }
         if deduped.len() >= 3 {
-            // Validity contract: the output must be simple. The old path
-            // passed any non-simple line through unchanged (GEOS MakeValid
-            // does the same for lines, but our repair contract is
-            // valid-or-empty - the fuzz smoke caught a denormal-scale
-            // self-overlapping LINESTRING shipped as NotSimple). Check with
-            // the validator's own predicate, then repair by dropping the
-            // conflicting segments (f64 space is lossless for f32 too).
+            // Check with the validator's own predicate, then repair by dropping the conflicting segments (f64 space is lossless for f32 too).
             let fd: Vec<Coord<f64>> = deduped
                 .iter()
                 .map(|c| Coord {
@@ -221,29 +195,10 @@ impl<T: NodingFloat> MakeValid for LineString<T> {
                 })
                 .collect();
             if check_linestring_self_intersection(&fd) {
-                // Noding repair first: split at every self-intersection
-                // instead of dropping segments (preserves the full
-                // traversal; the lean noder is also an order of magnitude
-                // faster than the greedy filter on dense crossings). The
-                // noder validates its own output and returns None when it
-                // cannot guarantee a valid result - the greedy filter is
-                // the fallback.
                 let runs = match crate::noding::line::node_line(&fd) {
-                    // The noder's contract: every returned chain already
-                    // passed the validator's own predicate (run_full
-                    // re-validates; crossing_only is simple by
-                    // construction plus the debug assert).
                     Some(runs) => runs,
                     None => {
-                        // The greedy fallback is only "simple by
-                        // construction" for the pairwise tests it copies -
-                        // without the validator's tiny-span rescale it can
-                        // emit subnormal runs the validator rejects
-                        // (fuzz 52812: fallback part 0 = NotSimple,
-                        // part 1 fine). Re-check every run with the
-                        // validator's own predicate and drop failures,
-                        // then apply the cross-component rule - the
-                        // validator runs it on any multi-part output.
+                        // (fuzz 52812: fallback part 0 = NotSimple, part 1 fine).
                         let runs: Vec<Vec<Coord<f64>>> = simple_subline(&fd)
                             .into_iter()
                             .filter(|r| {
@@ -297,9 +252,6 @@ fn simple_subline(coords: &[Coord<f64>]) -> Vec<Vec<Coord<f64>>> {
         (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0)
     };
     let eps = 1e-12 * scale;
-    // Bbox prefilter: cheap reject before the robust predicates (the
-    // repair path only runs on non-simple lines; keep it O(1) per pair in
-    // the common non-overlapping case).
     let bboxes: Vec<(f64, f64, f64, f64)> = (0..n)
         .map(|i| {
             let a = coords[i];
@@ -348,7 +300,6 @@ fn simple_subline(coords: &[Coord<f64>]) -> Vec<Vec<Coord<f64>>> {
         }
         kept.push(j);
     }
-    // Group consecutive kept segment indices into coordinate runs.
     let mut runs: Vec<Vec<Coord<f64>>> = Vec::new();
     let mut run: Vec<Coord<f64>> = Vec::new();
     for (idx, &s) in kept.iter().enumerate() {
@@ -406,10 +357,7 @@ fn keep_conflicting_runs(runs: &[Vec<Coord<f64>>]) -> Option<Vec<usize>> {
         .max((gmax_y - gmin_y).abs())
         .max(1.0);
     let eps = 1e-12 * scale;
-    // Bbox prefilter: most component pairs are disjoint; reject them
-    // before the per-edge checks (measured 2026-08-07: mls 50x3v went
-    // 1.7 -> 18.5 us when the cross-component filter ran
-    // check_line_components_intersect on every pair).
+    // before the per-edge checks (measured 2026-08-07: mls 50x3v went 1.7 -> 18.5 us when the cross-component filter ran check_line_components_intersect on)
     let bboxes: Vec<(f64, f64, f64, f64)> = runs
         .iter()
         .map(|r| {
@@ -427,14 +375,7 @@ fn keep_conflicting_runs(runs: &[Vec<Coord<f64>>]) -> Option<Vec<usize>> {
         })
         .collect();
     let mut kept: Vec<usize> = Vec::new();
-    // Sound skip bound: the validator's MLS cross check does NOT prefilter,
-    // and the predicate is eps-tolerant - the area-based orient tests let a
-    // segment of length L see points up to eps/L away, and
-    // segments_collinear_overlap's `len2 > eps` guard caps L at sqrt(eps),
-    // so the reachable bbox gap is at most sqrt(eps) (the other branches
-    // need a true crossing, i.e. bbox overlap, or an eps-inflated bbox
-    // containment). Skipping strictly beyond reach can never hide a
-    // conflict; within reach the full predicate runs.
+    // segments_collinear_overlap's `len2 > eps` guard caps L at sqrt(eps)
     let reach = eps.sqrt();
     for j in 0..runs.len() {
         let (bx0, bx1, by0, by1) = bboxes[j];
@@ -456,9 +397,6 @@ fn keep_conflicting_runs(runs: &[Vec<Coord<f64>>]) -> Option<Vec<usize>> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// MultiLineString
-// ---------------------------------------------------------------------------
 
 impl<T: NodingFloat> MakeValid for MultiLineString<T> {
     type Scalar = T;
@@ -474,10 +412,7 @@ impl<T: NodingFloat> MakeValid for MultiLineString<T> {
                 _ => {}
             }
         }
-        // Validity contract: components must not intersect each other
-        // except at boundary points (mirror of the validator's
-        // check_line_components_intersect rule). Greedy keep: drop a
-        // component that conflicts with an already-kept one.
+        // Validity contract: components must not intersect each other except at boundary points (mirror of the validator's check_line_components_intersect rule).
         if lines.len() > 1 {
             let fd: Vec<Vec<Coord<f64>>> = lines
                 .iter()
@@ -524,9 +459,6 @@ impl<T: NodingFloat> MakeValid for MultiLineString<T> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Rect
-// ---------------------------------------------------------------------------
 
 impl<T: GeoFloat> MakeValid for Rect<T> {
     type Scalar = T;
@@ -535,7 +467,6 @@ impl<T: GeoFloat> MakeValid for Rect<T> {
         let min_ok = self.min().x.is_finite() && self.min().y.is_finite();
         let max_ok = self.max().x.is_finite() && self.max().y.is_finite();
         if min_ok && max_ok {
-            // Degenerate (zero-area) rect → empty
             if (self.max().x - self.min().x).abs() < T::epsilon()
                 || (self.max().y - self.min().y).abs() < T::epsilon()
             {
@@ -554,9 +485,7 @@ impl<T: GeoFloat> MakeValid for Rect<T> {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Triangle - concrete f64 when polygon features available
-// ---------------------------------------------------------------------------
 
 #[cfg(any(feature = "arrange", feature = "structure"))]
 mod multipolygon;
@@ -656,9 +585,6 @@ impl<T: NodingFloat> MakeValid for GeometryCollection<T> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Validate + Fix mode (GEOS-compatible)
-// ---------------------------------------------------------------------------
 
 /// Combine validation and repair into a single pipeline.
 ///
@@ -724,9 +650,6 @@ pub trait ValidateAndFix: MakeValid<Scalar = f64> + GeoValidation<Scalar = f64> 
     }
 }
 
-// ---------------------------------------------------------------------------
-// ValidateAndFix blanket implementations
-// ---------------------------------------------------------------------------
 
 impl ValidateAndFix for Point<f64> {}
 

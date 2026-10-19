@@ -77,13 +77,9 @@ impl<'a> super::LineNoder<'a> {
             .unwrap_or(p)
     }
 
-    // ---------------------------------------------------------------------
     // Phase 4: clustering at the validator's eps + per-segment splits
-    // ---------------------------------------------------------------------
 
     pub(super) fn cluster_and_split(&mut self) {
-        // Input points: every original vertex (anchor) plus every node
-        // point. Sorted by x; union-find within eps (Chebyshev).
         let n_anchors = self.coords.len();
         let total = n_anchors + self.nodes.len();
         let mut pts: Vec<(Coord<f64>, bool, u32)> = Vec::with_capacity(total);
@@ -120,19 +116,7 @@ impl<'a> super::LineNoder<'a> {
             }
             r
         }
-        // Union-find over the eps (Chebyshev) neighborhood. `pts`
-        // is sorted by (x, y), so a plain forward x-window walk per
-        // point - the old form - is O(k^2) on a long bit-equal-x
-        // run (a subdivided vertical edge: the figure-8 class pays
-        // ~(0.2n)^2 per run, measured 6.7 ms on 4000 vertices where
-        // the fast path's active-set limit routes it here). Within a
-        // maximal equal-x block y is ascending, so each point's
-        // y-window is a contiguous range found by binary search;
-        // cross-block pairs (distinct x within eps - the genuine
-        // eps-class, small by contract) keep the forward walk. Same
-        // pair set as the old scan (the within-block window covers
-        // both directions; the union is symmetric), so the clustering
-        // is decision-identical.
+        // run (a subdivided vertical edge: the figure-8 class pays ~(0.2n)^2 per run, measured 6.7 ms on 4000 vertices where the)
         let mut i = 0usize;
         while i < total {
             let mut block_end = i + 1;
@@ -170,9 +154,6 @@ impl<'a> super::LineNoder<'a> {
             }
             i = block_end;
         }
-        // Canonical per cluster: the first point in the sort order
-        // (deterministic). When a cluster contains an original vertex the
-        // vertex sorts first among equal-x points and wins the canonical.
         let mut canon: Vec<Coord<f64>> = vec![
             Coord {
                 x: f64::NAN,
@@ -188,8 +169,7 @@ impl<'a> super::LineNoder<'a> {
                 has[r] = true;
             }
         }
-        // Node -> sorted position: the pre-sort index n_anchors + k is
-        // invalid once the sort reorders the points.
+        // Node -> sorted position: the pre-sort index n_anchors + k is invalid once the sort reorders the points.
         let mut node_pos: Vec<usize> = vec![0; self.nodes.len()];
         for (i, &(_, _, tag)) in pts.iter().enumerate() {
             if tag != 0 {
@@ -210,9 +190,7 @@ impl<'a> super::LineNoder<'a> {
         }
     }
 
-    // ---------------------------------------------------------------------
     // Phase 5: pieces
-    // ---------------------------------------------------------------------
 
     /// Piece construction for the pure-collinear fast path: identical to
     /// `build_pieces` but endpoints are used as-is (the 1-D split points
@@ -238,9 +216,6 @@ impl<'a> super::LineNoder<'a> {
             let mut prev_dist = 0.0f64;
             for &p in &pts {
                 let d = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len;
-                // Out-of-span guard: a node whose projection lies outside
-                // the segment (adjacent-pass endpoints of a long neighbour)
-                // must not produce a phantom piece.
                 if d < -self.eps || d > len + self.eps {
                     continue;
                 }
@@ -261,10 +236,6 @@ impl<'a> super::LineNoder<'a> {
     pub(super) fn build_pieces(&mut self) -> Vec<(Coord<f64>, Coord<f64>, u32)> {
         let mut out: Vec<(Coord<f64>, Coord<f64>, u32)> = Vec::new();
         for i in 0..self.n {
-            // Piece endpoints snap through the cluster canonical map so
-            // both segments of a near-coincident pair split at the same
-            // bit-exact point; a segment that collapses onto its twin is
-            // dropped (the twin carries the traversal).
             let a = self.snap(self.a[i]);
             let b = self.snap(self.b[i]);
             if a == b {
@@ -286,15 +257,9 @@ impl<'a> super::LineNoder<'a> {
             let mut prev_dist = 0.0f64;
             for &p in &pts {
                 let d = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len;
-                // Out-of-span guard: a node whose projection lies outside
-                // the segment (adjacent-pass endpoints of a long neighbour)
-                // must not produce a phantom piece.
                 if d < -self.eps || d > len + self.eps {
                     continue;
                 }
-                // Snap: drop split points within eps of the current emitted
-                // point or of the end (the cluster canonical is a vertex in
-                // those cases anyway - the other segments split at it).
                 if (d - prev_dist).abs() <= self.eps || (len - d).abs() <= self.eps {
                     continue;
                 }
@@ -385,9 +350,7 @@ impl<'a> super::LineNoder<'a> {
         pieces.truncate(k);
     }
 
-    // ---------------------------------------------------------------------
     // Phase 6: reconnection through degree-2 vertices
-    // ---------------------------------------------------------------------
 
     pub(super) fn reconnect(
         &self,
@@ -415,7 +378,6 @@ impl<'a> super::LineNoder<'a> {
             visited.insert((pieces[start].0.x.to_bits(), pieces[start].0.y.to_bits()));
             visited.insert((pieces[start].1.x.to_bits(), pieces[start].1.y.to_bits()));
             let mut cur = start;
-            // Forward extension.
             loop {
                 let v = *chain.last().expect("non-empty chain");
                 let k = (v.x.to_bits(), v.y.to_bits());
@@ -432,8 +394,6 @@ impl<'a> super::LineNoder<'a> {
                 } else {
                     pieces[q as usize].0
                 };
-                // Loop guard: a closed chain (the far vertex was already
-                // visited) must not extend through itself.
                 if !visited.insert((fv.x.to_bits(), fv.y.to_bits())) {
                     break;
                 }
@@ -441,7 +401,6 @@ impl<'a> super::LineNoder<'a> {
                 chain.push(fv);
                 cur = q as usize;
             }
-            // Backward extension (prepend, collected reversed).
             let mut pre: Vec<Coord<f64>> = Vec::new();
             let mut cur_b = start;
             loop {

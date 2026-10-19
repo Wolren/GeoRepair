@@ -15,9 +15,6 @@ use crate::core::MakeValidConfig;
 use crate::make_valid::MakeValid;
 use crate::validation::GeoValidation;
 
-// ---------------------------------------------------------------------------
-// Precision model
-// ---------------------------------------------------------------------------
 
 /// Controls how coordinates are rounded to a precision grid.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -102,9 +99,6 @@ impl PrecisionModel {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Geometry precision reducer
-// ---------------------------------------------------------------------------
 
 /// Reduces geometry precision with topology preservation.
 ///
@@ -142,12 +136,10 @@ impl GeometryPrecisionReducer {
     pub fn reduce(&self, geom: &Geometry<f64>) -> Geometry<f64> {
         let snapped = self.snap_geometry(geom);
 
-        // If result is valid, return it directly
         if snapped.validate().valid {
             return snapped;
         }
 
-        // Repair topology issues caused by snapping
         snapped.make_valid_with_config(&self.config)
     }
 
@@ -191,7 +183,6 @@ impl GeometryPrecisionReducer {
         if deduped.len() < 2 {
             return LineString::new(deduped);
         }
-        // Ensure closure
         let mut ring = deduped;
         if ring.len() > 1 && ring.first() != ring.last() {
             ring.push(ring[0]);
@@ -258,9 +249,6 @@ impl GeometryPrecisionReducer {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Retry chain
-// ---------------------------------------------------------------------------
 
 /// Try to reduce precision at progressively coarser grids until success.
 ///
@@ -276,7 +264,6 @@ pub fn reduce_with_retry(geom: &Geometry<f64>, config: &MakeValidConfig) -> Geom
             return result;
         }
     }
-    // Last resort: coarsest grid
     let model = PrecisionModel::new(1e-4);
     let reducer = GeometryPrecisionReducer::with_config(model, config.clone());
     reducer.reduce(geom)

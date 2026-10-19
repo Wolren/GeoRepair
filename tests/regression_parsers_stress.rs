@@ -1,11 +1,9 @@
 use geo_repair::io::wkb::read_wkb;
 use geo_repair::io::wkt::read_wkt;
 
-// Stress: parsers must never panic on ANY byte input - random, truncated,
-// adversarial. Returns Err (parse rejection) or Ok, never panics.
+// Stress: parsers must never panic on ANY byte input - random, truncated, adversarial.
 #[test]
 fn parsers_never_panic_random_bytes() {
-    // Deterministic xorshift (no external rng dep).
     let mut state: u64 = 0x9e3779b97f4a7c15;
     let mut next = || {
         state ^= state << 13;
@@ -23,7 +21,6 @@ fn parsers_never_panic_random_bytes() {
         for b in buf.iter_mut() {
             *b = (next() & 0xff) as u8;
         }
-        // Bias toward valid-looking WKB headers (byte order + type codes).
         if buf.len() >= 2 && (next() & 3) == 0 {
             buf[0] = 0; // big-endian
             buf[1] = (next() % 18) as u8; // plausible type codes
@@ -34,7 +31,6 @@ fn parsers_never_panic_random_bytes() {
             Ok(Err(_)) => {}
             Err(_) => wkb_panics += 1,
         }
-        // WKT: arbitrary bytes as lossy chars.
         let text: String = buf.iter().map(|&b| b as char).collect();
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read_wkt(&text)));
         match r {

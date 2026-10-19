@@ -39,7 +39,6 @@ pub fn polygonize(lines: &[Line<f64>]) -> Vec<Polygon<f64>> {
     for face in &face_edges {
         let ring = face_to_ring(&graph, face);
         if ring.len() >= 4 && signed_area_x2(&ring).abs() > 0.0 {
-            // Split rings that touch at a single vertex (pinch points)
             let split = split_at_pinch_point(&ring);
             rings.extend(split);
         }
@@ -61,14 +60,12 @@ pub fn polygonize(lines: &[Line<f64>]) -> Vec<Polygon<f64>> {
     shell_rings.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(core::cmp::Ordering::Equal));
     hole_rings.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(core::cmp::Ordering::Equal));
 
-    // Discard universe (largest CW by abs area)
     let holes: Vec<(usize, Vec<Coord<f64>>, f64)> = if hole_rings.len() > 1 {
         hole_rings.into_iter().skip(1).collect()
     } else {
         Vec::new()
     };
 
-    // Assign each hole to smallest containing shell (GEOS HoleAssigner)
     let mut shell_holes: Vec<Vec<LineString<f64>>> = vec![Vec::new(); shell_rings.len()];
     for (_, hole_coords, _) in &holes {
         let mut best_shell: Option<usize> = None;
@@ -129,7 +126,6 @@ fn point_class(pt: Coord<f64>, ring: &[Coord<f64>]) -> PtClass {
     for i in 0..n {
         let (xi, yi) = (ring[i].x, ring[i].y);
         let (xj, yj) = (ring[(i + 1) % n].x, ring[(i + 1) % n].y);
-        // Check collinearity + bounding box for boundary detection
         let cross = (xj - xi) * (pt.y - yi) - (yj - yi) * (pt.x - xi);
         if cross.abs() < 1e-12
             && pt.x >= xi.min(xj) - 1e-10
@@ -140,7 +136,6 @@ fn point_class(pt: Coord<f64>, ring: &[Coord<f64>]) -> PtClass {
             return PtClass::Boundary;
         }
     }
-    // Not on boundary — do standard ray crossing
     let mut inside = false;
     for i in 0..n {
         let (xi, yi) = (ring[i].x, ring[i].y);
@@ -184,7 +179,6 @@ fn build_area_filter(polys: Vec<Polygon<f64>>) -> Vec<Polygon<f64>> {
             .unwrap_or(core::cmp::Ordering::Equal)
     });
 
-    // findFaceHoles: for each face's hole ring, match to LATER face's exterior
     let n = faces.len();
     for i in 0..n {
         let nholes = faces[i].poly.interiors().len();
@@ -206,7 +200,6 @@ fn build_area_filter(polys: Vec<Polygon<f64>>) -> Vec<Polygon<f64>> {
         }
     }
 
-    // collectFacesWithEvenAncestors
     let mut result: Vec<Polygon<f64>> = Vec::new();
     for fi in &faces {
         let mut count = 0usize;
@@ -223,8 +216,6 @@ fn build_area_filter(polys: Vec<Polygon<f64>>) -> Vec<Polygon<f64>> {
     if result.len() <= 1 {
         return result;
     }
-    // Dissolve shared edges via unary_union. Do NOT run merge_shells even-parent
-    // again: that counts containment by exterior only and drops islands that sit
     // inside a hole of a kept shell (deep nesting L0+hole + L2 island).
     let mp = MultiPolygon::new(result);
     geo::algorithm::bool_ops::unary_union(&mp).0
@@ -244,7 +235,6 @@ fn rings_equal_any_direction(r1: &[Coord<f64>], r2: &[Coord<f64>]) -> bool {
         Some(o) => o,
         None => return false,
     };
-    // Forward
     let mut eq = true;
     for (k, &p1) in r1[1..n].iter().enumerate() {
         let j = (offset + k + 1) % n;
@@ -256,7 +246,6 @@ fn rings_equal_any_direction(r1: &[Coord<f64>], r2: &[Coord<f64>]) -> bool {
     if eq {
         return true;
     }
-    // Backward
     eq = true;
     for (k, &p1) in r1[1..n].iter().enumerate() {
         let j = (offset + n - (k + 1)) % n;

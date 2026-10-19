@@ -220,12 +220,7 @@ fn run_ser(polys: &[Polygon<f64>], cfg: &MakeValidConfig) -> f64 {
 
 #[cfg(feature = "parallel")]
 fn run_par(polys: &[Polygon<f64>], cfg: &MakeValidConfig) -> f64 {
-    // Owned batch: MOVES the polygons through the zero-copy fast path —
-    // the fair comparison against GEOS (shared-geometry return, no copy).
-    // The borrowed API would charge a full ring clone per polygon inside
-    // the timer. The batch is duplicated once OUTSIDE the timer to stand
-    // for the pipeline already owning its data (the real-world bench has
-    // used par_fix_polygon_batch_owned throughout; 2026-08-09).
+    // for the pipeline already owning its data (the real-world bench has used par_fix_polygon_batch_owned throughout; 2026-08-09).
     let owned: Vec<Polygon<f64>> = polys.to_vec();
     let t0 = Instant::now();
     let _ = par_fix_polygon_batch_owned(owned, cfg);
@@ -291,7 +286,6 @@ fn make_multilinestring(parts: &[Vec<(f64, f64)>]) -> Geometry<f64> {
     Geometry::MultiLineString(MultiLineString::new(lines))
 }
 
-// ─── Specialized shape generators ─────────────────────────────────
 
 fn make_starburst(spikes: usize, r: f64) -> Geometry<f64> {
     let mut coords = Vec::with_capacity(spikes * 2 + 1);
@@ -395,9 +389,6 @@ fn make_spoke_wheel(spokes: usize, r: f64) -> Geometry<f64> {
 }
 
 fn make_star_comb(spikes: usize) -> Geometry<f64> {
-    // Boost Geometry classic worst-case: alternating long/short radii
-    // Non-adjacent spikes have near-intersections — NO shared endpoints
-    // (Unlike star-burst where all edges share origin)
     let mut coords = Vec::with_capacity(spikes + 1);
     for i in 0..spikes {
         let a = 2.0 * std::f64::consts::PI * i as f64 / spikes as f64;
@@ -427,7 +418,6 @@ fn make_self_touching_polygon() -> Polygon<f64> {
 }
 
 fn make_collapsed_polygon() -> Polygon<f64> {
-    // Shell with a backtrack edge — partial zero area, tests collapsed output
     Polygon::new(
         LineString::new(vec![
             Coord { x: 0.0, y: 0.0 },
@@ -442,8 +432,7 @@ fn make_collapsed_polygon() -> Polygon<f64> {
 }
 
 fn make_dense_overlap_grid(per_side: usize) -> Geometry<f64> {
-    // Grid of small overlapping squares as MultiPolygon
-    // Each square overlaps neighbors by ~30% — tests batch overlap performance
+    // Each square overlaps neighbors by ~30%: tests batch overlap performance
     let size = 10.0;
     let stride = size * 0.7;
     let polys: Vec<Polygon<f64>> = (0..per_side)
@@ -471,7 +460,7 @@ fn make_dense_overlap_grid(per_side: usize) -> Geometry<f64> {
 }
 
 fn make_large_coord_polygon() -> Polygon<f64> {
-    // Polygon with coordinates at ±1e12 — tests numerical stability
+    // Polygon with coordinates at ±1e12: tests numerical stability
     Polygon::new(
         LineString::new(vec![
             Coord { x: -1e12, y: -1e12 },
@@ -731,21 +720,8 @@ fn bench_line(label: &str, g: &Geometry<f64>, batch: usize, cfg: &MakeValidConfi
     let par = run_line_par(&items, cfg);
     #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
     {
-        // CoordSeq direct construction — no WKT overhead
         let geos_geoms: Vec<geos::Geometry> = items.iter().filter_map(geometry_to_geos).collect();
-        // GEOS reference by geometry class, not by label prefix (the
-        // prefix routing silently swapped the reference for the
-        // MultiPolygon rows - dense grid / overlap mp - and collapsed
-        // their ratios ~46x, 2026-08-09):
-        //  - valid inputs: makeValid is the honest check reference (it
-        //    returns the valid input unchanged)
-        //  - invalid LINES: makeValid is a passthrough (GeometryFixer.cpp
-        //    strips repeated points and clones; non-simple passes
-        //    through) - the honest repair reference is UnaryUnion
-        //  - invalid POLYGONS/MPs: makeValid is the repair reference
-        //    users call (UnaryUnion is ~46x cheaper on overlapping
-        //    shells - measured 13ms vs 600ms at 400 shells - and would
-        //    flatter our MP rows)
+        // not by label prefix (the prefix routing silently swapped the reference for the MultiPolygon rows - dense grid / overlap)
         let is_line_geom = matches!(
             g,
             Geometry::Line(_) | Geometry::LineString(_) | Geometry::MultiLineString(_)
@@ -785,8 +761,7 @@ fn bench_line(label: &str, g: &Geometry<f64>, batch: usize, cfg: &MakeValidConfi
 fn gate_filtered(label: &str) -> bool {
     match std::env::var("BENCH_SUBSET") {
         Ok(sub) => {
-            // Collapse whitespace so padded labels ('invalid bowtie  50v')
-            // match subset entries ('invalid bowtie 50v').
+            // Collapse whitespace so padded labels ('invalid bowtie 50v') match subset entries ('invalid bowtie 50v').
             let norm_label: String = label.split_whitespace().collect::<Vec<_>>().join(" ");
             sub.split(',')
                 .map(str::trim)
@@ -825,7 +800,6 @@ fn bench_polygons(label: &str, polys: &[Polygon<f64>], batch: usize, cfg: &MakeV
     let par = run_par(polys, cfg);
     #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
     {
-        // CoordSeq direct construction — no WKT overhead
         let geos_geoms: Vec<geos::Geometry> = polys.iter().filter_map(polygon_to_geos).collect();
         let geos = run_geos_batch(&geos_geoms);
         eprintln!(
@@ -864,7 +838,6 @@ fn main() {
         ..Default::default()
     };
 
-    // Warmup
     let poly4 = make_valid_ring(4, 100.0);
     let mut warm: Vec<Polygon<f64>> = Vec::new();
     for _ in 0..10000 {
@@ -919,8 +892,7 @@ fn main() {
     }
 
     // Invalid bowtie at scale: same bowtie with subdivided edges, 50/100/
-    // 500/1000 vertices (the user's explicit ask 2026-08-07 - the bench
-    // only had the 4v bowtie, which never stressed the repair at scale).
+    // 500/1000 vertices (the user's explicit ask 2026-08-07 - the bench only had the 4v bowtie, which never stressed the repair)
     for &(n, batch) in &[(50usize, 5000usize), (100, 2000), (500, 200), (1000, 100)] {
         let poly = make_bowtie_n(n);
         let polys: Vec<Polygon<f64>> = (0..batch)
@@ -938,10 +910,8 @@ fn main() {
         bench_polygons(&format!("invalid bowtie {:>4}v", n), &polys, batch, &cfg);
     }
 
-    // Star polygon (spiky, r alternating 100/50 every 3rd vertex): VALID
-    // geometry at every size - verified with geosop isValid (2026-08-07).
-    // The old "invalid star 100v" label was a misnomer; this row measures
-    // the valid-repair fast path on a hard spiky shape at scale.
+    // Star polygon (spiky, r alternating 100/50 every 3rd vertex): VALID geometry at every size - verified with geosop isValid (2026-08-07).
+    // The old "invalid star 100v" label was a misnomer
     for &(n, batch) in &[(100usize, 1000usize), (500, 200), (1000, 100)] {
         let mut coords = Vec::with_capacity(n);
         for i in 0..n - 1 {
@@ -969,9 +939,6 @@ fn main() {
         bench_polygons(&format!("star poly {:>4}v", n), &polys, batch, &cfg);
     }
 
-    // Spaghetti rings: torus-wrapped random walks, dozens of proper
-    // crossings each - the "many crossings at scale" repair class
-    // (geosop isValid: false).
     for &(n, batch) in &[(500usize, 100usize), (2000, 20)] {
         let poly = make_spaghetti_ring(n);
         let polys: Vec<Polygon<f64>> = (0..batch)
@@ -989,40 +956,34 @@ fn main() {
         bench_polygons(&format!("spaghetti {:>4}v", n), &polys, batch, &cfg);
     }
 
-    // Self-touching (banana) polygon — tests self-touch forming hole.
-    // Arc-length subdivision keeps the touch point at every size so a
-    // size-scaling regression in the touch path is measurable.
     for &(n, batch) in &[(100usize, 5000usize), (500, 1000), (1000, 500)] {
         let poly = subdivide_polygon(&make_self_touching_polygon(), n);
         let polys: Vec<Polygon<f64>> = (0..batch).map(|_| poly.clone()).collect();
         bench_polygons(&format!("self-touch {:>4}v", n), &polys, batch, &cfg);
     }
 
-    // Collapsed polygon (zero-area spike) — tests collapsed output handling
     for &(n, batch) in &[(100usize, 5000usize), (500, 1000), (1000, 500)] {
         let poly = subdivide_polygon(&make_collapsed_polygon(), n);
         let polys: Vec<Polygon<f64>> = (0..batch).map(|_| poly.clone()).collect();
         bench_polygons(&format!("collapsed {:>4}v", n), &polys, batch, &cfg);
     }
 
-    // Nearly-collinear polygon — Shewchuk orient2d stress case
+    // Nearly-collinear polygon: Shewchuk orient2d stress case
     for &(n, batch) in &[(100usize, 5000usize), (500, 1000), (1000, 200)] {
         let poly = make_nearly_collinear_polygon_n(n);
         let polys: Vec<Polygon<f64>> = (0..batch).map(|_| poly.clone()).collect();
         bench_polygons(&format!("near-collinear {:>4}v", n), &polys, batch, &cfg);
     }
 
-    // Large coordinate polygon (±1e12) — tests numerical stability vs GEOS
+    // Large coordinate polygon (±1e12): tests numerical stability vs GEOS
     for &(n, batch) in &[(100usize, 5000usize), (500, 1000), (1000, 500)] {
         let poly = subdivide_polygon(&make_large_coord_polygon(), n);
         let polys: Vec<Polygon<f64>> = (0..batch).map(|_| poly.clone()).collect();
         bench_polygons(&format!("large coord 1e12 {:>4}v", n), &polys, batch, &cfg);
     }
 
-    // ─── Line benchmarks ─────────────────────────────────────────────
     eprintln!("{}", "-".repeat(55));
 
-    // Single Line tests
     bench_line(
         "valid line",
         &make_line([(0.0, 0.0), (1000.0, 500.0)]),
@@ -1036,7 +997,6 @@ fn main() {
         &cfg,
     );
 
-    // Valid LineString vertex sweep
     for &(n, batch) in &[
         (4, 50000usize),
         (10, 50000),
@@ -1050,7 +1010,6 @@ fn main() {
         bench_line(&format!("valid ls {:>4}v", n), &g, batch, &cfg);
     }
 
-    // Collinear LineString vertex sweep
     for &(n, batch) in &[
         (4, 50000usize),
         (10, 50000),
@@ -1064,7 +1023,6 @@ fn main() {
         bench_line(&format!("collinear ls {:>4}v", n), &g, batch, &cfg);
     }
 
-    // Convoluted: zigzag (alternating y)
     for &(n, batch) in &[
         (10, 50000usize),
         (50, 10000),
@@ -1079,7 +1037,6 @@ fn main() {
         bench_line(&format!("zigzag ls {:>4}v", n), &g, batch, &cfg);
     }
 
-    // Convoluted: spiral (tightly wound)
     for &(n, batch) in &[
         (10, 50000usize),
         (50, 10000),
@@ -1097,9 +1054,7 @@ fn main() {
         bench_line(&format!("spiral ls {:>4}v", n), &g, batch, &cfg);
     }
 
-    // Self-intersecting: figure-8, arc-length subdivided to n vertices so
-    // the crossing class is preserved at scale (the fixed 5v shape never
-    // measured size scaling of the noding path).
+    // the crossing class is preserved at scale (the fixed 5v shape never measured size scaling of the noding path).
     for &(n, batch) in &[(100usize, 5000usize), (500, 500), (1000, 200)] {
         let base = vec![
             (0.0, 0.0),
@@ -1112,7 +1067,6 @@ fn main() {
         bench_line(&format!("self-int ls {:>4}v", n), &g, batch, &cfg);
     }
 
-    // Self-intersecting: many crossing edges (dense bowtie chain)
     for &(n, batch) in &[
         (10, 50000usize),
         (50, 10000),
@@ -1130,28 +1084,24 @@ fn main() {
         bench_line(&format!("dense self ls {:>4}v", n), &g, batch, &cfg);
     }
 
-    // LineString with consecutive duplicates — n pairs = 2n vertices
+    // LineString with consecutive duplicates: n pairs = 2n vertices
     for &(pairs, batch) in &[(50usize, 50000usize), (250, 10000), (500, 1000)] {
         let g = make_duped_ls(pairs);
         bench_line(&format!("duped ls {:>4}v", pairs * 2), &g, batch, &cfg);
     }
 
-    // MultiLineString: many short parts
     for &(parts, batch) in &[(50usize, 10000usize), (250, 2000), (500, 1000)] {
         let g = make_mls_parts(parts);
         bench_line(&format!("mls {}x3v", parts), &g, batch, &cfg);
     }
 
-    // MultiLineString with many self-intersecting components
     for &(parts, batch) in &[(50usize, 10000usize), (250, 2000), (500, 500)] {
         let g = make_mls_selfint_parts(parts);
         bench_line(&format!("self-int mls {}x4v", parts), &g, batch, &cfg);
     }
 
-    // ─── Special shapes ────────────────────────────────────────────
     eprintln!("{}", "-".repeat(55));
 
-    // Star-burst: all edges from/to center — stresses duplicate-vertex detection
     for &(spikes, batch) in &[
         (10usize, 50000usize),
         (50, 10000),
@@ -1163,7 +1113,6 @@ fn main() {
         bench_line(&format!("star-burst {}sp", spikes), &g, batch, &cfg);
     }
 
-    // Collinear overlap: segments on same line with partial overlap (regression test)
     for &(segments, batch) in &[
         (10usize, 50000usize),
         (50, 10000),
@@ -1175,7 +1124,7 @@ fn main() {
         bench_line(&format!("collinear ov {}seg", segments), &g, batch, &cfg);
     }
 
-    // Extreme mixed scale: alternates 1e12 and 1e-12 coords — tests epsilon robustness
+    // Extreme mixed scale: alternates 1e12 and 1e-12 coords: tests epsilon robustness
     for &(n, batch) in &[
         (10usize, 50000usize),
         (50, 1000),
@@ -1187,13 +1136,13 @@ fn main() {
         bench_line(&format!("x-scale {}v", n), &g, batch, &cfg);
     }
 
-    // Tight ringing: dense near-miss oscillations — stresses orient2d near-boundary
+    // Tight ringing: dense near-miss oscillations: stresses orient2d near-boundary
     for &(n, batch) in &[(100usize, 10000usize), (500, 50), (1000, 50)] {
         let g = make_tight_ringing(n, 1e-8);
         bench_line(&format!("ringing {}v", n), &g, batch, &cfg);
     }
 
-    // Hilbert curve (order 4 = 256v, order 5 = 1024v) — space-filling, grid stress
+    // Hilbert curve (order 4 = 256v, order 5 = 1024v): space-filling, grid stress
     {
         let g = make_linestring(&hilbert_coords(4));
         bench_line("hilbert 256v", &g, 2000, &cfg);
@@ -1220,7 +1169,6 @@ fn main() {
         bench_line("lissajous 7:4 500v", &g, 1000, &cfg);
     }
 
-    // Spoke wheel: all edges converge at origin — stresses noding at common point
     for &(spokes, batch) in &[
         (10usize, 50000usize),
         (50, 5000),
@@ -1232,29 +1180,24 @@ fn main() {
         bench_line(&format!("spoke {}sp", spokes), &g, batch, &cfg);
     }
 
-    // Star comb: alternating long/short spikes — NO shared endpoints (differs from star-burst)
     for &(spikes, batch) in &[(20usize, 50000usize), (100, 5000), (500, 100), (1000, 50)] {
         let g = make_star_comb(spikes);
         bench_line(&format!("star-comb {}sp", spikes), &g, batch, &cfg);
     }
 
-    // ─── MultiPolygon / hole hierarchy / sliver ────────────────────
     eprintln!("{}", "-".repeat(55));
 
-    // Hole hierarchy: shell with many nested holes
     for &(nh, batch) in &[(5usize, 10000usize), (20, 1000), (50, 200), (100, 100)] {
         let poly = make_hole_hierarchy(nh, 500.0);
         let polys: Vec<Polygon<f64>> = (0..batch).map(|_| poly.clone()).collect();
         bench_polygons(&format!("hole hier {:>3}h", nh), &polys, batch, &cfg);
     }
 
-    // MultiPolygon with overlapping shells
     for &(ns, batch) in &[(5usize, 1000usize), (20, 200), (50, 50), (100, 50)] {
         let g = make_multipoly_overlap(ns, 100.0);
         bench_line(&format!("overlap mp {:>3}sh", ns), &g, batch, &cfg);
     }
 
-    // Dense grid of overlapping small polygons
     {
         let g = make_dense_overlap_grid(5);
         bench_line("dense grid 5x5=25", &g, 1000, &cfg);
@@ -1272,7 +1215,6 @@ fn main() {
         bench_line("dense grid 30x30=900", &g, 20, &cfg);
     }
 
-    // Sliver edges: near-collinear, very thin polygon
     for &(n, batch) in &[(100usize, 1000usize), (500, 100), (1000, 100)] {
         let poly = make_sliver_polygon(n, 0.001);
         let polys: Vec<Polygon<f64>> = (0..batch).map(|_| poly.clone()).collect();
@@ -1334,7 +1276,6 @@ fn main() {
             bench_polygons("arrange bowtie 100v", &polys, 500, &acfg);
         }
 
-        // Star polygon through Arrange (challenging for CDT)
         for &(spikes, batch) in &[(10usize, 5000usize), (50, 500), (100, 200), (500, 50)] {
             let g = make_starburst(spikes, 1000.0);
             bench_line(&format!("arrange star {:>3}sp", spikes), &g, batch, &acfg);

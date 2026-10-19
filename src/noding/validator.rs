@@ -37,7 +37,6 @@ pub struct NodingValidator {
     violations: Vec<NodingViolation>,
 }
 
-// ── MCIndex: monotone-chain spatial index ──
 
 #[cfg(feature = "rstar")]
 fn quadrant(dx: f64, dy: f64) -> u8 {
@@ -147,7 +146,6 @@ fn sub_chain(edges: &[Line<f64>], start: usize, end: usize) -> ValMonoChain {
     }
 }
 
-// ── Core validation logic ──
 
 fn check_crossing_violation(
     edges: &[Line<f64>],
@@ -156,7 +154,6 @@ fn check_crossing_violation(
     eps: f64,
     violations: &mut Vec<NodingViolation>,
 ) {
-    // Skip consecutive pairs that share an endpoint
     if j == i + 1 && edges[i].end == edges[j].start {
         return;
     }
@@ -171,7 +168,6 @@ fn check_crossing_violation(
     let o3 = orient2d(e2.start, e2.end, e1.start);
     let o4 = orient2d(e2.start, e2.end, e1.end);
 
-    // Proper crossing: all four values non-zero with opposite signs
     if o1 != 0.0
         && o2 != 0.0
         && o3 != 0.0
@@ -196,7 +192,6 @@ fn check_crossing_violation(
         return;
     }
 
-    // Collinear overlap
     if o1 == 0.0 && o2 == 0.0 && o3 == 0.0 && o4 == 0.0 && collinear_overlap_violation(e1, e2, eps)
     {
         let mid = Coord {
@@ -233,7 +228,6 @@ fn check_chain_pair(
     violations: &mut Vec<NodingViolation>,
     checked: &mut FxHashSet<(usize, usize)>,
 ) {
-    // Bounding box overlap test
     if mc1.min_x > mc2.max_x + eps
         || mc1.max_x < mc2.min_x - eps
         || mc1.min_y > mc2.max_y + eps
@@ -242,7 +236,6 @@ fn check_chain_pair(
         return;
     }
 
-    // Leaf: both chains are single segments
     if mc1.end - mc1.start == 1 && mc2.end - mc2.start == 1 {
         let i = mc1.start;
         let j = mc2.start;
@@ -253,7 +246,6 @@ fn check_chain_pair(
         return;
     }
 
-    // Subdivide the larger chain
     if (mc1.end - mc1.start) >= (mc2.end - mc2.start) {
         let mid = (mc1.start + mc1.end) / 2;
         if mid > mc1.start {
