@@ -2,7 +2,7 @@
 
 # GeoRepair
 
-OGC geometry repair and validation for Rust. Passes the GEOS XML validation suite.
+OGC compliant geometry repair and validation for Rust.
 
 [![crate](https://img.shields.io/crates/v/geo-repair.svg)](https://crates.io/crates/geo-repair)
 [![docs](https://docs.rs/geo-repair/badge.svg)](https://docs.rs/geo-repair)
@@ -21,7 +21,7 @@ OGC geometry repair and validation for Rust. Passes the GEOS XML validation suit
 GeoRepair repairs invalid OGC geometries and answers whether a geometry is
 valid. It fixes the common damage: self-intersections, unclosed rings,
 degenerate shapes, and NaN coordinates. Input that is already valid comes
-back unchanged, through a certification path that never runs the repair.
+back unchanged.
 
 Two strategies, chosen by geometry type:
 
@@ -30,17 +30,16 @@ Two strategies, chosen by geometry type:
 - **Arrange** is a CDT-based fallback for complex topologies.
 
 WKB and WKT reading and writing, plus a custom binary batch format, are
-built in with no extra dependencies. The GEOS XML validation suite passes.
+built in with no extra dependencies.
 
-Timings are measured against GEOS 3.14.1 (conda-forge) on a 1,579,030
-polygon production dataset, i5-12400F, release, 12-thread parallel batch:
-[Performance](#performance).
+Everything is evaluated against a huge ported test sets from GEOS, CGAL and own fuzz tests. 
+The result should always come as valid per GEOS, but the strategy differences might make the output slightly differ.
 
 ## Performance
 
-### Real-world dataset (1,579,030 polygons)
+### A test dataset (1,579,030 polygons)
 
-Structure batch on a production GIS dataset (813 features from a GeoPackage,
+Structure batch on an a GIS dataset (813 features from a GeoPackage,
 flattened to 1,579,030 polygon parts). i5-12400F (6C/12T), release LTO,
 Rayon 12-thread batch; GEOS is conda-forge 3.14.1, serial per-call, run
 concurrently via Rayon, geometries built via CoordSeq direct construction
@@ -246,7 +245,8 @@ Every function exists for WKB and WKT (`repair_*`, `repair_*_batch`,
 `validate_and_fix_*`, plus batch forms), with `method`
 (auto/arrange/structure) and `keep_collapsed` parameters. A QGIS
 Processing script (`qgis/qgis_geo_repair.py`) streams features through
-the WKB batch API. Examples and full API reference: `docs/BINDINGS.md`.
+the WKB batch API. Mind  that due to overhead it might suffer from performance issues.
+Examples and full API reference: `docs/BINDINGS.md`.
 
 ## C API
 
