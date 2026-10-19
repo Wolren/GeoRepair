@@ -1,9 +1,8 @@
 //! per-geometry GeoValidation impls and free validate functions
 //!
-//! Extracted from validation/core.rs on 2026-08-07 (file-size governance:
-//! core.rs was 2540 lines; the cap is 800). Content is verbatim - no
-//! behavior changes; sibling modules resolve shared items through the
-//! `crate::validation::core` facade.
+//! Extracted from validation/core.rs on 2026-08-07 (file-size governance: core.rs was
+//! 2540 lines; the cap is 800). Content is verbatim - no behavior changes; sibling
+//! modules resolve shared items through the `crate::validation::core` facade.
 //!
 //! See validation/mod.rs for the module map.
 
@@ -16,11 +15,12 @@ impl GeoValidation for Point<f64> {
     type Scalar = f64;
 
     fn validate(&self) -> ValidationResult {
-        // Point(NaN, NaN) is the geo representation of POINT EMPTY - valid OGC.
+        // Point(NaN, NaN) is the geo representation of point empty - valid OGC.
         if self.x().is_nan() && self.y().is_nan() {
             return ValidationResult::valid();
         }
-        // A point with a non-finite ordinate (NaN or inf) is invalid -GEOS reports "Invalid Coordinate"
+        // A point with a non-finite ordinate (NaN or inf) is invalid -GEOS reports
+        // "Invalid Coordinate"
         if !self.x().is_finite() || !self.y().is_finite() {
             return ValidationResult::invalid(vec![GeometryValidationError::CoordinateNaN]);
         }
@@ -106,16 +106,9 @@ impl GeoValidation for LineString<f64> {
     }
 }
 
-/// Check if a non-closed LineString has self-intersecting segments.
-///
-/// GEOS isSimple semantics (verified against geosop on the GEOS XML corpus):
-/// a LineString is simple iff no two segments intersect except at shared
-/// endpoints. This includes proper crossings, a vertex of one segment lying
-/// on another segment (vertex-on-edge, including vertex revisits between
-/// non-adjacent segments), and collinear overlap beyond a shared point
-/// (out-and-back backtracking). Adjacent segments may touch ONLY at their
-/// shared vertex; a closed line's first and last segments may touch ONLY at
-/// the closure vertex.
+/// Check a non-closed LineString for self-intersecting segments. Adjacent segments may
+/// touch only at their shared vertex. The first and last segments of a closed line may
+/// touch only at the closure vertex.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool {
     let n = coords.len() - 1;
@@ -137,8 +130,9 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
         let sp = (max_x - min_x).abs().max((max_y - min_y).abs());
         (sp, sp.max(1.0))
     };
-    // O(L^2) orient product underflows to 0, so both predicates collapse and an exactly-simple line falsely reports NotSimple (wkb seed 146242f1).
-    // The scaled span lands in [0.5, 4), so the recursion cannot re-trigger.
+    // O(L^2) orient product underflows to 0, so both predicates collapse and an
+    // exactly-simple line falsely reports NotSimple (wkb seed 146242f1). The scaled
+    // span lands in [0.5, 4), so the recursion cannot re-trigger.
     if raw_span > 0.0 && raw_span < 1e-100 {
         let mut k = (-(raw_span.log2())).ceil() as i32;
         let mut scaled = coords.to_vec();
@@ -175,7 +169,8 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
         return true;
     }
 
-    // coordinate magnitude (measured: 1e15-scale line, eps = 1000 units, flagged a vertex 1 unit from another segment as on-edge: a)
+    // coordinate magnitude (measured: 1e15-scale line, eps = 1000 units, flagged a
+    // vertex 1 unit from another segment as on-edge: a)
     let pair_intersects = |i: usize, j: usize| -> bool {
         if closed && i == 0 && j == n - 1 {
             return false; // closure pair handled above
@@ -189,15 +184,16 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
             return true;
         }
         if ambiguous {
-            // non-simple ("interior intersection at vertices", GEOS TestSimple LINESTRING (20 80, 80 20, 80 80, 140 60, 80 20, 160 20)).
+            // non-simple ("interior intersection at vertices", GEOS TestSimple
+            // linestring (20 80, 80 20, 80 80, 140 60, 80 20, 160 20)).
             if a1 == b1 || a1 == b2 || a2 == b1 || a2 == b2 {
                 return true;
             }
         }
         false
     };
-    // sweep tests only the small x-overlap active set (~25-60x fewer pair tests at n=500).
-    // The sweep's 32-line floor is the crossover.
+    // sweep tests only the small x-overlap active set (~25-60x fewer pair tests at
+    // n=500). The sweep's 32-line floor is the crossover.
     if n <= 32 {
         for i in 0..n {
             for j in i + 2..n {
@@ -211,7 +207,8 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
 
     // The former flat O(n) hash pass cost 5-9 us on every 500-vertex
 
-    // bulk_load costs ~1 us/item (measured 2026-08-07: 948 us to build the tree for a 500-vertex line)
+    // bulk_load costs ~1 us/item (measured 2026-08-07: 948 us to build the tree for a
+    // 500-vertex line)
     match crate::validation::sweep::sweep_ring_self_intersects(coords, eps, true) {
         Some(true) => true,
         Some(false) => false,
@@ -274,12 +271,8 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
     }
 }
 
-/// Full segment-intersection predicate: proper crossing, collinear positive-
-/// length overlap, or a vertex of one segment lying on the other.
-/// `include_endpoint_share`: for a single line, a non-adjacent segment pair
-/// sharing an endpoint is a vertex revisit (non-simple); between MultiLine-
-/// String components, endpoint-to-endpoint touching is allowed (OGC Simple
-/// Features, verified vs geosop).
+/// Full segment-intersection predicate: proper crossing, collinear positive- length
+/// overlap, or a vertex of one segment lying on the other.
 pub(crate) fn segments_intersect_any(
     a1: Coord<f64>,
     a2: Coord<f64>,
@@ -326,8 +319,8 @@ pub(crate) fn segments_intersect_any(
     false
 }
 
-/// True if both segments are collinear and overlap over a positive-length
-/// interval (endpoint-only touching is NOT an overlap).
+/// True if both segments are collinear and overlap over a positive-length interval
+/// (endpoint-only touching is not an overlap).
 pub(crate) fn segments_collinear_overlap(
     a1: Coord<f64>,
     a2: Coord<f64>,
@@ -386,7 +379,7 @@ pub(crate) fn check_line_components_intersect(
         return false;
     }
 
-    // MULTILINESTRING((0 0,1 0,1 1,0 0),(0 0,1 1)) = non-simple.
+    // multilinestring((0 0,1 0,1 1,0 0),(0 0,1 1)) = non-simple.
     {
         let open_ends = |ls: &[Coord<f64>]| -> (bool, Coord<f64>, Coord<f64>) {
             let closed = ls.len() > 1 && ls[0] == ls[ls.len() - 1];
@@ -582,8 +575,8 @@ impl GeoValidation for Triangle<f64> {
 
 /// Check whether a geometry is OGC-valid.
 ///
-/// Convenience wrapper around [`GeoValidation::is_valid`] that does not
-/// require importing the trait.
+/// Convenience wrapper around [`GeoValidation::is_valid`] that does not require
+/// importing the trait.
 pub fn is_valid(geom: &geo::Geometry<f64>) -> bool {
     GeoValidation::is_valid(geom)
 }

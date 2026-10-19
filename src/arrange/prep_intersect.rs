@@ -4,18 +4,14 @@ use rstar::{AABB, RTree, RTreeObject};
 
 use crate::validation::sweep::{radix_sort_keys_tls, sortable_u64};
 
-/// Active-set limit for the edge-level spiky-ring sweep; beyond it the
-/// input is dense and belongs on the grid/R-tree path (same rationale as
-/// the line noder's limit).
+/// Active-set limit for the edge-level spiky-ring sweep; beyond it the input is dense
+/// and belongs on the grid/R-tree path (same rationale as the line noder's limit).
 const EDGE_SWEEP_ACTIVE_LIMIT: usize = 512;
 
-/// Robust orientation of one line pair against another, batched as a single
-/// 4-wide SIMD call: [o(li, lj.start), o(li, lj.end), o(lj, li.start),
-/// o(lj, li.end)]. Sign-identical to four separate `orient2d` calls: the
-/// hybrid fast+error-bound fallback uses Shewchuk's bound (same as the
-/// `robust` crate's own fast path), and near-zero lanes fall back to exact
-/// arithmetic. Measured ~2x faster than four separate robust calls in the
-/// small-ring sweep that dominates the 1.58M-polygon fast path.
+/// Robust orientation of one line pair against another, batched as a single 4-wide SIMD
+/// call: [o(li, lj.start), o(li, lj.end), o(lj, li.start), o(lj, li.end)]. Measured ~2x
+/// faster than four separate robust calls in the small-ring sweep that dominates the
+/// 1.58M-polygon fast path.
 #[inline(always)]
 fn orient4(li: &Line<f64>, lj: &Line<f64>) -> [f64; 4] {
     let pa = [li.start, li.start, lj.start, lj.start];
@@ -24,13 +20,14 @@ fn orient4(li: &Line<f64>, lj: &Line<f64>) -> [f64; 4] {
     crate::simd::orient2d_batch_4_robust(&pa, &pb, &pc)
 }
 
-/// Strict proper-crossing test for two line segments using the batched
-/// orientation helper.
+/// Strict proper-crossing test for two line segments using the batched orientation
+/// helper.
 #[inline(always)]
 fn segments_properly_cross(li: &Line<f64>, lj: &Line<f64>) -> bool {
     let [o1, o2, o3, o4] = orient4(li, lj);
-    // The (o1 > 0) != (o2 > 0) form treats
-    // Measured: 276/300 real-world repaired components rejected by the --fast gate while the full validator and GEOS accept them (2026-08-03).
+    // The (o1 > 0) != (o2 > 0) form treats Measured: 276/300 real-world repaired
+    // components rejected by the --fast gate while the full validator and GEOS accept
+    // them (2026-08-03).
     (o1 > 0.0 && o2 < 0.0 || o1 < 0.0 && o2 > 0.0) && (o3 > 0.0 && o4 < 0.0 || o3 < 0.0 && o4 > 0.0)
 }
 
@@ -54,9 +51,9 @@ pub(crate) struct MonoChain {
     pub(crate) max_x: f64,
     pub(crate) max_y: f64,
     pub(crate) ring_id: u32,
-    /// 1e-12 * ring bbox scale, computed once per ring in
-    /// build_mono_chains. Used by the same-ring full pair predicate
-    /// (the gate must match check_ring_validity's ring-local eps).
+    /// 1e-12 * ring bbox scale, computed once per ring in build_mono_chains. Used by
+    /// the same-ring full pair predicate (the gate must match check_ring_validity's
+    /// ring-local eps).
     ring_eps: f64,
 }
 
@@ -83,8 +80,9 @@ pub(crate) fn build_mono_chains(lines: &[Line<f64>]) -> (Vec<MonoChain>, (f64, f
         return (vec![], (f64::MAX, f64::MIN, f64::MAX, f64::MIN));
     }
 
-    // stamped on its chains (measured 2026-08-07: the old pre-scan cost ~15 us on a 5000-vertex ring).
-    // (measured 2026-08-09: one fewer pass on the valid-polygon path).
+    // stamped on its chains (measured 2026-08-07: the old pre-scan cost ~15 us on a
+    // 5000-vertex ring). (measured 2026-08-09: one fewer pass on the valid-polygon
+    // path).
 
     let l0 = &lines[0];
     let dx = l0.end.x - l0.start.x;
@@ -185,20 +183,14 @@ pub(crate) fn build_mono_chains(lines: &[Line<f64>]) -> (Vec<MonoChain>, (f64, f
     (chains, (gmin_x, gmax_x, gmin_y, gmax_y))
 }
 
-/// Fused monotone-chain builder: the gate's plausibility scan feeds it one
-/// line at a time, so the chain index is built during the walk the gate
-/// already makes instead of a second pass over the collected `lines`.
-/// Output is bit-identical to [`build_mono_chains`] for the same input
-/// (enforced by the `chain_fusion_equivalence` unit tests).
-///
-/// Rings are fed in order (`begin_ring` ... lines ... `finish`), which is
-/// how every caller already drives [`crate::arrange::ring_is_plausible`]:
-/// exterior first, then holes. Ring boundaries are therefore KNOWN here
-/// rather than re-detected from `line.start != prev.end`.
+/// Monotone-chain builder that the gate feeds one line at a time. Callers feed rings in
+/// order (begin_ring, lines, finish), as every caller of
+/// crate::arrange::ring_is_plausible does: exterior first, then holes. Ring boundaries
+/// are known here, so the builder does not re-detect them from line.start != prev.end.
 pub(crate) struct ChainSink {
     chains: Vec<MonoChain>,
-    /// Flat line index of the next push; mirrors the index into the
-    /// caller's `lines` vector (both are pushed in lockstep).
+    /// Flat line index of the next push; mirrors the index into the caller's `lines`
+    /// vector (both are pushed in lockstep).
     flat: usize,
     start: usize,
     quad: u8,
@@ -252,10 +244,7 @@ impl Default for ChainSink {
 }
 
 impl ChainSink {
-    /// Open the next ring. A previously open ring is NOT flushed here: its
-    /// close waits for this ring's first line (see `pending_boundary`), so
-    /// the fused output matches the reference's boundary handling exactly.
-    /// No-op before the first ring.
+    /// Open the next ring.
     pub(crate) fn begin_ring(&mut self) {
         if self.ring_open {
             self.pending_boundary = true;
@@ -362,17 +351,9 @@ impl ChainSink {
         }
     }
 
-    /// Stamp the open ring's scale-relative eps on every chain of it, and
-    /// fold that ring's bbox into the global envelope.
-    ///
-    /// The global envelope is the grid path's `global_bbox`. It is the
-    /// min/max over every vertex, and every vertex belongs to exactly one
-    /// ring bbox, so folding the (complete) ring bbox in here is exactly
-    /// equivalent to the per-line accumulation it replaces - with four
-    /// min/max per RING instead of four per VERTEX (2026-10-17). Called
-    /// once per ring, always with a complete ring bbox: from `push_line`'s
-    /// `pending_boundary` arm for the ring being closed, and from
-    /// `flush_ring` for the ring being finished.
+    /// Stamp the open ring's scale-relative eps on its chains, and fold its bbox into
+    /// the global envelope. It costs four min/max per ring, not per vertex
+    /// (2026-10-17).
     fn stamp_ring_eps(&mut self) {
         let scale = (self.ring_max_x - self.ring_min_x)
             .abs()
@@ -389,9 +370,8 @@ impl ChainSink {
         self.any = true;
     }
 
-    /// Close the open ring exactly as the reference builder closes it after
-    /// its loop: flush the last chain (no foreign line folded in) and stamp
-    /// the ring's eps. Tolerates a ring left open by an aborted scan.
+    /// Close the open ring exactly as the reference builder closes it after its loop:
+    /// flush the last chain (no foreign line folded in) and stamp the ring's eps.
     fn flush_ring(&mut self) {
         self.push_open_chain(self.flat);
         self.stamp_ring_eps();
@@ -401,8 +381,7 @@ impl ChainSink {
         self.pending_boundary = false;
     }
 
-    /// Consume the sink: (chains, global bbox) in
-    /// [`build_mono_chains`]'s tuple order.
+    /// Consume the sink: (chains, global bbox) in [`build_mono_chains`]'s tuple order.
     pub(crate) fn finish(mut self) -> (Vec<MonoChain>, (f64, f64, f64, f64)) {
         if self.ring_open {
             self.flush_ring();
@@ -416,33 +395,10 @@ impl ChainSink {
     }
 }
 
-/// Repeated-vertex class for a NON-ADJACENT pair of edges in the same ring.
-///
-/// GEOS's `PolygonIntersectionAnalyzer::findInvalidIntersection` treats any
-/// same-segString intersection that is not an adjacent-in-ring endpoint
-/// touch as `eRingSelfIntersection`, so it needs no duplicate-vertex
-/// machinery at all. Our `lean_pair_intersects` classifies an exact shared
-/// endpoint as `ambiguous` and *not* intersecting, so the leaf has to close
-/// that class itself - otherwise the caller must keep an independent
-/// duplicate-vertex table over the whole ring.
-///
-/// Only three of the four endpoint orientations are tested. The fourth,
-/// `a.start == b.end`, is exactly the ring's own closure for the pair
-/// (first edge, last edge) - and that pair is deliberately not treated as
-/// adjacent here, because the two edges can still overlap collinearly past
-/// the shared vertex. Dropping that one orientation is enough:
-/// a vertex repeated at positions p < q is caught by
-/// - `end == start` on the pair (p-1, q)                    (p >= 1),
-/// - `end == end`   on the pair (p-1, q-1) or, for p == 0,   (L-1, q-1),
-/// - `start == start` on the pair (p, q).
-///
-/// Every one of those pairs consists of edges incident to the repeated
-/// point, so every one is enumerated.
-///
-/// Only called when the pair already escalated (`ambiguous`), which every
-/// repeated-vertex pair does: the shared point makes one of the four
-/// orientations exactly zero, so it can never clear the strong-zone gate.
-/// That keeps the three compares off the clean path entirely.
+/// Repeated-vertex class for a non-adjacent edge pair. GEOS
+/// PolygonIntersectionAnalyzer::findInvalidIntersection treats a non-adjacent
+/// same-segString intersection as eRingSelfIntersection. lean_pair_intersects marks an
+/// exact shared endpoint ambiguous and not intersecting, so this leaf closes the class.
 #[inline]
 fn shares_repeated_vertex(a: &Line<f64>, b: &Line<f64>) -> bool {
     a.start == b.start || a.end == b.end || a.end == b.start
@@ -464,7 +420,7 @@ fn rec_overlaps(
         if i == j {
             return false;
         }
-        // Closing pair is NOT skipped: shared vertex 0 aside
+        // Closing pair is not skipped: shared vertex 0 aside
         if mc1.ring_id == mc2.ring_id && (j == i + 1 || j + 1 == i) {
             return false;
         }
@@ -487,7 +443,8 @@ fn rec_overlaps(
             ) {
                 return true;
             }
-            // This replaces the per-ring duplicate-vertex hash table the caller used to carry (2026-10-17) - same verdicts, no table.
+            // This replaces the per-ring duplicate-vertex hash table the caller used to
+            // carry (2026-10-17) - same verdicts, no table.
             if ambiguous && shares_repeated_vertex(li, lj) {
                 return true;
             }
@@ -529,20 +486,11 @@ fn compute_overlaps(lines: &[Line<f64>], mc1: &MonoChain, mc2: &MonoChain) -> bo
     rec_overlaps(lines, mc1, mc1.start, mc1.end, mc2, mc2.start, mc2.end)
 }
 
-/// Small-ring O(n²) pairwise proper-crossing sweep.
-///
-/// Replicates the exact predicate of the monotone-chain leaf
-/// `rec_overlaps` for `n <= SMALL_RING_LINES` lines:
-/// - strict proper crossing: `(o1 > 0.0) != (o2 > 0.0) && (o3 > 0.0) != (o4 > 0.0)`
-///   using the same `orient2d` (Shewchuk via crate::orient)
-/// - same-ring adjacency skip: edges i and j are adjacent if `j == i + 1`
-///   or `j + 1 == i`, and the closing pair (first, last) is skipped -
-///   both mirror rec_overlaps lines 148-156
-/// - different rings always compare (ring boundary = segment whose start
-///   != previous segment's end, same as build_mono_chains)
-///
-/// Allocates nothing: `ring_of[i]` is a stack array sized by the caller's
-/// `SMALL_RING_LINES` bound.
+/// Small-ring O(n^2) proper-crossing sweep. It copies rec_overlaps for n <=
+/// SMALL_RING_LINES lines: - proper crossing: (o1 > 0.0) != (o2 > 0.0) and (o3 > 0.0)
+/// != (o4 > 0.0), via orient2d (crate::orient) - same-ring adjacency: j == i + 1 or j +
+/// 1 == i. The closing pair (first, last) is skipped, as in rec_overlaps lines 148-156.
+/// - different rings always compare.
 pub fn has_no_intersections_small(lines: &[Line<f64>]) -> bool {
     let n = lines.len();
     debug_assert!(n <= crate::core::SMALL_RING_LINES);
@@ -583,7 +531,8 @@ pub fn has_no_intersections_small(lines: &[Line<f64>]) -> bool {
         let ri = ring_of[i] as usize;
         for j in (i + 1)..n {
             if ri == ring_of[j] as usize {
-                // The closing pair (first vs last edge) is NOT skipped: the two share vertex 0
+                // The closing pair (first vs last edge) is not skipped: the two share
+                // vertex 0
                 if j == i + 1 || j + 1 == i {
                     continue;
                 }
@@ -592,7 +541,9 @@ pub fn has_no_intersections_small(lines: &[Line<f64>]) -> bool {
             if segments_properly_cross(li, lj) {
                 return false;
             }
-            // (proper crossing + eps-collinear overlap + vertex-on-edge T-junction) with the ring's own eps - identical to check_ring_validity's sweep (2026-08-07).
+            // (proper crossing + eps-collinear overlap + vertex-on-edge T-junction)
+            // with the ring's own eps - identical to check_ring_validity's sweep
+            // (2026-08-07).
             if ri == ring_of[j] as usize {
                 let eps = eps_by_ring[ri];
                 let mut ambiguous = false;
@@ -631,8 +582,8 @@ pub fn has_no_intersections(lines: &[Line<f64>]) -> bool {
     has_no_intersections_tuned(lines, &crate::core::Tuning::default())
 }
 
-/// Tuned variant of [`has_no_intersections`]: the repair pipeline threads
-/// the caller's [`crate::core::Tuning`] through the small-ring dispatch.
+/// Tuned variant of [`has_no_intersections`]: the repair pipeline threads the caller's
+/// [`crate::core::Tuning`] through the small-ring dispatch.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(crate) fn has_no_intersections_tuned(
     lines: &[Line<f64>],
@@ -654,12 +605,11 @@ pub(crate) fn has_no_intersections_tuned(
     has_no_intersections_nan_ok_tuned(lines, tuning)
 }
 
-/// `has_no_intersections` for line arrays whose finiteness was already
-/// verified by the caller (the fast-path gate's `ring_is_plausible` scan
-/// checks every coordinate before collecting the lines). Saves one full
-/// pass over the lines on the valid-polygon path (measured 2026-08-09:
-/// the NaN scan is a redundant ~1-2 us on a 5000-vertex ring - and one
-/// less pass of memory traffic on the bandwidth-bound parallel rows).
+/// `has_no_intersections` for line arrays whose finiteness was already verified by the
+/// caller (the fast-path gate's `ring_is_plausible` scan checks every coordinate before
+/// collecting the lines). Saves one full pass over the lines on the valid-polygon path
+/// (measured 2026-08-09: the NaN scan is a redundant ~1-2 us on a 5000-vertex ring -
+/// and one less pass of memory traffic on the bandwidth-bound parallel rows).
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn has_no_intersections_nan_ok(lines: &[Line<f64>]) -> bool {
     has_no_intersections_nan_ok_tuned(lines, &crate::core::Tuning::default())
@@ -685,12 +635,11 @@ pub(crate) fn has_no_intersections_nan_ok_tuned(
     has_no_intersections_from_chains(lines, &chains, global_bbox, tuning)
 }
 
-/// The chain-index half of [`has_no_intersections_nan_ok_tuned`], split out
-/// so a caller that already owns a chain index - the gate builds it inside
-/// its plausibility scan via [`ChainSink`] instead of making a second pass
-/// over the collected lines - pays no extra traversal. The verdict must be
-/// identical whichever way `chains` was produced (enforced by the
-/// `chain_fusion_equivalence` unit tests).
+/// The chain-index half of [`has_no_intersections_nan_ok_tuned`], split out so a caller
+/// that already owns a chain index - the gate builds it inside its plausibility scan
+/// via [`ChainSink`] instead of making a second pass over the collected lines - pays no
+/// extra traversal. The verdict must be identical whichever way `chains` was produced
+/// (enforced by the `chain_fusion_equivalence` unit tests).
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(crate) fn has_no_intersections_from_chains(
     lines: &[Line<f64>],
@@ -713,7 +662,8 @@ pub(crate) fn has_no_intersections_from_chains(
         return true;
     }
 
-    // pairs directly (measured: star poly 500v = 63,603 grid cell-pair tests vs 5,272 sweep tests, 12x).
+    // pairs directly (measured: star poly 500v = 63,603 grid cell-pair tests vs 5,272
+    // sweep tests, 12x).
     if nc_is_spiky(chains, tuning)
         && let Some(result) = has_no_intersections_edge_sweep(lines)
     {
@@ -795,13 +745,10 @@ pub(crate) fn has_no_intersections_from_chains(
     true
 }
 
-/// Spiky-chain detector: the fraction of chains that hold exactly one edge.
-/// Star/radial rings flip quadrant at nearly every vertex, so nearly every
-/// chain is a single edge; smooth rings produce few long chains. `frac` is
-/// the Tuning threshold (default 0.8). Floor of 128 chains: below that the
-/// grid is small and cheap regardless of shape (measured: star poly 100v,
-/// 92 chains - the sweep's setup cost more than the 10x10 grid it replaced),
-/// so the sweep only engages where the grid's pair explosion is real.
+/// Spiky-chain detector: the fraction of chains that hold exactly one edge. `frac` is
+/// the Tuning threshold (default 0.8). Floor of 128 chains: below that the grid is
+/// small and cheap regardless of shape (measured: star poly 100v, 92 chains - the
+/// sweep's setup cost more than the 10x10 grid it replaced).
 fn nc_is_spiky(chains: &[MonoChain], tuning: &crate::core::Tuning) -> bool {
     if chains.len() < 128 || chains.len() > tuning.spiky_max_chains {
         return false;
@@ -810,17 +757,12 @@ fn nc_is_spiky(chains: &[MonoChain], tuning: &crate::core::Tuning) -> bool {
     (ones as f64) >= tuning.spiky_chain_frac * (chains.len() as f64)
 }
 
-/// Edge-level x-radix sweep for spiky rings: sort edges by padded lo_x, keep
-/// an active set of x-overlapping edges, y-gate each candidate pair, then run
-/// the SAME predicate chain as rec_overlaps' leaf. Returns None when the
-/// active set explodes (dense inputs belong on the R-tree path).
-///
-/// Pair semantics mirror rec_overlaps exactly:
-/// - proper crossing via orient4/segments_properly_cross,
-/// - same-ring pairs escalate to lean_pair_intersects with the ring's own
-///   eps (proper crossing + eps-collinear overlap + vertex-on-edge),
-/// - same-ring adjacent edges skipped, closing pair NOT skipped,
-/// - cross-ring pairs: proper crossings only.
+/// Edge-level x-radix sweep for spiky rings. It returns None when the active set
+/// explodes (dense input goes to the R-tree). Pair rules: - proper crossing via orient4
+/// or segments_properly_cross - same-ring pairs escalate to lean_pair_intersects with
+/// the ring's own eps (proper crossing, eps-collinear overlap, vertex-on-edge) - skip
+/// same-ring adjacent edges, but not the closing pair - cross-ring pairs test proper
+/// crossings only.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn has_no_intersections_edge_sweep(lines: &[Line<f64>]) -> Option<bool> {
     let n = lines.len();
@@ -936,9 +878,8 @@ fn has_no_intersections_edge_sweep(lines: &[Line<f64>]) -> Option<bool> {
     Some(true)
 }
 
-/// Fast grid path for `has_no_intersections`. Returns `None` if the grid is
-/// too dense, triggering the R-tree fallback. The global bbox comes from
-/// `build_mono_chains` (no re-scan of the chains).
+/// Fast grid path for `has_no_intersections`. Returns `None` if the grid is too dense,
+/// triggering the R-tree fallback.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn has_no_intersections_grid(
     chains: &[MonoChain],
@@ -974,8 +915,8 @@ fn has_no_intersections_grid(
         }
     }
 
-    // and a 5000-vertex circle's chain pairs were tested 4-9x
-    // A mask of j >= 64 would silently skip pairs - never dedup by global index without this guard.
+    // and a 5000-vertex circle's chain pairs were tested 4-9x A mask of j >= 64 would
+    // silently skip pairs - never dedup by global index without this guard.
     let mut tested: Vec<u64> = Vec::new();
     if nc <= 64 {
         tested = vec![0; nc.max(1)];
@@ -1006,12 +947,10 @@ mod chain_fusion_tests {
     use crate::arrange::{GateAccum, ring_is_plausible};
     use geo::{LineString, LinesIter, Polygon};
 
-    /// One fused walk (lines + chain index + envelope in a single pass),
-    /// next to the reference outputs computed from the SAME collected lines.
-    /// Coordinates in the fixtures avoid signed zero: IEEE min/max returns
-    /// the second operand on a tie, so -0.0 vs 0.0 can make two correct
-    /// accumulators differ in representation only. `nz` normalizes that so
-    /// the assertions compare semantics, not tie-break order.
+    /// One fused walk (lines + chain index + envelope in a single pass), next to the
+    /// reference outputs computed from the same collected lines. Coordinates in the
+    /// fixtures avoid signed zero: ieee min/max returns the second operand on a tie, so
+    /// -0.0 vs 0.0 can make two correct accumulators differ in representation only.
     struct Snapshot {
         ok: bool,
         lines: Vec<Line<f64>>,
@@ -1022,9 +961,8 @@ mod chain_fusion_tests {
         ref_bbox: (f64, f64, f64, f64),
     }
 
-    /// Drive `ring_is_plausible` exactly the way the fast-path gate does:
-    /// exterior first, then holes, with the line, chain and bbox
-    /// accumulators live.
+    /// Drive `ring_is_plausible` exactly the way the fast-path gate does: exterior
+    /// first, then holes, with the line, chain and bbox accumulators live.
     fn walk(poly: &Polygon<f64>) -> Snapshot {
         let mut lines = Vec::new();
         let mut sink = ChainSink::default();
@@ -1079,10 +1017,10 @@ mod chain_fusion_tests {
             .collect()
     }
 
-    /// The invariant the gate's mid-size branch rests on: whatever the
-    /// fused walk produced, `build_mono_chains` would have produced it too,
-    /// from the same lines, with the same envelope. On a completed walk the
-    /// line collection must also be the polygon's full line set.
+    /// The invariant the gate's mid-size branch rests on: whatever the fused walk
+    /// produced, `build_mono_chains` would have produced it too, from the same lines,
+    /// with the same envelope. On a completed walk the line collection must also be the
+    /// polygon's full line set.
     fn assert_equivalent(poly: &Polygon<f64>) -> Snapshot {
         let s = walk(poly);
         assert_eq!(
@@ -1155,7 +1093,8 @@ mod chain_fusion_tests {
 
     #[test]
     fn shell_plus_hole_travels_two_rings() {
-        // Two rings: ring_id and the per-ring eps stamp must line up with the reference's ring-boundary re-detection.
+        // Two rings: ring_id and the per-ring eps stamp must line up with the
+        // reference's ring-boundary re-detection.
         let poly = polygon_with_holes(
             circle(64, 0.0, 0.0, 100.0),
             vec![circle(48, 3.0, 7.0, 20.0)],
@@ -1285,7 +1224,8 @@ mod chain_fusion_tests {
                 )),
             ) {
                 let mk = |mut p: Vec<(f64, f64)>| {
-                    // Pin -0.0 to +0.0: the equivalence below compares bit patterns, and IEEE min/max breaks ties by operand order.
+                    // Pin -0.0 to +0.0: the equivalence below compares bit patterns,
+                    // and ieee min/max breaks ties by operand order.
                     for c in p.iter_mut() {
                         if c.0 == 0.0 {
                             c.0 = 0.0;

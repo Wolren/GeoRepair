@@ -1,6 +1,6 @@
-//! Per-pair classification for the lean line noder: mirrors the
-//! validator's own predicate chain (fast-FP first, robust escalation,
-//! collinear, vertex-on-edge, shared endpoint).
+//! Per-pair classification for the lean line noder: mirrors the validator's own
+//! predicate chain (fast-FP first, robust escalation, collinear, vertex-on-edge, shared
+//! endpoint).
 
 use geo::Coord;
 
@@ -9,12 +9,6 @@ use crate::orient::orient2d;
 use super::Hit;
 
 /// Classify a segment pair with the validator's own predicate semantics.
-/// Order: fast-FP proper crossing (with the eps vertex-on-segment screen
-/// on the give-up arm), robust proper crossing, collinear overlap
-/// (adaptive gate), eps vertex-on-segment screen, segment-local
-/// vertex-on-edge, shared endpoint. Shared endpoints are checked LAST so
-/// that a pair that shares an endpoint AND overlaps collinearly (or
-/// touches vertex-on-edge) still gets its noding nodes.
 #[inline]
 pub(super) fn classify(
     a1: Coord<f64>,
@@ -39,7 +33,8 @@ pub(super) fn classify(
     let e2 = orient_err(dx_a * (b2.y - a1.y), dy_a * (b2.x - a1.x));
     let e3 = orient_err(dx_b * (a1.y - b1.y), dy_b * (a1.x - b1.x));
     let e4 = orient_err(dx_b * (a2.y - b1.y), dy_b * (a2.x - b1.x));
-    // validator's eps sweep rejects (fuzz crash-9c50dad6: vertex 4.6e-311 off the far segment's line, same side as partner, vs eps 5.26e71;)
+    // validator's eps sweep rejects (fuzz crash-9c50dad6: vertex 4.6e-311 off the far
+    // segment's line, same side as partner, vs eps 5.26e71;)
     let contact = |p: Coord<f64>, s1: Coord<f64>, s2: Coord<f64>, f: f64, e: f64| {
         (p != s1 && p != s2)
             && f.abs() <= eps + e
@@ -83,7 +78,8 @@ pub(super) fn classify(
     let o2 = orient2d(a1, a2, b2);
     let o3 = orient2d(b1, b2, a1);
     let o4 = orient2d(b1, b2, a2);
-    // 32-ulp band are FP-ambiguous (near-coincident lines, e.g. a segment pair whose endpoints coincide to 1 ulp from the lissajous retrace)
+    // 32-ulp band are FP-ambiguous (near-coincident lines, e.g. a segment pair whose
+    // endpoints coincide to 1 ulp from the lissajous retrace)
     if (o1.abs() > e1 || o2.abs() > e2 || o3.abs() > e3 || o4.abs() > e4)
         && (o1 > 0.0 && o2 < 0.0 || o1 < 0.0 && o2 > 0.0)
         && (o3 > 0.0 && o4 < 0.0 || o3 < 0.0 && o4 > 0.0)

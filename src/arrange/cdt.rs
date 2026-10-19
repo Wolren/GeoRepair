@@ -16,8 +16,9 @@ pub(crate) fn build(
         let start = if let Some(&h) = pos_to_handle.get(&start_key) {
             h
         } else {
-            // spade rejects coordinates whose magnitude exceeds its internal grid (InsertionError::TooLarge).
-            // panic killed the process (measured 2026-08-04: mixed-magnitude corpus seeds aborted the cargo-fuzz smoke).
+            // spade rejects coordinates whose magnitude exceeds its internal grid
+            // (InsertionError::TooLarge). panic killed the process (measured
+            // 2026-08-04: mixed-magnitude corpus seeds aborted the cargo-fuzz smoke).
             let h = cdt
                 .insert(line.start)
                 .map_err(|_| MakeValidError::ConstraintFailure)?;

@@ -5,18 +5,16 @@ use alloc::vec::Vec;
 #[cfg(feature = "std")]
 use std::io::Read;
 
-/// Maximum container nesting depth (Multi* / GeometryCollection). Each
-/// nesting level consumes at least 9 bytes of input (byte order + type +
-/// count), so the cap never rejects real data while bounding recursion
-/// (stack overflow is an uncatchable abort).
+/// Maximum container nesting depth (Multi* / GeometryCollection). Each nesting level
+/// consumes at least 9 bytes of input (byte order + type + count), so the cap never
+/// rejects real data while bounding recursion (stack overflow is an uncatchable abort).
 const MAX_WKB_NESTING: usize = 256;
 
 
 /// Parse a single WKB geometry from `buf`. Returns the 2D geometry.
 ///
-/// If the input contains EWKB Z/M dimension flags or an SRID, the extra
-/// data is silently read and discarded — only 2D coordinates are returned.
-/// Use [`read_ewkb`] to preserve SRID and Z/M values through a roundtrip.
+/// If the input contains EWKB Z/M dimension flags or an SRID, the extra data is
+/// silently read and discarded. Only 2D coordinates are returned.
 pub fn read_wkb(buf: &[u8]) -> Result<Geometry<f64>, WkbError> {
     let mut pos = 0;
     let mut dummy_extra = Vec::new();
@@ -31,8 +29,6 @@ pub fn read_wkb(buf: &[u8]) -> Result<Geometry<f64>, WkbError> {
 }
 
 /// Read a WKB geometry from any `io::Read` source.
-///
-/// Reads all bytes from the reader, then delegates to [`read_wkb`].
 #[cfg(feature = "std")]
 pub fn read_wkb_from(mut reader: impl Read) -> Result<Geometry<f64>, WkbError> {
     let mut buf = Vec::new();
@@ -42,12 +38,11 @@ pub fn read_wkb_from(mut reader: impl Read) -> Result<Geometry<f64>, WkbError> {
 
 /// Parse a single EWKB geometry from `buf`, preserving SRID and Z/M data.
 ///
-/// Returns an [`EwkbGeometry`] that holds both the 2D geometry and any
-/// extended metadata (SRID, Z/M dimension flags, extra coordinate values).
-/// Use [`write_ewkb`] to serialize back with full preservation.
+/// Returns an [`EwkbGeometry`] that holds both the 2D geometry and any extended
+/// metadata (SRID, Z/M dimension flags, extra coordinate values).
 ///
-/// For plain 2D WKB without EWKB flags, `.srid` is `None`, `.dims` is
-/// [`EwkbDims::XY`], and `.extra_coords` is empty.
+/// For plain 2D WKB without EWKB flags, `.srid` is `None`, `.dims` is [`EwkbDims::XY`],
+/// and `.extra_coords` is empty.
 pub fn read_ewkb(buf: &[u8]) -> Result<EwkbGeometry, WkbError> {
     let mut pos = 0;
     let mut extra_coords = Vec::new();
@@ -64,10 +59,9 @@ pub fn read_ewkb(buf: &[u8]) -> Result<EwkbGeometry, WkbError> {
         extra_coords,
     })
 }
-/// Low-level: read one geometry from `buf` starting at `pos`, advancing
-/// `pos` past the geometry. Optionally accumulates Z/M extra coordinate
-/// values into `extra_coords`. Returns the geometry, SRID, dimension
-/// count, and the raw WKB type code (for error reporting).
+/// Low-level: read one geometry from `buf` starting at `pos`, advancing `pos` past the
+/// geometry. Returns the geometry, SRID, dimension count, and the raw WKB type code
+/// (for error reporting).
 pub(crate) fn read_geometry_inner(
     buf: &[u8],
     pos: &mut usize,
@@ -107,7 +101,8 @@ pub(crate) fn read_geometry_inner(
             read_polygon_inner(buf, pos, le, dims as u32, extra_coords).map(Geometry::Polygon)
         }
         WKB_MULTIPOINT => {
-            // Each sub-geometry needs at least a 5-byte header (byte order + type code); the recursion enforces the rest.
+            // Each sub-geometry needs at least a 5-byte header (byte order + type
+            // code); the recursion enforces the rest.
             let n = read_bounded_count(buf, pos, le, 5)?;
             let mut points = Vec::with_capacity(n);
             for _ in 0..n {
@@ -172,8 +167,8 @@ pub(crate) fn read_geometry_inner(
     Ok((geom?, srid, dims, type_code))
 }
 
-/// Read byte order byte. Returns `true` for little-endian (NDR),
-/// `false` for big-endian (XDR).
+/// Read byte order byte. Returns `true` for little-endian (ndr), `false` for big-endian
+/// (xdr).
 fn read_byte_order(buf: &[u8], pos: &mut usize) -> Result<bool, WkbError> {
     if *pos >= buf.len() {
         return Err(WkbError::UnexpectedEof);
@@ -187,15 +182,11 @@ fn read_byte_order(buf: &[u8], pos: &mut usize) -> Result<bool, WkbError> {
     }
 }
 
-/// Read a count field bounded by the remaining buffer: `n` elements each
-/// need at least `min_bytes` to be parseable, so `n > remaining/min_bytes`
-/// means the document is truncated relative to its own count fields -
-/// same class as a read hitting the buffer end, so it surfaces as
-/// [`WkbError::UnexpectedEof`]. This is what keeps a 4-byte count field
-/// from driving `Vec::with_capacity` into an OOM abort (measured
-/// 2026-08-04: crafted MultiPoint count -> 120 GB allocation). No new
-/// public error variant: WkbError is a published enum and adding one
-/// would be a semver-breaking change at patch level.
+/// Read a count field bounded by the remaining buffer. Each of `n` elements needs at
+/// least `min_bytes`. That case is the same class as a read at the buffer end and
+/// returns `WkbError::UnexpectedEof`. The bound stops a 4-byte count field from driving
+/// `Vec::with_capacity` into an oom abort. Measured 2026-08-04: a crafted MultiPoint
+/// count requested a 120 GB allocation.
 #[inline]
 fn read_bounded_count(
     buf: &[u8],
@@ -216,10 +207,12 @@ fn read_u32(buf: &[u8], pos: &mut usize, le: bool) -> Result<u32, WkbError> {
     if *pos + 4 > buf.len() {
         return Err(WkbError::UnexpectedEof);
     }
-    // SAFETY: bounds checked above. read_unaligned handles misalignment on x86_64/aarch64.
+    // safety: bounds checked above. read_unaligned handles misalignment on
+    // x86_64/aarch64.
     let v = unsafe { (buf.as_ptr().add(*pos) as *const u32).read_unaligned() };
     *pos += 4;
-    // On x86_64 (LE), this simplifies to: le == true -> v (direct, no conversion) le == false -> v.swap_bytes()
+    // On x86_64 (LE), this simplifies to: le == true -> v (direct, no conversion) le ==
+    // false -> v.swap_bytes()
     Ok(if cfg!(target_endian = "little") == le {
         v
     } else {
@@ -233,8 +226,8 @@ fn read_f64(buf: &[u8], pos: &mut usize, le: bool) -> Result<f64, WkbError> {
     if *pos + 8 > buf.len() {
         return Err(WkbError::UnexpectedEof);
     }
-    // SAFETY: bounds checked above. read_unaligned handles misalignment on x86_64/aarch64.
-    // On x86_64 (LE) with le=true: loads directly into an XMM register: zero copy, zero conversion.
+    // safety: bounds checked above. read_unaligned handles misalignment on
+    // x86_64/aarch64.
     let v = unsafe { (buf.as_ptr().add(*pos) as *const f64).read_unaligned() };
     *pos += 8;
     Ok(if cfg!(target_endian = "little") == le {
@@ -348,8 +341,8 @@ fn read_polygon_inner(
     dims: u32,
     extra_coords: &mut Vec<f64>,
 ) -> Result<Polygon<f64>, WkbError> {
-    // Each ring needs at least its 4-byte count field; an EMPTY ring
-    // (count 0) is legal and consumes nothing more.
+    // Each ring needs at least its 4-byte count field; an empty ring (count 0) is legal
+    // and consumes nothing more.
     let n_rings = read_bounded_count(buf, pos, le, 4)?;
     if n_rings == 0 {
         return Ok(Polygon::new(LineString::new(vec![]), vec![]));

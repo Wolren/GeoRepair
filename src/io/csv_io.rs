@@ -1,8 +1,8 @@
-//! CSV backend (`.csv`): one geometry per row, first column = WKT.
+//! csv backend (`.csv`): one geometry per row, first column = WKT.
 //!
-//! The writer emits a single column of WKT. The reader accepts any CSV with
-//! a WKT geometry in the first column and ignores additional attribute
-//! columns (the `Vec<Geometry>` return type cannot carry attributes).
+//! The reader accepts any csv with a WKT geometry in the first column and ignores
+//! additional attribute columns (the `Vec<Geometry>` return type cannot carry
+//! attributes).
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -12,7 +12,7 @@ use geo::Geometry;
 
 use super::wkt::{read_wkt, write_wkt};
 
-/// Load geometries from a CSV file (WKT in the first column).
+/// Load geometries from a csv file (WKT in the first column).
 pub fn load_csv(path: &str) -> Result<Vec<Geometry<f64>>, String> {
     let data = fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
     let mut rdr = csv::ReaderBuilder::new()
@@ -35,7 +35,7 @@ pub fn load_csv(path: &str) -> Result<Vec<Geometry<f64>>, String> {
     Ok(out)
 }
 
-/// Save geometries to a CSV file, one WKT geometry per row.
+/// Save geometries to a csv file, one WKT geometry per row.
 pub fn save_csv(path: &str, geoms: &[Geometry<f64>]) -> Result<(), String> {
     let mut wtr = csv::WriterBuilder::new()
         .has_headers(false)

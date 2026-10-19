@@ -7,9 +7,6 @@ use geo::{Coord, Line, LineString};
 
 use crate::core;
 
-/// ---------------------------------------------------------------------------
-/// Graph construction
-/// ---------------------------------------------------------------------------
 #[inline(always)]
 fn snap_key(c: Coord<f64>) -> (i64, i64) {
     let sx = c.x * core::SNAP_SCALE;
@@ -87,22 +84,19 @@ pub fn build_graph(lines: &[Line<f64>]) -> Graph {
     }
 }
 
-/// ---------------------------------------------------------------------------
-/// Face extraction - faithful port of GEOS PolygonizeGraph::getEdgeRings
-/// (computeNextCWEdges + findLabeledEdgeRings + convertMaximalToMinimalEdgeRings,
-/// then findEdgeRing). Labels are per-DIRECTED edge (2*n_edges entries): the two
-/// faces on either side of an undirected edge carry different labels, and the
-/// CCW conversion distinguishes de->getLabel() from sym->getLabel().
-/// Without this, faces merge across shared edges (measured: 7 faces instead
-/// of the correct 10 on a 9-vertex multi-crossing ring).
-/// ---------------------------------------------------------------------------
+/// --------------------------------------------------------------------------- Face
+/// extraction - faithful port of GEOS PolygonizeGraph::getEdgeRings (computeNextCWEdges
+/// + findLabeledEdgeRings + convertMaximalToMinimalEdgeRings, then findEdgeRing).
+///   Without this, faces merge across shared edges (measured: 7 faces instead of the
+///   correct 10 on a 9-vertex multi-crossing ring).
+///   ---------------------------------------------------------------------------
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn extract_all_faces_geos(graph: &Graph) -> Option<Vec<Vec<(usize, usize)>>> {
     let n_edges = graph.edges.len();
     let mut next: Vec<usize> = vec![0; n_edges * 2];
 
-    // Step 1: computeNextCWEdges (maximal rings)
-    // Edges around each node are stored in CCW order in sorted_adj (atan2 sort).
+    // Step 1: computeNextCWEdges (maximal rings) Edges around each node are stored in
+    // ccw order in sorted_adj (atan2 sort).
     for (v, neighbors) in graph.sorted_adj.iter().enumerate() {
         let deg = neighbors.len();
         if deg == 0 {
@@ -151,8 +145,8 @@ pub fn extract_all_faces_geos(graph: &Graph) -> Option<Vec<Vec<(usize, usize)>>>
         next_label += 1;
     }
 
-    // Step 3: convertMaximalToMinimalEdgeRings
-    // (nodes with degree > 1 within that label) via computeNextCCWEdges.
+    // Step 3: convertMaximalToMinimalEdgeRings (nodes with degree > 1 within that
+    // label) via computeNextCCWEdges.
     let mut ccw_next: Vec<usize> = next.clone();
     for v in 0..graph.verts.len() {
         let neighbors = &graph.sorted_adj[v];
@@ -207,7 +201,7 @@ pub fn extract_all_faces_geos(graph: &Graph) -> Option<Vec<Vec<(usize, usize)>>>
         }
     }
 
-    // Step 4: findEdgeRing: walk minimal CCW rings
+    // Step 4: findEdgeRing: walk minimal ccw rings
     let mut used = vec![false; n_edges * 2];
     let mut faces: Vec<Vec<(usize, usize)>> = Vec::new();
     for start in 0..n_edges * 2 {
@@ -410,8 +404,8 @@ fn find_next_edge(
     best.map(|(ei, _, to)| (ei, to))
 }
 
-/// ---------------------------------------------------------------------------
-/// Split face at repeated vertices (pinch points) into simple cycles
+/// --------------------------------------------------------------------------- Split
+/// face at repeated vertices (pinch points) into simple cycles
 /// ---------------------------------------------------------------------------
 pub(crate) fn split_face_at_pinch_points(
     face: &[(usize, usize)],
@@ -495,16 +489,12 @@ fn split_face_at_pinch_points_depth(
 
     vec![face.to_vec()]
 }
-/// ---------------------------------------------------------------------------
-/// Face labeling: even-odd winding parity (GEOS MakeValidPoly equivalent)
-/// ---------------------------------------------------------------------------
-/// GEOS's BuildArea + symdiff loop selects the faces whose winding number
-/// w.r.t. the input ring is ODD. The BFS-from-exterior toggle is WRONG for
-/// multi-crossing rings: with 2+ crossings, faces on the far side of a
-/// second crossing are reachable through an odd number of edges but have
-/// EVEN winding (measured: 5 of 9 faces kept, GEOS area 9931.89 vs BFS
-/// interior 11956). Winding parity is exact:
-///   face winding = winding number of any interior probe point vs the ring.
+/// Face labeling by even-odd winding parity, equivalent to geos MakeValidPoly. The geos
+/// BuildArea and symdiff loop selects faces whose winding number against the input ring
+/// is odd. A bfs toggle from the exterior is wrong for multi-crossing rings. Beyond a
+/// second crossing, a face can be reachable through an odd edge count but still have
+/// even winding. Measured: 5 of 9 faces kept, geos area 9931.89 against bfs interior
+/// 11956. Winding parity is exact: the winding number of any interior probe point.
 pub fn label_interior_faces(
     _edges: &[Line<f64>],
     verts: &[Coord<f64>],
@@ -523,9 +513,8 @@ pub fn label_interior_faces(
     Some(interior)
 }
 
-/// Interior probe point for a face: midpoint of the first edge, nudged
-/// perpendicular toward the face interior. For a face of positive area this
-/// point is strictly inside (a centroid can land outside concave faces).
+/// Interior probe point for a face: midpoint of the first edge, nudged perpendicular
+/// toward the face interior.
 fn face_probe_point(
     face: &[(usize, usize)],
     verts: &[Coord<f64>],
@@ -543,7 +532,7 @@ fn face_probe_point(
         x: (v0.x + v1.x) * 0.5,
         y: (v0.y + v1.y) * 0.5,
     };
-    // INTO the ring (winding 1 → mislabeled interior, measured).
+    // into the ring (winding 1 → mislabeled interior, measured).
     let scale = (mid.x.abs().max(mid.y.abs())).max(1.0);
     let eps = 1e-9 * scale;
     let dx = v1.x - v0.x;

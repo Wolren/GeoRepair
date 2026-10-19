@@ -1,16 +1,15 @@
 //! Format-agnostic geometry I/O: WKB, WKT, and binary format backends.
 //!
-//! Built-in backends (no extra dependencies):
-//! - **WKB** (`read_wkb`, `write_wkb`): OGC Well-Known Binary, handles byte
-//!   order, EWKB SRID flags, all standard 2D geometry types.
-//! - **WKT** (`read_wkt`, `read_wkt_from`, `write_wkt`, `write_wkt_to`): OGC
-//!   Well-Known Text, all standard 2D geometry types. Supports streaming
-//!   I/O via `io::Read` / `io::Write`.
-//! - **Binary** (`load_bin`, `load_bin_stream`, `write_bin`): Custom bulk
-//!   format for polygons, optimized for batch processing.
+//! - **WKB** (`read_wkb`, `write_wkb`): OGC Well-Known Binary, handles byte order, EWKB
+//!   SRID flags, all standard 2D geometry types.
+//! - **WKT** (`read_wkt`, `read_wkt_from`, `write_wkt`, `write_wkt_to`): OGC Well-Known
+//!   Text, all standard 2D geometry types. Supports streaming I/O via `io::Read` /
+//!   `io::Write`.
+//! - **Binary** (`load_bin`, `load_bin_stream`, `write_bin`): Custom bulk format for
+//!   polygons, optimized for batch processing.
 //!
-//! Optional backends (behind feature flags): Shapefile (`io-shp`), CSV
-//! (`io-csv`), GML (`io-gml`), GeoPackage (`io-gpkg`).
+//! Optional backends (behind feature flags): Shapefile (`io-shp`), csv (`io-csv`), gml
+//! (`io-gml`), GeoPackage (`io-gpkg`).
 //!
 //! # Dispatch API
 //!
@@ -40,8 +39,8 @@
 //!
 //! # Feature gates
 //!
-//! All I/O requires the `std` feature (enabled by default). In no_std mode,
-//! only in-memory WKB parsing is available via `read_wkb` (no file paths).
+//! All I/O requires the `std` feature (enabled by default). In no_std mode, only
+//! in-memory WKB parsing is available via `read_wkb` (no file paths).
 
 #[cfg(feature = "std")]
 use crate::MakeValid;
@@ -66,17 +65,17 @@ use std::io::Read;
 /// Custom binary format for bulk polygon storage (`.bin`).
 #[cfg(feature = "std")]
 pub mod binary;
-/// CSV with WKT in the first column (`io-csv`).
+/// csv with WKT in the first column (`io-csv`).
 #[cfg(feature = "io-csv")]
 pub mod csv_io;
-/// OGC GML 3.2 geometry subset (`.gml`) (`io-gml`).
+/// OGC gml 3.2 geometry subset (`.gml`) (`io-gml`).
 #[cfg(feature = "io-gml")]
 pub mod gml;
-/// GeoPackage (`.gpkg`) via SQLite (`io-gpkg`; default feature, gated out
-/// on wasm32 - bundled SQLite compiles C).
+/// GeoPackage (`.gpkg`) via SQLite (`io-gpkg`; default feature, gated out on wasm32 -
+/// bundled SQLite compiles C).
 #[cfg(all(feature = "io-gpkg", not(target_arch = "wasm32")))]
 pub mod gpkg;
-/// ESRI Shapefile (`.shp`) (`io-shp`).
+/// esri Shapefile (`.shp`) (`io-shp`).
 #[cfg(feature = "io-shp")]
 pub mod shp;
 /// OGC Well-Known Binary (WKB) parsing and serialization.
@@ -255,7 +254,6 @@ fn extract_polygons(geom: &Geometry<f64>) -> Vec<Polygon<f64>> {
 
 /// Load geometries from `input`, repair each one, and save the result to `output`.
 ///
-/// File formats are auto-detected by extension (see [`load`]).
 ///
 /// # Example
 ///
@@ -279,10 +277,9 @@ pub fn repair_file(input: &str, output: &str, config: &MakeValidConfig) -> Resul
     save(output, &result)
 }
 
-/// Load geometries from `path` and validate each one, returning per-geometry
-/// results (mirrors GEOS `isValid` / `isValidReason`).
+/// Load geometries from `path` and validate each one, returning per-geometry results
+/// (mirrors GEOS `isValid` / `isValidReason`).
 ///
-/// File format is auto-detected by extension (see [`load`]).
 ///
 /// # Example
 ///
@@ -309,7 +306,6 @@ fn load_wkt(path: &str) -> Result<Vec<Geometry<f64>>, String> {
 
 
 /// Compute the signed area of a polygon ring using the shoelace formula.
-/// Positive values indicate CCW winding, negative values CW winding.
 pub fn signed_area(ring: &[Coord<f64>]) -> f64 {
     let mut s = 0.0;
     for w in ring.windows(2) {
@@ -323,8 +319,8 @@ pub fn polygon_area(p: &Polygon<f64>) -> f64 {
     signed_area(&p.exterior().0).abs()
 }
 
-/// Compute the total area of a polygon or multipolygon geometry.
-/// Returns 0.0 for non-polygon types.
+/// Compute the total area of a polygon or multipolygon geometry. Returns 0.0 for
+/// non-polygon types.
 pub fn geo_area(g: &Geometry<f64>) -> f64 {
     match g {
         Geometry::Polygon(p) => polygon_area(p),
@@ -333,8 +329,8 @@ pub fn geo_area(g: &Geometry<f64>) -> f64 {
     }
 }
 
-/// Count the number of sub-polygons in a geometry.
-/// Returns 1 for `Polygon`, `n` for `MultiPolygon`, 0 for other types.
+/// Count the number of sub-polygons in a geometry. Returns 1 for `Polygon`, `n` for
+/// `MultiPolygon`, 0 for other types.
 pub fn count_sub_polys(g: &Geometry<f64>) -> usize {
     match g {
         Geometry::Polygon(_) => 1,

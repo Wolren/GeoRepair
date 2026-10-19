@@ -1,9 +1,7 @@
 //! Rayon-based parallel batch geometry repair.
 //!
-//! Provides parallel implementations of MakeValid for Multi-geometries,
-//! processing each component on a separate rayon thread.
 //!
-//! Feature: `parallel` (enabled by default, non-WASM only).
+//! Feature: `parallel` (enabled by default, non-wasm only).
 
 use alloc::vec::Vec;
 use geo::{
@@ -16,7 +14,7 @@ use crate::core::MakeValidConfig;
 use crate::make_valid::MakeValid;
 use crate::noding::NodingFloat;
 
-/// Repair a MultiPoint in parallel — each point is processed on a separate rayon thread.
+/// Repair a MultiPoint in parallel.
 pub fn par_fix_multi_point<T: GeoFloat + Send + Sync>(
     mp: &MultiPoint<T>,
     _config: &MakeValidConfig,
@@ -49,7 +47,7 @@ pub fn par_fix_multi_point<T: GeoFloat + Send + Sync>(
     }
 }
 
-/// Repair a MultiLineString in parallel — each linestring is processed on a separate rayon thread.
+/// Repair a MultiLineString in parallel.
 pub fn par_fix_multi_line_string<T: NodingFloat + Send + Sync>(
     mls: &MultiLineString<T>,
     config: &MakeValidConfig,
@@ -97,8 +95,7 @@ pub fn par_fix_multi_line_string<T: NodingFloat + Send + Sync>(
     }
 }
 
-/// Repair a MultiPolygon in parallel — each polygon is processed on a separate rayon thread.
-/// Requires the `arrange` or `structure` feature.
+/// Repair a MultiPolygon in parallel. Requires the `arrange` or `structure` feature.
 #[cfg(any(feature = "arrange", feature = "structure"))]
 pub fn par_fix_multi_polygon(mp: &MultiPolygon<f64>, config: &MakeValidConfig) -> Geometry<f64> {
     if mp.0.is_empty() {
@@ -127,7 +124,8 @@ pub fn par_fix_multi_polygon(mp: &MultiPolygon<f64>, config: &MakeValidConfig) -
     if crate::make_valid::is_valid_with_geo(&Geometry::MultiPolygon(mp.clone())) {
         return crate::make_valid::enforce_ogc_winding(Geometry::MultiPolygon(mp)).0;
     }
-    // Normalize winding first: geo's unary_union silently drops area on CW input shells (verified 0.84 vs 1.80 for square+rect overlap).
+    // Normalize winding first: geo's unary_union silently drops area on CW input shells
+    // (verified 0.84 vs 1.80 for square+rect overlap).
     let ccw: Vec<Polygon<f64>> =
         mp.0.iter()
             .map(|p| {
@@ -143,9 +141,8 @@ pub fn par_fix_multi_polygon(mp: &MultiPolygon<f64>, config: &MakeValidConfig) -
     )))
 }
 
-/// Process a batch of independent polygons in parallel.
-/// Each polygon is fixed independently with no shared state — near-linear scaling.
-/// Returns the results in the same order as input.
+/// Process a batch of independent polygons in parallel. Returns the results in the same
+/// order as input.
 #[cfg(any(feature = "arrange", feature = "structure"))]
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn par_fix_polygon_batch(
@@ -158,12 +155,10 @@ pub fn par_fix_polygon_batch(
         .collect()
 }
 
-/// Owned parallel batch repair: consumes the polygons and MOVES each one
-/// through the repair fast path instead of cloning it. For the ~99.85% of
-/// real-world polygons that are already valid this is a zero-copy
-/// passthrough (the borrowed variant pays a full ring clone per polygon).
-///
-/// Output order matches the input order (rayon indexed collect).
+/// Owned parallel batch repair: consumes the polygons and moves each one through the
+/// repair fast path instead of cloning it. For the ~99.85% of real-world polygons that
+/// are already valid this is a zero-copy passthrough (the borrowed variant pays a full
+/// ring clone per polygon).
 #[cfg(any(feature = "arrange", feature = "structure"))]
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn par_fix_polygon_batch_owned(
@@ -176,9 +171,7 @@ pub fn par_fix_polygon_batch_owned(
         .collect()
 }
 
-/// Process polygons from an iterator in chunks — peak memory is bounded by
-/// `chunk_size` polygons. Useful for streaming large datasets without loading
-/// everything into memory at once. Results preserve input order.
+/// Process polygons from an iterator in chunks.
 #[cfg(any(feature = "arrange", feature = "structure"))]
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn par_fix_polygon_batch_chunked<I>(
@@ -208,7 +201,6 @@ where
 }
 
 /// Repair a GeometryCollection in parallel (without arrange/structure features).
-/// Each sub-geometry is processed on a separate rayon thread.
 #[cfg(not(any(feature = "arrange", feature = "structure")))]
 pub fn par_fix_collection<T: GeoFloat + Send + Sync>(
     gc: &GeometryCollection<T>,
@@ -229,7 +221,8 @@ pub fn par_fix_collection<T: GeoFloat + Send + Sync>(
     }
 }
 
-/// Repair a GeometryCollection in parallel - each sub-geometry is processed on a separate rayon thread.
+/// Repair a GeometryCollection in parallel - each sub-geometry is processed on a
+/// separate rayon thread.
 #[cfg(any(feature = "arrange", feature = "structure"))]
 pub fn par_fix_collection(gc: &GeometryCollection<f64>, config: &MakeValidConfig) -> Geometry<f64> {
     let repaired =

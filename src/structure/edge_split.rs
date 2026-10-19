@@ -1,5 +1,5 @@
-//! Edge splitting at intersection points: R-tree / sweep-line / brute-force
-//! strategies chosen by topology, with parametric intersection math.
+//! Edge splitting at intersection points: R-tree / sweep-line / brute-force strategies
+//! chosen by topology, with parametric intersection math.
 
 use alloc::vec::Vec;
 use geo::{Coord, Line};
@@ -14,12 +14,12 @@ use crate::orient::{orient2d, orient2d_fast};
 /// Per-edge split points: parametric position + intersection coordinate.
 type SplitPoint = SmallVec<[(f64, Coord<f64>); 2]>;
 
-/// ---------------------------------------------------------------------------
-/// Edge splitting at intersection points
-/// ---------------------------------------------------------------------------
-/// Choose split strategy based on topology.
-/// - If many edges share a single endpoint (radial-like, e.g. spoke wheel),
-///   sweep-line avoids R-tree degeneracy where all bboxes overlap.
+/// --------------------------------------------------------------------------- Edge
+/// splitting at intersection points
+/// --------------------------------------------------------------------------- Choose
+/// split strategy based on topology.
+/// - If many edges share a single endpoint (radial-like, e.g. spoke wheel), sweep-line
+///   avoids R-tree degeneracy where all bboxes overlap.
 /// - Otherwise R-tree spatial clustering is more efficient.
 fn should_use_sweepline(edges: &[Line<f64>], n: usize) -> bool {
     if n < 128 {
@@ -40,8 +40,8 @@ pub fn split_edges(edges: &[Line<f64>]) -> Vec<Line<f64>> {
     split_edges_tuned(edges, &core::Tuning::default())
 }
 
-/// Tuned variant of [`split_edges`]: the repair pipeline threads the
-/// caller's [`core::Tuning`] through the dispatch thresholds.
+/// Tuned variant of [`split_edges`]: the repair pipeline threads the caller's
+/// [`core::Tuning`] through the dispatch thresholds.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(crate) fn split_edges_tuned(edges: &[Line<f64>], tuning: &core::Tuning) -> Vec<Line<f64>> {
     let n = edges.len();
@@ -68,7 +68,8 @@ pub(crate) fn split_edges_tuned(edges: &[Line<f64>], tuning: &core::Tuning) -> V
     }
 
     let eps_param = core::EPS_PARAM;
-    // Parallelized for large inputs (the serial rebuild was ~30ms of the 71ms noding on a 260k-edge shell)
+    // Parallelized for large inputs (the serial rebuild was ~30ms of the 71ms noding on
+    // a 260k-edge shell)
     if n > tuning.split_rebuild_parallel_min {
         #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
         {
@@ -171,7 +172,8 @@ fn split_edges_rtree(edges: &[Line<f64>], split_points: &mut [SplitPoint], eps: 
         .collect();
     let tree = RTree::bulk_load(envs);
 
-    // Measured: noding a 260k-edge giant shell is ~100ms serial; the query phase dominates and parallelizes near-linearly.
+    // Measured: noding a 260k-edge giant shell is ~100ms serial; the query phase
+    // dominates and parallelizes near-linearly.
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     {
         use rayon::prelude::*;

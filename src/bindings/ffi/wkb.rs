@@ -13,9 +13,8 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 ///
 /// # Safety
 ///
-/// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes.
-/// The returned [`GeoRepairResult`] must be freed with
-/// [`super::geo_repair_free_result`].
+/// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes. The returned
+/// [`GeoRepairResult`] must be freed with [`super::geo_repair_free_result`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_make_valid(
     wkb_data: *const u8,
@@ -41,13 +40,11 @@ pub unsafe extern "C" fn geo_repair_make_valid(
 
 /// Repair a geometry from WKB with configuration.
 ///
-/// `poly_method`: 0 = Auto, 1 = Arrange, 2 = Structure.
 ///
 /// # Safety
 ///
-/// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes.
-/// The returned [`GeoRepairResult`] must be freed with
-/// [`super::geo_repair_free_result`].
+/// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes. The returned
+/// [`GeoRepairResult`] must be freed with [`super::geo_repair_free_result`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_make_valid_with_config(
     wkb_data: *const u8,
@@ -76,14 +73,11 @@ pub unsafe extern "C" fn geo_repair_make_valid_with_config(
 
 /// Repair a geometry from WKB with full configuration.
 ///
-/// `poly_method`: 0 = Auto, 1 = Arrange, 2 = Structure.
-/// `fill_rule`: 0 = EvenOdd, 1 = NonZero. `epsg_code` <= 0 means unknown CRS.
 ///
 /// # Safety
 ///
-/// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes.
-/// The returned [`GeoRepairResult`] must be freed with
-/// [`super::geo_repair_free_result`].
+/// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes. The returned
+/// [`GeoRepairResult`] must be freed with [`super::geo_repair_free_result`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_make_valid_with_config_full(
     wkb_data: *const u8,
@@ -134,15 +128,11 @@ pub unsafe extern "C" fn geo_repair_is_valid(wkb_data: *const u8, wkb_len: usize
 
 /// Validate a WKB-encoded geometry.
 ///
-/// `success == true` (with `wkb_len == 0`) when the geometry is valid;
-/// `success == false`, `error_code == InvalidGeometry` and `error_msg`
-/// set to the joined violation reasons when invalid.
 ///
 /// # Safety
 ///
-/// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes.
-/// The returned [`GeoRepairResult`] must be freed with
-/// [`super::geo_repair_free_result`].
+/// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes. The returned
+/// [`GeoRepairResult`] must be freed with [`super::geo_repair_free_result`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_validate(
     wkb_data: *const u8,
@@ -169,14 +159,11 @@ pub unsafe extern "C" fn geo_repair_validate(
 
 /// Validate a WKB-encoded geometry and return the violation reasons.
 ///
-/// Identical behavior to [`geo_repair_validate`]; kept as a convenience
-/// alias whose name states that `error_msg` carries the reasons.
 ///
 /// # Safety
 ///
-/// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes.
-/// The returned [`GeoRepairResult`] must be freed with
-/// [`super::geo_repair_free_result`].
+/// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes. The returned
+/// [`GeoRepairResult`] must be freed with [`super::geo_repair_free_result`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_validate_reason(
     wkb_data: *const u8,
@@ -186,19 +173,10 @@ pub unsafe extern "C" fn geo_repair_validate_reason(
 }
 
 
-/// Validate a WKB geometry, then repair it if invalid.
-///
-/// On success (`result.success == true`):
-/// - `wkb_data` / `wkb_len` contain the (possibly repaired) WKB geometry.
-/// - `error_msg` is `NULL` and `error_code == None` when the input was
-///   already valid; when the input was invalid, `error_code ==
-///   InvalidGeometry` and `error_msg` contains the validation reasons.
-///
-/// # Safety
-///
-/// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes.
-/// The returned [`GeoRepairResult`] must be freed with
-/// [`super::geo_repair_free_result`].
+/// Validate a WKB geometry, then repair it if invalid. When it was invalid, error_code
+/// == InvalidGeometry and error_msg holds the reasons. # Safety wkb_data must point to
+/// a valid WKB buffer of wkb_len bytes. Free the returned GeoRepairResult with
+/// super::geo_repair_free_result.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_validate_and_fix(
     wkb_data: *const u8,
@@ -237,21 +215,10 @@ pub unsafe extern "C" fn geo_repair_validate_and_fix(
     }
 }
 
-/// Validate a WKB geometry, then repair it with configuration.
-///
-/// `poly_method`: 0 = Auto, 1 = Arrange, 2 = Structure.
-///
-/// On success (`result.success == true`):
-/// - `wkb_data` / `wkb_len` contain the (possibly repaired) WKB geometry.
-/// - `error_msg` is `NULL` and `error_code == None` when the input was
-///   already valid; when the input was invalid, `error_code ==
-///   InvalidGeometry` and `error_msg` contains the validation reasons.
-///
-/// # Safety
-///
-/// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes.
-/// The returned [`GeoRepairResult`] must be freed with
-/// [`super::geo_repair_free_result`].
+/// Validate a WKB geometry, then repair it with configuration. poly_method: 0 Auto, 1
+/// Arrange, 2 Structure. When it was invalid, error_code == InvalidGeometry and
+/// error_msg holds the reasons. # Safety wkb_data must point to a valid WKB buffer of
+/// wkb_len bytes. Free the returned GeoRepairResult with super::geo_repair_free_result.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_validate_and_fix_with_config(
     wkb_data: *const u8,

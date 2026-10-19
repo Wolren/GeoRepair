@@ -1,4 +1,3 @@
-//! Test battery.
 
 use super::*;
 use alloc::vec::Vec;
@@ -132,7 +131,6 @@ fn test_check_self_intersections_single() {
     assert!(!check_self_intersections(&edges));
 }
 
-// edges_intersect / orient2d_generic
 
 #[test]
 fn test_orient2d_generic_ccw() {
@@ -215,8 +213,8 @@ fn test_split_edges_crossing() {
         Line::new(Coord { x: 2.0, y: 2.0 }, Coord { x: 2.0, y: 0.0 }),
         Line::new(Coord { x: 2.0, y: 0.0 }, Coord { x: 0.0, y: 2.0 }),
     ];
-    // Edge 0 (0->2) and edge 2 (2->0) cross at (1,1)
-    // Edge 0 should split into two: (0,0)-(1,1) and (1,1)-(2,2)
+    // Edge 0 (0->2) and edge 2 (2->0) cross at (1,1) Edge 0 should split into two:
+    // (0,0)-(1,1) and (1,1)-(2,2)
     let result = split_edges_at_intersections(&edges);
     assert!(result.len() >= 3);
 }
@@ -246,7 +244,6 @@ fn test_interpolate_end() {
     assert!((pt.y - 10.0f64).abs() < 1e-12f64);
 }
 
-// dist2
 
 #[test]
 fn test_dist2_identical() {

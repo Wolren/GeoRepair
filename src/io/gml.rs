@@ -1,10 +1,6 @@
-//! GML (`.gml`) backend: OGC GML 3.2 geometry subset via `quick-xml`.
+//! gml (`.gml`) backend: OGC gml 3.2 geometry subset via `quick-xml`.
 //!
-//! Reads namespace-agnostic `Point`, `LineString`, `Polygon`, `MultiPoint`,
-//! `MultiLineString`, `MultiPolygon`, and `MultiSurface` elements with
-//! `pos`/`posList` coordinates (2D; extra ordinates are ignored). Writes a
-//! minimal GML 3.2 feature collection of the same element set. The
-//! `srsDimension`/`srsName` attributes are accepted and ignored on read.
+//! Writes a minimal gml 3.2 feature collection of the same element set.
 
 use alloc::string::String;
 use alloc::string::ToString;
@@ -17,7 +13,7 @@ use geo::{Coord, Geometry, LineString, MultiLineString, MultiPoint, Point, Polyg
 use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
 
-/// Load every GML geometry from a file (any element in a `gml` namespace).
+/// Load every gml geometry from a file (any element in a `gml` namespace).
 pub fn load_gml(path: &str) -> Result<Vec<Geometry<f64>>, String> {
     let data = fs::read(path).map_err(|e| format!("{path}: {e}"))?;
     let mut reader = Reader::from_reader(data.as_slice());
@@ -34,7 +30,7 @@ pub fn load_gml(path: &str) -> Result<Vec<Geometry<f64>>, String> {
     Ok(out)
 }
 
-/// Save geometries as a GML 3.2 feature collection.
+/// Save geometries as a gml 3.2 feature collection.
 pub fn save_gml(path: &str, geoms: &[Geometry<f64>]) -> Result<(), String> {
     let mut out = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
@@ -75,8 +71,7 @@ fn is_geometry(local: &[u8]) -> bool {
     )
 }
 
-/// Parse one geometry element; `local` is the element's local name. Consumes
-/// events through the geometry's matching end tag.
+/// Parse one geometry element; `local` is the element's local name.
 fn parse_geometry(reader: &mut Reader<&[u8]>, local: &[u8]) -> Result<Geometry<f64>, String> {
     match local {
         b"Point" => {
@@ -138,8 +133,8 @@ fn parse_geometry(reader: &mut Reader<&[u8]>, local: &[u8]) -> Result<Geometry<f
     }
 }
 
-/// Read a `<pos>` element: exactly one coordinate tuple (honors
-/// `srsDimension` on the element; extra ordinates are dropped).
+/// Read a `<pos>` element: exactly one coordinate tuple (honors `srsDimension` on the
+/// element; extra ordinates are dropped).
 fn read_pos(reader: &mut Reader<&[u8]>, container: &[u8]) -> Result<Vec<f64>, String> {
     let mut nums = Vec::new();
     loop {
@@ -160,8 +155,8 @@ fn read_pos(reader: &mut Reader<&[u8]>, container: &[u8]) -> Result<Vec<f64>, St
     Ok(nums)
 }
 
-/// Read a `<posList>` element: a flat list of coordinate tuples (honors
-/// `srsDimension` on the element; extra ordinates are dropped).
+/// Read a `<posList>` element: a flat list of coordinate tuples (honors `srsDimension`
+/// on the element; extra ordinates are dropped).
 fn read_pos_list(reader: &mut Reader<&[u8]>, container: &[u8]) -> Result<Vec<Coord<f64>>, String> {
     let mut nums = Vec::new();
     let mut dim = 2usize;
@@ -260,8 +255,8 @@ fn dimension_of(e: &BytesStart) -> usize {
         .unwrap_or(2)
 }
 
-/// Read a multi-geometry: every member element (e.g. `polygonMember`)
-/// wrapping a geometry element (`Polygon`, `Surface`, ...).
+/// Read a multi-geometry: every member element (e.g. `polygonMember`) wrapping a
+/// geometry element (`Polygon`, `Surface`, .).
 fn read_members(
     reader: &mut Reader<&[u8]>,
     container: &[u8],
@@ -297,8 +292,8 @@ fn read_members(
     Ok(out)
 }
 
-/// Skip an element and everything nested inside it (depth-based; correct
-/// even when element names repeat at different nesting levels).
+/// Skip an element and everything nested inside it (depth-based; correct even when
+/// element names repeat at different nesting levels).
 fn skip_element(reader: &mut Reader<&[u8]>) -> Result<(), String> {
     let mut depth = 1usize;
     while depth > 0 {
@@ -312,8 +307,8 @@ fn skip_element(reader: &mut Reader<&[u8]>) -> Result<(), String> {
     Ok(())
 }
 
-/// Turn a flat number list into coordinates, validating the count against
-/// the declared dimension (3D ordinates are dropped).
+/// Turn a flat number list into coordinates, validating the count against the declared
+/// dimension (3D ordinates are dropped).
 fn coords_from_flat(nums: &[f64], ctx: &[u8], dim: usize) -> Result<Vec<Coord<f64>>, String> {
     if nums.is_empty() {
         return Ok(Vec::new());
@@ -422,15 +417,15 @@ fn write_polygon(
 }
 
 fn fmt(v: f64) -> String {
-    // ryu: shortest round-trip formatting (same as the WKT writer); std's Display float path is 5-10x slower per number.
+    // ryu: shortest round-trip formatting (same as the WKT writer); std's Display float
+    // path is 5-10x slower per number.
     let mut buf = ryu::Buffer::new();
     buf.format(v).to_string()
 }
 
-/// GML coordinate tokens: decimal numbers via fast_float (correctly
-/// rounded, strtod-equivalent - same as the WKT reader), with the
-/// NaN/inf keyword forms still routed through std's parser for full
-/// strtod parity (fast_float has no keyword form).
+/// gml coordinate tokens: decimal numbers via fast_float (correctly rounded,
+/// strtod-equivalent - same as the WKT reader), with the NaN/inf keyword forms still
+/// routed through std's parser for full strtod parity (fast_float has no keyword form).
 fn parse_gml_number(tok: &str) -> Result<f64, ()> {
     let b = tok.as_bytes();
     let body = if let Some(rest) = b.strip_prefix(b"+").or_else(|| b.strip_prefix(b"-")) {

@@ -1,9 +1,8 @@
 //! ring validity: closure, self-intersection, orientation, points, duplicates
 //!
-//! Extracted from validation/core.rs on 2026-08-07 (file-size governance:
-//! core.rs was 2540 lines; the cap is 800). Content is verbatim - no
-//! behavior changes; sibling modules resolve shared items through the
-//! `crate::validation::core` facade.
+//! Extracted from validation/core.rs on 2026-08-07 (file-size governance: core.rs was
+//! 2540 lines; the cap is 800). Content is verbatim - no behavior changes; sibling
+//! modules resolve shared items through the `crate::validation::core` facade.
 //!
 //! See validation/mod.rs for the module map.
 
@@ -19,8 +18,9 @@ pub fn check_ring_validity(ring: &[Coord<f64>], is_exterior: bool) -> Vec<Geomet
     let mut errors = Vec::new();
 
     let interior_n = ring.len().saturating_sub(1);
-    // - four former full passes (measured 2026-08-08: the separate NaN + bbox + repeated + extremal scans cost ~15-25 us)
-    // Error priority is preserved: NaN wins regardless of position (matches the old separate first pass).
+    // - four former full passes (measured 2026-08-08: the separate NaN + bbox +
+    //   repeated + extremal scans cost ~15-25 us) Error priority is preserved: NaN wins
+    //   regardless of position (matches the old separate first pass).
     let mut min_x = f64::MAX;
     let mut max_x = f64::MIN;
     let mut min_y = f64::MAX;
@@ -89,13 +89,15 @@ pub fn check_ring_validity(ring: &[Coord<f64>], is_exterior: bool) -> Vec<Geomet
         errors.push(GeometryValidationError::RepeatedPoint);
     }
 
-    // -0.0-normalized keys (a pinch at the origin must be detected regardless of zero sign - differential fuzz 2026-08-07).
+    // -0.0-normalized keys (a pinch at the origin must be detected regardless of zero
+    // sign - differential fuzz 2026-08-07).
     if first_pinch_dup(&ring[..n]).is_some() {
         errors.push(GeometryValidationError::PinchPoint);
     }
 
     if n > 64 {
-        // small x-overlap active set, padded-2D-bbox candidate gate queries cost ~320ms on the 600k-vertex giants vs ~50ms
+        // small x-overlap active set, padded-2D-bbox candidate gate queries cost ~320ms
+        // on the 600k-vertex giants vs ~50ms
         match sweep_ring_self_intersects(ring, eps, false) {
             Some(true) => {
                 errors.push(GeometryValidationError::SelfIntersection);
@@ -133,8 +135,8 @@ pub fn check_ring_validity(ring: &[Coord<f64>], is_exterior: bool) -> Vec<Geomet
                 let a1 = ring[i];
                 let a2 = ring[(i + 1) % n];
                 for j in i + 2..n {
-                    // share vertex 0 but may overlap collinearly beyond
-                    // See the rstar branch comment (differential fuzz 2026-08-03).
+                    // share vertex 0 but may overlap collinearly beyond See the rstar
+                    // branch comment (differential fuzz 2026-08-03).
                     if padded_bbox_overlap(a1, a2, ring[j], ring[(j + 1) % n])
                         && check_edge_pair_intersection(ring, i, j, eps)
                     {
@@ -181,35 +183,24 @@ pub fn check_ring_validity(ring: &[Coord<f64>], is_exterior: bool) -> Vec<Geomet
 
 /// Bit-mix for the pinch table's raw coordinate keys.
 ///
-/// The table is open-addressed with `hash & (cap - 1)`, i.e. it
-/// uses the LOW bits of the key. A coordinate that is an exact
-/// multiple of 2^m (any large-magnitude regular grid: projected-CRS
-/// values, snapped data, synthetic 1e12-scale benches - 1e12 =
-/// 2^12 * 5^12) has all-zero low mantissa bits, so the raw
-/// `(kx ^ ky.rotate_left(32))` hash collapsed every axis-aligned
-/// side of such a ring to a single bucket and the linear probe ran
-/// O(n^2) - measured 11.4 ms on an 8000-vertex 1e12 square vs
-/// 0.3 ms with the mix (stage probe 2026-10-08). A lone odd
-/// multiply does not fix it: v2(k * K) = v2(k), the low bits stay
-/// zero. The multiply + xorshift finalizer moves the high-bit
-/// entropy (exponent + high mantissa, which vary on exactly those
-/// inputs) into the masked bits. Deterministic and key-injective
-/// in effect: equal keys hash equal (the slot equality test on the
-/// raw keys is unchanged), distinct keys distribute - the verdict
-/// is decision-identical, only the probe order changes.
+/// A coordinate that is an exact multiple of 2^m (any large-magnitude regular grid:
+/// projected-crs values, snapped data, synthetic 1e12-scale benches - 1e12 = 2^12 *
+/// 5^12) has all-zero low mantissa bits. The raw `(kx ^ ky.rotate_left(32))` hash
+/// collapsed every axis-aligned side of such a ring to a single bucket and the linear
+/// probe ran O(n^2) - measured 11.4 ms on an 8000-vertex 1e12 square vs 0.3 ms with the
+/// mix (stage probe 2026-10-08).
 pub(crate) fn pinch_key_hash(kx: u64, ky: u64) -> u64 {
     let ax = kx.wrapping_mul(0x9E3779B97F4A7C15);
     let ay = ky.wrapping_mul(0xC2B2AE3D27D4EB4F);
     (ax ^ (ax >> 32)) ^ (ay ^ (ay >> 32))
 }
 
-/// First non-adjacent duplicate vertex in a ring's interior coords
-/// (normalized -0.0 keys), or None. Shared by the exit validator's pinch
-/// classification and the fast-path gate's duplicate scan - the gate must
-/// certify exactly what the validator accepts (2026-08-07 gate rule).
-/// Small rings use the O(n²) scan (no allocation); larger rings use a
-/// custom open-addressing table (bit-exact keys, no hasher - the FxHashMap
-/// was measured ~15 us slower on a 5000-vertex ring, 2026-08-08).
+/// First non-adjacent duplicate vertex in a ring's interior coords (normalized -0.0
+/// keys), or None. Shared by the exit validator's pinch classification and the
+/// fast-path gate's duplicate scan - the gate must certify exactly what the validator
+/// accepts (2026-08-07 gate rule). Larger rings use a custom open-addressing table
+/// (bit-exact keys, no hasher - the FxHashMap was measured ~15 us slower on a
+/// 5000-vertex ring, 2026-08-08).
 pub(crate) fn first_pinch_dup(coords: &[Coord<f64>]) -> Option<usize> {
     let n = coords.len();
     if n <= 32 {
@@ -227,8 +218,9 @@ pub(crate) fn first_pinch_dup(coords: &[Coord<f64>]) -> Option<usize> {
     let cap = n.next_power_of_two() * 2;
     let mut used: Vec<u64> = vec![0; cap / 64];
     let mut slots: Vec<(u64, u64)> = vec![(0, 0); cap];
-    // The occurrence index rides in a separate array (4B vs 24B slots)
-    // (measured 2026-08-08: a 24B (u64,u64,u32) slot struct cost ~15 us more on the gate's 5000-vertex valid ring).
+    // The occurrence index rides in a separate array (4B vs 24B slots) (measured
+    // 2026-08-08: a 24B (u64,u64,u32) slot struct cost ~15 us more on the gate's
+    // 5000-vertex valid ring).
     let mut idxs: Vec<u32> = vec![0; cap];
     for (idx, c) in coords.iter().enumerate() {
         let kx = (c.x + 0.0).to_bits();
@@ -312,13 +304,11 @@ pub(crate) fn point_on_segment(pt: Coord<f64>, a: Coord<f64>, b: Coord<f64>, eps
     pt.x >= min_x && pt.x <= max_x && pt.y >= min_y && pt.y <= max_y
 }
 
-/// EXACT point-on-segment (GEOS parity). Uses the robust orient2d so that
-/// exactly-collinear representable points count (the naive cross product can
-/// round to 1e-16 for them), but near-miss vertices do NOT touch: the
-/// tolerance-based point_on_segment fabricated touches from near-miss
-/// vertices in real cadastral giants (GEOS isValid=true on all 12 sampled,
-/// measured 2026-08-06). GEOS's own predicates are exact, so the touch
-/// graph must be exact too.
+/// exact point-on-segment (GEOS parity). Uses the robust orient2d so that
+/// exactly-collinear representable points count (the naive cross product can round to
+/// 1e-16 for them), but near-miss vertices do not touch: the tolerance-based
+/// point_on_segment fabricated touches from near-miss vertices in real cadastral giants
+/// (GEOS isValid=true on all 12 sampled, measured 2026-08-06).
 pub(crate) fn point_on_segment_exact(pt: Coord<f64>, a: Coord<f64>, b: Coord<f64>) -> bool {
     if crate::orient::orient2d(a, b, pt) != 0.0 {
         return false;
@@ -342,11 +332,6 @@ pub(crate) fn point_on_ring(pt: Coord<f64>, ring: &[Coord<f64>], eps: f64) -> bo
 }
 
 /// Fast rotation-invariant fingerprint for duplicate ring detection.
-///
-/// Finds the index of the lexicographically-minimum coordinate, hashes the
-/// ring starting from that index in both forward and reverse directions, and
-/// XORs the two hashes together.  Two rings that are rotated duplicates will
-/// produce the same fingerprint regardless of winding order.
 pub(crate) fn ring_dup_fingerprint(ring: &[Coord<f64>]) -> (usize, u64) {
     if ring.len() <= 1 {
         return (ring.len(), 0);
@@ -384,9 +369,9 @@ pub(crate) fn ring_dup_fingerprint(ring: &[Coord<f64>]) -> (usize, u64) {
     (ring.len(), h_fwd ^ h_rev)
 }
 
-/// Check whether two rings (with closing point) are duplicates starting at a
-/// different vertex. Both rings must have the same length and contain the same
-/// sequence of coordinates up to a cyclic rotation.
+/// Check whether two rings (with closing point) are duplicates starting at a different
+/// vertex. Both rings must have the same length and contain the same sequence of
+/// coordinates up to a cyclic rotation.
 pub(crate) fn is_rotated_duplicate(a: &[Coord<f64>], b: &[Coord<f64>]) -> bool {
     if a.len() != b.len() || a.len() < 2 {
         return false;
@@ -448,7 +433,7 @@ pub(crate) fn bbox_overlap(a: [f64; 4], b: [f64; 4]) -> bool {
     a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3]
 }
 
-/// Does box `a` fully cover box `b`? (GEOS envelope-covers gate.)
+/// Does box `a` fully cover box `b`?
 pub(crate) fn bbox_covers(a: [f64; 4], b: [f64; 4]) -> bool {
     a[0] <= b[0] && a[2] >= b[2] && a[1] <= b[1] && a[3] >= b[3]
 }

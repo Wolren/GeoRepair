@@ -1,9 +1,8 @@
 //! ValidationResult and its helper methods
 //!
-//! Extracted from validation/core.rs on 2026-08-07 (file-size governance:
-//! core.rs was 2540 lines; the cap is 800). Content is verbatim - no
-//! behavior changes; sibling modules resolve shared items through the
-//! `crate::validation::core` facade.
+//! Extracted from validation/core.rs on 2026-08-07 (file-size governance: core.rs was
+//! 2540 lines; the cap is 800). Content is verbatim - no behavior changes; sibling
+//! modules resolve shared items through the `crate::validation::core` facade.
 //!
 //! See validation/mod.rs for the module map.
 
@@ -14,8 +13,6 @@ use alloc::vec::Vec;
 
 /// Result of an OGC validity check.
 ///
-/// Contains the overall valid/invalid status and a list of detailed
-/// [`GeometryValidationError`] entries describing each violation found.
 ///
 /// # Examples
 ///
@@ -37,7 +34,7 @@ use alloc::vec::Vec;
 pub struct ValidationResult {
     /// Whether the geometry passed all OGC validity checks.
     pub valid: bool,
-    /// List of validity violations found. Empty when `valid` is true.
+    /// List of validity violations found.
     pub errors: Vec<GeometryValidationError>,
 }
 

@@ -1,9 +1,7 @@
 //! GeoPackage (`.gpkg`) backend: OGC 12-128r17 subset via `rusqlite`.
 //!
-//! Reads every table registered in `gpkg_geometry_columns` and parses the
-//! geometry column blobs with the crate's own WKB reader. Writes a minimal
-//! conforming GeoPackage (WGS 84 / EPSG:4326) with a single `georepair`
-//! feature table. All SQLite identifiers are double-quoted and escaped.
+//! Writes a minimal conforming GeoPackage (wgs 84 / EPSG:4326) with a single
+//! `georepair` feature table.
 
 use alloc::string::String;
 use alloc::string::ToString;
@@ -54,11 +52,10 @@ pub fn load_gpkg(path: &str) -> Result<Vec<Geometry<f64>>, String> {
     Ok(out)
 }
 
-/// Strip the GeoPackage binary header (OGC 12-128r15, section 6.1) from a
-/// geometry blob, returning the embedded WKB. The header is `GP`, version,
-/// flags (bit 1 = envelope present, bits 2-3 = envelope type), and a 4-byte
-/// SRS id, followed by an optional envelope and then the WKB. Blobs without
-/// the magic (older headerless writers) pass through unchanged.
+/// Strip the GeoPackage binary header (OGC 12-128r15, section 6.1) from a geometry
+/// blob, returning the embedded WKB. The header is `GP`, version, flags (bit 1 =
+/// envelope present, bits 2-3 = envelope type), and a 4-byte srs id, followed by an
+/// optional envelope and then the WKB.
 fn strip_gpkg_header(blob: &[u8]) -> Result<&[u8], String> {
     if blob.len() < 8 || blob[0] != b'G' || blob[1] != b'P' {
         return Ok(blob);
@@ -155,7 +152,7 @@ pub fn save_gpkg(path: &str, geoms: &[Geometry<f64>]) -> Result<(), String> {
     .map_err(|e| format!("{path}: geom cols: {e}"))?;
 
     {
-        // minutes instead of seconds (2026-08-06, QGIS-export run).
+        // minutes instead of seconds (2026-08-06, qgis-export run).
         let tx = conn
             .transaction()
             .map_err(|e| format!("{path}: begin tx: {e}"))?;
@@ -164,8 +161,9 @@ pub fn save_gpkg(path: &str, geoms: &[Geometry<f64>]) -> Result<(), String> {
                 .prepare("INSERT INTO \"georepair\" (geom) VALUES (?1)")
                 .map_err(|e| format!("{path}: {e}"))?;
             for g in geoms {
-                // GeoPackage binary header (OGC 12-128r15 6.1): 'GP', version 0, flags 0x01 (little-endian, no envelope), SRS id 4326 LE.
-                // GDAL/QGIS reject headerless blobs.
+                // GeoPackage binary header (OGC 12-128r15 6.1): 'GP', version 0, flags
+                // 0x01 (little-endian, no envelope), srs id 4326 LE. gdal/qgis reject
+                // headerless blobs.
                 let mut blob = Vec::with_capacity(8 + 64);
                 blob.extend_from_slice(&[0x47, 0x50, 0x00, 0x01]);
                 blob.extend_from_slice(&4326i32.to_le_bytes());
@@ -189,8 +187,8 @@ fn quote(ident: &str) -> String {
     format!("\"{}\"", ident.replace('"', "\"\""))
 }
 
-/// Collect all coordinates from a geometry (polygons and lines only;
-/// points are included as single coordinates).
+/// Collect all coordinates from a geometry (polygons and lines only; points are
+/// included as single coordinates).
 fn coords_of(g: &Geometry<f64>) -> Vec<Coord<f64>> {
     let mut out = Vec::new();
     match g {

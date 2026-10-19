@@ -1,9 +1,8 @@
 //! GeometryValidationError and its Display/Error impls
 //!
-//! Extracted from validation/core.rs on 2026-08-07 (file-size governance:
-//! core.rs was 2540 lines; the cap is 800). Content is verbatim - no
-//! behavior changes; sibling modules resolve shared items through the
-//! `crate::validation::core` facade.
+//! Extracted from validation/core.rs on 2026-08-07 (file-size governance: core.rs was
+//! 2540 lines; the cap is 800). Content is verbatim - no behavior changes; sibling
+//! modules resolve shared items through the `crate::validation::core` facade.
 //!
 //! See validation/mod.rs for the module map.
 
@@ -11,8 +10,6 @@ use geo::Coord;
 use thiserror::Error;
 
 /// Errors reported by OGC geometry validation.
-///
-/// Each variant corresponds to an OGC Simple Features validity rule.
 #[derive(Error, Clone, Debug, PartialEq)]
 pub enum GeometryValidationError {
     /// One or more coordinates contain NaN or infinite values.
@@ -43,11 +40,12 @@ pub enum GeometryValidationError {
     #[error("Holes are nested")]
     NestedHoles,
 
-    /// An interior ring is disconnected from the shell (touching at ≥ 2 points or edges crossing).
+    /// An interior ring is disconnected from the shell (touching at ≥ 2 points or edges
+    /// crossing).
     #[error("Interior ring is disconnected from shell")]
     DisconnectedInteriorRing,
 
-    /// Ring winding direction is incorrect (exterior must be CCW, interior CW).
+    /// Ring winding direction is incorrect (exterior must be ccw, interior CW).
     #[error("Wrong ring orientation: exterior should be CCW, interior CW")]
     WrongOrientation,
 
@@ -79,7 +77,8 @@ pub enum GeometryValidationError {
     #[error("Polygon exterior ring is degenerate (collapsed)")]
     DegenerateExterior,
 
-    /// A LineString or MultiLineString has components that intersect at interior points.
+    /// A LineString or MultiLineString has components that intersect at interior
+    /// points.
     #[error("Geometry is not simple: components intersect at interior points")]
     NotSimple,
 

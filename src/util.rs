@@ -11,9 +11,8 @@ pub(crate) fn shoelace_sum(ring: &[Coord<f64>]) -> f64 {
     sum
 }
 
-/// Determine CCW winding of a ring using Shewchuk's orient2d on the
-/// rightmost-lowest vertex (guaranteed convex for simple rings).
-/// Handles extreme fp ratios where shoelace sum flips sign.
+/// Determine ccw winding of a ring using Shewchuk's orient2d on the rightmost-lowest
+/// vertex (guaranteed convex for simple rings).
 pub(crate) fn robust_is_ccw(ring: &[Coord<f64>]) -> bool {
     if ring.len() < 4 {
         return false;
@@ -21,16 +20,16 @@ pub(crate) fn robust_is_ccw(ring: &[Coord<f64>]) -> bool {
     robust_is_ccw_at(ring, min_x_vertex(ring))
 }
 
-/// CCW verdict plus the extremal vertex index (min x, tie min y) in one
-/// pass - the caller can re-verify a possibly-reversed ring with
-/// [`robust_is_ccw_at`] without re-searching (winding fusion, 2026-08-08).
+/// ccw verdict plus the extremal vertex index (min x, tie min y) in one pass - the
+/// caller can re-verify a possibly-reversed ring with [`robust_is_ccw_at`] without
+/// re-searching (winding fusion, 2026-08-08).
 pub(crate) fn robust_is_ccw_with_index(ring: &[Coord<f64>]) -> (bool, usize) {
     let idx = min_x_vertex(ring);
     (robust_is_ccw_at(ring, idx), idx)
 }
 
-/// The extremal vertex index used by [`robust_is_ccw`]: minimum x, tie
-/// minimum y, candidate at index 0 (the closure point for closed rings).
+/// The extremal vertex index used by [`robust_is_ccw`]: minimum x, tie minimum y,
+/// candidate at index 0 (the closure point for closed rings).
 pub(crate) fn min_x_vertex(ring: &[Coord<f64>]) -> usize {
     if ring.len() < 4 {
         return 0;
@@ -50,9 +49,8 @@ pub(crate) fn min_x_vertex(ring: &[Coord<f64>]) -> usize {
     min_idx
 }
 
-/// Shewchuk orient2d at a pre-located extremal vertex (see
-/// [`min_x_vertex`]): the search is skipped, the verdict is identical.
-/// Collinear extremal vertex → shoelace fallback (Shewchuk gives 0).
+/// Shewchuk orient2d at a pre-located extremal vertex (see [`min_x_vertex`]): the
+/// search is skipped, the verdict is identical.
 pub(crate) fn robust_is_ccw_at(ring: &[Coord<f64>], min_idx: usize) -> bool {
     if ring.len() < 4 {
         return false;
@@ -80,24 +78,18 @@ pub(crate) fn robust_is_ccw_at(ring: &[Coord<f64>], min_idx: usize) -> bool {
         },
     );
     if orient.abs() <= 1e-15 || orient.is_nan() {
-        // Shewchuk overflow at extreme magnitude ratios (the products exceed f64::MAX and the exact predicate degrades to NaN).
-        // exact predicate exists for is caught by the non-NaN path.
+        // Shewchuk overflow at extreme magnitude ratios (the products exceed f64::max
+        // and the exact predicate degrades to NaN). exact predicate exists for is
+        // caught by the non-NaN path.
         shoelace_sum(ring) > 0.0
     } else {
         orient > 0.0
     }
 }
 
-/// A point strictly inside the ring: midpoint of the first non-degenerate
-/// edge, nudged toward the ring interior by a relative epsilon (1e-9 of the
-/// local magnitude). The interior side follows the ring's signed area
-/// (CCW: left of the directed edge; CW: right). Returns None only for
-/// degenerate rings (fewer than 3 distinct edges or all-zero-length edges).
-///
-/// Used for hole-aware nesting tests: vertex probes lie ON a hole ring for
-/// islands that touch it, and exclusive point-in-ring semantics then read
-/// the vertex as "not in the hole" (misclassifying island-in-hole as
-/// nested-in-fill). A strictly-interior probe resolves the ambiguity.
+/// A point strictly inside the ring: the midpoint of the first non-degenerate edge.
+/// Nudge it toward the interior by 1e-9 of the local magnitude. Return None only for
+/// degenerate rings with fewer than 3 distinct edges, or zero-length edges.
 pub(crate) fn ring_interior_probe(ring: &[Coord<f64>]) -> Option<Coord<f64>> {
     let interior_n = ring.len().saturating_sub(1);
     if interior_n < 3 {
@@ -154,9 +146,8 @@ pub(crate) fn shoelace_abs_sum(coords: &[Coord<f64>]) -> f64 {
     sum.abs()
 }
 
-/// Rotation/order-insensitive coordinate fingerprint of a ring (exact bit
-/// patterns, sorted). Was duplicated in structure/build_area.rs and
-/// structure/merge.rs.
+/// Rotation/order-insensitive coordinate fingerprint of a ring (exact bit patterns,
+/// sorted). Was duplicated in structure/build_area.rs and structure/merge.rs.
 pub(crate) fn ring_fingerprint(ring: &[Coord<f64>]) -> Vec<(u64, u64)> {
     let mut pts: Vec<(u64, u64)> = ring
         .iter()
@@ -169,8 +160,8 @@ pub(crate) fn ring_fingerprint(ring: &[Coord<f64>]) -> Vec<(u64, u64)> {
     pts
 }
 
-/// Length of the intersection of two 1-D intervals (0 if disjoint).
-/// Was duplicated in structure/subtract.rs and arrange/mod.rs.
+/// Length of the intersection of two 1-D intervals (0 if disjoint). Was duplicated in
+/// structure/subtract.rs and arrange/mod.rs.
 #[inline]
 pub(crate) fn interval_overlap(a0: f64, a1: f64, b0: f64, b1: f64) -> f64 {
     let lo = a0.max(b0);
@@ -178,25 +169,12 @@ pub(crate) fn interval_overlap(a0: f64, a1: f64, b0: f64, b1: f64) -> f64 {
     if hi > lo { hi - lo } else { 0.0 }
 }
 
-/// True if two rings share a collinear edge (both directions, exact after
-/// noding). Bbox-prefiltered O(na*nb) scan, capped to small rings.
-///
-/// TWO CALIBRATIONS exist for this test (formerly one private copy per
-/// caller — the merge into this module is what makes the split explicit):
-///
-/// - `rings_share_collinear_edge_quantized`: absolute tolerance with a 1.0
-///   magnitude floor (cross/line tests at 1e-12 * scale^2, overlap at
-///   1e-12 * scale). For rings that came out of i_overlay's boolean
-///   difference, whose coordinates are quantized to a fixed 1e-9 grid:
-///   a hole edge that was exactly parallel to the shell edge gains a
-///   ~1e-10 angular deviation, and the tight relative test misses the
-///   shared-edge signal (measured: valid 4-hole square at scale 48 →
-///   DisconnectedInteriorRing when the relative test is used here).
-/// - `rings_share_collinear_edge_precise`: relative tolerance
-///   (|cross| / (|da| * |db|) = sin(angle)). For PRE-quantization rings
-///   (fuzz generators, raw input) the absolute floor misclassifies
-///   genuinely non-collinear tiny edges as collinear (measured: two
-///   1.6e-7 edges with cross 2.8e-14 < 1e-12 → false DIR).
+/// True if two rings share a collinear edge, exact after noding. Two calibrations: -
+/// quantized: absolute, 1.0 floor, cross at 1e-12 * scale^2, overlap at 1e-12 * scale.
+/// i_overlay rings use a 1e-9 grid. A parallel hole edge gains 1e-10 angle. A valid
+/// 4-hole square, scale 48, gives a dir. - precise: relative, |cross| / (|da| * |db|).
+/// On pre-quantization rings the absolute floor marks non-collinear edges collinear:
+/// two 1.6e-7 edges with cross 2.8e-14 give a false dir.
 pub(crate) fn rings_share_collinear_edge_quantized(a: &[Coord<f64>], b: &[Coord<f64>]) -> bool {
     rings_bbox_overlap_prefilter(a, b)
         && rings_scan(
@@ -244,7 +222,8 @@ pub(crate) fn rings_share_collinear_edge_quantized(a: &[Coord<f64>], b: &[Coord<
 }
 
 pub(crate) fn rings_share_collinear_edge_precise(a: &[Coord<f64>], b: &[Coord<f64>]) -> bool {
-    // offsets at touching coordinates (adjacent holes sharing an edge whose x differs by 1 ULP: measured: 16.338582962195097 vs ...098)
+    // offsets at touching coordinates (adjacent holes sharing an edge whose x differs
+    // by 1 ULP: measured: 16.338582962195097 vs .098)
     rings_scan(
         a,
         b,
@@ -366,15 +345,10 @@ fn rings_scan(
     false
 }
 
-/// Even-odd toggle point-in-ring test (exclusive: on-edge → outside).
-/// One of two point-in-ring families in the crate: this one uses the
-/// even-odd ray-cast toggle and rejects rings with fewer than 4 coords;
-/// `validation::point_in_ring_exclusive` uses the winding number and
-/// accepts rings with 2+ coords. For simple rings both agree. NOT unified
-/// yet: the degenerate-ring guards differ and each call site relies on its
-/// own guard semantics (ring_simplicity at every call site must be
-/// verified before merging the families).
-/// Was duplicated in structure/merge.rs and make_valid.rs.
+/// Even-odd toggle point-in-ring test, exclusive: on-edge means outside. It uses the
+/// even-odd ray-cast toggle and rejects rings with fewer than 4 coordinates.
+/// validation::point_in_ring_exclusive uses the winding number and accepts rings with 2
+/// or more coordinates. Duplicated in structure/merge.rs and make_valid.rs.
 pub(crate) fn point_in_ring_exclusive_even_odd(pt: Coord<f64>, ring: &[Coord<f64>]) -> bool {
     if ring.len() < 4 {
         return false;
@@ -413,21 +387,19 @@ pub(crate) fn point_in_ring_exclusive_even_odd(pt: Coord<f64>, ring: &[Coord<f64
 
 /// Wall clock for the `PROFILE_*` counters and DIAG_* diagnostics.
 ///
-/// `std::time::Instant` is not implemented on wasm32-unknown-unknown -
-/// every call panics with "time not implemented on this platform". The
-/// clock degrades to a no-op on wasm (0 ns) so the profiling surface stays
-/// valid API there while the repair path keeps running. (Found 2026-08-06
-/// by the first wasm runtime test: the repair test panicked in
-/// fix_polygon_owned's PROFILE_FP_NS timing.)
+/// `std::time::Instant` is not implemented on wasm32-unknown-unknown - every call
+/// panics with "time not implemented on this platform". (Found 2026-08-06 by the first
+/// wasm runtime test: the repair test panicked in fix_polygon_owned's PROFILE_FP_NS
+/// timing.)
 #[cfg(all(not(target_arch = "wasm32"), feature = "std"))]
 pub(crate) struct ProfileClock(Option<std::time::Instant>);
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "std"))]
 impl ProfileClock {
     /// Starts a clock only while profiling is on (set by
-    /// [`crate::structure::reset_profile`]); otherwise this is one relaxed
-    /// atomic load and a branch. The two `Instant::now` calls per polygon
-    /// were a measurable share of the small-polygon and real-world rows.
+    /// [`crate::structure::reset_profile`]); otherwise this is one relaxed atomic load
+    /// and a branch. The two `Instant::now` calls per polygon were a measurable share
+    /// of the small-polygon and real-world rows.
     pub(crate) fn start() -> Self {
         if crate::structure::PROFILE_ON.load(::core::sync::atomic::Ordering::Relaxed) {
             Self(Some(std::time::Instant::now()))

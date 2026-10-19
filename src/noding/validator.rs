@@ -1,11 +1,9 @@
 //! Post-noding validation: verify that no non-adjacent edges cross.
 //!
-//! Uses MCIndex (monotone chain + R-tree) spatial indexing for
-//! O(n log n) validation instead of brute-force O(n²).
+//! Uses MCIndex (monotone chain + R-tree) spatial indexing for O(n log n) validation
+//! instead of brute-force O(n²).
 //!
-//! GEOS's `NodingValidator` checks that after noding, the entire edge set
-//! has no remaining intersections. If this check fails, a different noding
-//! algorithm or tolerance should be used.
+//! If this check fails, a different noding algorithm or tolerance should be used.
 
 use crate::orient::orient2d;
 use alloc::vec::Vec;
@@ -27,11 +25,7 @@ pub struct NodingViolation {
 
 /// Validates that a set of noded line segments has no remaining intersections.
 ///
-/// Only checks non-adjacent, non-consecutive edge pairs. Adjacent edges
-/// that share an endpoint are allowed.
-///
-/// Uses MCIndex spatial indexing internally — O(n log n), safe for large
-/// edge sets.
+/// Only checks non-adjacent, non-consecutive edge pairs.
 pub struct NodingValidator {
     edges: Vec<Line<f64>>,
     violations: Vec<NodingViolation>,
@@ -296,8 +290,8 @@ fn check_chain_pair(
 impl NodingValidator {
     /// Create a new validator for the given edge set.
     ///
-    /// Validation is not performed until [`validate`](NodingValidator::validate)
-    /// is called.
+    /// Validation is not performed until [`validate`](NodingValidator::validate) is
+    /// called.
     pub fn new(edges: Vec<Line<f64>>) -> Self {
         Self {
             edges,

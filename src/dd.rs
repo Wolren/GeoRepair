@@ -1,26 +1,17 @@
-//! Double-double arithmetic for robust geometric constructions.
-//!
-//! Each value is stored as a pair (hi, lo) where the real value is `hi + lo`.
-//! This gives ~106 bits of mantissa (roughly 2× f64 precision, ~31 decimal digits).
-//!
-//! Based on the algorithms of Dekker, Knuth, and Ogita–Rump–Oishi.
-//! Used by GEOS and JTS for exact line intersection and coordinate computation.
-//!
-//! # Profiling
-//! `dd_call_count` and `reset_dd_count` track total invocations of
-//! `segment_intersection_dd` across the repair pipeline.
+//! Double-double arithmetic for robust geometric constructions. This gives about 106
+//! bits of mantissa, roughly 2x f64 precision or 31 decimal digits.
 
 use core::sync::atomic::{AtomicU64, Ordering};
 
 pub(crate) static DD_CALL_COUNT: AtomicU64 = AtomicU64::new(0);
 
-/// Reset the DD call counter to zero.  Call before a profiling run.
+/// Reset the DD call counter to zero.
 pub fn reset_dd_count() {
     DD_CALL_COUNT.store(0, Ordering::Relaxed);
 }
 
-/// Return the total number of `segment_intersection_dd` calls since the
-/// last reset (or program start).
+/// Return the total number of `segment_intersection_dd` calls since the last reset (or
+/// program start).
 pub fn dd_call_count() -> u64 {
     DD_CALL_COUNT.load(Ordering::Relaxed)
 }
@@ -92,7 +83,6 @@ impl DD {
         DD { hi: x, lo: e }
     }
 
-    /// DD addition.
     pub fn add(self, other: DD) -> DD {
         let (s_hi, s_lo) = Self::two_sum(self.hi, other.hi);
         let (t_hi, t_lo) = Self::two_sum(self.lo, other.lo);
@@ -104,7 +94,6 @@ impl DD {
         }
     }
 
-    /// DD subtraction.
     pub fn sub(self, other: DD) -> DD {
         self.add(DD {
             hi: -other.hi,
@@ -131,15 +120,13 @@ impl DD {
     }
 
     /// DD division using Newton iteration to find f = a/b.
-    ///
-    /// Method: compute 1/b via Newton, then multiply by a.
-    /// Newton iteration for f(x) = b - 1/x: x_{n+1} = x * (2 - b * x).
     pub fn div(self, other: DD) -> DD {
         // Initial approximation of 1/other (using only the high part)
         let inv_approx = 1.0 / other.hi;
         let mut x = DD::from_f64(inv_approx);
 
-        // Two Newton steps for ~106 bits of precision in the reciprocal x = x * (2 - other * x)
+        // Two Newton steps for ~106 bits of precision in the reciprocal x = x * (2 -
+        // other * x)
         let two = DD::from_f64(2.0);
         x = x.mul(two.sub(other.mul(x)));
         x = x.mul(two.sub(other.mul(x)));
@@ -192,7 +179,6 @@ impl DD {
         }
     }
 
-    /// Absolute value.
     #[allow(dead_code)]
     pub fn abs(self) -> DD {
         if self.hi < 0.0 || (self.hi == 0.0 && self.lo < 0.0) {
@@ -215,10 +201,10 @@ type NormResult = (
     Coord<f64>,
 );
 
-/// Normalize a set of 4 coordinates for numerically stable DD computation.
-/// Returns (normalized_coords, scale, origin) where:
+/// Normalize a set of 4 coordinates for numerically stable DD computation. Returns
+/// (normalized_coords, scale, origin) where:
 /// - Each normalized coord = (coord - origin) / scale
-/// - scale is a power of 2 for exact IEEE 754 multiplication/division
+/// - scale is a power of 2 for exact ieee 754 multiplication/division
 pub(crate) fn normalize_four(
     a: Coord<f64>,
     b: Coord<f64>,
@@ -246,16 +232,12 @@ pub(crate) fn normalize_four(
     (norm(a), norm(b), norm(c), norm(d), scale, origin)
 }
 
-/// Compute the intersection point of two line segments using double-double
-/// arithmetic. Returns `Some((point, t, u))` if the lines intersect at any
-/// point (including outside segment bounds), `None` if they are parallel.
-///
-/// - `t` is the parameter along segment AB (DD precision)
-/// - `u` is the parameter along segment CD (DD precision)
-/// - `point` is the intersection point (f64)
-///
-/// Callers should check t/u in the desired range (e.g., `0..1` for interior,
-/// `-eps..1+eps` for extended segment intersection).
+/// Compute the intersection of two line segments with double-double arithmetic. Return
+/// `Some((point, t, u))` when the lines intersect at any point, including outside the
+/// segment bounds. Return `None` when the lines are parallel. `t` is the parameter
+/// along AB and `u` along CD, at DD precision. `point` is the intersection as f64.
+/// Check `t` and `u` against your range: `0..1` for the interior, `-eps..1+eps` for the
+/// extended segment.
 pub(crate) fn segment_intersection_dd(
     a: Coord<f64>,
     b: Coord<f64>,
@@ -319,8 +301,8 @@ pub(crate) fn segment_intersection_dd(
 mod tests {
     use super::*;
 
-    // and the snapshot assertion reads (0, 0)
-    // (ed73e76) could not tolerate, since a concurrent reset destroys the delta itself.
+    // and the snapshot assertion reads (0, 0) (ed73e76) could not tolerate, since a
+    // concurrent reset destroys the delta itself.
     static COUNTER_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn lock_counter() -> std::sync::MutexGuard<'static, ()> {
@@ -468,7 +450,7 @@ mod tests {
 
     #[test]
     fn test_segment_intersection_dd_very_small_angle() {
-        // Two segments that cross at a very small angle (0.001 rad)
+        // Two segments that cross at a small angle (0.001 rad)
         let a = Coord { x: 0.0, y: 0.0 };
         let b = Coord { x: 1000.0, y: 0.0 };
         let small_angle = 0.001f64;

@@ -1,31 +1,27 @@
 //! OGC Well-Known Text (WKT) parsing and serialization (2D only).
 //!
-//! Zero-dependency backend — parses and serializes WKT directly into
-//! `geo::Geometry<f64>` without intermediate representations.
+//! Parses and serializes WKT directly into `geo::Geometry<f64>` without intermediate
+//! representations.
 //!
 //! # Supported types
 //!
-//! Point, LineString, LINEARING (as LineString), Polygon, MultiPoint,
-//! MultiLineString, MultiPolygon, GeometryCollection.
+//! Point, LineString, linearing (as LineString), Polygon, MultiPoint, MultiLineString,
+//! MultiPolygon, GeometryCollection.
 //!
-//! EMPTY geometries and EMPTY elements inside Multi* / GeometryCollection
-//! are accepted (empty point components use geo's NaN-coordinate
-//! convention). NaN and inf ordinates are accepted (invalid geometry per
-//! OGC, but parseable - the corpus carries them).
+//! empty geometries and empty elements inside Multi* / GeometryCollection are accepted
+//! (empty point components use geo's NaN-coordinate convention). NaN and inf ordinates
+//! are accepted (invalid geometry per OGC, but parseable - the corpus carries them).
 //!
 //! Z, M, and ZM dimension modifiers are recognized and rejected with
 //! [`WktError::UnsupportedDimension`].
 //!
 //! # Reading
 //!
-//! - [`read_wkt`] — parse a WKT string
-//! - [`read_wkt_from`] — read WKT from any `io::Read` source
-//! - [`infer_wkt_type`] — peek at the type keyword without full parsing
+//! - Read WKT from any `io::Read` source
 //!
 //! # Writing
 //!
-//! - [`write_wkt`] — serialize to WKT string
-//! - [`write_wkt_to`] — write WKT to any `io::Write` target
+//! - Write WKT to any `io::Write` target
 //!
 //! # Example
 //!

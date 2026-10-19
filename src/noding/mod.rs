@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 //! Noding utilities for linear geometry repair.
 //!
-//! Linear geometries are fixed by:
 //! 1. Removing invalid/repeated coordinates
 //! 2. Noding self-intersections by splitting crossing edges
 
@@ -32,9 +31,8 @@ use crate::orient::orient2d as orient2d_robust;
 #[cfg(any(feature = "arrange", feature = "structure"))]
 use log::warn;
 
-/// Node a line string by removing repeated points and splitting at
-/// self-intersections. Returns a MultiLineString if splitting occurred,
-/// or a single LineString otherwise.
+/// Node a line string by removing repeated points and splitting at self-intersections.
+/// Returns a MultiLineString if splitting occurred, or a single LineString otherwise.
 pub(crate) fn node_line_string<T: NodingFloat>(ls: &LineString<T>) -> Geometry<T> {
     let coords: Vec<Coord<T>> =
         ls.0.iter()
@@ -377,7 +375,6 @@ fn split_edges_rtree(edges: &[Line<f64>], split_points: &mut [Vec<f64>], eps: f6
 }
 
 /// Reconnect split edges into continuous linestrings by chaining touching edges.
-/// Uses the O(n) HashMap-based approach directly (no transmutes).
 fn reconnect_edges<T: NodingFloat>(edges: Vec<Line<T>>) -> Vec<LineString<T>> {
     let n = edges.len();
     if n == 0 {
@@ -390,7 +387,6 @@ fn reconnect_edges<T: NodingFloat>(edges: Vec<Line<T>>) -> Vec<LineString<T>> {
 }
 
 /// O(n) chain reconstruction via HashMap from endpoint → edge index.
-/// Works for any type implementing the sealed NodingFloat trait.
 fn reconnect_edges_by_key<T: NodingFloat>(edges: Vec<Line<T>>) -> Vec<LineString<T>> {
     let n = edges.len();
 

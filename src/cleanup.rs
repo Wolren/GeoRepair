@@ -1,21 +1,7 @@
-//! Tolerance-based repeated-point removal.
-//!
-//! Our own implementation of the GEOS `RepeatedPointRemover` semantics
-//! (source: `geos/src/operation/valid/RepeatedPointRemover.cpp`, commit
-//! `cad26ad98` "Return EMPTY components when repeated point removal renders
-//! the underlying parts invalid"). 2D only.
-//!
-//! Behavior contract (source-verified):
-//! - Sequence level: keep the first coordinate, then every coordinate that
-//!   is not exactly equal to and not within `tolerance` of the last kept
-//!   coordinate. Tolerance 0 removes exact consecutive duplicates.
-//! - Geometry level: invalid (non-finite) coordinates are skipped, including
-//!   leading ones. Lines keep a minimum of 2 coordinates, rings 3.
-//! - If filtering leaves a single coordinate the component collapses to
-//!   empty (line, polygon, or collection part removed).
-//! - The original end coordinate is re-attached when the filtered output is
-//!   too small (fluff) or when it was stripped (last-point repair), but
-//!   never when the original end was invalid.
+//! Tolerance-based repeated-point removal with GEOS RepeatedPointRemover semantics
+//! (cad26ad98). 2D only. - Sequence: keep the first coordinate, then each coordinate
+//! outside tolerance of the last kept. Tolerance 0 removes exact consecutive
+//! duplicates. - Geometry: skip non-finite coordinates, including leading ones.
 
 use alloc::vec::Vec;
 use geo::{Coord, Geometry, HasDimensions, LineString, MultiLineString, MultiPolygon, Polygon};
@@ -25,8 +11,8 @@ const RING_MIN: usize = 3;
 /// Minimum line size.
 const LINE_MIN: usize = 2;
 
-/// Sequence-level removal: consecutive duplicates and within-tolerance
-/// points are dropped (GEOS `removeRepeatedPoints(seq, tolerance)`).
+/// Sequence-level removal: consecutive duplicates and within-tolerance points are
+/// dropped (GEOS `removeRepeatedPoints(seq, tolerance)`).
 pub fn remove_repeated_coords(coords: &[Coord<f64>], tolerance: f64) -> Vec<Coord<f64>> {
     if coords.is_empty() {
         return Vec::new();
@@ -48,7 +34,6 @@ pub fn remove_repeated_coords(coords: &[Coord<f64>], tolerance: f64) -> Vec<Coor
 }
 
 /// Geometry-level removal (GEOS `removeRepeatedPoints(geometry, tolerance)`).
-/// Collapsed components become empty geometries.
 pub fn remove_repeated_points(geom: &Geometry<f64>, tolerance: f64) -> Geometry<f64> {
     match geom {
         Geometry::Point(_) => geom.clone(),
@@ -106,14 +91,15 @@ pub fn remove_repeated_points(geom: &Geometry<f64>, tolerance: f64) -> Geometry<
     }
 }
 
-/// GEOS `RepeatedPointCoordinateOperation::edit` (with the invalid-coordinate
-/// filter and end repair). Returns `None` when the component collapses.
+/// GEOS `RepeatedPointCoordinateOperation::edit` (with the invalid-coordinate filter
+/// and end repair). Returns `None` when the component collapses.
 fn edit_sequence(coords: &[Coord<f64>], min_len: usize, tolerance: f64) -> Option<Vec<Coord<f64>>> {
     if coords.len() <= min_len {
         return Some(coords.to_vec());
     }
 
-    // RepeatedInvalidPointFilter: skip invalid coords (leading ones too), exact duplicates, and points within tolerance of the last kept.
+    // RepeatedInvalidPointFilter: skip invalid coords (leading ones too), exact
+    // duplicates, and points within tolerance of the last kept.
     let sq = tolerance * tolerance;
     let mut filt: Vec<Coord<f64>> = Vec::new();
     for &c in coords {

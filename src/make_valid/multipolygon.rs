@@ -1,5 +1,5 @@
-//! MultiPolygon/Geometry repair: union + even-parent filtering, nested
-//! component dropping, and precision-reduction fallbacks.
+//! MultiPolygon/Geometry repair: union + even-parent filtering, nested component
+//! dropping, and precision-reduction fallbacks.
 
 use super::polygon::has_nan_or_infinite;
 use super::polygon::{
@@ -39,8 +39,9 @@ impl MakeValid for MultiPolygon<f64> {
             return Geometry::MultiPolygon(MultiPolygon::new(Vec::new()));
         }
         if shells.len() == 1 {
-            // still gated (fuzz wkb seed 1da58cf8 - the component repair shipped a genuinely crossing POLYGON and this early return skipped)
-            // Returned directly instead of through `repair`
+            // still gated (fuzz wkb seed 1da58cf8 - the component repair shipped a
+            // genuinely crossing polygon and this early return skipped) Returned
+            // directly instead of through `repair`
             let single = shells.pop().expect("len==1 verified");
             let enforced = enforce_ogc_winding(Geometry::Polygon(single)).0;
             let orig = match &enforced {
@@ -59,14 +60,17 @@ impl MakeValid for MultiPolygon<f64> {
             let gated = validity_gate(enforced, orig);
             return gated;
         }
-        // Panic containment: everything from the merge to the final union/gate result runs under one catch_unwind below.
-        // unary_union (i_overlay debug_asserts on degenerate merges - fuzz wkt seeds aa4bb7d2 / 455657db, extract_ogc is_fill_top) and the arrange ladder inside
+        // Panic containment: everything from the merge to the final union/gate result
+        // runs under one catch_unwind below. unary_union (i_overlay debug_asserts on
+        // degenerate merges - fuzz wkt seeds aa4bb7d2 / 455657db, extract_ogc
+        // is_fill_top) and the arrange ladder inside
         let repair = || -> Geometry<f64> {
             let mp = MultiPolygon::new(shells);
             if is_valid_with_geo(&Geometry::MultiPolygon(mp.clone())) {
                 return enforce_ogc_winding(Geometry::MultiPolygon(mp)).0;
             }
-            // entirely (bench gate: `overlap mp 100sh` paid for re-validating an already-valid union).
+            // entirely (bench gate: `overlap mp 100sh` paid for re-validating an
+            // already-valid union).
             let orig_shells = mp.0.clone();
             let filtered = crate::structure::merge::merge_shells(mp.0);
             if filtered.0.is_empty() {
@@ -144,21 +148,11 @@ impl MakeValid for MultiPolygon<f64> {
 }
 
 
-/// Final validity gate for the MultiPolygon pipeline.
-///
-/// `merge_shells` converts a fully-contained component into a hole of its
-/// parent, but it only fingerprints rings the parent ALREADY had - it never
-/// checks the new hole against them. When a repaired component crosses a hole
-/// that came from its own repair (sliver vs. quad, fuzz-nightly `wkt_repair`
-/// seeds `3111ecaf` / `edf6e65b`) the merge produces a polygon whose interiors
-/// intersect, which our validator rejects as `DisconnectedInteriorRing`.
-/// The single-survivor shortcut used to return that without any gate at all.
-///
-/// `orig` is the pre-merge component list. Escalation, in order: BuildArea
-/// face decomposition over the crossing merged edges, BuildArea over the raw
-/// components, then the components that validate on their own (degrading to
-/// the largest single one, then to empty). Valid-but-thin beats invalid: the
-/// repair contract is `out.validate().valid`.
+/// Final validity gate for the MultiPolygon pipeline. `merge_shells` turns a fully
+/// contained component into a parent hole, but fingerprints only rings the parent
+/// already had. The merge then yields intersecting interiors. The validator rejects
+/// that as `DisconnectedInteriorRing`. Valid but thin beats invalid: the contract is
+/// `out.validate().valid`. Seeds `3111ecaf` and `edf6e65b`.
 fn validity_gate(g: Geometry<f64>, orig: Vec<Polygon<f64>>) -> Geometry<f64> {
     use geo::Area;
     if is_valid_with_geo(&g) {
@@ -200,9 +194,8 @@ fn validity_gate(g: Geometry<f64>, orig: Vec<Polygon<f64>>) -> Geometry<f64> {
     }
 }
 
-/// Drop components that are invalid on their own; `None` when nothing usable
-/// is left, so the caller can try the next candidate instead of returning
-/// empty.
+/// Drop components that are invalid on their own; `None` when nothing usable is left,
+/// so the caller can try the next candidate instead of returning empty.
 #[cfg(feature = "arrange")]
 fn keep_valid_components(mp: MultiPolygon<f64>) -> Option<Geometry<f64>> {
     let kept: Vec<Polygon<f64>> =
@@ -257,26 +250,19 @@ impl MakeValid for Geometry<f64> {
     }
 }
 
-/// Winding-insensitive validity probe for merged MultiPolygons.
-///
-/// Replaces `geo::algorithm::Validation::is_valid` at the merge/drop_nested
-/// gates:
-/// - PERF: geo's relate engine takes 30-45s on the fuzz timeout seeds'
-///   exploded MPs (1100-2000 components / 50-77k verts; timeout-aa3d69dc /
-///   251df359 were libFuzzer >1200s timeouts, ~97% of it this call), while
-///   our Shewchuk validator runs the same geometry in ~100ms.
-/// - SAFETY: geo's relate carries debug_assert!s that panic on adversarial
-///   input (edge_end_bundle_star.rs:116; fuzz run 35836311392).
-///
-/// Winding-insensitivity: merge_shells emits GEOS-walker CW shells that our
-/// validator reports as WrongOrientation, so probe an OGC-normalized COPY -
-/// rejecting on winding alone sent valid merged output into the polygonizer
-/// and it came back SelfIntersection (seed a27dfba6).
+/// Winding-insensitive probe for merged MultiPolygons. It replaces
+/// `geo::algorithm::Validation::is_valid` at both gates. perf: geo relate takes 30 to
+/// 45 s on MultiPolygons. They hold 1100 to 2000 components and 50 to 77k vertices.
+/// Seeds aa3d69dc and 251df359 timed out at 1200 s, 97% of it in this call. The
+/// Shewchuk validator takes 100 ms. safety: geo relate debug_assert!s panic on
+/// adversarial input (edge_end_bundle_star.rs:116, run 35836311392). merge_shells emits
+/// GEOS-walker CW shells that read as WrongOrientation. A winding-only rejection sent
+/// valid output to the polygonizer, which returned SelfIntersection (a27dfba6).
 pub(crate) fn mp_looks_valid(mp: &MultiPolygon<f64>) -> bool {
     is_valid_with_geo(&enforce_ogc_winding(Geometry::MultiPolygon(mp.clone())).0)
 }
 
-/// Post-repair: transform to target CRS if configured.
+/// Post-repair: transform to target crs if configured.
 pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
     if mp.0.len() <= 1 {
         return if mp.0.is_empty() {
@@ -330,7 +316,8 @@ pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
             if ext_j.len() < 4 {
                 return false;
             }
-            // - checking only the exterior ring drops it (measured: square-with-hole + island → island 64 lost; GEOS keeps it).
+            // - checking only the exterior ring drops it (measured: square-with-hole +
+            //   island → island 64 lost; GEOS keeps it).
             let in_ext = pt_candidates
                 .iter()
                 .any(|&pt| point_in_ring_exclusive_even_odd(pt, ext_j));
@@ -363,8 +350,10 @@ pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
         return enforce_ogc_winding(Geometry::Polygon(kept.into_iter().next().unwrap())).0;
     }
     let mp_kept = MultiPolygon::new(kept);
-    // (edge-sharing components / nested holes); re-polygonizing valid shells re-expands the whole face decomposition (measured: 5 shells → 9 faces).
-    // SelfIntersection (measured: 3 valid comps → 4 comps with SI on seed a27dfba6) - hence `mp_looks_valid`
+    // (edge-sharing components / nested holes); re-polygonizing valid shells re-expands
+    // the whole face decomposition (measured: 5 shells → 9 faces). SelfIntersection
+    // (measured: 3 valid comps → 4 comps with SI on seed a27dfba6) - hence
+    // `mp_looks_valid`
     let geo_valid = mp_looks_valid(&mp_kept);
     if geo_valid {
         return enforce_ogc_winding(Geometry::MultiPolygon(mp_kept)).0;
@@ -375,7 +364,8 @@ pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
             return strip_degenerate(g);
         }
     }
-    // Polygonizer failed - filter out components with PinchPoint, RepeatedPoint, or other remaining errors.
+    // Polygonizer failed - filter out components with PinchPoint, RepeatedPoint, or
+    // other remaining errors.
     let valid: Vec<Polygon<f64>> = mp_kept
         .0
         .into_iter()
@@ -411,15 +401,14 @@ pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
     enforce_ogc_winding(Geometry::MultiPolygon(MultiPolygon::new(valid))).0
 }
 
-/// Polygonizer fallback for edge-sharing MultiPolygon components
-/// that containment-based drop_nested_components can't handle.
+/// Polygonizer fallback for edge-sharing MultiPolygon components that containment-based
+/// drop_nested_components cannot handle.
 pub(super) fn polygonizer_fallback(mp: &MultiPolygon<f64>) -> Option<Geometry<f64>> {
     use geo::LinesIter;
     let lines: Vec<geo::Line<f64>> = mp.0.iter().flat_map(|p| p.lines_iter()).collect();
     if lines.is_empty() {
         return None;
     }
-    // (The legacy polygonizer misclassifies multi-shell inputs: measured 1 poly with 6 holes instead of 5 disjoint shells.)
     let area = crate::structure::build_area::build_area(&lines)?;
     #[cfg(all(any(test, debug_assertions), feature = "std"))]
     if std::env::var("DIAG_PF").is_ok() {

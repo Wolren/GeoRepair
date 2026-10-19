@@ -1,4 +1,3 @@
-//! Test battery.
 
 use super::*;
 use alloc::vec::Vec;

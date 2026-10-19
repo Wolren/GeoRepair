@@ -9,15 +9,15 @@ use crate::validation::core::*;
 
 /// Maximum `GeometryCollection` nesting depth accepted by validation.
 ///
-/// `validate_at_depth` counts collection levels starting at 0 for the
-/// outermost collection, and rejects a level once `depth > MAX_COLLECTION_DEPTH`,
-/// so a chain of `MAX_COLLECTION_DEPTH + 1` collections (depths `0..=100`) is
-/// accepted and one more is not.
+/// `validate_at_depth` counts collection levels starting at 0 for the outermost
+/// collection, and rejects a level once `depth > MAX_COLLECTION_DEPTH`, so a chain of
+/// `MAX_COLLECTION_DEPTH + 1` collections (depths `0.=100`) is accepted and one more is
+/// not.
 ///
-/// Repair has to honour the same bound: a `GeometryCollection` past this
-/// limit is handed back by [`crate::MakeValid`] verbatim unless the extra
-/// wrapper levels are folded away (see `push_repaired_member`), which would
-/// make `make_valid` return a geometry that still fails `validate()`.
+/// Repair has to honour the same bound: a `GeometryCollection` past this limit is
+/// handed back by [`crate::MakeValid`] verbatim unless the extra wrapper levels are
+/// folded away (see `push_repaired_member`), which would make `make_valid` return a
+/// geometry that still fails `validate()`.
 pub(crate) const MAX_COLLECTION_DEPTH: usize = 100;
 
 impl GeoValidation for Polygon<f64> {
@@ -33,8 +33,8 @@ impl GeoValidation for Polygon<f64> {
         // regression (3.83s vs 3.17s on the 1.58M dataset)
         let ext_errors = check_ring_validity(&self.exterior().0, true);
         if !ext_errors.is_empty() {
-            // ring errors but continued to the holes when ONLY
-            // (IsValidOp t2 expects HoleOutsideShell alongside the shell's WrongOrientation).
+            // ring errors but continued to the holes when only (IsValidOp t2 expects
+            // HoleOutsideShell alongside the shell's WrongOrientation).
             let only_orientation = ext_errors
                 .iter()
                 .all(|e| matches!(e, GeometryValidationError::WrongOrientation));
@@ -79,11 +79,10 @@ impl GeoValidation for Polygon<f64> {
     }
 }
 
-/// True when any hole duplicates another hole or the shell (rotated-start
-/// duplicates included). Fingerprint grouping avoids the O(h²) pairwise
-/// scan. Shared by the validator and the fast-path gate (the gate must
-/// certify exactly what the validator accepts before it may skip the exit
-/// validator - 2026-08-07).
+/// True when any hole duplicates another hole or the shell (rotated-start duplicates
+/// included). Shared by the validator and the fast-path gate (the gate must certify
+/// exactly what the validator accepts before it may skip the exit validator -
+/// 2026-08-07).
 pub(crate) fn has_duplicate_rings(interiors: &[&[Coord<f64>]], shell: &[Coord<f64>]) -> bool {
     if interiors.len() > 1 {
         let mut groups: rustc_hash::FxHashMap<(usize, u64), Vec<usize>> =
@@ -159,7 +158,8 @@ impl GeoValidation for MultiPolygon<f64> {
                 .max(1.0);
             let eps = 1e-12 * scale;
 
-            // Candidate pairs are bounding-box filtered (R-tree when many rings) - never an unfiltered O(m^2) pair loop.
+            // Candidate pairs are bounding-box filtered (R-tree when many rings) -
+            // never an unfiltered O(m^2) pair loop.
             let mut all_rings: Vec<(usize, bool, &[Coord<f64>])> = Vec::new();
             let mut comp_holes: Vec<Vec<&[Coord<f64>]>> = Vec::with_capacity(self.0.len());
             for (ci, p) in self.0.iter().enumerate() {
@@ -182,7 +182,8 @@ impl GeoValidation for MultiPolygon<f64> {
                     errors.push(GeometryValidationError::SelfIntersection);
                     return ValidationResult::invalid(errors);
                 }
-                // shell's hole is a valid island (Test 616/641 in general_TestValid2.xml) whose own hole may also sit
+                // shell's hole is a valid island (Test 616/641 in
+                // general_TestValid2.xml) whose own hole may also sit
                 if all_rings[a].1 != all_rings[b].1 {
                     if all_rings[a].1
                         && ring_has_vertex_inside(ra, rb2, rb[b], &comp_holes[all_rings[b].0])
@@ -292,13 +293,10 @@ trait ValidateDepth {
     fn validate_at_depth(&self, depth: usize, max_depth: usize) -> ValidationResult;
 }
 
-/// Any vertex of `probe` strictly inside `target`'s FILL (bbox-prefiltered;
-/// vertices inside `exclusions` - the target component's own holes - are
-/// excised and do not count). Used by the cross-component interior-overlap
-/// probe: a hole ring with a vertex in another shell's fill means the two
-/// interiors overlap without necessarily crossing edges (t21). Pure boundary
-/// touches (point_in_ring_exclusive semantics) do not count - MP touch cases
-/// stay valid.
+/// Any vertex of `probe` strictly inside `target`'s fill (bbox-prefiltered; vertices
+/// inside `exclusions` - the target component's own holes - are excised and do not
+/// count). Pure boundary touches (point_in_ring_exclusive semantics) do not count - MP
+/// touch cases stay valid.
 fn ring_has_vertex_inside(
     probe: &[Coord<f64>],
     target: &[Coord<f64>],

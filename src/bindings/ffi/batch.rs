@@ -8,19 +8,9 @@ use alloc::vec::Vec;
 use geo::Geometry;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-/// Repair an array of WKB geometries in one call.
-///
-/// `parallel` nonzero enables the rayon batch when the crate was built with
-/// the `parallel` feature (sequential otherwise). Per-item parse failures
-/// surface as per-item results with `error_code == Parse`; the batch
-/// itself succeeds.
-///
-/// # Safety
-///
-/// `inputs` must point to an array of `count` valid
-/// [`GeoRepairWkbBuffer`]s (or be null when `count` is 0). The returned
-/// [`GeoRepairBatchResult`] must be freed with
-/// [`super::geo_repair_free_batch_result`].
+/// Repair an array of WKB geometries in one call. A nonzero parallel enables the rayon
+/// batch when the crate has the parallel feature (sequential otherwise). Free the
+/// returned GeoRepairBatchResult with super::geo_repair_free_batch_result.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_make_valid_batch(
     inputs: *const GeoRepairWkbBuffer,
@@ -43,7 +33,8 @@ pub unsafe extern "C" fn geo_repair_make_valid_batch(
             #[cfg(feature = "parallel")]
             {
                 use rayon::prelude::*;
-                // GeoRepairWkbBuffer holds raw pointers (!Send/!Sync) so the raw slice cannot enter a rayon closure directly; GeoRepairResult is also !Send
+                // GeoRepairWkbBuffer holds raw pointers (!Send/!Sync) so the raw slice
+                // cannot enter a rayon closure directly; GeoRepairResult is also !Send
                 let parsed: Vec<Result<Geometry<f64>, GeoRepairErrorCode>> = slice
                     .iter()
                     .map(|buf| geometry_from_wkb(buf.data, buf.len))

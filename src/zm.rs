@@ -1,16 +1,4 @@
-//! Z/M coordinate value preservation and querying.
-//!
-//! Geometry repair can change coordinate counts and positions (e.g.
-//! splitting a self-intersecting polygon). This module provides types
-//! and functions to preserve Z (elevation) and M (measure) values
-//! through the repair pipeline via nearest-coordinate matching.
-//!
-//! The main types are:
-//! - \[`ZmValue`\]: a single Z/M pair for one coordinate
-//! - \[`ZmGeometry`\]: a geometry paired with per-coordinate Z/M data
-//! - \[`preserve_zm`\]: match Z/M from original to repaired geometry
-//! - \[`zm_pairs`\]: iterate coords with their Z/M values
-//! - \[`count_coords`\]: count vertices in a geometry
+//! Z and M coordinate value preservation and querying.
 
 use alloc::vec::Vec;
 use geo::{Coord, Geometry};
@@ -30,7 +18,6 @@ impl ZmValue {
 
     /// Create a new ZmValue from optional Z and M values.
     ///
-    /// Use `None` for missing components.
     ///
     /// # Examples
     ///
@@ -74,19 +61,19 @@ impl ZmValue {
 
 /// A geometry with per-coordinate Z/M data stored alongside.
 ///
-/// The `zm` vector has exactly one entry per coordinate in the geometry,
-/// in the order defined by `CoordsIter` (depth-first traversal).
+/// The `zm` vector has exactly one entry per coordinate in the geometry, in the order
+/// defined by `CoordsIter` (depth-first traversal).
 #[derive(Clone, Debug)]
 pub struct ZmGeometry {
     /// The underlying geometry (repaired or original).
     pub geometry: Geometry<f64>,
-    /// Per-coordinate Z/M values. Length must equal the number of
-    /// coordinates returned by [`crate::zm::count_coords`].
+    /// Per-coordinate Z/M values. Length must equal the number of coordinates returned
+    /// by [`crate::zm::count_coords`].
     pub zm: Vec<ZmValue>,
 }
 
 impl ZmGeometry {
-    /// Create a new ZmGeometry with no Z/M data (all NONE).
+    /// Create a new ZmGeometry with no Z/M data (all none).
     pub fn new(geometry: Geometry<f64>) -> Self {
         let count = count_coords(&geometry);
         Self {
@@ -97,8 +84,8 @@ impl ZmGeometry {
 
     /// Create a ZmGeometry with explicit Z/M data.
     ///
-    /// The `zm` vector must have one entry per coordinate in the
-    /// geometry, in depth-first traversal order.
+    /// The `zm` vector must have one entry per coordinate in the geometry, in
+    /// depth-first traversal order.
     pub fn with_zm(geometry: Geometry<f64>, zm: Vec<ZmValue>) -> Self {
         Self { geometry, zm }
     }
@@ -126,8 +113,8 @@ impl ZmGeometry {
 
 /// Count the total number of coordinates (vertices) in a geometry.
 ///
-/// Returns the count in depth-first traversal order, matching the
-/// iteration order of [`geo::CoordsIter`].
+/// Returns the count in depth-first traversal order, matching the iteration order of
+/// [`geo::CoordsIter`].
 pub fn count_coords(geom: &Geometry<f64>) -> usize {
     match geom {
         Geometry::Point(_) => 1,
@@ -151,8 +138,8 @@ fn count_polygon_coords(p: &geo::Polygon<f64>) -> usize {
 
 /// Attempt to preserve Z/M values from an original geometry to a repaired geometry.
 ///
-/// Matches coordinates by position index for same-topology geometries,
-/// otherwise falls back to nearest-coordinate matching with tolerance.
+/// Matches coordinates by position index for same-topology geometries, otherwise falls
+/// back to nearest-coordinate matching with tolerance.
 pub fn preserve_zm(
     original: &Geometry<f64>,
     original_zm: &[ZmValue],
@@ -206,8 +193,6 @@ fn match_nearest(
 }
 
 /// Build an iterator over (Coord, ZmValue) pairs in depth-first traversal order.
-///
-/// Each pair corresponds to one coordinate in the geometry.
 pub fn zm_pairs<'a>(
     geom: &'a Geometry<f64>,
     zm: &'a [ZmValue],

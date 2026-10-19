@@ -1,12 +1,8 @@
 //! Validate and repair invalid OGC GIS geometries in Rust.
 //!
-//! Detects and fixes geometry defects — self-intersections, unclosed rings,
-//! degenerate shapes, NaN coordinates, and more — using algorithms selected
-//! by geometry type. The **Structure** strategy (default) mirrors GEOS's
-//! ST_MakeValid algorithm; the **Arrange** strategy uses CDT-based repair
-//! as a robust fallback for complex topologies. Passes 937/937 dispatched
-//! GEOS XML validation cases (213 documented masked divergences), with
-//! parallel batch performance **1.16× GEOS** wall time on the 1.58M
+//! Self-intersections, unclosed rings, degenerate shapes, NaN coordinates, and more.
+//! Passes 937/937 dispatched GEOS xml validation cases (213 documented masked
+//! divergences), with parallel batch performance **1.16× GEOS** wall time on the 1.58M
 //! polygon real-world dataset (measured 2026-08-06).
 //!
 //! # Quick start
@@ -62,17 +58,16 @@
 //!
 //! ## Integration with the geo ecosystem
 //!
-//! geo-repair is built on `geo` types and participates in the georust
-//! ecosystem through two layers.
+//! geo-repair is built on `geo` types and participates in the georust ecosystem through
+//! two layers.
 //!
 //! ### geo-traits sources (feature `geo-traits`)
 //!
-//! The [`interop`] module exposes the engines over
-//! `geo_traits::GeometryTrait` / `geo_traits::GeometryCollectionTrait`, the
-//! trait layer implemented by `geo`, geoarrow, geozero, and the `wkb` crate.
-//! Any geometry source that implements those traits can be validated or
-//! repaired in one call; geo types materialize internally, and the result
-//! comes back as `geo::Geometry<f64>`.
+//! The [`interop`] module exposes the engines over `geo_traits::GeometryTrait` /
+//! `geo_traits::GeometryCollectionTrait`, the trait layer implemented by `geo`,
+//! geoarrow, geozero, and the `wkb` crate. Any geometry source that implements those
+//! traits can be validated or repaired in one call; geo types materialize internally,
+//! and the result comes back as `geo::Geometry<f64>`.
 //!
 //! ```rust
 //! # #[cfg(feature = "geo-traits")] {
@@ -91,8 +86,8 @@
 //! # }
 //! ```
 //!
-//! Batch repair over a collection (`geo::GeometryCollection`, geoarrow
-//! arrays, or any `GeometryCollectionTrait`):
+//! Batch repair over a collection (`geo::GeometryCollection`, geoarrow arrays, or any
+//! `GeometryCollectionTrait`):
 //!
 //! ```rust
 //! # #[cfg(feature = "geo-traits")] {
@@ -116,13 +111,12 @@
 //!
 //! ### geo's `Validation` trait (always available)
 //!
-//! geo's `Validation` trait and `Invalid*` error enums are the ecosystem's
-//! validation vocabulary, but the orphan rule prevents implementing geo's
-//! trait for geo's own types. The [`GeoRepairValidation`] adapter wraps a
-//! `&Geometry<f64>` and exposes geo_repair's stricter engine through geo's
-//! trait: code that calls `.is_valid()`, `.check_validation()`, or
-//! `.validation_errors()` runs geo_repair's validator, including the
-//! deliberate strictness gates that geo's exact-only validator lacks.
+//! geo's `Validation` trait and `Invalid*` error enums are the ecosystem's validation
+//! vocabulary, but the orphan rule prevents implementing geo's trait for geo's own
+//! types. The [`GeoRepairValidation`] adapter wraps a `&Geometry<f64>` and exposes
+//! geo_repair's stricter engine through geo's trait: code that calls `.is_valid()`,
+//! `.check_validation()`, or `.validation_errors()` runs geo_repair's validator,
+//! including the deliberate strictness gates that geo's exact-only validator lacks.
 //!
 //! ```rust
 //! # use geo::{Geometry, LineString, Polygon};
@@ -140,12 +134,9 @@
 //! # let _ = errors;
 //! ```
 //!
-//! The mapping is best-effort: geo_repair checks 18 OGC rules while geo's
-//! error enums cover a subset, and geo carries ring/index payloads that
-//! geo_repair's errors do not record. Unmappable classes (ring closure,
-//! pinch points, nested holes, orientation, collinearity, duplicates) are
-//! omitted from the geo view; use [`validate`] and [`validate_reason`] for
-//! the complete report.
+//! The mapping is best-effort: geo_repair checks 18 OGC rules while geo's error enums
+//! cover a subset, and geo carries ring/index payloads that geo_repair's errors do not
+//! record.
 //!
 //! ## WKB I/O (built-in, no dependencies)
 //!
@@ -220,15 +211,12 @@
 //! | WASM32 | Yes | Auto-vectorized scalar | In-memory only | No | No |
 //! | no_std (embedded) | Yes | Auto-vectorized scalar | No | No | No |
 //!
-//! SIMD is provided by LLVM's auto-vectorizer on all platforms; no special
-//! RUSTFLAGS are required. Hand-written AVX2 intrinsics were measured and
-//! removed (see `simd/mod.rs`).
+//! Hand-written AVX2 intrinsics were measured and removed (see `simd/mod.rs`).
 //!
 //! # no_std
 //!
-//! Disable the `std` feature for no_std builds. Core validation, repair,
-//! and WKB parsing work without std. File I/O, parallel processing, and
-//! Python/FFI bindings require std:
+//! Disable the `std` feature for no_std builds. File I/O, parallel processing, and
+//! Python/ffi bindings require std:
 //!
 //! ```shell
 //! cargo check --no-default-features --features arrange,structure,simd
@@ -279,23 +267,18 @@
 //! | **Arrange** (CDT) | Constrained Delaunay triangulation → face labeling → ring extraction | Handles any topology. No self-intersection limit. | Slower, especially on large rings. Requires `spade`. |
 //! | **Structure** (fast path) | Planar graph extraction → face walking → winding-number assembly | 10-100× faster for valid/simple inputs. No external deps. | Falls back on complex topologies (many holes, nested self-intersections). |
 //!
-//! **Auto** (default) tries Structure first and falls back to Arrange.
-//! The repair pipeline enforces OGC-correct winding order (CCW exterior,
-//! CW interior) on all output.
 //!
 //! # CRS support
 //!
-//! The [`Crs`] type stores EPSG codes and provides CRS-aware tolerance heuristics:
+//! The [`Crs`] type stores EPSG codes and provides crs-aware tolerance heuristics:
 //! - Geographic (lon/lat): `1e-10` degrees
 //! - Projected (metres): `1e-6` metres
 //! - Unknown: `1e-12`
 //!
-//! For CRS text interchange, [`Crs::to_wkt2`] emits an ISO 19162:2019
-//! (WKT2:2019) definition for the bundled EPSG CRSs (`4326`, `4269`,
-//! `3857`), and [`Crs::from_wkt`] reads the authority from either WKT1 or
-//! WKT2 text.
+//! For crs text interchange, [`Crs::to_wkt2`] emits an iso 19162:2019 (WKT2:2019)
+//! definition for the bundled EPSG CRSs (`4326`, `4269`, `3857`), and [`Crs::from_wkt`]
+//! reads the authority from either WKT1 or WKT2 text.
 //!
-//! CRS is set directly on [`MakeValidConfig`]:
 //!
 //! ```rust
 //! use geo_repair::{Crs, MakeValidConfig};
@@ -386,12 +369,10 @@
 //!
 //! # Known limitations
 //!
-//! - **CDT arranger may panic** on certain degenerate inputs (all-collinear
-//!   exterior rings, coordinates near f64::MAX). This is a known limitation
-//!   of `spade`.
-//! - **OGC compliance** is a key goal but not yet formally certified. The
-//!   validation module checks 18 OGC predicates and passes 937/937 dispatched GEOS XML
-//!   tests.
+//! - **cdt arranger may panic** on certain degenerate inputs (all-collinear exterior
+//!   rings, coordinates near f64::max).
+//! - **OGC compliance** is a key goal but not yet formally certified. The validation
+//!   module checks 18 OGC predicates and passes 937/937 dispatched GEOS xml tests.
 //! - **GeometryCollection cross-component intersection** is not validated.
 //! - **Z/M coordinate consistency** is not validated.
 //!
@@ -401,20 +382,17 @@
 #![cfg_attr(feature = "simd-portable", feature(portable_simd))]
 //! # no_std
 //!
-//! Disable the default `std` feature for an alloc-only build. WKB/WKT
-//! parsing, validation, and repair work without `std`; only file I/O
-//! (`.gpkg`/`.csv`/`.shp`/`.gml` loaders, binary file helpers) requires
-//! it. The crate itself is std-free: the `geo` dependency still links
-//! `std` on hosted targets, so embedded (bare-metal) targets are not yet
-//! supported — see geo-types for a fully embedded geometry type layer.
+//! Disable the default `std` feature for an alloc-only build. WKB/WKT parsing,
+//! validation, and repair work without `std`; only file I/O
+//! (`.gpkg`/`.csv`/`.shp`/`.gml` loaders, binary file helpers) requires it.
 #![cfg_attr(not(feature = "std"), no_std)]
 #[macro_use]
 extern crate alloc;
 
 /// Compile-time guard: ensures `cfg(feature = "rstar")` is active when any
 /// rstar-dependent feature is enabled. Prevents silent O(n²) regression when
-/// `dep:rstar` is used in Cargo.toml feature lists instead of the explicit
-/// `rstar = ["dep:rstar"]` feature alias.
+/// `dep:rstar` is used in Cargo.toml feature lists instead of the explicit `rstar =
+/// ["dep:rstar"]` feature alias.
 #[cfg(any(feature = "arrange", feature = "structure", feature = "validate"))]
 const _: () = {
     #[cfg(not(feature = "rstar"))]
@@ -428,7 +406,7 @@ const _: () = {
 
 /// Core configuration types for geometry repair.
 pub mod core;
-/// Coordinate reference system (CRS) handling and transformation.
+/// Coordinate reference system (crs) handling and transformation.
 pub mod crs;
 /// Double-double arithmetic for robust geometric computations.
 pub mod dd;
@@ -438,14 +416,14 @@ pub mod feature;
 pub mod io;
 /// Geometry repair implementation via the [`MakeValid`] trait.
 pub mod make_valid;
-/// Ring orientation utilities (CW/CCW winding).
+/// Ring orientation utilities (CW/ccw winding).
 pub mod orient;
 /// Coordinate snapping to a precision grid.
 pub mod snap;
 pub(crate) mod util;
 /// OGC Simple Features geometry validation predicates.
 pub mod validation;
-/// WASM browser fetch (`wasm` feature; wasm32 targets only).
+/// wasm browser fetch (`wasm` feature; wasm32 targets only).
 #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 pub mod wasm;
 /// Z/M coordinate value preservation through the repair pipeline.
@@ -457,7 +435,7 @@ pub mod zm;
 pub mod interop;
 
 #[cfg(feature = "arrange")]
-/// CDT-based polygon repair for complex topologies (Arrange strategy).
+/// cdt-based polygon repair for complex topologies (Arrange strategy).
 pub mod arrange;
 /// Tolerance-based repeated-point removal (GEOS RepeatedPointRemover parity).
 pub mod cleanup;
@@ -469,7 +447,7 @@ pub mod reduce;
 /// GEOS-compatible fast-path polygon repair via planar graph extraction.
 pub mod structure;
 
-/// Language bindings: C FFI and Python (PyO3).
+/// Language bindings: C ffi and Python (PyO3).
 #[cfg(any(feature = "ffi", feature = "python"))]
 pub mod bindings;
 #[cfg(feature = "ffi")]
@@ -479,11 +457,8 @@ pub use bindings::python;
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 /// Rayon-based parallel batch geometry repair.
 pub mod parallel;
-/// Geometric predicates (orientation, point-in-ring, AABB, snapping).
-/// Compiled unconditionally; the `simd` feature is retained for backward
-/// compatibility and gates the nightly `simd-portable` path. Stable builds
-/// use scalar kernels that LLVM auto-vectorizes — hand-written AVX2 was
-/// measured slower and removed (see `simd/mod.rs`).
+/// Geometric predicates (orientation, point-in-ring, aabb, snapping). Hand-written AVX2
+/// was measured slower and removed (see `simd/mod.rs`).
 pub mod simd;
 
 /// Tolerance-based repeated-point removal.
@@ -492,7 +467,7 @@ pub use cleanup::{remove_repeated_coords, remove_repeated_points};
 pub use core::{MakeValidConfig, MakeValidError, PolyMethod, Tuning};
 /// Coordinate reference system wrapper.
 pub use crs::Crs;
-/// A feature combining geometry with optional attributes and CRS.
+/// A feature combining geometry with optional attributes and crs.
 pub use feature::Feature;
 pub use io::{
     Endianness, EwkbDims, EwkbGeometry, WkbError, WktError, WriteOptions, infer_wkt_type,
@@ -507,8 +482,8 @@ pub use io::{
 /// Trait for repairing invalid geometries.
 pub use make_valid::MakeValid;
 #[cfg(any(feature = "arrange", feature = "structure"))]
-/// Combines validation and repair in a single step, returning errors for
-/// violations that could not be automatically repaired.
+/// Combines validation and repair in a single step, returning errors for violations
+/// that could not be automatically repaired.
 pub use make_valid::ValidateAndFix;
 /// Coordinate snapping functions.
 pub use snap::{DEFAULT_GRID, snap_coord, snap_coord_default, snap_line, snap_lines};
@@ -523,9 +498,9 @@ pub use validation::{
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-/// Profile each step of the structure fast path on a sample of polygons.
-/// Prints timing breakdown and pass rates to stderr.
-// Native-only: it times with `std::time::Instant`, which is not implemented on wasm32-unknown-unknown (panics on call).
+/// Profile each step of the structure fast path on a sample of polygons. Native-only:
+/// it times with `std::time::Instant`, which is not implemented on
+/// wasm32-unknown-unknown (panics on call).
 #[cfg(all(
     feature = "arrange",
     feature = "structure",

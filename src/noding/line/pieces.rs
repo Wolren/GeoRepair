@@ -1,7 +1,4 @@
 //! Piece construction, dedup and reconnection for the lean line noder.
-//! Segments split at their node points; pieces are deduplicated (exact
-//! canonical endpoint key, plus a tolerant validator-predicate sweep when
-//! near-collinear noding happened) and reconnected into simple chains.
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -66,10 +63,10 @@ impl<'a> super::LineNoder<'a> {
         }
     }
 
-    /// Endpoint snap through the cluster canonicals: every piece endpoint
-    /// that lies within eps of a cluster resolves to the same bit-exact
-    /// canonical point, so sub-tolerance topology disappears instead of
-    /// leaving micro-pieces the validator would flag.
+    /// Endpoint snap through the cluster canonicals: every piece endpoint that lies
+    /// within eps of a cluster resolves to the same bit-exact canonical point, so
+    /// sub-tolerance topology disappears instead of leaving micro-pieces the validator
+    /// would flag.
     pub(super) fn snap(&self, p: Coord<f64>) -> Coord<f64> {
         self.canon_map
             .get(&(p.x.to_bits(), p.y.to_bits()))
@@ -116,7 +113,8 @@ impl<'a> super::LineNoder<'a> {
             }
             r
         }
-        // run (a subdivided vertical edge: the figure-8 class pays ~(0.2n)^2 per run, measured 6.7 ms on 4000 vertices where the)
+        // run (a subdivided vertical edge: the figure-8 class pays ~(0.2n)^2 per run,
+        // measured 6.7 ms on 4000 vertices where the)
         let mut i = 0usize;
         while i < total {
             let mut block_end = i + 1;
@@ -169,7 +167,8 @@ impl<'a> super::LineNoder<'a> {
                 has[r] = true;
             }
         }
-        // Node -> sorted position: the pre-sort index n_anchors + k is invalid once the sort reorders the points.
+        // Node -> sorted position: the pre-sort index n_anchors + k is invalid once the
+        // sort reorders the points.
         let mut node_pos: Vec<usize> = vec![0; self.nodes.len()];
         for (i, &(_, _, tag)) in pts.iter().enumerate() {
             if tag != 0 {
@@ -192,9 +191,9 @@ impl<'a> super::LineNoder<'a> {
 
     // Phase 5: pieces
 
-    /// Piece construction for the pure-collinear fast path: identical to
-    /// `build_pieces` but endpoints are used as-is (the 1-D split points
-    /// are the other members' original vertices - already bit-exact).
+    /// Piece construction for the pure-collinear fast path: identical to `build_pieces`
+    /// but endpoints are used as-is (the 1-D split points are the other members'
+    /// original vertices - already bit-exact).
     pub(super) fn build_pieces_direct(&mut self) -> Vec<(Coord<f64>, Coord<f64>, u32)> {
         let mut out: Vec<(Coord<f64>, Coord<f64>, u32)> = Vec::new();
         for i in 0..self.n {
@@ -296,9 +295,6 @@ impl<'a> super::LineNoder<'a> {
     }
 
     /// Tolerant piece dedup: runs only when near-collinear noding happened.
-    /// Drops a piece that the validator's own cross-component predicate
-    /// flags against an earlier piece (coincident or overlapping residuals
-    /// that exact-key dedup cannot see).
     pub(super) fn dedup_pieces_tolerant(&self, pieces: &mut Vec<(Coord<f64>, Coord<f64>, u32)>) {
         let m = pieces.len();
         if m < 2 {

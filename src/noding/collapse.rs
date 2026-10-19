@@ -1,12 +1,12 @@
 //! Handle collapsed geometries (polygon → line → point).
 //!
-//! When keep_collapsed is true, degenerate higher-dimensional geometries
-//! are preserved as lower-dimensional types instead of becoming empty.
+//! When keep_collapsed is true, degenerate higher-dimensional geometries are preserved
+//! as lower-dimensional types instead of becoming empty.
 
 use geo::{CoordNum, GeoFloat, Geometry, LineString, Point};
 
-/// If a geometry has collapsed to a lower dimension, return the
-/// appropriate representation when keep_collapsed is true.
+/// If a geometry has collapsed to a lower dimension, return the appropriate
+/// representation when keep_collapsed is true.
 pub(crate) fn handle_collapse<T: GeoFloat>(
     input_dim: u8,
     coords: &[Coord<T>],

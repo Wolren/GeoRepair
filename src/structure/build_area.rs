@@ -4,22 +4,8 @@ use rustc_hash::FxHashMap;
 
 use super::fix_ring_graph::{build_graph, extract_all_faces_geos};
 
-/// ---------------------------------------------------------------------------
-/// GEOS BuildArea port (BuildArea.cpp + Polygonizer.cpp):
-///
-/// 1. Polygonize noded linework into face rings (extract_all_faces_geos).
-/// 2. Classify by ring orientation (EdgeRing::computeHole):
-///    CW (negative signed area) = SHELL, CCW (positive) = HOLE.
-/// 3. Assign each hole to the SMALLEST containing shell (findEdgeRing-
-///    Containing by envelope area).
-/// 4. Build polygons: shell ring + assigned holes.
-/// 5. Even-parent filter (collectFacesWithEvenAncestors): a face F is a
-///    parent of G if one of F's hole rings equals G's exterior ring
-///    (direction/rotation-insensitive). Keep faces with an EVEN ancestor
-///    count; drop odd (they sit in hole position).
-///
-/// Verified bit-identical to GEOS on multi-crossing rings.
-/// ---------------------------------------------------------------------------
+/// geos BuildArea port. Classify by ring orientation in edgering::computehole:
+/// clockwise is a shell, ccw is a hole.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn build_area(lines: &[geo::Line<f64>]) -> Option<MultiPolygon<f64>> {
     if lines.is_empty() {
@@ -29,7 +15,8 @@ pub fn build_area(lines: &[geo::Line<f64>]) -> Option<MultiPolygon<f64>> {
     if graph.edges.is_empty() {
         return Some(MultiPolygon::new(Vec::new()));
     }
-    // None as a fallback signal (make_valid.rs polygonizer_fallback, fix_ring.rs) - keep the semantics
+    // None as a fallback signal (make_valid.rs polygonizer_fallback, fix_ring.rs) -
+    // keep the semantics
     let faces = extract_all_faces_geos(&graph)?;
     if faces.is_empty() {
         return Some(MultiPolygon::new(Vec::new()));
@@ -74,7 +61,7 @@ pub fn build_area(lines: &[geo::Line<f64>]) -> Option<MultiPolygon<f64>> {
         return Some(MultiPolygon::new(Vec::new()));
     }
 
-    // Step 2: sort by envelope area DESC (GEOS CompareByEnvarea)
+    // Step 2: sort by envelope area desc (GEOS CompareByEnvarea)
     faces_out.sort_by(|a, b| {
         b.envelope_area
             .partial_cmp(&a.envelope_area)
@@ -113,7 +100,8 @@ pub fn build_area(lines: &[geo::Line<f64>]) -> Option<MultiPolygon<f64>> {
         }
     }
 
-    // Step 4: even-parent filter (ring equality, direction-agnostic) owner_of_ring: fingerprint of a hole ring -> the shell that owns it.
+    // Step 4: even-parent filter (ring equality, direction-agnostic) owner_of_ring:
+    // fingerprint of a hole ring -> the shell that owns it.
     let mut owner_of_ring: FxHashMap<Vec<(u64, u64)>, usize> = FxHashMap::default();
     for f in &faces_out {
         if let Some(s) = f.parent {
@@ -168,9 +156,6 @@ pub fn build_area(lines: &[geo::Line<f64>]) -> Option<MultiPolygon<f64>> {
 }
 
 /// Fingerprint of a ring: sorted coordinate bit pairs, closure removed.
-/// Direction/rotation-insensitive - GEOS ringsEqualAnyDirection equivalent.
-/// Interior probe point for a ring: midpoint of first edge nudged toward the
-/// ring's interior (right of the directed edge - walker convention).
 fn ring_probe(ring: &[Coord<f64>]) -> Option<Coord<f64>> {
     let (v0, v1) = (*ring.first()?, *ring.get(1)?);
     let mid = Coord {

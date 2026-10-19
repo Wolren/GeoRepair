@@ -1,4 +1,3 @@
-//! Test battery.
 
 use super::*;
 use alloc::vec::Vec;
@@ -10,9 +9,10 @@ fn test_point_valid() {
 
 #[test]
 fn test_point_nan() {
-    // Point(NaN, NaN) is the geo representation of POINT EMPTY - valid OGC
+    // Point(NaN, NaN) is the geo representation of point empty - valid OGC
     assert!(Point::new(f64::NAN, f64::NAN).is_valid());
-    // A single NaN ordinate is invalid (GEOS TestValid: "P - invalid NaN X ordinate" expects isValid=false; CoordinateNaN).
+    // A single NaN ordinate is invalid (GEOS TestValid: "P - invalid NaN X ordinate"
+    // expects isValid=false; CoordinateNaN).
     assert!(!Point::new(f64::NAN, 2.0).is_valid());
     assert!(!Point::new(2.0, f64::NAN).is_valid());
     assert!(Point::new(1.0, 2.0).is_valid());
@@ -573,7 +573,8 @@ fn test_degenerate_exterior_collinear_x() {
 
 #[test]
 fn retrace_ring_flags_self_intersection_both_windings() {
-    // fuzz-nightly class C (run 35578735657, 2026-09-21): the closing edge of this ring doubles back over part of the first edge.
+    // fuzz-nightly class C (run 35578735657, 2026-09-21): the closing edge of this ring
+    // doubles back over part of the first edge.
     let coords = vec![
         Coord {
             x: 0.0,

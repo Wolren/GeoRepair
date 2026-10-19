@@ -1,9 +1,8 @@
 //! hole validation, nesting, and cycle detection
 //!
-//! Extracted from validation/core.rs on 2026-08-07 (file-size governance:
-//! core.rs was 2540 lines; the cap is 800). Content is verbatim - no
-//! behavior changes; sibling modules resolve shared items through the
-//! `crate::validation::core` facade.
+//! Extracted from validation/core.rs on 2026-08-07 (file-size governance: core.rs was
+//! 2540 lines; the cap is 800). Content is verbatim - no behavior changes; sibling
+//! modules resolve shared items through the `crate::validation::core` facade.
 //!
 //! See validation/mod.rs for the module map.
 
@@ -13,10 +12,9 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use geo::{Coord, LineString};
 
-/// Per-hole boundary check (crossing / exact touches / any-inside), shared
-/// by the serial and parallel per-hole phases. Returns the FIRST error in
-/// the check order, or None. `tree` is the shell's edge tree (None for
-/// small shells - the brute paths are faster there).
+/// Per-hole boundary check (crossing / exact touches / any-inside), shared by the
+/// serial and parallel per-hole phases. Returns the first error in the check order, or
+/// None.
 #[cfg(feature = "rstar")]
 fn per_hole_check(
     shell: &[Coord<f64>],
@@ -130,13 +128,13 @@ pub(crate) fn check_holes_valid(
     let scale = (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
     let eps = 1e-12 * scale;
 
-    // real-world dataset (giants with ~100 holes x 187k-edge shells)
-    // 0.8-2.3s for the cheap structural gate the README's validation row documented.
+    // real-world dataset (giants with ~100 holes x 187k-edge shells) 0.8-2.3s for the
+    // cheap structural gate the readme's validation row documented.
     #[cfg(feature = "rstar")]
     let shell_tree: Option<Arc<rstar::RTree<EdgeIdx>>> =
         (shell.len() - 1 > 64).then(|| Arc::new(build_ring_edge_tree(shell)));
 
-    // MEASURED as a regression (3.83s vs 3.17s, 2026-08-06)
+    // measured as a regression (3.83s vs 3.17s, 2026-08-06)
     for hole in interiors {
         #[cfg(feature = "rstar")]
         let e = per_hole_check(shell, shell_tree.as_deref(), hole, eps, max_x);
@@ -161,7 +159,8 @@ pub(crate) fn check_holes_valid(
             }
         }
 
-        // --- hole-cycle detection (GEOS PolygonRing::findHoleCycleLocation + scanForHoleCycle port, source-verified 2026-08-05)
+        // --- hole-cycle detection (GEOS PolygonRing::findHoleCycleLocation +
+        // scanForHoleCycle port, source-verified 2026-08-05)
         #[cfg(feature = "rstar")]
         let cycle = detect_hole_cycle(&rings, &bboxes, eps, shell_tree.as_ref());
         #[cfg(not(feature = "rstar"))]
@@ -171,7 +170,7 @@ pub(crate) fn check_holes_valid(
             return errors;
         }
 
-        // ALL lie on the outer hole's boundary (measured t20, 2026-08-05).
+        // all lie on the outer hole's boundary (measured t20, 2026-08-05).
         for (a, b) in overlap_pairs(&bboxes, 1) {
             if !bbox_covers(bboxes[a], bboxes[b]) {
                 continue;
@@ -185,13 +184,15 @@ pub(crate) fn check_holes_valid(
     errors
 }
 
-// Ring-touch graph helpers (GEOS PolygonRing / PolygonTopologyAnalyzer / PolygonNodeTopology ports, source-verified against the GEOS clone at 24ec89dc3, 2026-08-05).
-// All pair enumeration is bounding-box filtered: O(n log n) tree + candidate queries, never unfiltered O(n^2).
+// Ring-touch graph helpers (GEOS PolygonRing / PolygonTopologyAnalyzer /
+// PolygonNodeTopology ports, source-verified against the GEOS clone at 24ec89dc3,
+// 2026-08-05). All pair enumeration is bounding-box filtered: O(n log n) tree +
+// candidate queries, never unfiltered O(n^2).
 
-/// Candidate ring pairs (i < j) with overlapping bounding boxes, skipping
-/// rings below `min_ring` (0 includes the shell, 1 = holes only). Small
-/// ring counts brute-force (faster than building a tree); larger counts use
-/// an R-tree under the rstar feature, with the all-pairs fallback otherwise.
+/// Candidate ring pairs (i < j) with overlapping bounding boxes, skipping rings below
+/// `min_ring` (0 includes the shell, 1 = holes only). Small ring counts brute-force
+/// (faster than building a tree); larger counts use an R-tree under the rstar feature,
+/// with the all-pairs fallback otherwise.
 pub(crate) fn overlap_pairs(bboxes: &[[f64; 4]], min_ring: usize) -> Vec<(usize, usize)> {
     let n = bboxes.len();
     if n <= 16 {
@@ -254,14 +255,10 @@ pub(crate) fn overlap_pairs(bboxes: &[[f64; 4]], min_ring: usize) -> Vec<(usize,
     }
 }
 
-/// Tree-accelerated exclusive point-in-ring (winding number, boundary =
-/// outside), same arithmetic as point_in_ring_exclusive but only candidate
-/// edges from the prebuilt shell tree are evaluated. The query box is the
-/// +x ray slab [pt.x, max_x] x [pt.y +/- 1e-12]: every ray-crossing edge
-/// has its x-max >= the crossing x >= pt.x and its y-span containing
-/// pt.y, and every boundary candidate lies within 1e-12 of pt - so the
-/// candidate set is a superset of the edges the original loop evaluates
-/// for this point, and the result is identical.
+/// Tree-accelerated exclusive point-in-ring test, winding number, boundary as outside.
+/// The arithmetic matches point_in_ring_exclusive, but only candidate edges from the
+/// prebuilt shell tree run. The query box is the +x ray slab [pt.x, max_x] x [pt.y +/-
+/// 1e-12]. Every boundary candidate lies within 1e-12 of pt.
 #[cfg(feature = "rstar")]
 fn point_in_ring_exclusive_tree(
     pt: Coord<f64>,
@@ -303,10 +300,10 @@ fn point_in_ring_exclusive_tree(
     if boundary_hit { false } else { wn != 0 }
 }
 
-/// Tree-accelerated hole-vs-shell crossing test: query the prebuilt shell
-/// edge tree with each hole edge's envelope (GEOS-style indexed check; the
-/// naive per-hole check_rings_intersect built a tree over the SMALL ring
-/// and paid O(|shell| x log|hole|) per hole on giant shells).
+/// Tree-accelerated hole-vs-shell crossing test: query the prebuilt shell edge tree
+/// with each hole edge's envelope (GEOS-style indexed check; the naive per-hole
+/// check_rings_intersect built a tree over the small ring and paid O(|shell| x
+/// log|hole|) per hole on giant shells).
 #[cfg(feature = "rstar")]
 fn ring_edges_intersect_tree(
     hole: &[Coord<f64>],
@@ -349,10 +346,10 @@ fn ring_edges_intersect_tree(
     false
 }
 
-/// Hole vertices lying EXACTLY on the shell boundary (vertex-on-edge and
-/// shared vertices), via the prebuilt shell edge tree. Near-miss vertices
-/// do NOT touch (GEOS exact-predicate parity; tolerance-based touches
-/// fabricated contacts on real cadastral giants, measured 2026-08-06).
+/// Hole vertices lying exactly on the shell boundary (vertex-on-edge and shared
+/// vertices), via the prebuilt shell edge tree. Near-miss vertices do not touch (GEOS
+/// exact-predicate parity; tolerance-based touches fabricated contacts on real
+/// cadastral giants, measured 2026-08-06).
 #[cfg(feature = "rstar")]
 fn ring_touch_points(
     hole: &[Coord<f64>],

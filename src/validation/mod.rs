@@ -104,8 +104,8 @@ pub(crate) mod ring;
 /// Sweep-line machinery for ring self-intersection.
 pub(crate) mod sweep;
 
-/// Maximum `GeometryCollection` nesting depth - shared with repair so the
-/// bound cannot drift between the validator and the repair output.
+/// Maximum `GeometryCollection` nesting depth - shared with repair so the bound cannot
+/// drift between the validator and the repair output.
 pub(crate) use complex::MAX_COLLECTION_DEPTH;
 /// Shared by the validator and the fast-path gate (duplicated rings).
 pub(crate) use complex::has_duplicate_rings;

@@ -7,9 +7,8 @@ use std::io::{self, Write};
 
 /// Serialize a `Geometry<f64>` to WKT and write it to any `io::Write` target.
 ///
-/// Formats the geometry using [`write_wkt`] and writes the resulting
-/// string to `writer`. Returns `io::Result<()>` so callers can handle
-/// write errors (e.g. broken pipe, disk full).
+/// Returns `io::Result<()>` so callers can handle write errors (e.g. broken pipe, disk
+/// full).
 #[cfg(feature = "std")]
 pub fn write_wkt_to(geom: &Geometry<f64>, writer: &mut impl Write) -> io::Result<()> {
     let s = write_wkt(geom);
@@ -18,10 +17,6 @@ pub fn write_wkt_to(geom: &Geometry<f64>, writer: &mut impl Write) -> io::Result
 
 
 /// Serialize a `Geometry<f64>` to WKT string.
-///
-/// The output uses standard OGC WKT formatting (space after type keyword,
-/// spaces after commas). The same geometry can be round-tripped through
-/// [`read_wkt`].
 pub fn write_wkt(geom: &Geometry<f64>) -> String {
     let mut s = String::new();
     write_geom(&mut s, geom);

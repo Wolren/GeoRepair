@@ -1,9 +1,7 @@
 //! Geometry precision reduction with topology preservation.
 //!
-//! Mirrors JTS's `GeometryPrecisionReducer`: reduces all coordinates to a
-//! fixed grid, then validates and repairs any topology issues caused by
-//! snapping. Supports multiple precision models and automatic retry with
-//! progressively coarser grids.
+//! Supports multiple precision models and automatic retry with progressively coarser
+//! grids.
 
 use alloc::vec::Vec;
 use geo::{
@@ -21,26 +19,26 @@ use crate::validation::GeoValidation;
 pub enum RoundingMode {
     /// Round to nearest grid point (standard).
     ///
-    /// `(v / scale).round() * scale` — the usual rounding behaviour.
+    /// The usual rounding behaviour.
     Round,
     /// Always floor (for conservative envelope expansions).
     ///
-    /// `(v / scale).floor() * scale` — never rounds upward.
+    /// Never rounds upward.
     Floor,
     /// Always ceil.
     ///
-    /// `(v / scale).ceil() * scale` — never rounds downward.
+    /// Never rounds downward.
     Ceil,
 }
 
 /// Describes a fixed-precision grid for coordinate reduction.
 ///
-/// `scale` is the grid resolution (e.g., `1e-8` snaps to 8 decimal places).
-/// The grid is always origin-centered.
+/// `scale` is the grid resolution (e.g., `1e-8` snaps to 8 decimal places). The grid is
+/// always origin-centered.
 #[derive(Clone, Copy, Debug)]
 pub struct PrecisionModel {
-    /// Grid resolution: coordinate values are snapped to multiples of this.
-    /// Smaller values give finer precision (e.g. `1e-8` ≈ 1 cm at geographic scale).
+    /// Grid resolution: coordinate values are snapped to multiples of this. Smaller
+    /// values give finer precision (e.g. `1e-8` ≈ 1 cm at geographic scale).
     pub scale: f64,
     /// Rounding mode: standard round-to-nearest, floor, or ceil.
     pub mode: RoundingMode,
@@ -80,12 +78,11 @@ impl PrecisionModel {
         }
     }
 
-    /// Common precision models.
-    /// 1e-6 precision (~1 metre at geographic scale).
+    /// Common precision models. 1e-6 precision (~1 metre at geographic scale).
     pub fn fixed_6() -> Self {
         Self::new(1e-6)
     }
-    /// 1e-8 precision (~1 cm at geographic scale). Default for most operations.
+    /// 1e-8 precision (~1 cm at geographic scale).
     pub fn fixed_8() -> Self {
         Self::new(1e-8)
     }
@@ -93,7 +90,7 @@ impl PrecisionModel {
     pub fn fixed_10() -> Self {
         Self::new(1e-10)
     }
-    /// 1e-4 precision (~10 m at geographic scale). Coarsest useful grid.
+    /// 1e-4 precision (~10 m at geographic scale).
     pub fn fixed_4() -> Self {
         Self::new(1e-4)
     }
@@ -102,12 +99,9 @@ impl PrecisionModel {
 
 /// Reduces geometry precision with topology preservation.
 ///
-/// Algorithm:
 /// 1. Snap all coordinates to the precision grid
 /// 2. Validate the result
 /// 3. If invalid, run MakeValid to repair topology issues
-///
-/// The config controls which repair strategy is used for fix-up.
 pub struct GeometryPrecisionReducer {
     model: PrecisionModel,
     config: MakeValidConfig,
@@ -144,7 +138,6 @@ impl GeometryPrecisionReducer {
     }
 
     /// Snap all coordinates to the precision grid without calling MakeValid.
-    /// Use this inside retry chains to avoid recursive MakeValid calls.
     pub fn reduce_raw(&self, poly: &Polygon<f64>) -> Geometry<f64> {
         let snapped = self.snap_polygon(poly);
         Geometry::Polygon(snapped)
@@ -252,8 +245,8 @@ impl GeometryPrecisionReducer {
 
 /// Try to reduce precision at progressively coarser grids until success.
 ///
-/// Starts at `1e-10` and degrades by factor 100 each step until `1e-4`.
-/// Returns the first valid result, or the last (possibly invalid) result.
+/// Starts at `1e-10` and degrades by factor 100 each step until `1e-4`. Returns the
+/// first valid result, or the last (possibly invalid) result.
 pub fn reduce_with_retry(geom: &Geometry<f64>, config: &MakeValidConfig) -> Geometry<f64> {
     let scales = [1e-10, 1e-8, 1e-6, 1e-4];
     for &scale in &scales {

@@ -1,10 +1,4 @@
 //! Full Bentley-Ottmann sweep-line for finding all proper edge intersections.
-//!
-//! Processes endpoint events left-to-right, maintains an active set of
-//! segments intersecting the current sweep position, and detects intersections
-//! between adjacent segments.  When an intersection is found it is added as a
-//! future event so that crossing segments are swapped in the active set,
-//! ensuring all subsequent intersections are found.
 
 use alloc::vec::Vec;
 use rustc_hash::FxHashSet;
@@ -183,7 +177,6 @@ pub(crate) fn find_intersecting_pairs(edges: &[Line<f64>], eps: f64) -> Vec<(usi
         return vec![];
     }
 
-    // 1.
     let mut events: Vec<Event> = Vec::with_capacity(n * 2);
     for (i, e) in edges.iter().enumerate() {
         let (left_pt, right_pt) =
@@ -210,7 +203,6 @@ pub(crate) fn find_intersecting_pairs(edges: &[Line<f64>], eps: f64) -> Vec<(usi
 
     events.sort_by(event_cmp);
 
-    // 2.
     let mut active = ActiveSet::new(edges);
     let mut results: Vec<(usize, usize)> = Vec::new();
     let mut seen: FxHashSet<u64> = FxHashSet::default();

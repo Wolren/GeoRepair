@@ -1,15 +1,13 @@
 //! geo-traits interop surface.
 //!
-//! Enabled by the `geo-traits` feature. Exposes the validation and repair
-//! engines over [`geo_traits::GeometryTrait`] and
-//! [`geo_traits::GeometryCollectionTrait`], the trait layer shared by the
-//! georust data ecosystem (geo, geoarrow, geozero, the `wkb` crate).
+//! Exposes the validation and repair engines over [`geo_traits::GeometryTrait`] and
+//! [`geo_traits::GeometryCollectionTrait`], the trait layer shared by the georust data
+//! ecosystem (geo, geoarrow, geozero, the `wkb` crate).
 //!
-//! Any geometry source that implements those traits can be validated or
-//! repaired in one call. The engine materializes a `geo::Geometry<f64>`
-//! internally and returns the result as geo geometry; callers that need the
-//! result back in their own representation convert with their crate's
-//! geo-traits writer (e.g. `wkb::writer::write_wkb`, geoarrow's `ToWKB`).
+//! The engine materializes a `geo::Geometry<f64>` internally and returns the result as
+//! geo geometry; callers that need the result back in their own representation convert
+//! with their crate's geo-traits writer (e.g. `wkb::writer::write_wkb`, geoarrow's
+//! `ToWKB`).
 //!
 //! # Example
 //!
@@ -36,10 +34,9 @@ use crate::validation::ValidationResult;
 
 /// Repair one geometry from any geo-traits source.
 ///
-/// The result is a valid `geo::Geometry<f64>`. Geometry that cannot be
-/// represented as geo geometry (an empty point, or a MultiPoint containing
-/// an empty point) is returned as an empty [`GeometryCollection`], matching
-/// geo's own representation limits.
+/// The result is a valid `geo::Geometry<f64>`. Geometry that cannot be represented as
+/// geo geometry (an empty point, or a MultiPoint containing an empty point) is returned
+/// as an empty [`GeometryCollection`], matching geo's own representation limits.
 pub fn make_valid_geometry<G>(geometry: &G) -> Geometry<f64>
 where
     G: GeometryTrait<T = f64>,
@@ -52,8 +49,7 @@ where
 
 /// Repair every geometry in a collection, preserving order.
 ///
-/// Each element is repaired independently; an invalid element never aborts
-/// the batch.
+/// Each element is repaired independently; an invalid element never aborts the batch.
 pub fn make_valid_geometries<G>(collection: &G) -> Vec<Geometry<f64>>
 where
     G: GeometryCollectionTrait<T = f64>,
@@ -73,9 +69,6 @@ where
 }
 
 /// Quick validity check for any geo-traits geometry.
-///
-/// An unrepresentable geometry (empty point / MultiPoint with empty points)
-/// is treated as valid, matching OGC.
 pub fn is_valid_geometry<G>(geometry: &G) -> bool
 where
     G: GeometryTrait<T = f64>,

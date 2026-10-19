@@ -1,22 +1,4 @@
-//! Custom binary bulk polygon format loader and streaming iterator.
-//!
-//! Provides [`load_bin`] for loading all polygons at once and
-//! [`load_bin_stream`] for memory-efficient streaming.
-//!
-//! # Format
-//!
-//! Little-endian binary format for polygon batches:
-//! - u32 LE: polygon count
-//! - Per polygon:
-//!   - u32 LE: exterior ring vertex count
-//!   - f64 LE × N: (x, y) pairs
-//!   - u32 LE: interior ring count
-//!   - Per interior ring:
-//!     - u32 LE: vertex count
-//!     - f64 LE × N: (x, y) pairs
-//!
-//! This format is designed for bulk transfer from GDAL/QGIS and is not
-//! an OGC standard. For portable interchange, use WKB.
+//! Loader and streaming iterator for the custom binary bulk polygon format.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -28,7 +10,6 @@ use geo::{Coord, LineString, Polygon};
 
 /// Load polygons from a custom binary format.
 ///
-/// Format:
 /// - u32 LE: number of polygons
 /// - For each polygon:
 ///   - u32 LE: number of exterior ring coords
@@ -97,9 +78,8 @@ pub fn load_bin(path: &str) -> Result<Vec<Polygon<f64>>, String> {
 
 /// Stream polygons from a binary file without loading everything into memory.
 ///
-/// Returns an iterator that reads polygons one at a time from a custom
-/// binary format file. Useful for processing datasets too large to fit
-/// in memory.
+/// Returns an iterator that reads polygons one at a time from a custom binary format
+/// file.
 ///
 /// # Format
 ///
@@ -116,7 +96,6 @@ pub fn load_bin(path: &str) -> Result<Vec<Polygon<f64>>, String> {
 /// # Panics
 ///
 /// Panics on I/O errors (file not found, read failure).
-/// Use [`load_bin`] for fallible access.
 ///
 /// # Example
 ///
@@ -197,7 +176,6 @@ impl Iterator for LoadBinStream {
 
 /// Write polygons to the custom binary format.
 ///
-/// Same format as [`load_bin`]:
 /// - u32 LE: number of polygons
 /// - For each polygon:
 ///   - u32 LE: exterior ring coord count

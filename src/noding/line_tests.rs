@@ -1,10 +1,9 @@
 //! Unit tests for the lean line noder.
 //!
-//! The core assertion on every case: the noded chains must each pass the
-//! validator's own simplicity predicate (`check_linestring_self_intersection`),
-//! because that is the repair contract (valid-or-empty). Cross-component
-//! validity is asserted through `GeoValidation::validate` on the assembled
-//! MultiLineString where relevant.
+//! The core assertion on every case: the noded chains must each pass the validator's
+//! own simplicity predicate (`check_linestring_self_intersection`), because that is the
+//! repair contract (valid-or-empty). Cross-component validity is asserted through
+//! `GeoValidation::validate` on the assembled MultiLineString where relevant.
 
 use alloc::vec::Vec;
 
@@ -66,8 +65,8 @@ fn node_ok_closed(pairs: &[(f64, f64)]) -> Vec<Vec<Coord<f64>>> {
     chains
 }
 
-/// Figure-8: a closed line crossing itself once. The four arcs must share
-/// the crossing node bit-exactly and be simple.
+/// Figure-8: a closed line crossing itself once. The four arcs must share the crossing
+/// node bit-exactly and be simple.
 #[test]
 fn figure8_crossing() {
     let chains = node_ok_closed(&[(0.0, 0.0), (10.0, 10.0), (10.0, 0.0), (0.0, 10.0)]);
@@ -91,9 +90,9 @@ fn figure8_crossing() {
     assert_mls_valid(&chains);
 }
 
-/// Adjacent out-and-back: LINESTRING(0 0, 10 0, 5 0). The doubled-back
-/// segment is a collinear overlap of its neighbour; the noder must merge
-/// the traversal into a single chain 0 -> 5 -> 10.
+/// Adjacent out-and-back: linestring(0 0, 10 0, 5 0). The doubled-back segment is a
+/// collinear overlap of its neighbour; the noder must merge the traversal into a single
+/// chain 0 -> 5 -> 10.
 #[test]
 fn out_and_back_adjacent() {
     let chains = node_ok(&[(0.0, 0.0), (10.0, 0.0), (5.0, 0.0)]);
@@ -105,9 +104,9 @@ fn out_and_back_adjacent() {
     assert!((ch[2].x - 10.0).abs() < 1e-12);
 }
 
-/// Non-adjacent collinear overlap: 0-10-5-15. Segments [0,10] and [5,15]
-/// overlap on [5,10]; the noder must split both and dedup the doubled
-/// traversal into one chain 0 -> 5 -> 10 -> 15.
+/// Non-adjacent collinear overlap: 0-10-5-15. Segments [0,10] and [5,15] overlap on
+/// [5,10]; the noder must split both and dedup the doubled traversal into one chain 0
+/// -> 5 -> 10 -> 15.
 #[test]
 fn collinear_overlap_non_adjacent() {
     let chains = node_ok(&[(0.0, 0.0), (10.0, 0.0), (5.0, 0.0), (15.0, 0.0)]);
@@ -119,8 +118,8 @@ fn collinear_overlap_non_adjacent() {
     }
 }
 
-/// T-junction: a vertex of one segment lies on the interior of another.
-/// The horizontal must split at the junction; the vertical stays whole.
+/// T-junction: a vertex of one segment lies on the interior of another. The horizontal
+/// must split at the junction; the vertical stays whole.
 #[test]
 fn t_junction_vertex_on_edge() {
     let chains = node_ok(&[(0.0, 0.0), (10.0, 0.0), (5.0, 0.0), (5.0, 10.0)]);
@@ -138,9 +137,8 @@ fn t_junction_vertex_on_edge() {
     assert_mls_valid(&chains);
 }
 
-/// Vertex revisit: the line passes through an existing vertex. The noder
-/// may fall back (the greedy filter is the safe path), but the final
-/// make_valid output must be valid.
+/// Vertex revisit: the line passes through an existing vertex. The noder may fall back
+/// (the greedy filter is the safe path), but the final make_valid output must be valid.
 #[test]
 fn vertex_revisit_make_valid_ok() {
     let cs = coords(&[
@@ -155,8 +153,7 @@ fn vertex_revisit_make_valid_ok() {
     assert!(out.is_valid(), "make_valid output must be valid");
 }
 
-/// Star-burst: five spokes meeting at the centre. Every spoke is its own
-/// chain; the centre is a degree-5 junction.
+/// Star-burst: five spokes meeting at the centre.
 #[test]
 fn star_burst() {
     let chains = node_ok_closed(&[
@@ -174,9 +171,8 @@ fn star_burst() {
     assert_mls_valid(&chains);
 }
 
-/// Three segments crossing at nearly the same point (within the noding
-/// eps of each other). All three must split at ONE canonical node, and
-/// every chain must be simple.
+/// Three segments crossing at nearly the same point (within the noding eps of each
+/// other). All three must split at one canonical node, and every chain must be simple.
 #[test]
 fn near_coincident_crossing_cluster() {
     let chains = node_ok(&[
@@ -191,9 +187,8 @@ fn near_coincident_crossing_cluster() {
     assert_mls_valid(&chains);
 }
 
-/// The bench collinear-overlap shape (50 segments on y = 0 with doubled
-/// coverage): the noder must reduce it to one simple chain covering the
-/// full span.
+/// The bench collinear-overlap shape (50 segments on y = 0 with doubled coverage): the
+/// noder must reduce it to one simple chain covering the full span.
 #[test]
 fn collinear_overlap_bench_shape() {
     let mut pairs = Vec::new();
@@ -218,9 +213,7 @@ fn collinear_overlap_bench_shape() {
     }
 }
 
-/// A lissajous 5:3 polyline. The parametrization retraces every segment
-/// (t and pi - t give the same point), so the noded output is the figure
-/// covered once: about half the input length, all simple.
+/// A lissajous 5:3 polyline.
 #[test]
 fn lissajous_retrace_resolved() {
     let n = 400usize;
@@ -258,8 +251,8 @@ fn lissajous_retrace_resolved() {
     assert_mls_valid(&chains);
 }
 
-/// make_valid on a non-simple line: the result must be valid and simple
-/// (never NotSimple).
+/// make_valid on a non-simple line: the result must be valid and simple (never
+/// NotSimple).
 #[test]
 fn make_valid_line_contract() {
     let cs = coords(&[
@@ -275,8 +268,8 @@ fn make_valid_line_contract() {
 }
 
 
-/// Subdivide a closed coordinate loop to exactly n vertices by arc length
-/// (the bench's figure-8 construction).
+/// Subdivide a closed coordinate loop to exactly n vertices by arc length (the bench's
+/// figure-8 construction).
 fn subdivide(pairs: &[(f64, f64)], n: usize) -> Vec<Coord<f64>> {
     let edges = pairs.len() - 1;
     let lens: Vec<f64> = (0..edges)
@@ -337,8 +330,8 @@ fn lissajous(n: usize) -> Vec<Coord<f64>> {
     cs
 }
 
-/// The general path on a fresh noder, reached exactly as `run` reaches it
-/// when the fast path bails (revisit pre-scan, then `run_full`).
+/// The general path on a fresh noder, reached exactly as `run` reaches it when the fast
+/// path bails (revisit pre-scan, then `run_full`).
 fn general_chains(cs: &[Coord<f64>]) -> Option<Vec<Vec<Coord<f64>>>> {
     let mut ln = LineNoder::new(cs);
     let n = cs.len() - 1;
@@ -412,8 +405,9 @@ fn crossing_only_splits_vertex_on_edge() {
         (5.0, 0.0),
         (5.0, 10.0),
     ]);
-    // (5.0, 0.0) rests strictly inside segment (0,0)-(10,0).
-    // 1000v +60% locally / +93% CI: every wave-vertex-on-chord contact tripped it (fuzz crash-9c50dad6 fix, 64c2b58).
+    // (5.0, 0.0) rests strictly inside segment (0,0)-(10,0). 1000v +60% locally / +93%
+    // CI: every wave-vertex-on-chord contact tripped it (fuzz crash-9c50dad6 fix,
+    // 64c2b58).
     let chains = LineNoder::new(&cs)
         .crossing_only()
         .expect("vertex-on-edge now splits the host segment instead of bailing");

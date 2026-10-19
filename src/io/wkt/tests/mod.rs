@@ -1,5 +1,5 @@
-//! wkt test battery (split from tests.rs 2026-08-07 for
-//! file-size governance; content verbatim).
+//! wkt test battery (split from tests.rs 2026-08-07 for file-size governance; content
+//! verbatim).
 
 #[cfg(test)]
 use super::*;

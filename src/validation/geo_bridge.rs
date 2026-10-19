@@ -1,23 +1,7 @@
-//! Bridge to geo's [`Validation`]
-//! trait taxonomy.
-//!
-//! geo's `Validation` trait and per-type `Invalid*` error enums are the
-//! validation vocabulary of the georust ecosystem. geo_repair's validator is
-//! stricter (see the module docs on the collinear gate and T-junction rule)
-//! and passes the GEOS XML suite, but its error taxonomy differs from geo's.
-//!
-//! The orphan rule prevents implementing geo's trait for geo's own types, so
-//! this adapter wraps any `Geometry<f64>` in [`GeoRepairValidation`]: code
-//! written against geo's trait — generic bounds on `Validation`,
-//! `.validation_errors()`, `.check_validation()` — then consumes geo_repair's
-//! engine without changing its error handling.
-//!
-//! The mapping is best-effort. geo_repair checks 18 OGC rules while geo's
-//! enums cover a subset, and geo carries ring/index payloads that
-//! geo_repair's errors do not record. Error classes with no geo counterpart
-//! (ring closure, pinch points, nested holes, orientation, collinearity,
-//! duplicates) are omitted from the geo view; they remain visible through
-//! the plain [`validate`](crate::validate) API.
+//! Bridge to the geo Validation trait and georust vocabulary. Best-effort: geo_repair
+//! checks 18 ogc rules, geo enums cover a subset, and geo carries payloads that
+//! geo_repair errors omit. Classes with no counterpart, such as closure, pinch or
+//! nested holes, stay visible via crate::validate api.
 
 use alloc::boxed::Box;
 use geo::Geometry;
@@ -28,10 +12,8 @@ use geo::algorithm::validation::{
 
 use super::{GeometryValidationError, validate};
 
-/// Adapter exposing geo_repair's validation engine through geo's
-/// [`Validation`] trait.
+/// Adapter exposing geo_repair's validation engine through geo's [`Validation`] trait.
 ///
-/// Wrap any `&Geometry<f64>` and call the trait methods directly:
 ///
 /// ```rust
 /// # use geo::{Geometry, Polygon, LineString};
@@ -67,10 +49,10 @@ impl Validation for GeoRepairValidation<'_> {
 /// Best-effort mapping of one geo_repair validation error into geo's
 /// [`InvalidGeometry`] taxonomy for the given geometry.
 ///
-/// Returns `None` for error classes with no geo counterpart (geo does not
-/// model ring closure, pinch points, nested holes, orientation,
-/// collinearity, or duplicates) and for geometry types geo models with a
-/// different shape (multi-geometries, collections, rect, triangle).
+/// Returns `None` for error classes with no geo counterpart (geo does not model ring
+/// closure, pinch points, nested holes, orientation, collinearity, or duplicates) and
+/// for geometry types geo models with a different shape (multi-geometries, collections,
+/// rect, triangle).
 pub fn map_geo_invalid(
     geometry: &Geometry<f64>,
     err: &GeometryValidationError,
@@ -165,8 +147,9 @@ mod tests {
 
     #[test]
     fn stricter_than_geo_collinear_sliver() {
-        // 5e-14 apart (about 28 ulps at this scale) - genuinely separated, geometrically VALID, and GEOS accepts it.
-        // `32 * EPSILON * L^2` collinear gate swallowed near-parallel pairs
+        // 5e-14 apart (about 28 ulps at this scale) - genuinely separated,
+        // geometrically valid, and GEOS accepts it. `32 * epsilon * L^2` collinear gate
+        // swallowed near-parallel pairs
         let poly = Polygon::new(
             LineString::from(vec![
                 (0.0, 0.0),

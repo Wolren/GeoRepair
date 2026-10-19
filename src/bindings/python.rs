@@ -1,12 +1,5 @@
 //! Python bindings via PyO3.
 //!
-//! The `geo_repair` package exposes the full validation and repair
-//! surface over both WKB (bytes, the GIS-native format used by QGIS and
-//! GDAL) and WKT (text). Every repair/validate-and-fix function accepts
-//! `method` ("auto" | "arrange" | "structure") and `keep_collapsed`;
-//! batch functions mirror the single-geometry semantics, and
-//! `par_repair_*_batch` uses the rayon batch when the wheel was built
-//! with the `parallel` feature.
 //!
 //! # Build and install
 //!
@@ -33,8 +26,8 @@
 //! print(geo_repair.version())
 //! ```
 //!
-//! **QGIS integration:** See `qgis/qgis_geo_repair.py` for a complete
-//! processing script (batched WKB streaming, memory O(1)).
+//! **qgis integration:** See `qgis/qgis_geo_repair.py` for a complete processing script
+//! (batched WKB streaming, memory O(1)).
 
 use alloc::string::String;
 use alloc::string::ToString;
@@ -89,9 +82,8 @@ fn repair_one(geom: geo::Geometry<f64>, config: &MakeValidConfig) -> geo::Geomet
     geom.make_valid_with_config(config)
 }
 
-/// Collect validation errors as strings; for GeometryCollection inputs each
-/// child's errors are prefixed with `[geom N]` so callers can tell which
-/// component failed.
+/// Collect validation errors as strings; for GeometryCollection inputs each child's
+/// errors are prefixed with `[geom N]` so callers can tell which component failed.
 fn error_strings(geom: &geo::Geometry<f64>) -> Vec<String> {
     if let geo::Geometry::GeometryCollection(gc) = geom {
         let mut out = Vec::new();
@@ -153,14 +145,11 @@ fn geo_repair_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
 /// Repair a single WKB geometry (bytes).
 ///
-/// Args:
-///     wkb: Raw WKB bytes of the geometry to repair.
-///     method: Optional repair method (``"auto"``, ``"arrange"``, ``"structure"``).
-///     keep_collapsed: Optional; when True, collapsed (zero-area)
-///         components are kept instead of dropped.
+/// Args: wkb: Raw WKB bytes of the geometry to repair. method: Optional repair method
+/// (``"auto"``, ``"arrange"``, ``"structure"``). keep_collapsed: Optional; when True,
+/// collapsed (zero-area) components are kept instead of dropped.
 ///
-/// Returns:
-///     WKB bytes of the repaired geometry.
+/// Returns: WKB bytes of the repaired geometry.
 #[pyfunction]
 #[pyo3(signature = (wkb, method = None, keep_collapsed = None))]
 fn repair_wkb(
@@ -176,8 +165,7 @@ fn repair_wkb(
 
 /// Repair a list of WKB byte buffers.
 ///
-/// Unparseable inputs are returned unchanged (the batch never fails as a
-/// whole).
+/// Unparseable inputs are returned unchanged (the batch never fails as a whole).
 #[pyfunction]
 #[pyo3(signature = (wkbs, method = None, keep_collapsed = None))]
 fn repair_wkb_batch(
@@ -226,11 +214,8 @@ fn par_repair_wkb_batch(
 
 /// Check whether a WKB geometry is OGC-valid.
 ///
-/// Args:
-///     wkb: Raw WKB bytes.
 ///
-/// Returns:
-///     ``True`` if the geometry is valid, ``False`` otherwise.
+/// Returns: ``True`` if the geometry is valid, ``False`` otherwise.
 #[pyfunction]
 fn is_valid_wkb(wkb: Vec<u8>) -> PyResult<bool> {
     let geom = parse_wkb(&wkb)?;
@@ -248,10 +233,9 @@ fn validate_wkb(wkb: Vec<u8>) -> PyResult<(bool, Vec<String>)> {
 
 /// Validate a WKB geometry, then fix it if invalid.
 ///
-/// Returns:
-///     ``(was_valid, errors_before_repair, fixed_wkb_bytes)``
-///     If the geometry was already valid, `errors_before_repair` is empty
-///     and `fixed_wkb_bytes` equals the original input.
+/// Returns: ``(was_valid, errors_before_repair, fixed_wkb_bytes)`` If the geometry was
+/// already valid, `errors_before_repair` is empty and `fixed_wkb_bytes` equals the
+/// original input.
 #[pyfunction]
 #[pyo3(signature = (wkb, method = None, keep_collapsed = None))]
 fn validate_and_fix_wkb(
@@ -280,7 +264,7 @@ fn is_valid_wkb_batch(wkbs: Vec<Vec<u8>>) -> PyResult<Vec<bool>> {
     Ok(results)
 }
 
-/// Validate each WKB geometry, returning ``[(is_valid, [errors]), ...]``.
+/// Validate each WKB geometry, returning ``[(is_valid, [errors]), .]``.
 #[pyfunction]
 fn validate_wkb_batch(wkbs: Vec<Vec<u8>>) -> PyResult<Vec<(bool, Vec<String>)>> {
     let mut results = Vec::with_capacity(wkbs.len());
@@ -300,7 +284,7 @@ fn validate_wkb_batch(wkbs: Vec<Vec<u8>>) -> PyResult<Vec<(bool, Vec<String>)>> 
 
 /// Validate then fix each WKB geometry.
 ///
-/// Returns ``[(was_valid, errors_before_repair, fixed_wkb_bytes), ...]``.
+/// Returns ``[(was_valid, errors_before_repair, fixed_wkb_bytes), .]``.
 #[pyfunction]
 #[pyo3(signature = (wkbs, method = None, keep_collapsed = None))]
 fn validate_and_fix_wkb_batch(
@@ -348,7 +332,7 @@ fn repair_validate_wkb(
 
 /// Repair + validate a list of WKB buffers.
 ///
-/// Returns ``[(wkb_bytes, is_valid_before, [errors]), ...]``.
+/// Returns ``[(wkb_bytes, is_valid_before, [errors]), .]``.
 #[pyfunction]
 #[pyo3(signature = (wkbs, method = None, keep_collapsed = None))]
 fn repair_validate_wkb_batch(
@@ -376,14 +360,11 @@ fn repair_validate_wkb_batch(
 
 /// Repair a WKT geometry string.
 ///
-/// Args:
-///     wkt: WKT text of the geometry to repair.
-///     method: Optional repair method (``"auto"``, ``"arrange"``, ``"structure"``).
-///     keep_collapsed: Optional; when True, collapsed (zero-area)
-///         components are kept instead of dropped.
+/// Args: wkt: WKT text of the geometry to repair. method: Optional repair method
+/// (``"auto"``, ``"arrange"``, ``"structure"``). keep_collapsed: Optional; when True,
+/// collapsed (zero-area) components are kept instead of dropped.
 ///
-/// Returns:
-///     WKT text of the repaired geometry.
+/// Returns: WKT text of the repaired geometry.
 #[pyfunction]
 #[pyo3(signature = (wkt, method = None, keep_collapsed = None))]
 fn repair_wkt(wkt: &str, method: Option<&str>, keep_collapsed: Option<bool>) -> PyResult<String> {
@@ -393,7 +374,7 @@ fn repair_wkt(wkt: &str, method: Option<&str>, keep_collapsed: Option<bool>) -> 
     Ok(write_wkt(&fixed))
 }
 
-/// Repair a list of WKT strings. Unparseable inputs are returned unchanged.
+/// Repair a list of WKT strings.
 #[pyfunction]
 #[pyo3(signature = (wkts, method = None, keep_collapsed = None))]
 fn repair_wkt_batch(
@@ -441,7 +422,7 @@ fn is_valid_wkt(wkt: &str) -> PyResult<bool> {
     Ok(geom.is_valid())
 }
 
-/// Validate a list of WKT strings, returning ``[bool, ...]``.
+/// Validate a list of WKT strings, returning ``[bool, .]``.
 #[pyfunction]
 fn is_valid_wkt_batch(wkts: Vec<String>) -> PyResult<Vec<bool>> {
     let mut results = Vec::with_capacity(wkts.len());
@@ -455,14 +436,13 @@ fn is_valid_wkt_batch(wkts: Vec<String>) -> PyResult<Vec<bool>> {
 }
 
 /// Validate a WKT geometry, returning the list of violations.
-/// Collection components are prefixed with ``[geom N]``.
 #[pyfunction]
 fn validate_wkt(wkt: &str) -> PyResult<Vec<String>> {
     let geom = parse_wkt(wkt)?;
     Ok(error_strings(&geom))
 }
 
-/// Validate a list of WKT strings, returning ``[[errors], ...]``.
+/// Validate a list of WKT strings, returning ``[[errors], .]``.
 #[pyfunction]
 fn validate_wkt_batch(wkts: Vec<String>) -> PyResult<Vec<Vec<String>>> {
     let mut results = Vec::with_capacity(wkts.len());
@@ -495,7 +475,7 @@ fn validate_and_fix_wkt(
 
 /// Validate then fix each WKT geometry.
 ///
-/// Returns ``[(was_valid, errors_before_repair, fixed_wkt), ...]``.
+/// Returns ``[(was_valid, errors_before_repair, fixed_wkt), .]``.
 #[pyfunction]
 #[pyo3(signature = (wkts, method = None, keep_collapsed = None))]
 fn validate_and_fix_wkt_batch(
@@ -543,7 +523,7 @@ fn repair_validate_wkt(
 
 /// Repair + validate a list of WKT strings.
 ///
-/// Returns ``[(fixed_wkt, is_valid_before, [errors]), ...]``.
+/// Returns ``[(fixed_wkt, is_valid_before, [errors]), .]``.
 #[pyfunction]
 #[pyo3(signature = (wkts, method = None, keep_collapsed = None))]
 fn repair_validate_wkt_batch(

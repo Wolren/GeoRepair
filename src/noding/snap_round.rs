@@ -30,9 +30,8 @@ fn snap_to_grid(c: Coord<f64>) -> Coord<f64> {
     }
 }
 
-/// A hot pixel represents a grid cell at SNAP_GRID resolution.
-/// Its center is snapped to the grid, and it can detect if a segment
-/// passes through it within HOT_PIXEL_RADIUS.
+/// A hot pixel represents a grid cell at SNAP_GRID resolution. Its center is snapped to
+/// the grid, and it can detect if a segment passes through it within HOT_PIXEL_RADIUS.
 struct HotPixel {
     center: Coord<f64>,
 }
@@ -44,8 +43,8 @@ impl HotPixel {
         }
     }
 
-    /// Returns true if the segment passes within HOT_PIXEL_RADIUS
-    /// of this hot pixel's center (including exactly through it).
+    /// Returns true if the segment passes within HOT_PIXEL_RADIUS of this hot pixel's
+    /// center (including exactly through it).
     fn touches(&self, seg: &Line<f64>) -> bool {
         let dx = seg.end.x - seg.start.x;
         let dy = seg.end.y - seg.start.y;
@@ -65,8 +64,8 @@ impl HotPixel {
         d2 <= HOT_PIXEL_RADIUS * HOT_PIXEL_RADIUS
     }
 
-    /// Returns the parameter of the closest point on the segment
-    /// to this hot pixel's center.
+    /// Returns the parameter of the closest point on the segment to this hot pixel's
+    /// center.
     fn closest_param(&self, seg: &Line<f64>) -> f64 {
         let dx = seg.end.x - seg.start.x;
         let dy = seg.end.y - seg.start.y;
@@ -283,7 +282,7 @@ fn check_chain_pair(
     }
 }
 
-/// Build a sub-chain from `segments[start..end]` with a computed bounding box.
+/// Build a sub-chain from `segments[start.end]` with a computed bounding box.
 #[cfg(feature = "rstar")]
 fn sub_chain(segments: &[Line<f64>], start: usize, end: usize) -> MonoChain {
     let mut min_x = f64::MAX;
@@ -521,15 +520,8 @@ impl SnapRoundingNoder {
     }
 }
 
-/// Snap-round a set of line segments to a uniform grid.
-///
-/// Algorithm (HotPixel-style via SnapRoundingNoder):
-/// 1. Collect all unique coordinates (endpoints + intersection points)
-/// 2. Create hot pixels at each coordinate snapped to the grid
-/// 3. Fall near-coincident points to the same hot pixel
-/// 4. For each segment, find all hot pixels it passes through
-/// 5. Subdivide each segment at hot pixel boundaries
-/// 6. Snap all coordinates to grid and drop zero-length segments
+/// Snap-round line segments to a uniform grid in the HotPixel style of
+/// SnapRoundingNoder.
 pub(crate) fn snap_round_lines(lines: &[Line<f64>]) -> Vec<Line<f64>> {
     let mut noder = SnapRoundingNoder::new();
     noder.node(lines)

@@ -359,16 +359,11 @@ mod shuffle_kernels {
         assert_eq!(simd.3.to_bits(), scalar.3.to_bits());
     }
 
-    /// Informational head-to-head timings, no assertions (CI-safe).
-    /// Run with: cargo test --release --lib simd:: -- --nocapture
-    ///
-    /// Verdicts (2026-08-16, i5-12400F, rustc 1.97):
-    /// - aabb shuffle-transpose AVX kernel: ~4x vs scalar (wired into
-    ///   aabb_minmax_simd, used by the repair paths).
-    /// - orient2d batch-of-4: raw shuffle AVX2 kernel ~1.17x faster,
-    ///   but runtime dispatch + non-inlinable target_feature boundary
-    ///   cost ~0.8ns/call on a ~3ns kernel -> net 0.90x LOSS. Kept
-    ///   scalar (inlinable into the pair predicates).
+    /// Informational head-to-head timings with no assertions, so CI is safe. Verdicts
+    /// from 2026-08-16, i5-12400F, rustc 1.97: an aabb shuffle-transpose avx kernel is
+    /// ~4x faster than scalar and feeds aabb_minmax_simd. An orient2d batch-of-4 avx2
+    /// kernel is ~1.17x faster. Runtime dispatch costs ~0.8 ns per call on a ~3 ns
+    /// kernel. The net is a 0.90x loss, so the code stays scalar.
     #[test]
     fn microbench_kernels() {
         let coords = pseudo_coords(100_000);

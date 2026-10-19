@@ -22,8 +22,8 @@ pub fn repair_ring(ring: &LineString<f64>) -> Option<Vec<Polygon<f64>>> {
     repair_ring_tuned(ring, &core::Tuning::default())
 }
 
-/// Tuned variant of [`repair_ring`]: the repair pipeline threads the
-/// caller's [`core::Tuning`] through the dispatch thresholds.
+/// Tuned variant of [`repair_ring`]: the repair pipeline threads the caller's
+/// [`core::Tuning`] through the dispatch thresholds.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(crate) fn repair_ring_tuned(
     ring: &LineString<f64>,
@@ -33,8 +33,9 @@ pub(crate) fn repair_ring_tuned(
     if coords.len() < 4 {
         return None;
     }
-    // a vertex within validation tolerance (1e-12 * bbox scale) of the start vertex is a needle, not a feature
-    // (measured: 7.3e-11 gap at scale 118, eps 1.18e-10, invariant_barely_closed_ring).
+    // a vertex within validation tolerance (1e-12 * bbox scale) of the start vertex is
+    // a needle, not a feature (measured: 7.3e-11 gap at scale 118, eps 1.18e-10,
+    // invariant_barely_closed_ring).
     if coords.len() >= 5 {
         let (mut min_x, mut max_x, mut min_y, mut max_y) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
         for c in &coords {
@@ -63,8 +64,8 @@ pub(crate) fn repair_ring_tuned(
         return Some(vec![Polygon::new(LineString::new(coords), Vec::new())]);
     }
 
-    // Fast path: try O(n) split for single self-intersection (70% of invalids).
-    // whole lobes of area (measured: 2334 → 112, 95% loss).
+    // Fast path: try O(n) split for single self-intersection (70% of invalids). whole
+    // lobes of area (measured: 2334 → 112, 95% loss).
     if let Some(rings) = try_fast_fix_tuned(&coords, tuning) {
         let cleaned: Vec<Polygon<f64>> = rings
             .into_iter()
@@ -80,7 +81,7 @@ pub(crate) fn repair_ring_tuned(
         }
     }
 
-    // Returns polygons WITH structural holes: do not flatten to exterior rings.
+    // Returns polygons with structural holes: do not flatten to exterior rings.
     if let Some(polys) = fix_self_intersecting_tuned(&coords, tuning) {
         let cleaned: Vec<Polygon<f64>> = polys
             .into_iter()
@@ -118,31 +119,12 @@ pub(crate) fn basic_cleanup(ring: &LineString<f64>) -> Option<Vec<Coord<f64>>> {
     Some(deduped)
 }
 
-/// Collapse SUB-ULP spikes: consecutive vertices closer than
-/// f64::EPSILON × ring-bbox-scale are below the coordinate's own
-/// representable precision — degenerate spikes that poison noding and face
-/// extraction (measured: mixed-magnitude ring with a 5.089e-9 spike at 1e8
-/// scale → 7 GEOS-exact faces collapsed to 6, 62% area loss; GEOS degrades
-/// such spikes, as does arrange's prepare_lines snap). Merge the spike
-/// vertex into its predecessor. Only interior vertices are dropped (the
-/// closure vertex is protected by the loop range).
-///
-/// Runs ONLY on the repair path (before noding in fix_self_intersecting) —
-/// NOT in basic_cleanup — because valid fast-path passthrough must stay
-/// O(n) with no extra scan (measured: adding this to basic_cleanup cost
-/// ~0.45s on the 1.58M dataset, blowing the 5s bar).
-///
-/// Representative choice (`snap_clean`):
-/// - Structure repair path: keep the run's FIRST vertex (`snap_clean=false`).
-///   A sub-ULP run on an axis-aligned edge must collapse onto the axis
-///   (e.g. run (0,-8.4e-9),(-5.6e-10,8.6e-9),(-7.2e-10,6.5e-9) inside a ring
-///   with a y=0 edge → keep (0,-8.4e-9); snapping to the off-axis member
-///   (-7.2e-10,6.5e-9) turns the collinear overlap into a proper crossing,
-///   measured seed mixed4 → SelfIntersection).
-/// - Arrange CDT path: snap to the member closest to the origin
-///   (`snap_clean=true`). A spike at a random offset (e.g. (-7.55e-9,0)
-///   instead of (0,0)) produces CDT triangles that cross each other,
-///   measured seed 00c11200 → cross-component SelfIntersection.
+/// A vertex within f64::epsilon x ring bbox scale of the previous one is sub-precision.
+/// A 5.089e-9 spike at 1e8 scale turned 7 geos-exact faces into 6, a 62% area loss.
+/// Repair path only, before noding, not basic_cleanup: ~0.45 s on 1.58M polygons.
+/// snap_clean picks the representative. Structure path keeps the run first vertex:
+/// (0,-8.4e-9), (-5.6e-10,8.6e-9), (-7.2e-10,6.5e-9). Arrange cdt snaps to the
+/// nearest-origin member, so (-7.55e-9,0) makes crossing triangles, seed 00c11200.
 pub(crate) fn collapse_sub_ulp_vertices(
     coords: &[Coord<f64>],
     snap_clean: bool,
@@ -167,8 +149,8 @@ pub(crate) fn collapse_sub_ulp_vertices(
     let mut i = 0usize;
     while i < interior_len {
         cleaned.push(coords[i]);
-        // A run of >= 2 sub-ULP-consecutive vertices
-        // (-7.55e-9, 0) instead of (0,0): measured: seed 00c11200
+        // A run of >= 2 sub-ULP-consecutive vertices (-7.55e-9, 0) instead of (0,0):
+        // measured: seed 00c11200
         let mut j = i + 1;
         let mut best = coords[i];
         let mut best_mag = coords[i].x.abs().max(coords[i].y.abs());
@@ -293,8 +275,8 @@ fn has_self_intersections_bruteforce(coords: &[Coord<f64>], eps: f64) -> bool {
     false
 }
 
-/// Strict proper crossing of two segments (endpoints excluded), used by the
-/// R-tree sweep for `has_proper_self_crossing`.
+/// Strict proper crossing of two segments (endpoints excluded), used by the R-tree
+/// sweep for `has_proper_self_crossing`.
 #[inline(always)]
 pub fn segments_properly_cross_seg(
     a1: Coord<f64>,
@@ -394,8 +376,8 @@ pub(crate) fn check_edge_pair(coords: &[Coord<f64>], i: usize, j: usize, eps: f6
     false
 }
 
-/// Check if edges i and j have a proper crossing (not just endpoint touch).
-/// If so, returns the edge indices and the intersection point.
+/// Check if edges i and j have a proper crossing (not just endpoint touch). If so,
+/// returns the edge indices and the intersection point.
 pub(crate) fn edge_intersection(
     coords: &[Coord<f64>],
     i: usize,
@@ -436,13 +418,8 @@ pub(crate) fn edge_intersection(
     }
 }
 
-/// Split a self-intersecting ring at the first proper crossing into two
-/// simple (non-self-intersecting) rings.  O(n).
-///
-/// Given edges `(vi, vi+1)` and `(vj, vj+1)` crossing at `pt` (i < j):
-///
-///   Ring A: `vi+1 → vi+2 → … → vj → pt → vi+1`  (one lobe)
-///   Ring B: `v0 → … → vi → pt → vj+1 → … → vn-1 → v0`  (other lobe)
+/// Split a self-intersecting ring at the first proper crossing into two simple
+/// (non-self-intersecting) rings.
 pub(crate) fn split_ring_at_intersection(
     coords: &[Coord<f64>],
     i: usize,
@@ -466,9 +443,9 @@ pub(crate) fn split_ring_at_intersection(
 
 /// Fast path: try to detect and repair a single self-intersection in O(n).
 ///
-/// Returns `Some(rings)` if the ring had exactly one proper crossing that was
-/// split successfully.  Returns `None` if the fix is too complex for the fast
-/// path (caller should fall through to the full `fix_self_intersecting`).
+/// Returns `Some(rings)` if the ring had exactly one proper crossing that was split
+/// successfully. Returns `None` if the fix is too complex for the fast path (caller
+/// should fall through to the full `fix_self_intersecting`).
 pub fn try_fast_fix(coords: &[Coord<f64>]) -> Option<Vec<LineString<f64>>> {
     try_fast_fix_tuned(coords, &core::Tuning::default())
 }
@@ -514,9 +491,9 @@ pub(crate) fn try_fast_fix_tuned(
     Some(vec![LineString::new(ring1), LineString::new(ring2)])
 }
 
-/// Find any proper crossing OTHER than the edge pair (i0, j0). O(n²) brute
-/// force with early exit — only called for rings within GRID_THRESHOLD_N
-/// (larger rings route to sweep::find_second_intersection, O(n log n)).
+/// Find any proper crossing other than the edge pair (i0, j0). Only called for rings
+/// within GRID_THRESHOLD_N (larger rings route to sweep::find_second_intersection, O(n
+/// log n)).
 fn find_second_intersection_bruteforce(
     coords: &[Coord<f64>],
     eps: f64,

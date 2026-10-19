@@ -135,7 +135,7 @@ fn double_roundtrip_point_empty() {
     let wkt = write_wkt(&geom);
     assert_eq!(wkt, "POINT EMPTY");
     let parsed = read_wkt(&wkt).unwrap();
-    // NaN != NaN in IEEE 754, so check both are NaN coords
+    // NaN != NaN in ieee 754, so check both are NaN coords
     if let (Geometry::Point(a), Geometry::Point(b)) = (&geom, &parsed) {
         assert!(a.x().is_nan() && a.y().is_nan());
         assert!(b.x().is_nan() && b.y().is_nan());
@@ -514,14 +514,16 @@ fn malformed_wkt_rejected() {
 
 #[test]
 fn degenerate_ring_parses_but_flagged_by_validator() {
-    // A 2-coordinate ring is structurally parsed (Polygon::new auto-closes), then the validator flags
+    // A 2-coordinate ring is structurally parsed (Polygon::new auto-closes), then the
+    // validator flags
     let g = read_wkt("POLYGON ((0 0, 1 1))").unwrap();
     assert!(!crate::validation::validate(&g).valid);
 }
 
 #[test]
 fn non_ogc_variants_serialized_losslessly() {
-    // OGC WKT has no Line/Rect/Triangle; they must serialize to their closest OGC equivalents (coordinate-exact), never silently drop to GEOMETRYCOLLECTION EMPTY.
+    // OGC WKT has no Line/Rect/Triangle; they must serialize to their closest OGC
+    // equivalents (coordinate-exact), never silently drop to geometrycollection empty.
     let line = Geometry::Line(geo::Line::new(
         Coord { x: 1.0, y: 2.0 },
         Coord { x: 3.0, y: 4.0 },

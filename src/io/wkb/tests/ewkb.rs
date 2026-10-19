@@ -562,10 +562,11 @@ fn mixed_byte_order_multipolygon() {
     }
 }
 
-// Production-readiness battery: truncation, garbage, trailing bytes, non-OGC variants, empty geometries, precise error codes.
+// Production-readiness battery: truncation, garbage, trailing bytes, non-OGC variants,
+// empty geometries, precise error codes.
 
-/// Every strict prefix of a valid WKB buffer must fail cleanly (no
-/// panics, no silent truncation acceptance).
+/// Every strict prefix of a valid WKB buffer must fail cleanly (no panics, no silent
+/// truncation acceptance).
 #[test]
 fn truncated_wkb_never_panics() {
     let poly = match make_test_polygon() {
@@ -707,7 +708,8 @@ fn empty_geometries_roundtrip_wkb() {
 
 #[test]
 fn wrong_subtype_reports_real_code() {
-    // MULTIPOINT containing a LINESTRING sub-geometry: the error must carry the actual sub type code (2 = LINESTRING), not 0.
+    // multipoint containing a linestring sub-geometry: the error must carry the actual
+    // sub type code (2 = linestring), not 0.
     let mut buf = Vec::new();
     buf.push(1u8); // NDR
     buf.extend_from_slice(&WKB_MULTIPOINT.to_le_bytes());

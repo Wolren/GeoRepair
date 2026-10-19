@@ -69,7 +69,7 @@ pub(crate) fn is_ring_ccw_simd(coords: &[Coord<f64>]) -> bool {
 }
 
 /// Snap all coordinates to a uniform grid: `coord = (coord / scale).round() * scale`.
-/// Non-finite values pass through unchanged (IEEE 754 semantics).
+/// Non-finite values pass through unchanged (ieee 754 semantics).
 #[cfg(feature = "simd-portable")]
 pub(crate) fn snap_coords_simd(coords: &mut [Coord<f64>], scale: f64) {
     use core::simd::f64x4;
@@ -107,8 +107,8 @@ pub(crate) fn snap_coords_simd(coords: &mut [Coord<f64>], scale: f64) {
     }
 }
 
-/// Compute the axis-aligned bounding box (min_x, max_x, min_y, max_y) of a
-/// coordinate slice using SIMD reductions.
+/// Compute the axis-aligned bounding box (min_x, max_x, min_y, max_y) of a coordinate
+/// slice using SIMD reductions.
 #[cfg(feature = "simd-portable")]
 #[allow(dead_code)]
 pub(crate) fn aabb_minmax_simd(coords: &[Coord<f64>]) -> (f64, f64, f64, f64) {

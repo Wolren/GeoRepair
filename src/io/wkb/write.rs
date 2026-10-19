@@ -6,18 +6,11 @@ use alloc::vec::Vec;
 use std::io::{self, Write};
 
 /// Encode a geometry as little-endian WKB bytes (2D, no SRID).
-///
-/// Produces standard OGC WKB. Use [`write_ewkb`] to preserve SRID and
-/// Z/M dimension data. Output can be decoded with [`read_wkb`].
-/// For big-endian output, use [`write_wkb_with_opts`].
 pub fn write_wkb(geom: &Geometry<f64>) -> Vec<u8> {
     write_wkb_with_opts(geom, &WriteOptions::default())
 }
 
 /// Encode a geometry as WKB bytes with the given options.
-///
-/// Allows specifying the byte order via [`WriteOptions`]. For the default
-/// little-endian output, use [`write_wkb`].
 pub fn write_wkb_with_opts(geom: &Geometry<f64>, opts: &WriteOptions) -> Vec<u8> {
     let le = opts.endianness == Endianness::LittleEndian;
     let size = wkb_size(geom);
@@ -28,9 +21,6 @@ pub fn write_wkb_with_opts(geom: &Geometry<f64>, opts: &WriteOptions) -> Vec<u8>
 }
 
 /// Serialize a geometry as WKB and write it to any `io::Write` target.
-///
-/// Uses little-endian byte order. For endianness control, use
-/// [`write_wkb_with_opts`] and write the bytes yourself.
 #[cfg(feature = "std")]
 pub fn write_wkb_to(geom: &Geometry<f64>, writer: &mut impl Write) -> io::Result<()> {
     let bytes = write_wkb(geom);
@@ -39,9 +29,8 @@ pub fn write_wkb_to(geom: &Geometry<f64>, writer: &mut impl Write) -> io::Result
 
 /// Encode an EWKB geometry with SRID and Z/M dimension preservation.
 ///
-/// Produces little-endian EWKB bytes that include SRID (if set) and
-/// Z/M dimension flags with extra coordinate values. Use [`read_ewkb`]
-/// to decode the output.
+/// Produces little-endian EWKB bytes that include SRID (if set) and Z/M dimension flags
+/// with extra coordinate values.
 ///
 /// # Example
 ///
@@ -60,8 +49,8 @@ pub fn write_wkb_to(geom: &Geometry<f64>, writer: &mut impl Write) -> io::Result
 /// assert_eq!(roundtrip.extra_coords, vec![3.0]);
 /// ```
 ///
-/// For endianness control, construct a byte buffer manually and write
-/// with [`write_wkb_with_opts`].
+/// For endianness control, construct a byte buffer manually and write with
+/// [`write_wkb_with_opts`].
 pub fn write_ewkb(geom: &EwkbGeometry) -> Vec<u8> {
     let size = ewkb_size(&geom.geometry, geom.dims, geom.srid.is_some());
     let mut buf = Vec::with_capacity(size);
@@ -168,18 +157,11 @@ fn write_coord(buf: &mut Vec<u8>, c: &Coord<f64>, le: bool) {
     write_f64(buf, c.y, le);
 }
 
-/// Bulk LE coordinate copy: the WKB little-endian wire form of a
-/// `Coord<f64>` is exactly its 16 in-memory bytes, so a contiguous run of
-/// coords is one memcpy instead of two `extend_from_slice` calls per
-/// coord (measured 2026-08-04: ~2.5x fewer ops on the write path).
-///
-/// Soundness: `Coord<f64>` is two `f64` fields; the const asserts pin
-/// size 16 / align 8 (no padding is possible for two f64s), and the
-/// bit-exact WKB roundtrip invariant (fuzz target + probe) is the
-/// behavioral gate on field order - a layout change in geo-types that
-/// reordered the fields would break the byte-equality tests loudly.
-/// Only the little-endian 2D path uses this; BE and EWKB (interleaved
-/// extra dimensions) keep the per-coordinate writer.
+/// The WKB little-endian wire form of a `Coord<f64>` is exactly its 16 in-memory bytes.
+/// Measured 2026-08-04: about 2.5x fewer operations on the write path. `Coord<f64>` is
+/// two f64 fields, and const asserts pin size 16 and align 8. The bit-exact WKB
+/// roundtrip invariant (fuzz target plus probe) gates field order. Only the
+/// little-endian 2D path uses this copy.
 fn write_coords_le_bulk(buf: &mut Vec<u8>, coords: &[Coord<f64>]) {
     const _: () = assert!(core::mem::size_of::<Coord<f64>>() == 16);
     const _: () = assert!(core::mem::align_of::<Coord<f64>>() == 8);
@@ -577,8 +559,7 @@ fn write_geometry_ewkb(
 }
 
 
-/// Read the byte size of the next WKB geometry from `buf` without
-/// fully parsing it. Useful for skipping or chunking concatenated WKB.
+/// Read the byte size of the next WKB geometry from `buf` without fully parsing it.
 pub fn estimate_wkb_size(buf: &[u8]) -> Result<usize, WkbError> {
     let mut pos = 0;
     let mut dummy_extra = Vec::new();

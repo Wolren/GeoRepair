@@ -1,20 +1,14 @@
-//! Ring-touch graph cycle detection for disconnected-interior checks
-//! (split from validation/holes.rs 2026-08-07; verbatim).
+//! Ring-touch graph cycle detection for disconnected-interior checks (split from
+//! validation/holes.rs 2026-08-07; verbatim).
 
 use super::*;
 use alloc::vec::Vec;
 
-/// Ring-touch graph cycle detection (GEOS PolygonRing::findHoleCycleLocation
-/// and scanForHoleCycle port). Touches are exact shared vertices plus
-/// vertex-on-edge contacts within eps. Returns true when the touch graph
-/// contains a cycle through pairwise-DISTINCT coordinates (disconnected
-/// interior); touches at a single coordinate never close a cycle (GEOS
-/// isValid=true for multiple holes meeting at one point).
-///
-/// Per-ring structures (sorted unique vertex list, edge tree for large
-/// rings) are built ONCE outside the pair loop - never re-sorted or
-/// re-indexed per pair (the naive version cost 170x on the real-world
-/// giants, measured 2026-08-06).
+/// Ring-touch graph cycle detection, a port of geos polygonring::findholecyclelocation
+/// and scanForHoleCycle. It returns true when the touch graph has a cycle through
+/// distinct coordinates (disconnected interior). Touches at one coordinate never close
+/// a cycle: geos isValid is true for holes that meet at a point. Never re-sort or
+/// re-index per pair; the naive version cost 170x on giants (2026-08-06).
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(super) fn detect_hole_cycle(
     rings: &[&[Coord<f64>]],
@@ -23,8 +17,9 @@ pub(super) fn detect_hole_cycle(
     #[cfg(feature = "rstar")] shell_tree: Option<&Arc<rstar::RTree<EdgeIdx>>>,
 ) -> bool {
     let n = rings.len();
-    // (rings[0] is the shell) - building a second rstar bulk_load of a 600k-edge shell cost ~100ms per giant (measured 2026-08-06).
-    // The vertex lists are radix-sorted by x (std sort cost ~50ms on the giant shells; measured 2026-08-06).
+    // (rings[0] is the shell) - building a second rstar bulk_load of a 600k-edge shell
+    // cost ~100ms per giant (measured 2026-08-06). The vertex lists are radix-sorted by
+    // x (std sort cost ~50ms on the giant shells; measured 2026-08-06).
     let mut sorted: Vec<Vec<Coord<f64>>> = Vec::with_capacity(n);
     for r in rings {
         let mut v = r.to_vec();
@@ -53,8 +48,8 @@ pub(super) fn detect_hole_cycle(
         })
         .collect();
     let mut touches: Vec<Vec<(usize, Coord<f64>)>> = vec![Vec::new(); n];
-    // Exact shared vertices among the HOLES: one global pass (vertex -> containing rings), O(total vertices); -0.0 normalizes to 0.0
-    // The shell (ring 0) is skipped
+    // Exact shared vertices among the holes: one global pass (vertex -> containing
+    // rings), O(total vertices); -0.0 normalizes to 0.0 The shell (ring 0) is skipped
     let mut by_coord: rustc_hash::FxHashMap<(u64, u64), Vec<usize>> =
         rustc_hash::FxHashMap::with_capacity_and_hasher(64, Default::default());
     for (ri, ring) in rings.iter().enumerate().skip(1) {
@@ -144,10 +139,10 @@ pub(super) fn detect_hole_cycle(
     false
 }
 
-/// Brute-force vertex-on-edge touch collection (small rings). Iterates only
-/// the source vertices inside the target's x range (binary search over the
-/// precomputed sorted list) and the target's bbox - giant shells probe each
-/// hole in O(log V) + near-hole vertices.
+/// Brute-force vertex-on-edge touch collection (small rings). Iterates only the source
+/// vertices inside the target's x range (binary search over the precomputed sorted
+/// list) and the target's bbox - giant shells probe each hole in O(log V) + near-hole
+/// vertices.
 pub(super) fn collect_on_edge_brute(
     src: usize,
     tgt: usize,
@@ -170,7 +165,8 @@ pub(super) fn collect_on_edge_brute(
         }
         let mut hit = false;
         for i in 0..n_t {
-            // The tolerance version fabricated touches from near-miss vertices in real cadastral giants (GEOS isValid=true, measured 2026-08-06).
+            // The tolerance version fabricated touches from near-miss vertices in real
+            // cadastral giants (GEOS isValid=true, measured 2026-08-06).
             if point_on_segment_exact(v, tgt_ring[i], tgt_ring[(i + 1) % n_t]) {
                 hit = true;
                 break;
@@ -183,10 +179,10 @@ pub(super) fn collect_on_edge_brute(
     }
 }
 
-/// Edge-tree vertex-on-edge touch collection (large target ring). The
-/// source side iterates only x-range-gated vertices (binary search over the
-/// precomputed sorted list); small target rings fall back to brute force
-/// over their edges for the few in-range vertices.
+/// Edge-tree vertex-on-edge touch collection (large target ring). The source side
+/// iterates only x-range-gated vertices (binary search over the precomputed sorted
+/// list); small target rings fall back to brute force over their edges for the few
+/// in-range vertices.
 #[cfg(feature = "rstar")]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn collect_on_edge_tree(
@@ -253,9 +249,7 @@ pub(super) fn first_non_equal(ring: &[Coord<f64>], p0: Coord<f64>) -> Option<Coo
         .copied()
 }
 
-/// GEOS PolygonTopologyAnalyzer::isRingNested port: is `test` nested inside
-/// `target`? A start point strictly inside => yes; outside => no; on the
-/// boundary => the incident-segment topology decides.
+/// GEOS PolygonTopologyAnalyzer::isRingNested port: is `test` nested inside `target`?
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(super) fn is_ring_nested(test: &[Coord<f64>], target: &[Coord<f64>], eps: f64) -> bool {
     let Some(&p0) = test.first() else {
@@ -273,8 +267,8 @@ pub(super) fn is_ring_nested(test: &[Coord<f64>], target: &[Coord<f64>], eps: f6
     point_in_ring_exclusive(p0, target)
 }
 
-/// GEOS PolygonTopologyAnalyzer::isIncidentSegmentInRing port: is the
-/// segment p0->p1 (p0 on the ring boundary) inside the ring at the node?
+/// GEOS PolygonTopologyAnalyzer::isIncidentSegmentInRing port: is the segment p0->p1
+/// (p0 on the ring boundary) inside the ring at the node?
 pub(super) fn is_incident_segment_in_ring(
     p0: Coord<f64>,
     p1: Coord<f64>,
@@ -285,7 +279,8 @@ pub(super) fn is_incident_segment_in_ring(
     if n < 2 {
         return false;
     }
-    // Segment containing p0 (GEOS intersectingSegIndex: p0 == segment end selects the NEXT segment start).
+    // Segment containing p0 (GEOS intersectingSegIndex: p0 == segment end selects the
+    // next segment start).
     let mut idx = 0usize;
     for i in 0..n {
         if point_on_segment(p0, target[i], target[(i + 1) % n], eps) {
@@ -339,8 +334,8 @@ pub(super) fn is_interior_segment(
     (b_between && is_interior_between) || (!b_between && !is_interior_between)
 }
 
-/// GEOS Quadrant + isAngleGreater port: p > q when p is CCW of q as seen
-/// from the origin.
+/// GEOS Quadrant + isAngleGreater port: p > q when p is ccw of q as seen from the
+/// origin.
 pub(super) fn is_angle_greater(origin: Coord<f64>, p: Coord<f64>, q: Coord<f64>) -> bool {
     let qp = quadrant(origin, p);
     let qq = quadrant(origin, q);
@@ -350,11 +345,11 @@ pub(super) fn is_angle_greater(origin: Coord<f64>, p: Coord<f64>, q: Coord<f64>)
     if qp < qq {
         return false;
     }
-    // Same quadrant: p > q iff p is CCW of q (robust orient2d, > 0 = CCW).
+    // Same quadrant: p > q iff p is ccw of q (robust orient2d, > 0 = ccw).
     crate::orient::orient2d(origin, q, p) > 0.0
 }
 
-/// GEOS isBetween port: p lies in the CCW angle wedge e0 -> e1 from origin.
+/// GEOS isBetween port: p lies in the ccw angle wedge e0 -> e1 from origin.
 pub(super) fn is_between(
     origin: Coord<f64>,
     p: Coord<f64>,

@@ -2,10 +2,6 @@ use alloc::vec::Vec;
 use geo::{Coord, LineString};
 
 /// Check if a hole ring is entirely outside a shell ring by testing its first point.
-/// A simple non-self-intersecting ring is either entirely inside or entirely outside
-/// a simple shell — partial overlap is impossible. So the first point is sufficient.
-/// If the first point is on the shell boundary (rare), we classify as outer; the
-/// boolean difference and merge steps handle this correctly either way.
 fn is_hole_outside(hole: &LineString<f64>, shell: &LineString<f64>) -> bool {
     let first = match hole.0.first() {
         Some(pt) => *pt,
@@ -23,8 +19,9 @@ fn is_hole_outside(hole: &LineString<f64>, shell: &LineString<f64>) -> bool {
             any_outside = true;
         }
     }
-    // subtracted (boolean difference splits the shell into 4 components)
-    // Classifying it outer makes merge_shells' unary_union fold it back into the shell: area 1.0 instead of GEOS's 0.5 (measured).
+    // subtracted (boolean difference splits the shell into 4 components) Classifying it
+    // outer makes merge_shells' unary_union fold it back into the shell: area 1.0
+    // instead of GEOS's 0.5 (measured).
     if !any_outside && !ring_set_equal(hole, shell) {
         let mut cx = 0.0;
         let mut cy = 0.0;
@@ -45,10 +42,8 @@ fn is_hole_outside(hole: &LineString<f64>, shell: &LineString<f64>) -> bool {
 }
 
 /// True if two rings are the same coordinate set (rotation/reversal/
-/// closure-insensitive). hole==shell is a degenerate invalid polygon whose
-/// hole must NOT be reclassified inner by the centroid test — the
-/// cancel_identical_shells path in merge_shells handles it (GEOS drops the
-/// duplicate hole, yielding the shell; empty is also valid).
+/// closure-insensitive). hole==shell is a degenerate invalid polygon whose hole must
+/// not be reclassified inner by the centroid test.
 fn ring_set_equal(a: &LineString<f64>, b: &LineString<f64>) -> bool {
     if a.0.len() != b.0.len() {
         return false;

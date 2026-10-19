@@ -1,53 +1,24 @@
-//! C-compatible FFI bindings for geo-repair.
-//!
-//! Enable the `ffi` feature for a C-compatible API. The C surface covers
-//! WKB (the GIS-native binary format) and WKT (text), single geometries
-//! and parallel batches.
-//!
-//! # C header
-//!
-//! The canonical header lives at `include/geo_repair.h` and is shipped
-//! with every release. The API is panic-safe: a Rust panic inside the
-//! library is caught and surfaced as `GeoRepairErrorCode::Panic` in the
-//! result. Every result must be released with the matching
-//! `geo_repair_free_*` function when no longer needed.
-//!
-//! # Error model
-//!
-//! Every result carries a `GeoRepairErrorCode` so C callers can branch
-//! programmatically without parsing `error_msg`:
-//!
-//! - `None` — operation succeeded.
-//! - `Parse` — input WKB/WKT could not be parsed.
-//! - `InvalidInput` — null pointer or invalid length argument.
-//! - `InvalidGeometry` — validation found violations (only on
-//!   `geo_repair_validate*` / `geo_repair_validate_and_fix*` paths, where
-//!   the geometry being invalid is the *result*, not a failure).
-//! - `Encode` — the output geometry could not be encoded to WKB/WKT.
-//! - `Panic` — an internal panic was caught. This should never happen;
-//!   report it as a bug.
-//!
-//! # Panic safety and build profile
-//!
-//! Panic containment relies on `catch_unwind`, which requires the crate
-//! to be built with `panic = "unwind"`. The library release profile uses
-//! unwind (see `[profile.release]` in Cargo.toml); building the FFI with
-//! `panic = "abort"` disables containment and a panic would abort the
-//! host process.
+//! C-compatible ffi bindings for geo-repair, behind the ffi feature. The API covers WKB
+//! (the GIS-native binary) and WKT, single and batch. # C header The header is
+//! include/geo_repair.h, shipped with each release. # Error model Every result carries
+//! a GeoRepairErrorCode: None, Parse, InvalidInput, Encode, GeoRepairErrorCode::Panic,
+//! InvalidGeometry on validate paths only. Free results with geo_repair_free_*. # Panic
+//! safety and build profile Panic containment uses catch_unwind and needs panic =
+//! "unwind", as in the Cargo.toml release profile.
 
 use alloc::vec::Vec;
 use std::ffi::{CStr, CString, c_char};
 use std::ptr;
 
-/// Static NUL-terminated version string, derived from Cargo.toml at compile
-/// time (`CARGO_PKG_VERSION`) so the C API and the crate can never drift.
+/// Static nul-terminated version string, derived from Cargo.toml at compile time
+/// (`CARGO_PKG_VERSION`) so the C API and the crate can never drift.
 static VERSION_CSTR: &CStr = unsafe {
     CStr::from_bytes_with_nul_unchecked(concat!(env!("CARGO_PKG_VERSION"), "\0").as_bytes())
 };
 
-/// Return the geo-repair library version as a NUL-terminated string.
+/// Return the geo-repair library version as a nul-terminated string.
 ///
-/// The returned pointer is static — the caller must NOT free it.
+/// The caller must not free it.
 #[unsafe(no_mangle)]
 pub extern "C" fn geo_repair_version() -> *const c_char {
     VERSION_CSTR.as_ptr()
@@ -55,13 +26,11 @@ pub extern "C" fn geo_repair_version() -> *const c_char {
 
 /// Free a [`GeoRepairResult`] returned by any WKB `geo_repair_*` function.
 ///
-/// After calling this function the result struct is zeroed so that
-/// double-free is harmless (the inner pointers will be null).
 ///
 /// # Safety
 ///
-/// `result` must not be null and must point to a valid result that has
-/// not been freed before.
+/// `result` must not be null and must point to a valid result that has not been freed
+/// before.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_free_result(result: *mut GeoRepairResult) {
     if result.is_null() {
@@ -72,7 +41,7 @@ pub unsafe extern "C" fn geo_repair_free_result(result: *mut GeoRepairResult) {
         unsafe { drop(Vec::from_raw_parts(r.wkb_data, r.wkb_len, r.wkb_len)) };
     }
     if !r.error_msg.is_null() {
-        // SAFETY: the error string was allocated by CString.
+        // safety: the error string was allocated by CString.
         unsafe { drop(CString::from_raw(r.error_msg)) };
     }
     r.success = false;
@@ -82,16 +51,13 @@ pub unsafe extern "C" fn geo_repair_free_result(result: *mut GeoRepairResult) {
     r.error_msg = ptr::null_mut();
 }
 
-/// Free a [`GeoRepairStringResult`] returned by any WKT `geo_repair_*`
-/// function.
+/// Free a [`GeoRepairStringResult`] returned by any WKT `geo_repair_*` function.
 ///
-/// After calling this function the result struct is zeroed so that
-/// double-free is harmless.
 ///
 /// # Safety
 ///
-/// `result` must not be null and must point to a valid result that has
-/// not been freed before.
+/// `result` must not be null and must point to a valid result that has not been freed
+/// before.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_free_string_result(result: *mut GeoRepairStringResult) {
     if result.is_null() {
@@ -102,7 +68,7 @@ pub unsafe extern "C" fn geo_repair_free_string_result(result: *mut GeoRepairStr
         unsafe { drop(CString::from_raw(r.data)) };
     }
     if !r.error_msg.is_null() {
-        // SAFETY: the error string was allocated by CString.
+        // safety: the error string was allocated by CString.
         unsafe { drop(CString::from_raw(r.error_msg)) };
     }
     r.success = false;
@@ -112,16 +78,13 @@ pub unsafe extern "C" fn geo_repair_free_string_result(result: *mut GeoRepairStr
     r.error_msg = ptr::null_mut();
 }
 
-/// Free a [`GeoRepairBatchResult`] returned by
-/// [`geo_repair_make_valid_batch`].
+/// Free a [`GeoRepairBatchResult`] returned by [`geo_repair_make_valid_batch`].
 ///
-/// Frees every per-item result, the item array, and the batch error
-/// string, then zeroes the struct so double-free is harmless.
 ///
 /// # Safety
 ///
-/// `result` must not be null and must point to a valid result that has
-/// not been freed before.
+/// `result` must not be null and must point to a valid result that has not been freed
+/// before.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_free_batch_result(result: *mut GeoRepairBatchResult) {
     if result.is_null() {
@@ -147,7 +110,7 @@ pub unsafe extern "C" fn geo_repair_free_batch_result(result: *mut GeoRepairBatc
         unsafe { drop(Vec::from_raw_parts(r.items, r.count, r.count)) };
     }
     if !r.error_msg.is_null() {
-        // SAFETY: the error string was allocated by CString.
+        // safety: the error string was allocated by CString.
         unsafe { drop(CString::from_raw(r.error_msg)) };
     }
     r.success = false;

@@ -1,33 +1,9 @@
-//! CDT-based polygon repair for complex topologies (LEDOUX et al. 2014).
-//!
-//! The Arrange strategy uses Constrained Delaunay Triangulation as a robust
-//! fallback for polygons that the Structure fast path cannot handle. It is
-//! based on the approach described by Ledoux et al. (2014) for repairing
-//! invalid polygons via constrained triangulation.
-//!
-//! Algorithm:
-//! 1. Constrained Delaunay triangulation of polygon edges
-//! 2. Triangle labeling (interior/exterior via winding)
-//! 3. Face extraction from labeled triangles
-//! 4. Ring assembly with winding correction
-//!
-//! Strengths:
-//! - Handles any topology, no self-intersection limit
-//! - Works on all-collinear and near-degenerate inputs
-//!
-//! Weaknesses:
-//! - Slower than Structure, especially on large rings
-//! - Requires the `spade` crate
-//! - Can panic on extreme degeneracies (all-collinear rings, coords near f64::MAX)
-//!
-//! # Submodules
-//!
-//! - `cdt`: Constrained Delaunay triangulation wrapper
-//! - `extract`: Triangle-to-ring extraction
-//! - `label`: Face labeling (interior/exterior)
-//! - `prep`: Input preparation, intersection pre-checks
-//! - `prep_intersect`: Parallel intersection pre-filter
-//! - `assemble`: Ring assembly from labeled faces
+//! cdt polygon repair for complex topologies (Ledoux et al. 2014). Arrange is the
+//! fallback when Structure cannot handle a polygon. Weaknesses: slower than Structure
+//! on large rings, needs the spade crate, can panic near f64::max. # Submodules - cdt:
+//! triangulation - extract: ring extraction - label: face labeling - prep: input
+//! preparation, intersection checks - prep_intersect: parallel pre-filter - assemble:
+//! ring assembly
 
 use alloc::vec::Vec;
 /// Ring assembly from labeled triangle faces.
@@ -51,11 +27,8 @@ use geo::{
 use rstar::{AABB, RTree, RTreeObject};
 use spade::{ConstrainedDelaunayTriangulation, Triangulation};
 
-/// Wrap CDT construction in panic catch — spade can panic on degenerate
-/// input (all-collinear rings, coords near f64::MAX). Without `std` there
-/// is no unwind machinery, so the catch is disabled and a panicking spade
-/// propagates (arrange is a std-gated strategy in practice: spade is a
-/// std crate).
+/// Wrap cdt construction in panic catch. Spade can panic on degenerate input
+/// (all-collinear rings, coords near f64::max).
 fn build_cdt_safe(
     prepared: &prep::PreparedLines,
 ) -> Option<ConstrainedDelaunayTriangulation<Coord<f64>>> {
@@ -74,8 +47,9 @@ fn build_cdt_safe(
 }
 
 pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Geometry<f64> {
-    // (1e8 + 1e-9 coords) have sub-precision spikes that fail basic form
-    // (measured: seed 00c11200 → MultiPolygon with cross-component SelfIntersection; GEOS snaps the spike to the grid).
+    // (1e8 + 1e-9 coords) have sub-precision spikes that fail basic form (measured:
+    // seed 00c11200 → MultiPolygon with cross-component SelfIntersection; GEOS snaps
+    // the spike to the grid).
     if has_sub_ulp_edge(poly, None) {
         let ext: LineString<f64> = LineString::new(
             crate::structure::fix_ring::collapse_sub_ulp_vertices(&poly.exterior().0, true),
@@ -98,7 +72,8 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Geom
                 ext.0.len()
             );
         }
-        // No-op collapse guard: if the ring is unchanged, recursion would be infinite (measured: invariant_mixed_fp_in_same_ring stack overflow).
+        // No-op collapse guard: if the ring is unchanged, recursion would be infinite
+        // (measured: invariant_mixed_fp_in_same_ring stack overflow).
         let collapsed = Polygon::new(ext, holes);
         if collapsed.exterior().0.len() != poly.exterior().0.len() {
             return fix_polygon(&collapsed, config);
@@ -133,7 +108,8 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Geom
     {
         return Geometry::Polygon(poly.clone());
     }
-    // Fallback: if intersection check false-positives (known fp precision issue with near-collinear vertices from CDT output), verify with our own validator.
+    // Fallback: if intersection check false-positives (known fp precision issue with
+    // near-collinear vertices from cdt output), verify with our own validator.
     if holes_are_valid(poly) && poly_has_basic_form(poly) {
         let v = poly.validate();
         if v.valid {
@@ -143,8 +119,8 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Geom
     fallback_polygon_fix(poly)
 }
 
-/// Collect a polygon's lines for the repair path (used when the basic
-/// form fails mid-scan: the fused scan's partial lines are unusable).
+/// Collect a polygon's lines for the repair path (used when the basic form fails
+/// mid-scan: the fused scan's partial lines are unusable).
 fn fix_from_poly_lines(poly: &Polygon<f64>) -> Geometry<f64> {
     let lines: Vec<_> = poly.lines_iter().collect();
     if lines.is_empty() {
@@ -156,10 +132,9 @@ fn fix_from_poly_lines(poly: &Polygon<f64>) -> Geometry<f64> {
     }
 }
 
-/// Run CDT on polygon edges, falling back to boolean difference when CDT
-/// produces empty output (e.g. hole touching shell at 2 points).
-/// Does NOT run the expensive Shewchuk validation — use this from Structure
-/// fallback where the polygon is already known to need repair.
+/// Run cdt on polygon edges, falling back to boolean difference when cdt produces empty
+/// output (e.g. hole touching shell at 2 points). Does not run the expensive Shewchuk
+/// validation.
 pub(crate) fn fallback_polygon_fix(poly: &Polygon<f64>) -> Geometry<f64> {
     let lines: Vec<_> = poly.lines_iter().collect();
     if let Some(mp) = fix_from_lines(lines)
@@ -178,16 +153,17 @@ pub(crate) fn fallback_polygon_fix(poly: &Polygon<f64>) -> Geometry<f64> {
         .collect();
     match boolean_difference_catch(&shell, &holes) {
         Some(diff) if !diff.0.is_empty() => Geometry::MultiPolygon(diff),
-        // boolean difference panicked (i_overlay is_fill_top assertion on degenerate input) or produced empty: polygon split failed for hole-touching-2-places.
+        // boolean difference panicked (i_overlay is_fill_top assertion on degenerate
+        // input) or produced empty: polygon split failed for hole-touching-2-places.
         _ => empty(),
     }
 }
 
-/// `boolean_op(Difference)` wrapped in `catch_unwind`. i_overlay 4.5.2
-/// asserts `is_fill_top(link.fill)` internally on some degenerate inputs
-/// (measured: shell [(54.36,0),(0,0),(18.55,82.91),(-48.92,33.44)] with a
-/// 6-vertex hole). A panic inside a rayon batch kills the whole run, so
-/// callers must catch and route to their BuildArea fallback instead.
+/// `boolean_op(Difference)` wrapped in `catch_unwind`. i_overlay 4.5.2 asserts
+/// `is_fill_top(link.fill)` internally on some degenerate inputs (measured: shell
+/// [(54.36,0),(0,0),(18.55,82.91),(-48.92,33.44)] with a 6-vertex hole). A panic inside
+/// a rayon batch kills the whole run, so callers must catch and route to their
+/// BuildArea fallback instead.
 pub(crate) fn boolean_difference_catch(
     shell: &Polygon<f64>,
     holes: &[Polygon<f64>],
@@ -214,24 +190,10 @@ pub(crate) fn boolean_difference_catch(
     result
 }
 
-/// Cheap hole-containment supplement to the first-vertex probe: catches a
-/// hole poking out of the shell (the DisconnectedInteriorRing /
-/// HoleOutsideShell class) without full ring-vs-ring analysis. Soundness:
-/// in a VALID polygon every hole vertex is inside-or-on the shell, hence
-/// the hole bbox is inside the shell bbox: bbox-exceeds proves a poke.
-/// For small polygons also enforce the touch rule (>=2 distinct hole
-/// vertices on the shell disconnect the interior, GEOS Test 22 semantics)
-/// and >=1 hole vertex strictly inside, mirroring the full validator's
-/// containment checks. Large rings skip the touch scan (O(hole x shell)
-/// is prohibitive on giants; the axis-aligned poke class is still caught
-/// by the bbox rule, and edge-crossing pokes are caught by
-/// has_no_intersections).
-///
-/// Measured regression driver (2026-08-03): the zero-safe proper-crossing
-/// fix made the light gate accept a CGAL hole-outside-shell fixture (hole
-/// poking through the shell top via two touch vertices), routing arrange's
-/// passthrough into the gate -> empty. The first-vertex probe alone cannot
-/// see the poke; this closes it.
+/// Supplement to the first-vertex probe: it catches a hole poking out of the shell.
+/// Small polygons also apply the touch rule: two or more distinct shell vertices
+/// disconnect the interior (GEOS Test 22). One hole vertex must lie strictly inside.
+/// Regression 2026-08-03: a cgal fixture passed the gate and arrange returned empty.
 pub(crate) fn holes_contained_cheap(poly: &Polygon<f64>, tuning: &crate::core::Tuning) -> bool {
     let shell = poly.exterior();
     if shell.0.len() < 3 {
@@ -286,13 +248,11 @@ pub(crate) fn holes_contained_cheap(poly: &Polygon<f64>, tuning: &crate::core::T
 
 /// Validate a polygon against GEOS-compatible validity rules.
 ///
-/// Checks: ring closure & min points, non-finite coords, no self-intersections,
-/// hole containment, and no nested/overlapping holes.
-/// Does NOT check OGC winding (CCW exterior) — GEOS isValid accepts both
-/// winding orders, and winding is enforced on repair output separately.
+/// Does not check OGC winding (ccw exterior).
 pub fn validate_polygon(poly: &Polygon<f64>) -> bool {
-    // One pass over the coords does the basic form (closure, adjacent duplicates, NaN) AND the bit-exact duplicate scan
-    // (measured 2026-08-07: the collect was a full extra read, ~10-15 us on a 5000-vertex ring).
+    // One pass over the coords does the basic form (closure, adjacent duplicates, NaN)
+    // and the bit-exact duplicate scan (measured 2026-08-07: the collect was a full
+    // extra read, ~10-15 us on a 5000-vertex ring).
     let cap = poly
         .exterior()
         .0
@@ -316,8 +276,9 @@ pub fn validate_polygon(poly: &Polygon<f64>) -> bool {
     if lines.is_empty() || !prep::has_no_intersections(&lines) {
         return false;
     }
-    // The exclusive variant rejects GEOS-valid repaired outputs; measured: --fast gate flagged
-    // 24/300 real-world structure components that the full validator and GEOS accept, 2026-08-03 .
+    // The exclusive variant rejects GEOS-valid repaired outputs; measured: --fast gate
+    // flagged 24/300 real-world structure components that the full validator and GEOS
+    // accept, 2026-08-03 .
     if poly.interiors().is_empty() {
         return true;
     }
@@ -325,15 +286,11 @@ pub fn validate_polygon(poly: &Polygon<f64>) -> bool {
 }
 
 /// Lightweight check: hole containment + nesting.
-/// Used after `has_no_intersections` for the fast path.
 pub fn holes_are_valid(poly: &Polygon<f64>) -> bool {
     holes_valid_impl(poly, false)
 }
 
-/// GEOS-aligned hole validity for the large-valid fast-path gate. GEOS
-/// IsValidOp allows a hole to touch the shell at a point (OGC polygon
-/// validity), so the first-vertex probe is INCLUSIVE here — a vertex exactly
-/// on the shell boundary does not disqualify the polygon. Strictness matters
+/// GEOS-aligned hole validity for the large-valid fast-path gate. Strictness matters
 /// for the gate: rejecting GEOS-valid polys forces the full subtract pipeline
 /// (measured: 857 holes on a 159k shell = 11.8s of wasted geo differences).
 pub fn holes_are_valid_inclusive(poly: &Polygon<f64>) -> bool {
@@ -431,55 +388,20 @@ pub fn rings_share_collinear_edge_test(a: &[geo::Coord<f64>], b: &[geo::Coord<f6
     crate::util::rings_share_collinear_edge_precise(a, b)
 }
 
-/// True if any ring edge is shorter than EPSILON * bbox_scale.
-/// Mixed-magnitude rings (1e8 + 1e-8 coords) create edges below the
-/// representable precision of the bbox scale — collinear overlaps between
-/// such edges and big edges are invisible to proper-crossing detection.
-/// Cheap O(n): single pass over edges, only used in fast-path gates.
-///
-/// The `scale_hint` parameter is accepted for call-site compatibility (the
-/// structure fast path precomputes an exterior scale); the sub-ULP test is
-/// per-edge local now and no longer consumes it.
-/// An edge is sub-ULP when its length is below the coordinate rounding at
-/// its OWN magnitude (eps = EPSILON * the edge's largest |coord|).
-///
-/// The rule is LOCAL on purpose: the old bbox-spread rule let a single
-/// distant spike dominate, so a VALID ring with a 4.9e208 spike had its
-/// 1-unit base edge (8 ULPs at 1e15, perfectly representable) flagged
-/// sub-ULP and collapsed to empty by every repair mode (measured
-/// 2026-08-04). Local eps still catches the noise class the gate exists
-/// for (1e-8 spikes at 1e8 magnitude: 1e-8 < 2.2e-8).
-///
-/// Length uses the MAX component, not either one: real GIS data is full of
-/// axis-aligned edges (vertical: dx=0, horizontal: dy=0) which are
-/// perfectly valid. Only a truly point-like edge (both components sub-ULP)
-/// is degenerate.
-///
-/// Single definition of the rule - `has_sub_ulp_edge` and `ring_guards`
-/// both call this, so the gate and the pre-collapse pass cannot drift.
+/// True when a ring edge is under epsilon * bbox_scale. Mixed magnitudes (1e8 plus
+/// 1e-8) hide collinear overlaps from crossing tests. A 4.9e208 spike collapsed a valid
+/// ring with a 1-unit base edge (8 ULPs at 1e15) to empty (2026-08-04). Local eps
+/// catches 1e-8 spikes at 1e8 (1e-8 < 2.2e-8).
 #[inline(always)]
 fn edge_is_sub_ulp(a: geo::Coord<f64>, b: geo::Coord<f64>) -> bool {
     let eps = f64::EPSILON * a.x.abs().max(a.y.abs()).max(b.x.abs()).max(b.y.abs());
     eps > 0.0 && (b.x - a.x).abs().max((b.y - a.y).abs()) < eps
 }
 
-/// One pass over a ring collecting the two whole-polygon guards the
-/// fast-path gate needs: whether any edge is sub-ULP, and the smallest
-/// non-zero |ordinate| (the extreme-magnitude guard's denominator).
-///
-/// Both are properties of the coordinate set, not of the edge walk, and
-/// both used to ride inside the fused plausibility walk at ~16 scalar ops
-/// per vertex on every valid ring - including the benchmark shapes where
-/// neither can ever fire. As dedicated reductions they vectorise and the
-/// walk stops paying for them (2026-10-17).
-///
-/// Covers the same `len - 1` edges as `ring_has_sub_ulp` (the duplicated
-/// closing coordinate starts no edge) and the same vertices as the old
-/// in-walk `min_abs` scan: for a closed ring `ring[len-1] == ring[0]`, so
-/// omitting it from the minimum cannot change the result. Callers must
-/// have established closure; `fast_path_check` rejects an unclosed ring in
-/// the walk regardless of these guards, so an open ring cannot be
-/// certified on their strength.
+/// One pass collects two guards: any sub-ULP edge and the smallest non-zero absolute
+/// ordinate, the extreme-magnitude denominator. They used to ride in the fused
+/// plausibility walk at 16 scalar ops per vertex. As dedicated reductions they
+/// vectorize (2026-10-17).
 pub(crate) fn ring_guards(ring: &[geo::Coord<f64>]) -> (bool, f64) {
     let mut sub_ulp = false;
     let mut min_abs = f64::INFINITY;
@@ -528,7 +450,6 @@ pub fn has_sub_ulp_edge(poly: &Polygon<f64>, _scale_hint: Option<f64>) -> bool {
 }
 
 /// Winding-number point-in-ring test (strict interior, boundary counts as outside).
-/// Timing breakdown for the CDT arrange pipeline.
 /// Only available with `--features bench-geos` or `--features bench-geos-system`.
 #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
 #[derive(Default)]
@@ -537,7 +458,7 @@ pub struct ArrangeTiming {
     pub prep_secs: f64,
     /// Seconds spent building the constrained Delaunay triangulation.
     pub cdt_build_secs: f64,
-    /// Number of faces in the constructed CDT.
+    /// Number of faces in the constructed cdt.
     pub cdt_faces: usize,
     /// Seconds spent labeling faces as interior/exterior.
     pub label_secs: f64,
@@ -547,8 +468,8 @@ pub struct ArrangeTiming {
     pub total_secs: f64,
 }
 
-/// Profile the CDT arrange pipeline on a polygon, returning stage timing.
-/// Returns `None` if the polygon has no edges or preparation fails.
+/// Profile the cdt arrange pipeline on a polygon, returning stage timing. Returns
+/// `None` if the polygon has no edges or preparation fails.
 #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
 pub fn diagnose_arrange(poly: &Polygon<f64>) -> Option<ArrangeTiming> {
     use std::time::Instant;
@@ -580,25 +501,22 @@ pub fn diagnose_arrange(poly: &Polygon<f64>) -> Option<ArrangeTiming> {
     Some(t)
 }
 
-/// Side-channel accumulators for the gate's fused scan: optional line
-/// collection (the gate's separate collect), the global bbox (the
-/// envelope degeneracy check), and the sub-ULP edge flag. Every field
-/// optional - a caller pays only for the accumulators it requested.
+/// Side-channel accumulators for the gate's fused scan: optional line collection (the
+/// gate's separate collect), the global bbox (the envelope degeneracy check), and the
+/// sub-ULP edge flag. Every field optional - a caller pays only for the accumulators it
+/// requested.
 pub(crate) struct GateAccum<'a> {
     pub lines: Option<&'a mut Vec<geo::Line<f64>>>,
-    /// Fused monotone-chain index: pushed in lockstep with `lines` (same
-    /// windows, same order) so the gate owns a chain index after its walk
-    /// and never makes the second pass `build_mono_chains` costs. Set by
-    /// callers that will sweep with
-    /// [`prep_intersect::has_no_intersections_from_chains`]; `None` keeps
-    /// the plain collect-then-build flow.
+    /// Fused monotone-chain index: pushed in lockstep with `lines` (same windows, same
+    /// order) so the gate owns a chain index after its walk and never makes the second
+    /// pass `build_mono_chains` costs. Set by callers that will sweep with
+    /// [`prep_intersect::has_no_intersections_from_chains`]; `None` keeps the plain
+    /// collect-then-build flow.
     pub chains: Option<&'a mut prep_intersect::ChainSink>,
     pub bbox: Option<&'a mut (f64, f64, f64, f64)>,
-    /// Per-ring min-x extremal index (tie min-y, strict <, candidate 0,
-    /// interior range [1..n)) recorded by [`ring_is_plausible`] so the
-    /// caller's OGC winding normalization skips its own search. The ring
-    /// order matches the gate's iteration: exterior first, then holes.
-    /// None in non-gate callers (no recording, no overhead).
+    /// Per-ring min-x extremal index (tie min-y, strict <, candidate 0, interior range
+    /// [1.n)) recorded by [`ring_is_plausible`] so the caller's OGC winding
+    /// normalization skips its own search.
     pub extremal: Option<&'a mut Vec<usize>>,
 }
 
@@ -613,28 +531,22 @@ impl GateAccum<'_> {
     }
 }
 
-/// Basic-form plausibility scan for one ring: closure, min points,
-/// adjacent duplicates, non-finite coords, non-adjacent duplicate scan
-/// (shared with the exit validator - the gate must certify exactly what
-/// the validator accepts, 2026-08-07 gate rule). The same pass also
-/// drives the optional accumulators (lines, global bbox, sub-ULP flag) -
-/// the gate's separate collect, envelope scan and sub-ULP scan are all
-/// fused here (measured 2026-08-08: the envelope + sub-ULP passes cost
-/// ~15-20 us on a 5000-vertex ring). Kept as ONE function so the gate's
-/// verdict cannot drift from `poly_has_basic_form`'s.
+/// Basic-form plausibility scan for one ring: closure, min points, adjacent duplicates,
+/// non-finite coords, non-adjacent duplicate scan (shared with the exit validator - the
+/// gate must certify exactly what the validator accepts, 2026-08-07 gate rule). The
+/// same pass also drives the optional accumulators (lines, global bbox, sub-ULP flag) -
+/// the gate's separate collect, envelope scan and sub-ULP scan are all fused here
+/// (measured 2026-08-08: the envelope + sub-ULP passes cost ~15-20 us on a 5000-vertex
+/// ring).
 ///
-/// The per-ring duplicate-vertex hash table that used to live here (a
-/// 2*2^ceil(log2 n)-slot open-addressed table, 512 KB at 10 000 vertices,
-/// hit at a random offset per vertex) is GONE. The pair predicates now
-/// close the repeated-vertex class themselves - see
-/// `prep_intersect::shares_repeated_vertex`, which mirrors GEOS's rule
-/// that a same-ring interaction which is not an adjacent-in-ring endpoint
-/// touch is invalid. That was the only per-vertex structure here whose
-/// working set grew with n, and it measured 11 % of the gate at 500 v
-/// rising to 17 % at 10 000 v (2026-10-17, TLS scratch and bitmap clear
-/// already in place). Rings at or below `SMALL_RING_LINES` keep the
-/// allocation-free O(n^2) `first_pinch_dup` scan: it is bounded, and it
-/// keeps the small-ring verdict independent of the sweep.
+/// The per-ring duplicate-vertex hash table that used to live here (a 2*2^ceil(log2
+/// n)-slot open-addressed table, 512 KB at 10 000 vertices, hit at a random offset per
+/// vertex) is gone. It measured 11 % of the gate at 500 v rising to 17 % at 10 000 v
+/// (2026-10-17, tls scratch and bitmap clear already in place). Rings at or below
+/// `SMALL_RING_LINES` keep the allocation-free O(n^2) `first_pinch_dup` scan: it is
+/// bounded. The pair predicates now close the repeated-vertex class themselves - see
+/// `prep_intersect::shares_repeated_vertex`, which mirrors GEOS's rule that a same-ring
+/// interaction which is not an adjacent-in-ring endpoint touch is invalid.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(crate) fn ring_is_plausible(ring: &geo::LineString<f64>, acc: &mut GateAccum) -> bool {
     let coords = &ring.0;
@@ -650,18 +562,21 @@ pub(crate) fn ring_is_plausible(ring: &geo::LineString<f64>, acc: &mut GateAccum
 
 /// The shared windows loop of [`ring_is_plausible`].
 fn plausible_body(coords: &[geo::Coord<f64>], n: usize, acc: &mut GateAccum) -> bool {
-    // Extremal recording (min-x, tie min-y, strict <, candidate 0, interior range [1..n)): matches min_x_vertex in util.rs EXACTLY
+    // Extremal recording (min-x, tie min-y, strict <, candidate 0, interior range
+    // [1.n)): matches min_x_vertex in util.rs exactly
     let track_ext = acc.extremal.is_some();
     let mut ext_min_x = coords[0].x;
     let mut ext_min_y = coords[0].y;
     let mut ext_idx = 0usize;
     for (i, w) in coords.windows(2).enumerate() {
-        // Adjacent duplicates AND non-finite coords (the gate's separate NaN scan is folded here - measured 2026-08-07: one fewer full pass)
+        // Adjacent duplicates and non-finite coords (the gate's separate NaN scan is
+        // folded here - measured 2026-08-07: one fewer full pass)
         if w[0] == w[1] || !w[0].x.is_finite() || !w[0].y.is_finite() {
             return false;
         }
         if track_ext && i >= 1 {
-            // w[0] is coords[i]; the closure coord (index n) never appears as w[0], and index 0 is the default candidate.
+            // w[0] is coords[i]; the closure coord (index n) never appears as w[0], and
+            // index 0 is the default candidate.
             let c = w[0];
             if c.x < ext_min_x || (c.x == ext_min_x && c.y < ext_min_y) {
                 ext_min_x = c.x;

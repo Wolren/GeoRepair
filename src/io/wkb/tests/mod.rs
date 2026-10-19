@@ -1,5 +1,5 @@
-//! wkb test battery (split from tests.rs 2026-08-07 for
-//! file-size governance; content verbatim).
+//! wkb test battery (split from tests.rs 2026-08-07 for file-size governance; content
+//! verbatim).
 
 #[cfg(test)]
 use super::*;
@@ -168,7 +168,6 @@ fn ewkb_srid_stripped() {
 
 #[test]
 fn ewkb_z_flag_now_returns_2d() {
-    // read_wkb no longer rejects Z dimension: silently returns 2D
     let mut wkb = Vec::new();
     wkb.push(1);
     let type_with_z = 1u32 | WKB_Z_FLAG;

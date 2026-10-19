@@ -7,8 +7,8 @@ use crate::snap;
 use geo::{Coord, Line};
 use rstar::{AABB, RTree, RTreeObject};
 
-/// Prepared edge set: snapped, deduplicated, and intersection-split segments
-/// ready for CDT construction.
+/// Prepared edge set: snapped, deduplicated, and intersection-split segments ready for
+/// cdt construction.
 #[derive(Debug)]
 pub struct PreparedLines {
     /// The processed line segments (snapped, deduped, split at intersections).
@@ -126,8 +126,8 @@ fn on_segment(a: Coord<f64>, b: Coord<f64>, c: Coord<f64>, eps: f64) -> bool {
     c.x >= minx && c.x <= maxx && c.y >= miny && c.y <= maxy
 }
 
-/// Returns the intersection point of two segments if they properly cross.
-/// For collinear overlaps, returns the endpoints of the overlapping portion.
+/// Returns the intersection point of two segments if they properly cross. For collinear
+/// overlaps, returns the endpoints of the overlapping portion.
 fn segment_intersection(
     a: Coord<f64>,
     b: Coord<f64>,

@@ -10,9 +10,6 @@ mod private {
     use geo::{Coord, GeoFloat};
 
     /// Trait for numeric types usable in noding algorithms.
-    ///
-    /// Extends [`GeoFloat`] with a deterministic coordinate hashing method
-    /// used for HashMap-based deduplication during noding.
     pub trait NodingFloat: GeoFloat {
         /// Deterministic hash from coordinate bits for HashMap keys.
         fn coord_hash_key(c: &Coord<Self>) -> u64;
@@ -33,8 +30,8 @@ mod private {
 
 pub(crate) use private::NodingFloat;
 
-/// Returns true when every edge shares one of two common endpoints —
-/// a radial/star topology that cannot produce proper crossings.
+/// Returns true when every edge shares one of two common endpoints. A radial/star
+/// topology that cannot produce proper crossings.
 fn is_radial<T: GeoFloat>(edges: &[Line<T>]) -> bool {
     if edges.len() < 3 {
         return false;
@@ -198,7 +195,8 @@ pub(crate) fn edges_intersect<T: GeoFloat>(e1: &Line<T>, e2: &Line<T>, eps: T) -
     if e1.end == e2.end && orient2d_generic(e1.end, e1.start, e2.start) != T::zero() {
         return false;
     }
-    // For f64, use robust orient2d (Shewchuk's algorithm) to avoid false negatives with near-collinear edges at large coordinates.
+    // For f64, use robust orient2d (Shewchuk's algorithm) to avoid false negatives with
+    // near-collinear edges at large coordinates.
     if mem::size_of::<T>() == 8 {
         return edges_intersect_f64_robust(
             &Line::new(
@@ -309,8 +307,8 @@ pub(crate) fn dist2<T: GeoFloat>(a: Coord<T>, b: Coord<T>) -> T {
     (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y)
 }
 
-/// For two collinear segments, compute split t-parameters where one edge's
-/// endpoint falls strictly inside the other. Returns `(splits_on_e1, splits_on_e2)`.
+/// For two collinear segments, compute split t-parameters where one edge's endpoint
+/// falls strictly inside the other. Returns `(splits_on_e1, splits_on_e2)`.
 pub(crate) fn collinear_split_params<T: GeoFloat>(
     e1: &Line<T>,
     e2: &Line<T>,
@@ -354,9 +352,9 @@ pub(crate) fn collinear_split_params<T: GeoFloat>(
     (p1, p2)
 }
 
-/// f64‑only DD‑based intersection for maximum robustness.
-/// Callers MUST still check t/u in the desired range (this function
-/// returns the intersection even when the crossing falls outside segments).
+/// f64‑only DD‑based intersection for maximum robustness. Callers must still check t/u
+/// in the desired range (this function returns the intersection even when the crossing
+/// falls outside segments).
 fn compute_intersection_param_dd(e1: &Line<f64>, e2: &Line<f64>) -> Option<(f64, f64, Coord<f64>)> {
     crate::dd::segment_intersection_dd(e1.start, e1.end, e2.start, e2.end)
         .map(|(pt, t, u)| (t.to_f64(), u.to_f64(), pt))
@@ -389,7 +387,8 @@ pub(crate) fn compute_intersection_param<T: GeoFloat>(
                 y: e2.end.y.to_f64().expect("to_f64"),
             },
         );
-        // Phase 1: Detection via batch robust orient2d (SIMD fast path + Shewchuk adaptive-precision fallback for near-zero results).
+        // Phase 1: Detection via batch robust orient2d (SIMD fast path + Shewchuk
+        // adaptive-precision fallback for near-zero results).
         let batch = crate::simd::orient2d_batch_4_robust(
             &[ef1.start, ef1.start, ef2.start, ef2.start],
             &[ef1.end, ef1.end, ef2.end, ef2.end],
@@ -404,7 +403,9 @@ pub(crate) fn compute_intersection_param<T: GeoFloat>(
             return None;
         }
 
-        // Phase 2: Computation via DD (106-bit mantissa) for any non-trivially-separated case: proper crossing, endpoint-on-segment, or near-parallel.
+        // Phase 2: Computation via DD (106-bit mantissa) for any
+        // non-trivially-separated case: proper crossing, endpoint-on-segment, or
+        // near-parallel.
         return compute_intersection_param_dd(&ef1, &ef2).map(|(t, u, pt)| {
             (
                 T::from(t).expect("intersection param in range"),

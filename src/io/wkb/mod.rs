@@ -1,22 +1,8 @@
-//! Single-pass WKB parser and encoder for 2D geometries.
-//!
-//! No dependencies beyond `geo`. Handles both big-endian (NDR) and
-//! little-endian (XDR) byte order, including mixed orders inside
-//! multi-geometries. Supports EWKB type flag stripping.
-//!
-//! # Writing
-//!
-//! - [`write_wkb`] — encodes as little-endian WKB
-//! - [`write_wkb_with_opts`] — configurable byte order via [`WriteOptions`]
-//! - [`write_wkb_to`] — writes WKB to any `io::Write` target
-//! - [`write_ewkb`] — EWKB with SRID and Z/M dimension preservation
-//!
-//! # Reading
-//!
-//! - [`read_wkb`] — parses WKB/EWKB bytes (returns 2D geometry, discards extras)
-//! - [`read_ewkb`] — parses preserving SRID, Z/M into [`EwkbGeometry`]
-//! - [`read_wkb_from`] — reads WKB from any `io::Read` source
-//! - [`read_wkb_concat`] — parses concatenated WKB sequence
+//! Single-pass WKB parser and encoder for 2D geometries, with no dependency beyond
+//! `geo`. It strips EWKB type flags. # Writing `write_wkb` encodes little-endian WKB.
+//! `write_wkb_to` writes to any `io::Write` target. `write_ewkb` keeps SRID and Z/M
+//! dimensions. # Reading `read_wkb` parses WKB or EWKB bytes and returns 2D geometry.
+//! `read_wkb_from` reads from any `io::Read` source.
 
 use alloc::vec::Vec;
 use core::fmt;
@@ -107,30 +93,16 @@ impl EwkbDims {
         has_m: true,
     };
 
-    /// Number of coordinate values per point (2 for XY, 3 for XYZ/XYM, 4 for XYZM).
+    /// Number of coordinate values per point (2 for XY, 3 for xyz/xym, 4 for xyzm).
     pub fn coord_count(self) -> u8 {
         (self.has_z as u8) + (self.has_m as u8) + 2
     }
 }
 
-/// An EWKB geometry preserving SRID and Z/M dimension data.
-///
-/// Returned by [`read_ewkb`] when the input contains extended WKB flags.
-/// The 2D geometry is always accessible via `.geometry`, while `.srid`
-/// and `.extra_coords` preserve the extended data for roundtrip via
-/// [`write_ewkb`].
-///
-/// For [`read_wkb`], this metadata is discarded and only the 2D geometry
-/// is returned.
-///
-/// # Extra coordinates
-///
-/// `.extra_coords` stores Z and/or M values in depth-first coordinate
-/// traversal order matching the `.geometry` tree. For `XYZ` or `XYM`,
-/// one `f64` per coordinate. For `XYZM`, two `f64`s per coordinate
-/// (Z first, then M). Extra data is only meaningful when paired with
-/// the same geometry structure — use [`read_ewkb`] and [`write_ewkb`]
-/// as a matched pair.
+/// EWKB geometry that keeps SRID and Z/M dimension data. `read_ewkb` returns it when
+/// the input carries extended WKB flags. `.geometry` always holds the 2D geometry. The
+/// data is meaningful only with the same structure, so use `read_ewkb` and `write_ewkb`
+/// as a pair.
 #[derive(Debug, Clone)]
 pub struct EwkbGeometry {
     pub geometry: Geometry<f64>,
@@ -142,9 +114,7 @@ pub struct EwkbGeometry {
 /// Byte order for WKB serialization.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Endianness {
-    /// Little-endian (NDR) — default, native on x86_64/aarch64
     LittleEndian,
-    /// Big-endian (XDR) — network byte order
     BigEndian,
 }
 

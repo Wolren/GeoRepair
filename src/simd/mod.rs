@@ -1,25 +1,9 @@
-//! SIMD-accelerated geometric predicates.
-//!
-//! Provides packed implementations of orient2d (cross product of three coords)
-//! and related ring predicates.
-//!
-//! # Kernel selection history (measured, 2026-08-02, i5-12400F)
-//!
-//! Hand-written x86_64 AVX2/AVX-512 intrinsics were benchmarked head-to-head
-//! against scalar code and **removed**: `is_ring_ccw` was 2.8x slower,
-//! `point_in_ring` 8.4x slower (AoS gathers + per-element robust fallback),
-//! `orient2d_batch_4` a tie, `aabb_minmax` 4.5x faster, `snap_coords` 1.8x
-//! faster — but a whole-crate `-C target-cpu=native` build regressed the full
-//! 1.58M-polygon pass by 25% (3.73s → 4.69s), and even runtime-dispatched
-//! AVX2 for the two winning kernels did not move the full pass. Verdict:
-//! scalar everywhere; LLVM's auto-vectorizer beats hand-written intrinsics on
-//! AoS coordinate data. The `simd-portable` nightly path (`std::simd`)
-//! remains as the forward-looking SIMD route.
-//!
-//! The module is compiled unconditionally (it is pure Rust with no
-//! dependencies), which also fixes the "optional `simd` feature was secretly
-//! required" bug — call sites throughout the crate use `crate::simd::*`
-//! without `#[cfg(feature = "simd")]` guards.
+//! SIMD-accelerated geometric predicates. # Kernel selection history (measured,
+//! 2026-08-02, i5-12400F) Hand-written avx2 and avx-512 intrinsics lost to scalar code
+//! and are removed. is_ring_ccw was 2.8x slower, point_in_ring 8.4x slower,
+//! orient2d_batch_4 a tie, aabb_minmax 4.5x faster, snap_coords 1.8x faster. A -C
+//! target-cpu=native build regressed the 1.58M pass by 25%, from 3.73s to 4.69s. The
+//! std::simd path remains. Call sites use crate::simd without a feature guard.
 
 #[cfg(feature = "simd-portable")]
 use geo::Coord;
@@ -83,10 +67,10 @@ fn point_in_ring_scalar_loop(
     wn
 }
 
-/// Point-in-ring test that accepts boundary points as inside (inclusive).
-/// Used by the large-valid fast-path gate: GEOS IsValidOp allows a hole to
-/// touch the shell at a point (OGC polygon validity), so a hole whose probe
-/// vertex lies exactly ON the shell must not disqualify the polygon.
+/// Point-in-ring test that accepts boundary points as inside (inclusive). Used by the
+/// large-valid fast-path gate: GEOS IsValidOp allows a hole to touch the shell at a
+/// point (OGC polygon validity), so a hole whose probe vertex lies exactly ON the shell
+/// must not disqualify the polygon.
 pub fn point_in_ring_inclusive_test(pt: Coord<f64>, coords: &[Coord<f64>]) -> bool {
     point_in_ring_inclusive(pt, coords)
 }

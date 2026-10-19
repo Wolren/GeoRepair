@@ -1,15 +1,6 @@
-//! ESRI Shapefile (`.shp`) backend via the `shapefile` crate.
-//!
-//! Reads all shape types (2D, M, and Z variants; M/Z ordinates are dropped).
-//! Polygon records use the crate's `PolygonRing::Outer`/`Inner` ring
-//! classification: multiple `Outer` rings become a `MultiPolygon` (the
-//! shapefile representation of multi-part polygons), `Inner` rings become
-//! holes attached to the exterior whose bounding box contains them.
-//! Multi-part polylines become `MultiLineString`.
-//!
-//! Writes polygons/multipolygons as single `Polygon` records with multiple
-//! rings, producing `.shp` + `.shx` (no `.dbf` — geometry only; add an
-//! attribute table with a GIS tool if attributes are needed).
+//! esri Shapefile (`.shp`) backend over the `shapefile` crate. Records use the crate
+//! ring classes `PolygonRing::Outer` and `Inner`. No `.dbf` is written, because the
+//! backend carries geometry only.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -32,8 +23,6 @@ pub fn load_shp(path: &str) -> Result<Vec<Geometry<f64>>, String> {
 }
 
 /// Save polygons (and multipolygons) to a `.shp` file.
-///
-/// Non-polygon geometries are skipped; an empty polygon set is an error.
 pub fn save_shp(path: &str, geoms: &[Geometry<f64>]) -> Result<(), String> {
     let polys: Vec<Geometry<f64>> = geoms
         .iter()
@@ -58,8 +47,8 @@ pub fn save_shp(path: &str, geoms: &[Geometry<f64>]) -> Result<(), String> {
     Ok(())
 }
 
-/// Convert a shapefile `Shape` to a geo `Geometry`; `None` for types with no
-/// geo equivalent (null shapes, multipatch).
+/// Convert a shapefile `Shape` to a geo `Geometry`; `None` for types with no geo
+/// equivalent (null shapes, multipatch).
 fn shape_to_geo(shape: Shape) -> Option<Geometry<f64>> {
     Some(match shape {
         Shape::NullShape | Shape::Multipatch(_) => return None,
@@ -95,10 +84,6 @@ fn parts_to_line_geometry<P: CoordLike>(parts: &[Vec<P>]) -> Geometry<f64> {
 }
 
 /// Convert a record's ring list to a Polygon or MultiPolygon.
-///
-/// Outer rings are exteriors (multiple outers = multi-part polygon); inner
-/// rings are holes attached to the smallest exterior whose bounding box
-/// contains the hole's first vertex.
 fn rings_to_geometry<P: CoordLike>(rings: &[PolygonRing<P>]) -> Geometry<f64> {
     let mut exteriors: Vec<LineString<f64>> = Vec::new();
     let mut holes: Vec<LineString<f64>> = Vec::new();
@@ -154,8 +139,8 @@ fn pts_to_ls<P: CoordLike>(pts: &[P]) -> LineString<f64> {
     LineString(pts.iter().map(|p| p.as_coord()).collect())
 }
 
-/// Minimal abstraction over the shapefile point types (`Point`, `PointZ`,
-/// `PointM`), which all expose `x`/`y`.
+/// Minimal abstraction over the shapefile point types (`Point`, `PointZ`, `PointM`),
+/// which all expose `x`/`y`.
 trait CoordLike {
     fn as_coord(&self) -> Coord<f64>;
 }

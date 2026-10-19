@@ -1,20 +1,9 @@
 use alloc::vec::Vec;
 use geo::{Area, Coord, LinesIter, MultiPolygon, Polygon};
 
-/// Subtract holes from a shell, producing OGC-valid polygon components.
-///
-/// Strategy:
-/// 1. Boolean difference (fast for clean nesting)
-/// 2. If the boolean RESULT looks topologically bad (bbox-overlapping holes
-///    inside one component → DisconnectedInteriorRing risk), BuildArea on
-///    noded shell+hole edges as a fallback.
-///
-/// Triggering on the *result* (not input heuristics) keeps this fast: the
-/// boolean op already handles the common cases (including hourglass
-/// diamond-touch holes, which split the shell into multiple components).
-/// Input-side heuristics like "hole vertex on shell boundary" fire on
-/// ordinary real-world data and forced full noding + polygonize on nearly
-/// every polygon — a ~50-100x regression (305s vs 5.5s on 2298 invalid polys).
+/// Subtract holes from a shell to give ogc-valid polygon parts. They force noding and
+/// polygonize on nearly every polygon: a 50-100x regression, 305s against 5.5s on 2298
+/// invalid polygons.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn subtract_holes(shell: &Polygon<f64>, holes: &[Polygon<f64>]) -> MultiPolygon<f64> {
     if holes.is_empty() {
@@ -24,8 +13,9 @@ pub fn subtract_holes(shell: &Polygon<f64>, holes: &[Polygon<f64>]) -> MultiPoly
     // touches the shell in 2+ places splits the shell into multiple
     let result = match crate::arrange::boolean_difference_catch(shell, holes) {
         Some(mp) => mp,
-        // i_overlay panic (is_fill_top assertion on degenerate input): the panic must not kill the rayon batch.
-        // Route to the BuildArea fallback below, which operates on noded edges and never panics.
+        // i_overlay panic (is_fill_top assertion on degenerate input): the panic must
+        // not kill the rayon batch. Route to the BuildArea fallback below, which
+        // operates on noded edges and never panics.
         None => {
             if let Some(mp) = build_area_shell_holes(shell, holes) {
                 return mp;
@@ -47,7 +37,8 @@ pub fn subtract_holes(shell: &Polygon<f64>, holes: &[Polygon<f64>]) -> MultiPoly
         .collect();
     let result = MultiPolygon::new(valid);
 
-    // but ONLY when (the WIP's bbox heuristic forced noding+polygonize on nearly every poly: 305s vs 5.5s on 2298 invalid polys).
+    // but only when (the wip's bbox heuristic forced noding+polygonize on nearly every
+    // poly: 305s vs 5.5s on 2298 invalid polys).
     if needs_build_area_holes(&result) {
         if let Some(mp) = build_area_shell_holes(shell, holes) {
             return mp;
@@ -84,8 +75,7 @@ fn needs_build_area_holes(mp: &MultiPolygon<f64>) -> bool {
 }
 
 /// True if two rings share a collinear edge segment with positive-length overlap.
-/// Vertex-only touches (hourglass patterns) return false — boolean difference
-/// handles those correctly by splitting components.
+/// Vertex-only touches (hourglass patterns) return false.
 fn build_area_shell_holes(
     shell: &Polygon<f64>,
     holes: &[Polygon<f64>],

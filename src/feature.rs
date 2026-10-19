@@ -1,9 +1,8 @@
-//! GIS feature container with attribute, CRS, and Z/M preservation.
+//! GIS feature container with attribute, crs, and Z/M preservation.
 
 //!
-//! The [`Feature`] struct bundles a geometry with optional JSON attributes,
-//! CRS metadata, and per-coordinate Z/M values. It is the primary data
-//! container for I/O operations — the repair pipeline modifies only the
+//! The [`Feature`] struct bundles a geometry with optional JSON attributes, crs
+//! metadata, and per-coordinate Z/M values. The repair pipeline modifies only the
 //! geometry while preserving all other fields.
 
 use alloc::string::String;
@@ -14,11 +13,11 @@ use serde_json::{Map, Value};
 use crate::crs::Crs;
 use crate::zm::{ZmValue, count_coords, preserve_zm, zm_pairs};
 
-/// A GIS feature combining geometry with optional attributes, CRS, and Z/M values.
+/// A GIS feature combining geometry with optional attributes, crs, and Z/M values.
 ///
-/// This is the primary data container for I/O operations, ensuring that
-/// attribute data, CRS metadata, and Z/M coordinates are preserved through
-/// the repair pipeline (only the geometry is modified by repair).
+/// This is the primary data container for I/O operations, ensuring that attribute data,
+/// crs metadata, and Z/M coordinates are preserved through the repair pipeline (only
+/// the geometry is modified by repair).
 #[derive(Clone, Debug)]
 pub struct Feature {
     /// The geometry being repaired or round-tripped.
@@ -27,8 +26,8 @@ pub struct Feature {
     pub properties: Option<Map<String, Value>>,
     /// Coordinate Reference System metadata.
     pub crs: Option<Crs>,
-    /// Per-coordinate Z (elevation) and M (measure) values, one entry per
-    /// coordinate in depth-first traversal order.
+    /// Per-coordinate Z (elevation) and M (measure) values, one entry per coordinate in
+    /// depth-first traversal order.
     pub zm: Vec<ZmValue>,
 }
 
@@ -73,7 +72,7 @@ impl Feature {
         }
     }
 
-    /// Set the CRS on this feature.
+    /// Set the crs on this feature.
     pub fn with_crs(mut self, crs: Option<Crs>) -> Self {
         self.crs = crs;
         self
@@ -121,7 +120,6 @@ impl Feature {
     }
 }
 
-/// Convert any geometry into a [`Feature`] with no attributes.
 /// Convert any geometry into a [`Feature`] with no attributes.
 impl From<Geometry<f64>> for Feature {
     fn from(geometry: Geometry<f64>) -> Self {

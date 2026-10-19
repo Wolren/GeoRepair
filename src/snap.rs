@@ -1,16 +1,15 @@
 //! Coordinate snap-rounding utilities.
 //!
-//! Eliminates sliver geometries and near-degenerate artifacts by snapping
-//! coordinates to a fixed-precision grid.
+//! Eliminates sliver geometries and near-degenerate artifacts by snapping coordinates
+//! to a fixed-precision grid.
 
 use alloc::vec::Vec;
 use geo::{Coord, Line};
 
 /// Default grid resolution for coordinate snapping: 1e-10 (0.1 nm).
 ///
-/// Used by [`snap_coord_default`] and the geometry precision reducer.
-/// Equivalent to ~0.1 nanometre — fine enough that normal GIS data is
-/// unchanged while eliminating floating-point noise from computation.
+/// Used by [`snap_coord_default`] and the geometry precision reducer. Equivalent to
+/// ~0.1 nanometre.
 pub const DEFAULT_GRID: f64 = 1e-10;
 
 /// Snap a coordinate to a grid of the given resolution.
@@ -29,7 +28,6 @@ pub fn snap_coord_default(c: Coord<f64>) -> Coord<f64> {
 }
 
 /// Snap a line segment's endpoints to the default grid.
-/// Filters out zero-length segments after snapping.
 pub fn snap_line(line: Line<f64>) -> Option<Line<f64>> {
     let start = snap_coord_default(line.start);
     let end = snap_coord_default(line.end);

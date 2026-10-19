@@ -1,9 +1,8 @@
 //! sweep-line machinery for ring self-intersection
 //!
-//! Extracted from validation/core.rs on 2026-08-07 (file-size governance:
-//! core.rs was 2540 lines; the cap is 800). Content is verbatim - no
-//! behavior changes; sibling modules resolve shared items through the
-//! `crate::validation::core` facade.
+//! Extracted from validation/core.rs on 2026-08-07 (file-size governance: core.rs was
+//! 2540 lines; the cap is 800). Content is verbatim - no behavior changes; sibling
+//! modules resolve shared items through the `crate::validation::core` facade.
 //!
 //! See validation/mod.rs for the module map.
 
@@ -12,10 +11,10 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 use geo::Coord;
 
-/// Padded 2D bounding-box overlap for an edge pair (the R-tree envelope
-/// filter equivalent: both boxes inflated by 1e-10 x max-dim, floored at
-/// 1e-10). Conservative by construction: any pair the exact predicates
-/// accept has overlapping boxes, so rejecting here never changes results.
+/// Padded 2D bounding-box overlap for an edge pair (the R-tree envelope filter
+/// equivalent: both boxes inflated by 1e-10 x max-dim, floored at 1e-10). Conservative
+/// by construction: any pair the exact predicates accept has overlapping boxes, so
+/// rejecting here never changes results.
 #[inline]
 pub(crate) fn padded_bbox_overlap(
     a1: Coord<f64>,
@@ -51,9 +50,9 @@ pub(crate) fn padded_bbox_overlap(
         && lo_y - ext <= hi_y2 + ext2
 }
 
-/// Order-preserving u64 encoding of an f64 (IEEE bit trick): positives map
-/// above negatives, negatives reverse-magnitude. NaN handled upstream
-/// (finite check in check_ring_validity).
+/// Order-preserving u64 encoding of an f64 (ieee bit trick): positives map above
+/// negatives, negatives reverse-magnitude. NaN handled upstream (finite check in
+/// check_ring_validity).
 #[inline]
 pub(crate) fn sortable_u64(x: f64) -> u64 {
     let bits = x.to_bits();
@@ -70,9 +69,7 @@ thread_local! {
         core::cell::RefCell::new(SweepScratch::default());
 }
 
-/// Run a closure against the radix-sort scratch buffers. With  the
-/// buffers are thread-local (no realloc between sweeps); without it a
-/// fresh default scratch is allocated per call (no_std has no TLS).
+/// Run a closure against the radix-sort scratch buffers.
 #[cfg(feature = "std")]
 fn with_scratch<R>(f: impl FnOnce(&mut SweepScratch) -> R) -> R {
     SWEEP_SCRATCH.with(|s| f(&mut s.borrow_mut()))
@@ -111,9 +108,8 @@ impl Default for SweepScratch {
     }
 }
 
-/// LSD radix sort of (keys, order) pairs, 8 bits x 8 passes. Stable; sorts
-/// by ascending key. Buffers are passed in (the caller already holds the
-/// TLS scratch borrow - re-borrowing would panic).
+/// lsd radix sort of (keys, order) pairs, 8 bits x 8 passes. Buffers are passed in (the
+/// caller already holds the tls scratch borrow - re-borrowing would panic).
 fn radix_sort_u64(
     keys: &mut Vec<u64>,
     order: &mut Vec<u32>,
@@ -148,8 +144,7 @@ fn radix_sort_u64(
     }
 }
 
-/// Radix sort of (keys, order) using the TLS scratch buffers (no caller
-/// borrow held). Used for the cycle-detection vertex lists.
+/// Radix sort of (keys, order) using the tls scratch buffers (no caller borrow held).
 pub(crate) fn radix_sort_keys_tls(keys: &mut Vec<u64>, order: &mut Vec<u32>) {
     with_scratch(|s| {
         let SweepScratch {
@@ -162,42 +157,29 @@ pub(crate) fn radix_sort_keys_tls(keys: &mut Vec<u64>, order: &mut Vec<u32>) {
     });
 }
 
-/// Static uniform-grid index over a set of bounding boxes
-/// (`[lo_x, hi_x, lo_y, hi_y]`).
+/// Static uniform-grid index over a set of bounding boxes (`[lo_x, hi_x, lo_y, hi_y]`).
 ///
-/// Exists because the x-active-set sweeps in this file and in
-/// `noding::line` retire a segment only when `hi_x < cur.lo_x`, so a run
-/// of segments sharing one `lo_x` never retires. A subdivided vertical
-/// edge puts its whole run in the active set at once, which makes the
-/// per-step scan O(active) and the sweep O(n^2) overall. Measured
-/// 2026-10-17 on the figure-8 ladder: that degeneration was ~90 % of a
-/// 4000-vertex noder call, split across three separate scans
-/// (`sweep_ring_self_intersects`, `crossing_only`'s candidate loop, and
-/// `run_full`'s removed-family-vs-sweep loop), all reached through
-/// different flags but all the same bug.
+/// Exists because the x-active-set sweeps in this file and in `noding::line` retire a
+/// segment only when `hi_x < cur.lo_x`. Measured 2026-10-17 on the figure-8 ladder:
+/// that degeneration was ~90 % of a 4000-vertex noder call, split across three separate
+/// scans (`sweep_ring_self_intersects`, `crossing_only`'s candidate loop. `run_full`'s
+/// removed-family-vs-sweep loop), all reached through different flags but all the same
+/// bug.
 ///
-/// A static grid enumerates the same candidate set - box overlap within
-/// the boxes' own padding - in O(n + candidates): nothing is maintained
-/// incrementally, so nothing degenerates on x ties and nothing goes
-/// stale. Candidates are returned in ascending insertion position, which
-/// keeps the pair order of the scan it replaces when the grid is built in
-/// that scan's order.
 ///
-/// `build` returns `None` when one cell holds more than [`GRID_MAX_CELL`]
-/// boxes. That is the genuinely dense case, and the caller keeps its
-/// existing fallback there, so no input can get slower than it is today.
+/// `build` returns `None` when one cell holds more than [`GRID_MAX_CELL`] boxes.
 pub(crate) struct SegGrid {
     min_x: f64,
     min_y: f64,
     inv_cell: f64,
     nx: usize,
     ny: usize,
-    /// CSR cell boundaries into `items`, length `nx * ny + 1`.
+    /// csr cell boundaries into `items`, length `nx * ny + 1`.
     offsets: Vec<u32>,
     /// Cell contents: positions in build order, ascending within a cell.
     items: Vec<u32>,
-    /// Per-position dedup stamp; `seen[p] == epoch` means position `p` was
-    /// already handed to the caller for this query.
+    /// Per-position dedup stamp; `seen[p] == epoch` means position `p` was already
+    /// handed to the caller for this query.
     seen: Vec<u32>,
     epoch: u32,
 }
@@ -288,10 +270,8 @@ impl SegGrid {
         })
     }
 
-    /// Visit every position whose box shares a grid cell with `b`,
-    /// ascending, skipping `exclude` and without repeats. Sharing a cell is
-    /// implied by box overlap, so no overlapping box is ever missed; the
-    /// caller still applies its own overlap gate to the extras.
+    /// Visit every position whose box shares a grid cell with `b`, ascending, skipping
+    /// `exclude` and without repeats.
     pub(crate) fn for_each_candidate<F: FnMut(usize)>(
         &mut self,
         b: [f64; 4],
@@ -324,28 +304,21 @@ impl SegGrid {
     }
 }
 
-/// Active-set size at which [`sweep_ring_self_intersects`] gives up and lets
-/// the caller use the index or brute-force path.
+/// Active-set size at which [`sweep_ring_self_intersects`] gives up and lets the caller
+/// use the index or brute-force path.
 const SWEEP_DENSE_ACTIVE_LIMIT: usize = 256;
 
 /// Longest equal-`lo_x` run tolerated by the incremental active set in
-/// [`sweep_ring_self_intersects`] before it switches to the static grid.
-/// A simple polyline keeps one or two active entries and never approaches
-/// this; a subdivided vertical edge is one run of `n / 4` and always
-/// exceeds it (2026-10-17).
+/// [`sweep_ring_self_intersects`] before it switches to the static grid. A simple
+/// polyline keeps one or two active entries and never approaches this; a subdivided
+/// vertical edge is one run of `n / 4` and always exceeds it (2026-10-17).
 const SWEEP_DEGENERATE_RUN: usize = 32;
 
-/// Self-intersection sweep. Returns Some(true) on intersection, Some(false)
-/// when clean, None when the ring's x-overlap density exceeds the routing
-/// limit (caller falls back to the indexed / brute path).
-///
-/// `check_revisit`: the LINE path's vertex-revisit class (a non-adjacent
-/// pair sharing an endpoint is non-simple). The equality compares run ONLY
-/// on lean-escalated pairs - every revisit pair has an orient exactly zero,
-/// so it always escalates, and fast-FP-strong dense pairs never pay the
-/// compares (the star-comb's ~120k bbox-overlapping pairs measured clean;
-/// 2026-08-07). The ring path passes false - shared vertices there are the
-/// pinch class, classified by check_ring_validity.
+/// It returns Some(true) on an intersection, Some(false) when clean, and None when
+/// x-overlap density exceeds the routing limit; the caller uses the indexed or brute
+/// path. check_revisit covers the line vertex-revisit class: a non-adjacent pair
+/// sharing an endpoint is non-simple. Fast-FP-strong dense pairs never pay: the
+/// star-comb has about 120k bbox-overlapping pairs, measured clean (2026-08-07).
 pub(crate) fn sweep_ring_self_intersects(
     ring: &[Coord<f64>],
     eps: f64,
@@ -375,7 +348,8 @@ pub(crate) fn sweep_ring_self_intersects(
         let mut prev_lo_bits = 0u64;
         for i in 0..n {
             let a = ring[i];
-            // min(n) identical to % n for closed rings (ring[n] == ring[0]), correct for open chain slices (see check_edge_pair_intersection).
+            // min(n) identical to % n for closed rings (ring[n] == ring[0]), correct
+            // for open chain slices (see check_edge_pair_intersection).
             let b = ring[(i + 1).min(n)];
             let (lo_x, hi_x) = if a.x < b.x { (a.x, b.x) } else { (b.x, a.x) };
             let (lo_y, hi_y) = if a.y < b.y { (a.y, b.y) } else { (b.y, a.y) };
@@ -401,13 +375,14 @@ pub(crate) fn sweep_ring_self_intersects(
             spans.push([lo_x - ext, hi_x + ext, lo_y - ext, hi_y + ext]);
         }
 
-        // scan at ~2.4 ns/vertex.
-        // run of segments shares one lo_x - a subdivided vertical edge -because such a run can never retire
+        // scan at ~2.4 ns/vertex. run of segments shares one lo_x - a subdivided
+        // vertical edge -because such a run can never retire
         if lo_max_run > SWEEP_DEGENERATE_RUN {
             return sweep_with_grid(spans, ring, n, eps, check_revisit, closed);
         }
 
-        // Measured (2026-08-07): the 8-pass radix was ~40% of the sweep's fixed cost on a 500-vertex valid line.
+        // Measured (2026-08-07): the 8-pass radix was ~40% of the sweep's fixed cost on
+        // a 500-vertex valid line.
         if sorted {
             order.clear();
             for i in 0..n {
@@ -427,7 +402,8 @@ pub(crate) fn sweep_ring_self_intersects(
             active.retain(|&p| spans[p as usize][1] >= cur[0]);
             for &p in &*active {
                 let t = spans[p as usize];
-                // x-overlap is guaranteed by the retain condition; only the y gate remains (matches the tree's 2D envelope filter).
+                // x-overlap is guaranteed by the retain condition; only the y gate
+                // remains (matches the tree's 2D envelope filter).
                 if t[3] < cur[2] || t[2] > cur[3] {
                     continue;
                 }
@@ -464,13 +440,11 @@ pub(crate) fn sweep_ring_self_intersects(
     })
 }
 
-/// The degeneracy escape hatch of [`sweep_ring_self_intersects`]: a static
-/// grid instead of an incremental active set, and no radix sort, because
-/// the grid does not care about x order. Used only for rings whose longest
-/// equal-`lo_x` run exceeds [`SWEEP_DEGENERATE_RUN`], where the active set
-/// would be O(n) and the sweep O(n^2) - see `SegGrid`. This function
-/// returns a bool on the first hit, so pair order is irrelevant; each
-/// unordered pair is visited once, from the higher index.
+/// The degeneracy escape hatch of [`sweep_ring_self_intersects`]: a static grid instead
+/// of an incremental active set, and no radix sort, because the grid does not care
+/// about x order. Used only for rings whose longest equal-`lo_x` run exceeds
+/// [`SWEEP_DEGENERATE_RUN`], where the active set would be O(n) and the sweep O(n^2) -
+/// see `SegGrid`.
 fn sweep_with_grid(
     spans: &[[f64; 4]],
     ring: &[Coord<f64>],
@@ -521,8 +495,8 @@ fn sweep_with_grid(
     Some(false)
 }
 
-/// R-tree self-intersection check (the dense-ring fallback; kept exact -
-/// same predicate and pair rules as the sweep).
+/// R-tree self-intersection check (the dense-ring fallback; kept exact - same predicate
+/// and pair rules as the sweep).
 #[cfg(feature = "rstar")]
 pub(crate) fn ring_tree_self_intersects(ring: &[Coord<f64>], n: usize, eps: f64) -> bool {
     struct EdgeEnv {

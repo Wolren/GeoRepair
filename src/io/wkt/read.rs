@@ -3,9 +3,9 @@
 use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec::Vec;
-/// Maximum GEOMETRYCOLLECTION nesting depth. Each level consumes at least
-/// ~14 bytes of input, so the cap never rejects real data while bounding
-/// recursion (stack overflow is an uncatchable abort).
+/// Maximum geometrycollection nesting depth. Each level consumes at least ~14 bytes of
+/// input, so the cap never rejects real data while bounding recursion (stack overflow
+/// is an uncatchable abort).
 const MAX_WKT_NESTING: usize = 256;
 
 use super::*;
@@ -101,7 +101,8 @@ impl<'a> Parser<'a> {
             return Err(self.err("expected number"));
         }
 
-        // The historical hand-rolled u64 accumulator + 10f64.powi(exp) assembly was not: measured output re-parsed to a DIFFERENT f64 (roundtrip fuzz target).
+        // The historical hand-rolled u64 accumulator + 10f64.powi(exp) assembly was
+        // not: measured output re-parsed to a different f64 (roundtrip fuzz target).
         let bytes = &self.s;
         let n = bytes.len();
         if self.i < n && (bytes[self.i] == b'-' || bytes[self.i] == b'+') {
@@ -158,8 +159,9 @@ impl<'a> Parser<'a> {
             }
         }
 
-        // an Eisel-Lemire implementation (correctly rounded, ~2x faster than std's float parsing - measured 2026-08-04: float parsing is ~88% of WKT)
-        // Note: hex floats ("0x1p3") are rejected - WKT has no hex form and GEOS never emits one.
+        // an Eisel-Lemire implementation (correctly rounded, ~2x faster than std's
+        // float parsing - measured 2026-08-04: float parsing is ~88% of WKT) Note: hex
+        // floats ("0x1p3") are rejected - WKT has no hex form and GEOS never emits one.
         fast_float2::parse::<f64, _>(&self.s[start..self.i])
             .map_err(|_| self.err("expected number"))
     }
@@ -171,7 +173,8 @@ impl<'a> Parser<'a> {
 
     fn read_coord_list(&mut self, dims: u32) -> Result<Vec<Coord<f64>>, WktError> {
         self.skip_ws();
-        // A bare '(' ')' coordinate list is rejected (GEOS rejects it too); emptiness is expressed with the EMPTY keyword.
+        // A bare '(' ')' coordinate list is rejected (GEOS rejects it too); emptiness
+        // is expressed with the empty keyword.
         let mut coords = Vec::new();
         coords.push(self.read_coord(dims)?);
         loop {
@@ -253,7 +256,7 @@ impl<'a> Parser<'a> {
             if self.i < self.s.len() && self.s[self.i] == b')' {
                 break;
             }
-            // POLYGON (EMPTY, (0 0, 1 1, 0 1, 0 0)) is a polygon
+            // polygon (empty, (0 0, 1 1, 0 1, 0 0)) is a polygon
             if self.i < self.s.len() && (self.s[self.i] == b'E' || self.s[self.i] == b'e') {
                 let rest = &self.s[self.i..];
                 if rest.starts_with(b"EMPTY") || rest.starts_with(b"empty") {
@@ -289,7 +292,8 @@ impl<'a> Parser<'a> {
             saw_any = true;
         }
         self.expect(b')')?;
-        // POLYGON () is rejected (GEOS rejects it too); POLYGON (EMPTY) is a valid empty polygon.
+        // polygon () is rejected (GEOS rejects it too); polygon (empty) is a valid
+        // empty polygon.
         if !saw_any {
             return Err(self.err("expected at least one ring"));
         }
@@ -320,7 +324,8 @@ impl<'a> Parser<'a> {
             if self.i >= self.s.len() || self.s[self.i] == b')' {
                 break;
             }
-            // EMPTY element (MULTIPOINT (EMPTY, (1 2), ...)) - an empty point component; geo's empty-point convention is NaN coords.
+            // empty element (multipoint (empty, (1 2), .)) - an empty point component;
+            // geo's empty-point convention is NaN coords.
             if self.s[self.i] == b'E' || self.s[self.i] == b'e' {
                 let rest = &self.s[self.i..];
                 if rest.starts_with(b"EMPTY") || rest.starts_with(b"empty") {
@@ -350,7 +355,7 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect(b')')?;
-        // MULTIPOINT () is rejected (GEOS rejects it too).
+        // multipoint () is rejected (GEOS rejects it too).
         if !saw_any {
             return Err(self.err("expected at least one point"));
         }
@@ -383,7 +388,8 @@ impl<'a> Parser<'a> {
             if self.i < self.s.len() && self.s[self.i] == b')' {
                 break;
             }
-            // EMPTY element (MULTILINESTRING (EMPTY, (1 1, 2 2))) - an empty line component.
+            // empty element (multilinestring (empty, (1 1, 2 2))) - an empty line
+            // component.
             if self.i < self.s.len() && (self.s[self.i] == b'E' || self.s[self.i] == b'e') {
                 let rest = &self.s[self.i..];
                 if rest.starts_with(b"EMPTY") || rest.starts_with(b"empty") {
@@ -400,7 +406,7 @@ impl<'a> Parser<'a> {
             saw_any = true;
         }
         self.expect(b')')?;
-        // MULTILINESTRING () is rejected (GEOS rejects it too).
+        // multilinestring () is rejected (GEOS rejects it too).
         if !saw_any {
             return Err(self.err("expected at least one line"));
         }
@@ -433,7 +439,8 @@ impl<'a> Parser<'a> {
             if self.i < self.s.len() && self.s[self.i] == b')' {
                 break;
             }
-            // EMPTY element (MULTIPOLYGON (EMPTY, ((0 0, ...)))) - an empty polygon component.
+            // empty element (multipolygon (empty, ((0 0, .)))) - an empty polygon
+            // component.
             if self.i < self.s.len() && (self.s[self.i] == b'E' || self.s[self.i] == b'e') {
                 let rest = &self.s[self.i..];
                 if rest.starts_with(b"EMPTY") || rest.starts_with(b"empty") {
@@ -491,7 +498,7 @@ impl<'a> Parser<'a> {
                 saw_ring = true;
             }
             self.expect(b')')?;
-            // (GEOS rejects it too); (EMPTY) is a valid empty component.
+            // (GEOS rejects it too); (empty) is a valid empty component.
             if !saw_ring {
                 return Err(self.err("expected at least one ring"));
             }
@@ -504,7 +511,7 @@ impl<'a> Parser<'a> {
             saw_any = true;
         }
         self.expect(b')')?;
-        // MULTIPOLYGON () is rejected (GEOS rejects it too).
+        // multipolygon () is rejected (GEOS rejects it too).
         if !saw_any {
             return Err(self.err("expected at least one polygon"));
         }
@@ -537,7 +544,8 @@ impl<'a> Parser<'a> {
             if self.i < self.s.len() && self.s[self.i] == b')' {
                 break;
             }
-            // EMPTY element (GEOMETRYCOLLECTION (EMPTY, POINT (1 2))) -an empty point component (geo convention: NaN coords).
+            // empty element (geometrycollection (empty, point (1 2))) -an empty point
+            // component (geo convention: NaN coords).
             if self.i < self.s.len() && (self.s[self.i] == b'E' || self.s[self.i] == b'e') {
                 let rest = &self.s[self.i..];
                 if rest.starts_with(b"EMPTY") || rest.starts_with(b"empty") {
@@ -551,7 +559,7 @@ impl<'a> Parser<'a> {
             saw_any = true;
         }
         self.expect(b')')?;
-        // GEOMETRYCOLLECTION () is rejected (GEOS rejects it too).
+        // geometrycollection () is rejected (GEOS rejects it too).
         if !saw_any {
             return Err(self.err("expected at least one element"));
         }
@@ -559,8 +567,8 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_any(&mut self, depth: usize) -> Result<Geometry<f64>, WktError> {
-        // GEOMETRYCOLLECTION nests recursively; a crafted document can nest arbitrarily deep and overflow the stack (uncatchable abort).
-        // A flat collection's members each parse at depth+1, so the cap is on nesting, not element count.
+        // geometrycollection nests recursively; a crafted document can nest arbitrarily
+        // deep and overflow the stack (uncatchable abort).
         if depth > MAX_WKT_NESTING {
             return Err(self.err("geometry nesting exceeds limit"));
         }
@@ -589,8 +597,6 @@ pub(crate) enum Keyword {
 
 /// Parse a WKT string into a `Geometry<f64>`.
 ///
-/// Supports all OGC geometry types: Point, LineString, Polygon,
-/// MultiPoint, MultiLineString, MultiPolygon, GeometryCollection.
 /// Z, M, and ZM dimension modifiers are rejected with
 /// [`WktError::UnsupportedDimension`].
 pub fn read_wkt(input: &str) -> Result<Geometry<f64>, WktError> {
@@ -612,7 +618,6 @@ pub fn read_wkt(input: &str) -> Result<Geometry<f64>, WktError> {
 
 /// Read a WKT geometry from any `io::Read` source.
 ///
-/// Reads the entire input to a string, then delegates to [`read_wkt`].
 /// Supports the same geometry types and rejects Z/M/ZM modifiers.
 #[cfg(feature = "std")]
 pub fn read_wkt_from(mut reader: impl Read) -> Result<Geometry<f64>, WktError> {
@@ -621,11 +626,11 @@ pub fn read_wkt_from(mut reader: impl Read) -> Result<Geometry<f64>, WktError> {
     read_wkt(&s)
 }
 
-/// Peek at the beginning of a WKT string to determine the geometry type name
-/// and dimension (always 2 for GeoRepair, since Z/M/ZM are rejected).
+/// Peek at the beginning of a WKT string to determine the geometry type name and
+/// dimension (always 2 for GeoRepair, since Z/M/ZM are rejected).
 ///
-/// This function reads only the type keyword and optional dimension modifier,
-/// without parsing the full geometry. Useful for routing or preview.
+/// This function reads only the type keyword and optional dimension modifier, without
+/// parsing the full geometry.
 ///
 /// # Errors
 ///

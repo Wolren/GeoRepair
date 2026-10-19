@@ -1,12 +1,4 @@
-//! Topological face extraction from fully-noded edge sets (Polygonizer).
-//!
-//! Implements the GEOS BuildArea pipeline:
-//! 1. Extract all face cycles from planar graph using smallest-CCW-turn walker
-//! 2. Classify as shell (CCW) or hole (CW) by winding
-//! 3. Assign holes to containing shells using GEOS-style point walking
-//! 4. Build face polygons (shell + holes)
-//! 5. Even-parent filter (BuildArea findFaceHoles + collectWithEvenAncestors)
-//! 6. Union kept faces to dissolve shared edges
+//! Face extraction from fully-noded edge sets, in geos BuildArea order.
 
 use alloc::vec::Vec;
 use geo::{Coord, Line, LineString, MultiPolygon, Polygon, Winding};
@@ -310,9 +302,8 @@ fn signed_area_x2(coords: &[Coord<f64>]) -> f64 {
     sum
 }
 
-/// Split a ring at pinch points (vertices that appear more than once),
-/// producing separate rings. A pinch point is a vertex where the ring
-/// touches itself — the same coordinate appears at two different indices.
+/// Split a ring at pinch points (vertices that appear more than once), producing
+/// separate rings.
 fn split_at_pinch_point(ring: &[Coord<f64>]) -> Vec<Vec<Coord<f64>>> {
     if ring.len() < 4 {
         return vec![ring.to_vec()];
@@ -429,7 +420,7 @@ mod tests {
 
     #[test]
     fn test_deep_nesting() {
-        // L0 outer, L1 hole (CW), L2 island (CCW inside hole)
+        // L0 outer, L1 hole (CW), L2 island (ccw inside hole)
         let lines = vec![
             Line::new(Coord { x: 0.0, y: 0.0 }, Coord { x: 20.0, y: 0.0 }),
             Line::new(Coord { x: 20.0, y: 0.0 }, Coord { x: 20.0, y: 20.0 }),
@@ -440,7 +431,7 @@ mod tests {
             Line::new(Coord { x: 17.0, y: 3.0 }, Coord { x: 17.0, y: 17.0 }),
             Line::new(Coord { x: 17.0, y: 17.0 }, Coord { x: 3.0, y: 17.0 }),
             Line::new(Coord { x: 3.0, y: 17.0 }, Coord { x: 3.0, y: 3.0 }),
-            // L2 CCW island: E, N, W, S
+            // L2 ccw island: E, N, W, S
             Line::new(Coord { x: 6.0, y: 6.0 }, Coord { x: 14.0, y: 6.0 }),
             Line::new(Coord { x: 14.0, y: 6.0 }, Coord { x: 14.0, y: 14.0 }),
             Line::new(Coord { x: 14.0, y: 14.0 }, Coord { x: 6.0, y: 14.0 }),

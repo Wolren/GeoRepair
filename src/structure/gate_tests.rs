@@ -1,9 +1,8 @@
 #[cfg(all(test, feature = "arrange"))]
 mod gate_completeness {
-    //! The fast-path gate is a COMPLETE certifier: every polygon the gate
-    //! accepts (FixOutcome::Fast) must survive the exit validator after
-    //! OGC re-winding, because the Fast path now SKIPS that validator
-    //! (2026-08-07). A gate/validator divergence here ships invalid output.
+    //! The fast-path gate is a complete certifier: every polygon the gate accepts
+    //! (FixOutcome::Fast) must survive the exit validator after OGC re-winding, because
+    //! the Fast path now skips that validator (2026-08-07).
 
     use crate::MakeValidConfig;
     use crate::make_valid::{enforce_ogc_winding, is_valid_with_geo};
@@ -79,7 +78,8 @@ mod gate_completeness {
     }
 
     fn t_junction_ring() -> Polygon<f64> {
-        // Closing vertex (110, 140) lies on edge (60, 90)-(160, 190): the GEOS XML Test 22 class - vertex-on-edge self-touch.
+        // Closing vertex (110, 140) lies on edge (60, 90)-(160, 190): the GEOS xml Test
+        // 22 class - vertex-on-edge self-touch.
         Polygon::new(
             ring(&[(60.0, 90.0), (160.0, 190.0), (260.0, 90.0), (110.0, 140.0)]),
             Vec::new(),
@@ -87,7 +87,8 @@ mod gate_completeness {
     }
 
     fn eps_collinear_sliver() -> Polygon<f64> {
-        // Two same-ring edges within 5e-14 of collinear overlap (the 32*EPS*scale collinear gate class; geo_bridge catches it).
+        // Two same-ring edges within 5e-14 of collinear overlap (the 32*eps*scale
+        // collinear gate class; geo_bridge catches it).
         Polygon::new(
             ring(&[
                 (0.0, 0.0),
@@ -197,7 +198,8 @@ mod gate_completeness {
         cases.push(bowtie_subdivided(4));
         cases.push(bowtie_subdivided(125));
         cases.push(mixed_magnitude());
-        // Fast path must route it to arrange (fuzz invariant_mixed_fp_in_same_ring perm=1, keep_collapsed=true).
+        // Fast path must route it to arrange (fuzz invariant_mixed_fp_in_same_ring
+        // perm=1, keep_collapsed=true).
         cases.push(Polygon::new(
             LineString::new(vec![
                 Coord {
@@ -216,7 +218,7 @@ mod gate_completeness {
             ]),
             Vec::new(),
         ));
-        // than f64::EPSILON (DegenerateExterior) even though the ring
+        // than f64::epsilon (DegenerateExterior) even though the ring
         // (fuzz_inprocess_loop, 2026-08-07).
         cases.push(Polygon::new(
             LineString::new(vec![
@@ -240,7 +242,8 @@ mod gate_completeness {
             ]),
             Vec::new(),
         ));
-        // Near-parallel mixed-magnitude pair (the adaptive error bound class): a long edge + a short edge separated by ~1e-8
+        // Near-parallel mixed-magnitude pair (the adaptive error bound class): a long
+        // edge + a short edge separated by ~1e-8
         cases.push(Polygon::new(
             LineString::new(vec![
                 Coord { x: 5e-9, y: 9e-9 },
@@ -275,7 +278,9 @@ mod gate_completeness {
             match out {
                 crate::structure::FixOutcome::Fast(g, _, _, _) => {
                     let (g, ok) = enforce_ogc_winding(g);
-                    // validator-clean (the arms check orientation AFTER re-winding; rings in the exact-orient ~0 zone route to arrange there - e.g. case)
+                    // validator-clean (the arms check orientation after re-winding;
+                    // rings in the exact-orient ~0 zone route to arrange there - e.g.
+                    // case)
                     if ok {
                         assert!(
                             is_valid_with_geo(&g),
@@ -320,7 +325,7 @@ mod gate_completeness {
         );
     }
 
-    /// A regular n-gon, CCW, no holes.
+    /// A regular n-gon, ccw, no holes.
     fn ngon(n: usize, r: f64, cx: f64, cy: f64) -> Vec<Coord<f64>> {
         let mut v: Vec<Coord<f64>> = (0..n - 1)
             .map(|i| {
@@ -335,23 +340,19 @@ mod gate_completeness {
         v
     }
 
-    /// Non-adjacent repeated vertex on a ring LARGER than `SMALL_RING_LINES`
+    /// Non-adjacent repeated vertex on a ring larger than `SMALL_RING_LINES`
     /// (2026-10-17).
     ///
-    /// The gate used to carry an open-addressed duplicate-vertex table over
-    /// the whole ring. That table is gone: the repeated-vertex class is now
-    /// closed by the pair predicates themselves (`shares_repeated_vertex`,
-    /// mirroring GEOS's rule that any same-ring interaction which is not an
-    /// adjacent-in-ring endpoint touch is invalid). The property that has to
-    /// hold is exactly the one this test pins - the chain leaf must SEE the
-    /// pair, and the verdict must match what the validator says. `n = 40`
-    /// puts the ring on the fused chain path (not the small-ring sweep, not
-    /// the very-large validator branch), which is the branch that changed.
+    /// The property that has to hold is exactly the one this test pins - the chain leaf
+    /// must see the pair, and the verdict must match what the validator says. `n = 40`
+    /// puts the ring on the fused chain path (not the small-ring sweep, not the -large
+    /// validator branch), which is the branch that changed.
     #[test]
     fn gate_rejects_repeated_vertex_on_chain_path() {
         let clean = Polygon::new(LineString::new(ngon(40, 100.0, 500.0, 500.0)), Vec::new());
 
-        // Repeat vertex 1 at position 21: a non-adjacent repeat, so the ring touches itself at exactly that point.
+        // Repeat vertex 1 at position 21: a non-adjacent repeat, so the ring touches
+        // itself at exactly that point.
         let mut coords = ngon(40, 100.0, 500.0, 500.0);
         coords[21] = coords[1];
         let pinched = Polygon::new(LineString::new(coords), Vec::new());
@@ -400,13 +401,11 @@ mod gate_completeness {
 
 #[cfg(all(test, feature = "arrange"))]
 mod gate_retrace_ring {
-    //! fuzz-nightly class C (run 35578735657, 2026-09-21): the fast-path
-    //! gate certified a ring whose closing edge doubles back over part of
-    //! the first edge; the OGC re-winding after the gate flipped the
-    //! segments and the exit validator then rejected the shipped output
-    //! with SelfIntersection on geometry the gate had called clean. The
-    //! shared pair predicate now flags the retrace in both windings, so
-    //! the gate must refuse to certify it and route it to full repair.
+    //! fuzz-nightly class C (run 35578735657, 2026-09-21): the fast-path gate certified
+    //! a ring whose closing edge doubles back over part of the first edge; the OGC
+    //! re-winding after the gate flipped the segments and the exit validator then
+    //! rejected the shipped output with SelfIntersection on geometry the gate had
+    //! called clean.
 
     use crate::MakeValidConfig;
     use geo::{Coord, LineString, Polygon};
@@ -434,12 +433,11 @@ mod gate_retrace_ring {
     }
 }
 
-/// `ring_guards` is the gate's whole-ring guard reduction (sub-ULP edge flag
-/// plus smallest non-zero |ordinate|), and `has_sub_ulp_edge` is the
-/// pre-collapse pass's early-exit version of the same rule. Both go through
-/// `edge_is_sub_ulp`. This pins them against each other and against a naive
-/// reimplementation, including the cases that made the rule local in the
-/// first place (2026-10-17).
+/// `ring_guards` is the gate's whole-ring guard reduction (sub-ULP edge flag plus
+/// smallest non-zero |ordinate|), and `has_sub_ulp_edge` is the pre-collapse pass's
+/// early-exit version of the same rule. This pins them against each other and against a
+/// naive reimplementation, including the cases that made the rule local in the first
+/// place (2026-10-17).
 mod ring_guards_agreement {
     use crate::arrange::{has_sub_ulp_edge, ring_guards};
     use geo::{Coord, LineString, Polygon};
@@ -470,8 +468,8 @@ mod ring_guards_agreement {
         false
     }
 
-    /// Mirrors the in-walk `min_abs` this reduction replaced: the minimum
-    /// over non-zero |x| and |y| of `windows(2)`'s leading coordinate.
+    /// Mirrors the in-walk `min_abs` this reduction replaced: the minimum over non-zero
+    /// |x| and |y| of `windows(2)`'s leading coordinate.
     fn naive_min_abs(ring: &[Coord<f64>]) -> f64 {
         let mut m = f64::INFINITY;
         for w in ring.windows(2) {
@@ -509,7 +507,8 @@ mod ring_guards_agreement {
                     y: 1e12 + 4.0,
                 },
             ]),
-            // 1e-8 spike at 1e8 magnitude: the noise class the guard exists for (1e-8 < EPSILON * 1e8).
+            // 1e-8 spike at 1e8 magnitude: the noise class the guard exists for (1e-8 <
+            // epsilon * 1e8).
             closed(vec![
                 Coord { x: 1e8, y: 1e8 },
                 Coord {
@@ -525,8 +524,8 @@ mod ring_guards_agreement {
                     y: 1e8 + 1.0,
                 },
             ]),
-            // Valid ring with a distant spike: the 2026-08-04 false positive the local rule was introduced to fix.
-            // Its 1-unit base edge must
+            // Valid ring with a distant spike: the 2026-08-04 false positive the local
+            // rule was introduced to fix. Its 1-unit base edge must
             closed(vec![
                 Coord { x: 0.0, y: 0.0 },
                 Coord { x: 1.0, y: 0.0 },

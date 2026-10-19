@@ -1,8 +1,8 @@
 //! hole nesting resolution, ring helpers, collapse handling
 //!
-//! Extracted from structure/mod.rs on 2026-08-07 (file-size governance).
-//! Content is verbatim - no behavior changes; items are re-exported by
-//! structure/mod.rs so `crate::structure::X` paths keep resolving.
+//! Extracted from structure/mod.rs on 2026-08-07 (file-size governance). Content is
+//! verbatim - no behavior changes; items are re-exported by structure/mod.rs so
+//! `crate::structure::X` paths keep resolving.
 
 use crate::core::MakeValidConfig;
 use crate::util;
@@ -10,13 +10,10 @@ use alloc::vec::Vec;
 use geo::{Coord, Geometry, LineString, Point, Polygon, Winding};
 use rstar::{AABB, RTree, RTreeObject};
 
-/// True if the polygon's linework has a PROPER self-crossing (interior-interior
-/// intersection). Shared endpoints (hole touching shell at a vertex — GEOS
-/// makeValid emits them) are legal and do NOT count. Used as a post-fix
-/// filter: only genuine floating-point self-crossings are discarded.
-/// Uses the R-tree sweep for O(n log n) instead of the brute-force O(n²)
-/// pair loop — the quadratic version was fatal on large rings (59k verts →
-/// 9.1s, 181k verts → 143s measured on the real-world dataset).
+/// True if the polygon's linework has a proper self-crossing (interior-interior
+/// intersection). Uses the R-tree sweep for O(n log n) instead of the brute-force O(n²)
+/// pair loop. The quadratic version was fatal on large rings (59k verts → 9.1s, 181k
+/// verts → 143s measured on the real-world dataset).
 pub fn bbox_test(coords: &[Coord<f64>]) -> (f64, f64, f64, f64) {
     crate::simd::aabb_minmax_simd(coords)
 }
@@ -49,16 +46,14 @@ pub fn has_proper_self_crossing(p: &geo::Polygon<f64>) -> bool {
 }
 
 /// Winding-number point-in-ring test (exclusive of boundary).
-/// Delegates to SIMD-accelerated implementation.
 fn point_in_ring_exclusive(pt: Coord<f64>, ring: &[Coord<f64>]) -> bool {
     crate::simd::point_in_ring_exclusive(pt, ring)
 }
 
-/// True if the hole ring has at least one vertex STRICTLY OUTSIDE the shell
-/// ring (neither inside nor on the boundary) - i.e. the hole crosses the
-/// shell boundary. Boundary-touching holes (all vertices exactly on the
-/// shell, e.g. CGAL square_hole_rhombus) return false. Used to route
-/// crossing holes to the arrange fallback (see fix_polygon).
+/// True if the hole ring has at least one vertex strictly outside the shell ring
+/// (neither inside nor on the boundary) - i.e. the hole crosses the shell boundary.
+/// Boundary-touching holes (all vertices exactly on the shell, e.g. cgal
+/// square_hole_rhombus) return false.
 pub(crate) fn hole_vertex_strictly_outside(
     hole: &LineString<f64>,
     shell: &LineString<f64>,
@@ -71,7 +66,8 @@ pub(crate) fn hole_vertex_strictly_outside(
         if point_in_ring_exclusive(pt, ring) {
             continue;
         }
-        // Exact-vertex touch: distance to the nearest shell segment within the validation tolerance (1e-12 * L^2 relative).
+        // Exact-vertex touch: distance to the nearest shell segment within the
+        // validation tolerance (1e-12 * L^2 relative).
         let mut on_boundary = false;
         for w in ring.windows(2) {
             if w[0] == w[1] {
@@ -105,9 +101,7 @@ pub(crate) fn ring_bbox(coords: &[Coord<f64>]) -> (f64, f64, f64, f64) {
     crate::simd::aabb_minmax_simd(coords)
 }
 
-/// True if EVERY vertex of `inner` is strictly inside ring `outer`.
-/// Used for hole-role swap: an outer hole that fully contains the shell
-/// becomes the shell itself (GEOS even-odd semantics).
+/// True if every vertex of `inner` is strictly inside ring `outer`.
 pub(crate) fn all_vertices_inside_ring(inner: &[Coord<f64>], outer: &[Coord<f64>]) -> bool {
     if inner.len() < 4 || outer.len() < 4 {
         return false;
@@ -121,14 +115,10 @@ pub(crate) fn bboxes_overlap(a: (f64, f64, f64, f64), b: (f64, f64, f64, f64)) -
     a.0 <= b.1 && a.1 >= b.0 && a.2 <= b.3 && a.3 >= b.2
 }
 
-/// Resolve hole-hole nesting among inner holes of a shell.
-///
-/// Returns:
-/// - `to_subtract`: holes at containment depth 1 (directly inside the shell).
-///   These are subtracted from the shell via boolean difference.
-/// - `islands`: holes at depth 2+ become separate polygons, with their own
-///   sub-holes (depth 3) as interior rings. Depth alternates: even depths are
-///   separate polygons (islands/positive space), odd depths are holes (negative space).
+/// Resolve hole-hole nesting among the inner holes of a shell. to_subtract holds depth
+/// 1 holes inside the shell and subtracts them by boolean difference. islands holds
+/// holes at depth 2 or more, which become separate polygons with depth 3 sub-holes as
+/// interior rings.
 pub(crate) fn resolve_nesting(
     holes: &[LineString<f64>],
 ) -> (Vec<LineString<f64>>, Vec<Polygon<f64>>) {
@@ -223,7 +213,8 @@ pub(crate) fn resolve_nesting(
         }
     }
 
-    // Group holes by depth parity: even depth (2, 4, ...): separate polygons (islands) odd depth (1, 3, ...): subtract-from-parent (holes/voids)
+    // Group holes by depth parity: even depth (2, 4, .): separate polygons (islands)
+    // odd depth (1, 3, .): subtract-from-parent (holes/voids)
     let mut subtract = Vec::new();
     let mut island_indices = Vec::new();
     for (i, &d) in depth.iter().enumerate() {
@@ -270,8 +261,8 @@ pub(crate) fn ensure_cw(mut ring: LineString<f64>) -> LineString<f64> {
     ring
 }
 
-/// When keep_collapsed is true and the polygon shell collapsed during repair,
-/// return a Point or LineString instead of empty.
+/// When keep_collapsed is true and the polygon shell collapsed during repair, return a
+/// Point or LineString instead of empty.
 pub(crate) fn handle_collapse_result(
     exterior: &LineString<f64>,
     _config: &MakeValidConfig,

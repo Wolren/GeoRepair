@@ -1,9 +1,9 @@
 //! Scalar fallback (all stable targets).
 //!
-//! The x86_64 module was removed after head-to-head measurement showed the
-//! hand-written AVX2 kernels lose to LLVM's auto-vectorized scalar loops
-//! (see `mod.rs` header). This module serves every stable target; the
-//! nightly `simd-portable` path lives in `portable.rs`.
+//! This module serves every stable target; the nightly `simd-portable` path lives in
+//! `portable.rs`. The x86_64 module was removed after head-to-head measurement showed
+//! the hand-written AVX2 kernels lose to llvm's auto-vectorized scalar loops (see
+//! `mod.rs` header).
 
 use super::*;
 
@@ -13,8 +13,8 @@ pub(crate) fn orient2d_batch_4(
     pb: &[Coord<f64>; 4],
     pc: &[Coord<f64>; 4],
 ) -> [f64; 4] {
-    // target_feature boundary costs ~0.8ns/call on a ~3ns kernel
-    // The 2026-08-02 verdict stands for this kernel; only bulk scans (aabb, snap) justify dispatch.
+    // target_feature boundary costs ~0.8ns/call on a ~3ns kernel The 2026-08-02 verdict
+    // stands for this kernel; only bulk scans (aabb, snap) justify dispatch.
     scalar_orient2d_batch(pa, pb, pc)
 }
 
@@ -63,8 +63,9 @@ pub fn aabb_minmax_simd(coords: &[Coord<f64>]) -> (f64, f64, f64, f64) {
     if n == 0 {
         return (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
     }
-    // Runtime-dispatched AVX2 kernel.
-    // (is_x86_feature_detected) so the binary runs on any x86_64; the old compile-time cfg never activated because builds don't set target features.
+    // Runtime-dispatched AVX2 kernel. (is_x86_feature_detected) so the binary runs on
+    // any x86_64; the old compile-time cfg never activated because builds do not set
+    // target features.
     #[cfg(all(
         not(feature = "simd-portable"),
         target_arch = "x86_64",
@@ -85,12 +86,9 @@ pub fn aabb_minmax_simd(coords: &[Coord<f64>]) -> (f64, f64, f64, f64) {
     (mnx, mxx, mny, mxy)
 }
 
-/// AVX2 min/max reduction over a coordinate slice. Shuffle-transpose
-/// variant (unpacklo/unpackhi, no gathers): 2 loads + 2 unpacks per
-/// 4 coords. Lane order is irrelevant for min/max so no permute is needed.
-/// Restored from the pre-fe4c831 kernel and reworked from setr_pd gathers
-/// (measured 4.5x vs scalar on the bbox scan; the shuffle form measures
-/// faster still - see simd/tests.rs microbench_kernels).
+/// AVX2 min/max reduction over a coordinate slice. Restored from the pre-fe4c831 kernel
+/// and reworked from setr_pd gathers (measured 4.5x vs scalar on the bbox scan; the
+/// shuffle form measures faster still - see simd/tests.rs microbench_kernels).
 #[cfg(all(not(feature = "simd-portable"), target_arch = "x86_64"))]
 #[target_feature(enable = "avx")]
 pub(crate) unsafe fn aabb_minmax_avx(coords: &[Coord<f64>]) -> (f64, f64, f64, f64) {

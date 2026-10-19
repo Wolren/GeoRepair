@@ -1,23 +1,8 @@
-//! Bit-exact coordinate preconditioning for uniform-magnitude inputs that
-//! the snap-representability guard routes to the CDT path.
-//!
-//! Translate-to-origin plus an exact power-of-two scale is an exact
-//! similarity transform in IEEE f64: every accepted input coordinate maps
-//! with zero rounding (the translation is verified per coordinate by the
-//! roundtrip identity, the power-of-two scale stays out of the subnormal
-//! range), orient signs scale by a positive factor, and every eps
-//! threshold in the pipeline is relative to the working coordinates, so
-//! the repair decides on the same geometry it decides on at native
-//! magnitude. The transformed input must still pass the snap guard itself
-//! (`snap_cannot_represent`) - otherwise the transform is rejected and the
-//! legacy routing stays untouched.
-//!
-//! Measured context (2026-09-18): the `large coord 1e12` README rows sat
-//! at 0.08-0.12x of GEOS because the guard routed uniform-magnitude input
-//! to the CDT purely on `max * 1e8 > 2^53`. Mixed-magnitude inputs whose
-//! dynamic range does not fit the snap grid fail [`Precondition::try_new`]
-//! and keep the CDT route - that class is the fuzz-crash class the guard
-//! was introduced for (2026-08-03) and must never be preconditioned.
+//! Bit-exact preconditioning for uniform input that the snap guard sends to cdt. The
+//! transform is exact in ieee f64, with zero rounding. The guard used max * 1e8 > 2^53.
+//! Mixed input outside the snap grid fails precondition::try_new and keeps cdt. Fuzz
+//! class, 2026-08-03. Measured 2026-09-18: large coord 1e12 readme rows ran at 0.08 to
+//! 0.12x of geos.
 
 use crate::core::{MakeValidConfig, SNAP_SCALE};
 use alloc::vec::Vec;
@@ -31,16 +16,14 @@ fn pow2(exp: i32) -> Option<f64> {
     Some(f64::from_bits(((exp + 1023) as u64) << 52))
 }
 
-/// `floor(log2(x))` for finite `x > 0` without std math (no_std path).
-/// Subnormal inputs clamp to -1023; callers reject those via `pow2`.
+/// `floor(log2(x))` for finite `x > 0` without std math (no_std path). Subnormal inputs
+/// clamp to -1023; callers reject those via `pow2`.
 fn exp2_floor(x: f64) -> i32 {
     let e = ((x.to_bits() >> 52) & 0x7ff) as i32;
     if e == 0 { -1023 } else { e - 1023 }
 }
 
-/// The transform: `t = (c - anchor) * scale`, restored by
-/// `c = t * unscale + anchor`. Both `scale` and `unscale` are exact
-/// powers of two and exact inverses of each other.
+/// The transform: `t = (c - anchor) * scale`, restored by `c = t * unscale + anchor`.
 pub(crate) struct Precondition {
     ax: f64,
     ay: f64,
@@ -49,13 +32,12 @@ pub(crate) struct Precondition {
 }
 
 impl Precondition {
-    /// Build a transform for `poly` and the transformed polygon itself
-    /// when (a) the snap guard fires on the ORIGINAL polygon (representable
-    /// input never needs or gets a transform - a no-op transform would
-    /// recurse forever), (b) the translation and scaling are exact for
+    /// Build a transform for `poly` and the transformed polygon itself when (a) the
+    /// snap guard fires on the original polygon (representable input never needs or
+    /// gets a transform - a no-op transform would recurse forever), (b) the translation
+    /// and scaling are exact for
     /// every coordinate, and (c) the transformed polygon satisfies the
-    /// guard's two representability inequalities. Returns `None` on any
-    /// doubt - the caller then keeps the legacy routing.
+    /// guard's two representability inequalities.
     pub(crate) fn try_new(poly: &Polygon<f64>) -> Option<(Self, Polygon<f64>)> {
         if !crate::make_valid::snap_cannot_represent(poly) {
             return None;
@@ -135,7 +117,7 @@ impl Precondition {
         for h in poly.interiors() {
             holes.push(map_ring(h)?);
         }
-        // the snap grid reject the transform and keep the CDT route.
+        // the snap grid reject the transform and keep the cdt route.
         if max_abs * SNAP_SCALE > (1u64 << 53) as f64 {
             return None;
         }
@@ -147,9 +129,7 @@ impl Precondition {
         Some((pre, tp))
     }
 
-    /// Map a repaired geometry back to native magnitude. Input-coordinate
-    /// images are exact; node coordinates round to the nearest representable
-    /// value at native magnitude, so the caller re-validates the result.
+    /// Map a repaired geometry back to native magnitude.
     pub(crate) fn inverse_geometry(&self, g: Geometry<f64>) -> Geometry<f64> {
         let map_coord = |c: Coord<f64>| Coord {
             x: c.x * self.unscale + self.ax,
@@ -187,15 +167,8 @@ impl Precondition {
     }
 }
 
-/// Bit-exact preconditioning entry: transform a guard-bound input, run the
-/// normal structure fix at the preconditioned magnitude, map the outcome
-/// back. `None` on any doubt - the caller then keeps the legacy route
-/// (CDT at native magnitude) untouched.
-///
-/// A `Fast` outcome at transformed scale is downgraded to `Repaired`: the
-/// gate's sub-ULP checks are absolute, so a certificate does not transfer
-/// across the scale change; the caller's repair arm re-validates at native
-/// magnitude.
+/// Bit-exact preconditioning entry. The gate sub-ulp checks are absolute, so a
+/// certificate cannot cross the scale change.
 #[cfg(feature = "structure")]
 pub(crate) fn precondition_fix(
     poly: &Polygon<f64>,
@@ -203,7 +176,8 @@ pub(crate) fn precondition_fix(
 ) -> Option<crate::structure::FixOutcome> {
     use crate::structure::FixOutcome;
     let (pre, tp) = Precondition::try_new(poly)?;
-    // `tp` satisfies the guard by construction (try_new checked it), so the recursive fix cannot re-enter preconditioning.
+    // `tp` satisfies the guard by construction (try_new checked it), so the recursive
+    // fix cannot re-enter preconditioning.
     match crate::structure::fix_polygon_owned(tp, config, None) {
         FixOutcome::Fast(g, _, _, _) | FixOutcome::Repaired(g) => {
             Some(FixOutcome::Repaired(pre.inverse_geometry(g)))
@@ -263,7 +237,7 @@ mod tests {
 
     #[test]
     fn accepts_small_coords_at_anchor() {
-        // 1e-9..1e7 absolute coordinates whose FEATURES are all large
+        // 1e-9.1e7 absolute coordinates whose features are all large
         let p = Polygon::new(
             LineString::new(vec![
                 Coord { x: 1e7, y: 1e7 },
