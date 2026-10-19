@@ -84,14 +84,17 @@ fn with_scratch<R>(f: impl FnOnce(&mut SweepScratch) -> R) -> R {
 }
 
 struct SweepScratch {
+    /// Sort key per edge (sortable `lo_x`), maintained sorted with `order`.
     keys: Vec<u64>,
+    /// Edge indices in ascending `lo_x` order.
     order: Vec<u32>,
+    /// Incremental x-active set for the non-degenerate path.
+    active: Vec<u32>,
     tmp_keys: Vec<u64>,
     tmp_order: Vec<u32>,
     counts: Box<[u32; 256]>,
     /// Padded bounds per ring edge: [lo_x, hi_x, lo_y, hi_y].
     spans: Vec<[f64; 4]>,
-    active: Vec<u32>,
 }
 
 impl Default for SweepScratch {
@@ -99,11 +102,11 @@ impl Default for SweepScratch {
         SweepScratch {
             keys: Vec::new(),
             order: Vec::new(),
+            active: Vec::new(),
             tmp_keys: Vec::new(),
             tmp_order: Vec::new(),
             counts: Box::new([0u32; 256]),
             spans: Vec::new(),
-            active: Vec::new(),
         }
     }
 }
@@ -159,10 +162,183 @@ pub(crate) fn radix_sort_keys_tls(keys: &mut Vec<u64>, order: &mut Vec<u32>) {
     });
 }
 
-/// Rings whose x-overlap active set exceeds this route to the spatial
-/// tree / brute force instead of the linear-active sweep (which would be
-/// O(n^2) on them). Measured worst real-world giant: 63.
+/// Static uniform-grid index over a set of bounding boxes
+/// (`[lo_x, hi_x, lo_y, hi_y]`).
+///
+/// Exists because the x-active-set sweeps in this file and in
+/// `noding::line` retire a segment only when `hi_x < cur.lo_x`, so a run
+/// of segments sharing one `lo_x` never retires. A subdivided vertical
+/// edge puts its whole run in the active set at once, which makes the
+/// per-step scan O(active) and the sweep O(n^2) overall. Measured
+/// 2026-10-17 on the figure-8 ladder: that degeneration was ~90 % of a
+/// 4000-vertex noder call, split across three separate scans
+/// (`sweep_ring_self_intersects`, `crossing_only`'s candidate loop, and
+/// `run_full`'s removed-family-vs-sweep loop), all reached through
+/// different flags but all the same bug.
+///
+/// A static grid enumerates the same candidate set - box overlap within
+/// the boxes' own padding - in O(n + candidates): nothing is maintained
+/// incrementally, so nothing degenerates on x ties and nothing goes
+/// stale. Candidates are returned in ascending insertion position, which
+/// keeps the pair order of the scan it replaces when the grid is built in
+/// that scan's order.
+///
+/// `build` returns `None` when one cell holds more than [`GRID_MAX_CELL`]
+/// boxes. That is the genuinely dense case, and the caller keeps its
+/// existing fallback there, so no input can get slower than it is today.
+pub(crate) struct SegGrid {
+    min_x: f64,
+    min_y: f64,
+    inv_cell: f64,
+    nx: usize,
+    ny: usize,
+    /// CSR cell boundaries into `items`, length `nx * ny + 1`.
+    offsets: Vec<u32>,
+    /// Cell contents: positions in build order, ascending within a cell.
+    items: Vec<u32>,
+    /// Per-position dedup stamp; `seen[p] == epoch` means position `p` was
+    /// already handed to the caller for this query.
+    seen: Vec<u32>,
+    epoch: u32,
+}
+
+/// Above this many boxes in one cell the grid is abandoned.
+pub(crate) const GRID_MAX_CELL: usize = 64;
+
+#[inline]
+fn cell_range(lo: f64, hi: f64, min: f64, inv_cell: f64, nc: usize) -> (usize, usize) {
+    // Multiply by the precomputed reciprocal: four divides per query turned
+    // out to dominate the per-query cost of the grid (measured 2026-10-17).
+    let idx = |v: f64| {
+        let q = (v - min) * inv_cell;
+        if q.is_nan() {
+            0
+        } else {
+            (q as isize).clamp(0, nc as isize - 1) as usize
+        }
+    };
+    let (a, b) = (idx(lo), idx(hi));
+    if a <= b { (a, b) } else { (b, a) }
+}
+
+impl SegGrid {
+    pub(crate) fn build(boxes: &[[f64; 4]]) -> Option<SegGrid> {
+        let m = boxes.len();
+        if m == 0 {
+            return None;
+        }
+        let (mut min_x, mut min_y) = (f64::MAX, f64::MAX);
+        let (mut max_x, mut max_y) = (f64::MIN, f64::MIN);
+        for b in boxes {
+            min_x = min_x.min(b[0]);
+            max_x = max_x.max(b[1]);
+            min_y = min_y.min(b[2]);
+            max_y = max_y.max(b[3]);
+        }
+        let span = (max_x - min_x).abs().max((max_y - min_y).abs());
+        if span <= 0.0 || !span.is_finite() {
+            return None;
+        }
+        // sqrt(m) cells per axis: O(m) cells, and a box covers O(1) of
+        // them whenever its extent is near the cell size.
+        let cell = (span / (m as f64).sqrt().ceil()).max(f64::MIN_POSITIVE);
+        let inv_cell = 1.0 / cell;
+        let nx = (((max_x - min_x) / cell).ceil() as usize).max(1);
+        let ny = (((max_y - min_y) / cell).ceil() as usize).max(1);
+        let nc = nx * ny;
+        // Counting sort into one flat arena rather than a Vec per cell: the
+        // per-cell Vec form costs `nx * ny` heap allocations per build and
+        // measured ~2.6 us of pure allocation overhead on a 100-vertex
+        // chain, which is most of that size's whole sweep (2026-10-17).
+        let mut offsets: Vec<u32> = alloc::vec![0u32; nc + 1];
+        for b in boxes {
+            let (x0, x1) = cell_range(b[0], b[1], min_x, inv_cell, nx);
+            let (y0, y1) = cell_range(b[2], b[3], min_y, inv_cell, ny);
+            for cy in y0..=y1 {
+                for cx in x0..=x1 {
+                    let c = cy * nx + cx;
+                    offsets[c + 1] += 1;
+                    if offsets[c + 1] as usize > GRID_MAX_CELL {
+                        return None;
+                    }
+                }
+            }
+        }
+        for c in 0..nc {
+            offsets[c + 1] += offsets[c];
+        }
+        let mut items: Vec<u32> = alloc::vec![0u32; offsets[nc] as usize];
+        let mut cursor: Vec<u32> = offsets[..nc].to_vec();
+        for (i, b) in boxes.iter().enumerate() {
+            let (x0, x1) = cell_range(b[0], b[1], min_x, inv_cell, nx);
+            let (y0, y1) = cell_range(b[2], b[3], min_y, inv_cell, ny);
+            for cy in y0..=y1 {
+                for cx in x0..=x1 {
+                    let c = cy * nx + cx;
+                    items[cursor[c] as usize] = i as u32;
+                    cursor[c] += 1;
+                }
+            }
+        }
+        Some(SegGrid {
+            min_x,
+            min_y,
+            inv_cell,
+            nx,
+            ny,
+            offsets,
+            items,
+            seen: alloc::vec![0u32; m],
+            epoch: 0,
+        })
+    }
+
+    /// Visit every position whose box shares a grid cell with `b`,
+    /// ascending, skipping `exclude` and without repeats. Sharing a cell is
+    /// implied by box overlap, so no overlapping box is ever missed; the
+    /// caller still applies its own overlap gate to the extras.
+    pub(crate) fn for_each_candidate<F: FnMut(usize)>(
+        &mut self,
+        b: [f64; 4],
+        exclude: Option<usize>,
+        mut f: F,
+    ) {
+        self.epoch = self.epoch.wrapping_add(1);
+        if self.epoch == 0 {
+            for s in self.seen.iter_mut() {
+                *s = 0;
+            }
+            self.epoch = 1;
+        }
+        let (x0, x1) = cell_range(b[0], b[1], self.min_x, self.inv_cell, self.nx);
+        let (y0, y1) = cell_range(b[2], b[3], self.min_y, self.inv_cell, self.ny);
+        for cy in y0..=y1 {
+            for cx in x0..=x1 {
+                let c = cy * self.nx + cx;
+                let (s, e) = (self.offsets[c] as usize, self.offsets[c + 1] as usize);
+                for k in s..e {
+                    let p = self.items[k] as usize;
+                    if Some(p) == exclude || self.seen[p] == self.epoch {
+                        continue;
+                    }
+                    self.seen[p] = self.epoch;
+                    f(p);
+                }
+            }
+        }
+    }
+}
+
+/// Active-set size at which [`sweep_ring_self_intersects`] gives up and lets
+/// the caller use the index or brute-force path.
 const SWEEP_DENSE_ACTIVE_LIMIT: usize = 256;
+
+/// Longest equal-`lo_x` run tolerated by the incremental active set in
+/// [`sweep_ring_self_intersects`] before it switches to the static grid.
+/// A simple polyline keeps one or two active entries and never approaches
+/// this; a subdivided vertical edge is one run of `n / 4` and always
+/// exceeds it (2026-10-17).
+const SWEEP_DEGENERATE_RUN: usize = 32;
 
 /// Self-intersection sweep. Returns Some(true) on intersection, Some(false)
 /// when clean, None when the ring's x-overlap density exceeds the routing
@@ -199,6 +375,12 @@ pub(crate) fn sweep_ring_self_intersects(
         order.reserve(n);
         spans.reserve(n);
         let mut sorted = true;
+        // Longest run of consecutive segments sharing one `lo_x`, tracked
+        // during the same pass: the degeneracy screen below needs no sort
+        // and no second scan for it.
+        let mut lo_run = 1usize;
+        let mut lo_max_run = 1usize;
+        let mut prev_lo_bits = 0u64;
         for i in 0..n {
             let a = ring[i];
             // min(n) identical to % n for closed rings (ring[n] == ring[0]),
@@ -206,6 +388,18 @@ pub(crate) fn sweep_ring_self_intersects(
             let b = ring[(i + 1).min(n)];
             let (lo_x, hi_x) = if a.x < b.x { (a.x, b.x) } else { (b.x, a.x) };
             let (lo_y, hi_y) = if a.y < b.y { (a.y, b.y) } else { (b.y, a.y) };
+            let lo_bits = lo_x.to_bits();
+            if i > 0 {
+                if lo_bits == prev_lo_bits {
+                    lo_run += 1;
+                    if lo_run > lo_max_run {
+                        lo_max_run = lo_run;
+                    }
+                } else {
+                    lo_run = 1;
+                }
+            }
+            prev_lo_bits = lo_bits;
             let ext = (hi_x - lo_x).abs().max((hi_y - lo_y).abs()).max(1.0) * 1e-10;
             let k = sortable_u64(lo_x - ext);
             if i > 0 && k < keys[i - 1] {
@@ -215,6 +409,29 @@ pub(crate) fn sweep_ring_self_intersects(
             order.push(i as u32);
             spans.push([lo_x - ext, hi_x + ext, lo_y - ext, hi_y + ext]);
         }
+
+        // Degeneracy screen, before the sort: the grid path below does not
+        // need x order at all, so paying the 8-pass radix only to then hand
+        // the ring to the grid would be pure waste (measured ~16 us at
+        // n = 1000).
+        //
+        // The incremental active set is the fast path: a simple polyline
+        // keeps one or two entries, so the whole sweep is a single linear
+        // scan at ~2.4 ns/vertex. It degenerates to O(n) entries whenever a
+        // run of segments shares one lo_x - a subdivided vertical edge -
+        // because such a run can never retire, and that is what made this
+        // sweep O(n^2). A contiguous run of bit-equal `lo_x` is exactly that
+        // class, and it is detected here in one linear pass. The grid costs
+        // more per vertex in the sparse case (a build plus n cell queries),
+        // which is why it is not the default: on a valid polyline it
+        // measured 21 ns/vertex against 2.4 ns/vertex for the scan.
+        // Patterns that inflate the active set without a contiguous
+        // equal-`lo_x` run still fall through to the active-set loop and its
+        // own SWEEP_DENSE_ACTIVE_LIMIT bail, exactly as before.
+        if lo_max_run > SWEEP_DEGENERATE_RUN {
+            return sweep_with_grid(spans, ring, n, eps, check_revisit, closed);
+        }
+
         // Sortedness skip: x-ordered input (the common valid-polyline case)
         // needs no radix sort - the active-set logic runs in input order.
         // Measured (2026-08-07): the 8-pass radix was ~40% of the sweep's
@@ -227,6 +444,7 @@ pub(crate) fn sweep_ring_self_intersects(
         } else {
             radix_sort_u64(keys, order, tmp_keys, tmp_order, counts);
         }
+
         active.clear();
         for &ord in order.iter() {
             let r_i = ord as usize;
@@ -276,6 +494,66 @@ pub(crate) fn sweep_ring_self_intersects(
         }
         Some(false)
     })
+}
+
+/// The degeneracy escape hatch of [`sweep_ring_self_intersects`]: a static
+/// grid instead of an incremental active set, and no radix sort, because
+/// the grid does not care about x order. Used only for rings whose longest
+/// equal-`lo_x` run exceeds [`SWEEP_DEGENERATE_RUN`], where the active set
+/// would be O(n) and the sweep O(n^2) - see `SegGrid`. This function
+/// returns a bool on the first hit, so pair order is irrelevant; each
+/// unordered pair is visited once, from the higher index.
+fn sweep_with_grid(
+    spans: &[[f64; 4]],
+    ring: &[Coord<f64>],
+    n: usize,
+    eps: f64,
+    check_revisit: bool,
+    closed: bool,
+) -> Option<bool> {
+    let mut grid = SegGrid::build(spans)?;
+    let mut hit = false;
+    for r_i in 0..n {
+        if hit {
+            break;
+        }
+        let cur = spans[r_i];
+        grid.for_each_candidate(cur, Some(r_i), |r_j| {
+            if hit || r_j >= r_i {
+                return;
+            }
+            let t = spans[r_j];
+            // Only the y gate is left: x overlap is implied by sharing
+            // a cell, and the stored boxes carry the same padding the
+            // spans do, so the pair neighbourhood is unchanged.
+            if t[3] < cur[2] || t[2] > cur[3] {
+                return;
+            }
+            if r_i.abs_diff(r_j) <= 1 {
+                return;
+            }
+            let a1 = ring[r_i];
+            let a2 = ring[(r_i + 1).min(n)];
+            let b1 = ring[r_j];
+            let b2 = ring[(r_j + 1).min(n)];
+            let mut ambiguous = false;
+            if crate::validation::edges::lean_pair_intersects(a1, a2, b1, b2, eps, &mut ambiguous) {
+                hit = true;
+                return;
+            }
+            if ambiguous
+                && check_revisit
+                && !(closed && (r_i == 0 && r_j == n - 1 || r_i == n - 1 && r_j == 0))
+                && (a1 == b1 || a1 == b2 || a2 == b1 || a2 == b2)
+            {
+                hit = true;
+            }
+        });
+    }
+    if hit {
+        return Some(true);
+    }
+    Some(false)
 }
 
 /// R-tree self-intersection check (the dense-ring fallback; kept exact -

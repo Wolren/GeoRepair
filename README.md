@@ -2,7 +2,7 @@
 
 # GeoRepair
 
-OGC geometry repair and validation for Rust. Passes the GEOS XML validation suite.
+OGC compliant geometry repair and validation for Rust.
 
 [![crate](https://img.shields.io/crates/v/geo-repair.svg)](https://crates.io/crates/geo-repair)
 [![docs](https://docs.rs/geo-repair/badge.svg)](https://docs.rs/geo-repair)
@@ -18,24 +18,28 @@ OGC geometry repair and validation for Rust. Passes the GEOS XML validation suit
 > and feature flags are all subject to change as we improve correctness
 > and performance.
 
-Detects and fixes invalid GIS geometries (self-intersections, unclosed
-rings, degenerate shapes, NaN coordinates) using algorithms selected by
-geometry type. Built-in I/O for WKB, WKT, and a custom binary batch
-format with no extra dependencies.
+GeoRepair repairs invalid OGC geometries and answers whether a geometry is
+valid. It fixes the common damage: self-intersections, unclosed rings,
+degenerate shapes, and NaN coordinates. Input that is already valid comes
+back unchanged.
 
-The **Structure** strategy (default) mirrors GEOS ST_MakeValid: planar
-graph extraction, face walking, winding-number assembly. The **Arrange**
-strategy is a CDT-based fallback for complex topologies.
+Two strategies, chosen by geometry type:
 
-Measured against GEOS on the 1,579,030-polygon production dataset
-(i5-12400F, release, parallel batch, GEOS 3.14.1 conda-forge as
-reference). Current timings: [Performance](#performance).
+- **Structure** (default) mirrors GEOS `ST_MakeValid`: planar graph
+  extraction, face walking, winding-number assembly.
+- **Arrange** is a CDT-based fallback for complex topologies.
+
+WKB and WKT reading and writing, plus a custom binary batch format, are
+built in with no extra dependencies.
+
+Everything is evaluated against a huge ported test sets from GEOS, CGAL and own fuzz tests. 
+The result should always come as valid per GEOS, but the strategy differences might make the output slightly differ.
 
 ## Performance
 
-### Real-world dataset (1,579,030 polygons)
+### A test dataset (1,579,030 polygons)
 
-Structure batch on a production GIS dataset (813 features from a GeoPackage,
+Structure batch on an a GIS dataset (813 features from a GeoPackage,
 flattened to 1,579,030 polygon parts). i5-12400F (6C/12T), release LTO,
 Rayon 12-thread batch; GEOS is conda-forge 3.14.1, serial per-call, run
 concurrently via Rayon, geometries built via CoordSeq direct construction
@@ -109,9 +113,9 @@ we win. Methodology: `docs/BENCHMARKS.md`. Regenerate:
 | spiral ls 100v | 1.5 | 18.1 | 12x |
 | spiral ls 500v | 127 | 563 | 4.4x |
 | spiral ls 1000v | 362 | 1933 | 5.3x |
-| self-int ls 100v | 6.3 | 2.3 | 0.36x |
-| self-int ls 500v | 43.5 | 3.3 | 0.08x |
-| self-int ls 1000v | 121 | 6.4 | 0.05x |
+| self-int ls 100v | 3.1 | 2.3 | 0.73x |
+| self-int ls 500v | 15.6 | 3.3 | 0.21x |
+| self-int ls 1000v | 28.8 | 6.4 | 0.22x |
 | dense self ls 10v | 0.074 | 1.3 | 17x |
 | dense self ls 50v | 0.231 | 5.2 | 22x |
 | dense self ls 100v | 0.288 | 12.5 | 43x |
@@ -123,9 +127,9 @@ we win. Methodology: `docs/BENCHMARKS.md`. Regenerate:
 | mls 50x3v | 2.8 | 30.8 | 11x |
 | mls 250x3v | 15.5 | 129 | 8.3x |
 | mls 500x3v | 39.6 | 276 | 7.0x |
-| self-int mls 50x4v | 31.0 | 78.1 | 2.5x |
-| self-int mls 250x4v | 193 | 521 | 2.7x |
-| self-int mls 500x4v | 619 | 1206 | 1.9x |
+| self-int mls 50x4v | 24.1 | 78.1 | 3.2x |
+| self-int mls 250x4v | 152 | 521 | 3.4x |
+| self-int mls 500x4v | 457 | 1206 | 2.6x |
 | star-burst 10sp | 3.0 | 18.1 | 5.9x |
 | star-burst 50sp | 1.0 | 349 | 334x |
 | star-burst 100sp | 1.6 | 1438 | 873x |
@@ -241,7 +245,8 @@ Every function exists for WKB and WKT (`repair_*`, `repair_*_batch`,
 `validate_and_fix_*`, plus batch forms), with `method`
 (auto/arrange/structure) and `keep_collapsed` parameters. A QGIS
 Processing script (`qgis/qgis_geo_repair.py`) streams features through
-the WKB batch API. Examples and full API reference: `docs/BINDINGS.md`.
+the WKB batch API. Mind  that due to overhead it might suffer from performance issues.
+Examples and full API reference: `docs/BINDINGS.md`.
 
 ## C API
 

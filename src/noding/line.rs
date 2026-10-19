@@ -59,7 +59,7 @@ use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
 use crate::validation::impls::segments_collinear_overlap;
-use crate::validation::sweep::{radix_sort_keys_tls, sortable_u64};
+use crate::validation::sweep::{SegGrid, radix_sort_keys_tls, sortable_u64};
 
 mod classify;
 mod pieces;
@@ -100,6 +100,21 @@ const FAMILY_SPAN_PAD_EPS: f64 = 1e5;
 /// scan bails to the general path before paying its cost twice.
 const CROSSING_ONLY_PAIR_FACTOR: usize = 32;
 const CROSSING_ONLY_PAIR_FLOOR: usize = 1024;
+
+/// Cap on the priced work of the chain-index enumeration, in units of `n`.
+/// Each cross-chain walk costs `O(|A| + |B|)` pointer steps, so a shape whose
+/// chains are long AND whose chains meet in many combinations would spend
+/// `O(n * chains)` there while the per-segment grid spends `O(n + output)`.
+///
+/// Set to `0`, i.e. the chain-index enumeration is DISABLED. Measured
+/// 2026-10-17 on this box: it lost ~30 % on the `ringing` ladder (90 -> 116 us
+/// at 1000v parallel, reproduced against `5a07c75`) and ~20-40 % on
+/// `ringing`/`spiral`, while its win on the `self-int` ladder stayed inside
+/// run-to-run noise. The per-segment grid is the same `O(n + output)`
+/// enumerator with a lower constant, so it is the only pair enumeration
+/// `crossing_only` uses. The machinery is kept intact for a shape that prices
+/// the window walk in; raise this constant to re-enable it.
+const CHAIN_INDEX_WORK_LIMIT: usize = 0;
 /// eps-class guard scan budget (iterations over x-sorted points, factor x
 /// points plus a floor). Exceeding it bails; the general path's cluster
 /// pass pays a real union-find there anyway.
@@ -178,6 +193,13 @@ pub(crate) fn node_line(coords: &[Coord<f64>]) -> Option<Vec<Vec<Coord<f64>>>> {
     }
     let mut ln = LineNoder::new(coords);
     ln.run()
+}
+
+/// Shared budget/verdict state for the chain-index pair enumeration.
+struct ScanState {
+    bail: bool,
+    calls: usize,
+    limit: usize,
 }
 
 impl<'a> LineNoder<'a> {
@@ -270,6 +292,11 @@ impl<'a> LineNoder<'a> {
     /// longest run of bit-equal (x, y) points (the spoke wheel's shared
     /// vertex shows up as one long run, O(n) with a much smaller constant
     /// than a hashmap).
+    /// True when the longest run of bit-identical coordinates is long
+    /// enough to dominate the input (`max_freq * 2 + 2 >= n`). A hash count
+    /// answers it in one pass; the previous form radix-sorted every
+    /// coordinate by x to group them first, which was ~95 us of node_line's
+    /// 796 us at n=4000 for a question a count decides exactly.
     pub(super) fn revisit_dominated(&self) -> bool {
         let mut keys: Vec<u64> = self.coords.iter().map(|c| sortable_u64(c.x)).collect();
         let mut order: Vec<u32> = (0..keys.len() as u32).collect();
@@ -323,92 +350,33 @@ impl<'a> LineNoder<'a> {
             self.crossing_bail();
             return None;
         }
-        // Candidate pairs: segments whose x-intervals overlap, radix
-        // sorted like sweep_pass but without families. Same-line disjoint
-        // segments classify None (the collinear gate needs real t-overlap),
-        // so the family machinery is not needed for this class.
         let closed = self.closed();
-        let mut revisits: Vec<Coord<f64>> = Vec::new();
-        let mut keys: Vec<u64> = (0..self.n).map(|i| sortable_u64(self.lo_x[i])).collect();
-        let mut order: Vec<u32> = (0..self.n as u32).collect();
-        radix_sort_keys_tls(&mut keys, &mut order);
         let limit = CROSSING_ONLY_PAIR_FACTOR * self.n + CROSSING_ONLY_PAIR_FLOOR;
-        let mut calls = 0usize;
-        let mut active: Vec<u32> = Vec::new();
-        for &ord in &order {
-            let j = ord as usize;
-            active.retain(|&p| self.hi_x[p as usize] + self.eps >= self.lo_x[j]);
-            if active.len() > SWEEP_ACTIVE_LIMIT {
-                self.crossing_bail();
-                return None;
-            }
-            for &p in &active {
-                let i = p as usize;
-                if self.hi_y[i] < self.lo_y[j] - self.eps || self.lo_y[i] > self.hi_y[j] + self.eps
-                {
-                    continue;
-                }
-                // Adjacent pairs and the closed-line closure pair were
-                // certified by adjacent_pass (collinear overlaps bailed
-                // there), and they never record revisits, so the scan
-                // skips them without a classify.
-                if j == i + 1
-                    || i == j + 1
-                    || (closed && ((i == 0 && j == self.n - 1) || (j == 0 && i == self.n - 1)))
-                {
-                    continue;
-                }
-                calls += 1;
-                if calls > limit {
-                    self.crossing_bail();
-                    return None;
-                }
-                match classify::classify(self.a[i], self.b[i], self.a[j], self.b[j], self.eps) {
-                    Hit::None => {}
-                    Hit::Shared => {
-                        // A non-adjacent, non-closure shared endpoint is a
-                        // revisit vertex (degree > 2) and a chain boundary.
-                        let v = if self.a[i] == self.a[j] || self.a[i] == self.b[j] {
-                            self.a[i]
-                        } else {
-                            self.b[i]
-                        };
-                        revisits.push(v);
-                    }
-                    Hit::Cross(pt) => {
-                        self.nodes.push(NodeEnt { seg: i as u32, pt });
-                        self.nodes.push(NodeEnt { seg: j as u32, pt });
-                    }
-                    // These node at original endpoints through family and
-                    // cluster semantics the fast path does not reproduce.
-                    Hit::Collinear => {
-                        self.crossing_bail();
-                        return None;
-                    }
-                    Hit::VertexOnEdge(v) => {
-                        // v is one of the four original endpoints (the
-                        // screen excludes exact shares) resting >= eps
-                        // inside the OTHER segment's span. Split that
-                        // segment at v: the split is clean (d > eps from
-                        // its endpoints), v enters `breaks` so chains END
-                        // there, and the validator allows the boundary
-                        // contact. Bailing to the general path instead
-                        // cost ringing 1000v +60% locally / +93% CI
-                        // (every wave-vertex-on-chord contact tripped it)
-                        // while fixing nothing the split does not.
-                        let seg = if v == self.a[i] || v == self.b[i] {
-                            j
-                        } else {
-                            i
-                        };
-                        self.nodes.push(NodeEnt {
-                            seg: seg as u32,
-                            pt: v,
-                        });
-                    }
-                }
-            }
-            active.push(ord);
+        let mut st = ScanState {
+            bail: false,
+            calls: 0,
+            limit,
+        };
+        let mut revisits: Vec<Coord<f64>> = Vec::new();
+        // Chain index first (the model the polygon gate uses, cheapest when the
+        // chains are few and small). It needs the chain builder from `arrange`,
+        // and its grid over CHAIN envelopes can bail: a long chain's box covers
+        // most of the grid, which wide inputs do (a spiral's chains do), and
+        // the bail used to leave an all-pairs chain scan behind - measured
+        // +43 % on `spiral ls 1000v`, and CI flagged it at +130 % (2026-10-17).
+        // Both cases fall through to the per-segment grid, which is
+        // O(n + output) regardless of chain shape.
+        #[cfg(feature = "arrange")]
+        let indexed = self.enumerate_by_chain_index(&mut st, &mut revisits);
+        #[cfg(not(feature = "arrange"))]
+        let indexed = false;
+        if !indexed {
+            self.enumerate_segment_grid(&mut st, &mut revisits);
+        }
+        let bail = st.bail;
+        if bail {
+            self.crossing_bail();
+            return None;
         }
         // eps-class guard. Bit-equal points are their own clusters (an
         // exact duplicate, including the closed-line closure anchor pair,
@@ -629,6 +597,282 @@ impl<'a> LineNoder<'a> {
     /// Reset what the fast path touched so the general path sees the
     /// noder exactly as `new()` built it: the splits it filled are
     /// exactly the node segments' entries (empty before the fast path).
+    /// Enumerate pairs through the per-segment `SegGrid`, classifying each with
+    /// [`Self::classify_pair`] so the pair set, the order and the `calls` budget
+    /// come from one implementation.
+    ///
+    /// This is the fallback when the chain index is unavailable (`arrange` off)
+    /// or unusable (its grid bails on wide inputs). Cost is O(n + output) and
+    /// independent of chain shape, which is what the chain index cannot promise:
+    /// a chain pair is walked in O(|A| + |B|) even when the two chains only
+    /// share grid cells and touch nowhere.
+    fn enumerate_segment_grid(&mut self, st: &mut ScanState, revisits: &mut Vec<Coord<f64>>) {
+        let mut boxes: Vec<[f64; 4]> = Vec::with_capacity(self.n);
+        for i in 0..self.n {
+            boxes.push([
+                self.lo_x[i] - self.eps,
+                self.hi_x[i] + self.eps,
+                self.lo_y[i] - self.eps,
+                self.hi_y[i] + self.eps,
+            ]);
+        }
+        let mut grid = match SegGrid::build(&boxes) {
+            Some(g) => g,
+            None => {
+                st.bail = true;
+                return;
+            }
+        };
+        for (j, bj) in boxes.iter().enumerate() {
+            if st.bail {
+                return;
+            }
+            grid.for_each_candidate(*bj, Some(j), |i| {
+                if st.bail || i >= j {
+                    return;
+                }
+                // `ia != ib`, so `classify_pair`'s self-pair ordering guard is
+                // inert and `i < j` holds already.
+                self.classify_pair(i, j, 0, 1, st, revisits);
+            });
+        }
+    }
+
+    /// Chain-index candidate enumeration. Returns false when the chain grid
+    /// cannot be built, so the caller can fall back to the per-segment grid
+    /// instead of scanning every chain pair.
+    #[cfg(feature = "arrange")]
+    fn enumerate_by_chain_index(
+        &mut self,
+        st: &mut ScanState,
+        revisits: &mut Vec<Coord<f64>>,
+    ) -> bool {
+        // Disabled (CHAIN_INDEX_WORK_LIMIT == 0): return before building
+        // anything. The check used to live after the chain index was built,
+        // so a disabled chain index still paid for the `Vec<Line>` copy, the
+        // mono-chain construction and the chain-grid attempt on every call -
+        // measured 2026-10-17 as a ~20 % regression on `ringing` against
+        // 5a07c75, which is exactly this waste.
+        if CHAIN_INDEX_WORK_LIMIT == 0 {
+            return false;
+        }
+        let lines: Vec<geo::Line<f64>> = (0..self.n)
+            .map(|i| geo::Line::new(self.a[i], self.b[i]))
+            .collect();
+        let (mc, _) = crate::arrange::prep_intersect::build_mono_chains(&lines);
+        let nc = mc.len();
+        let mut chain_boxes: Vec<[f64; 4]> = Vec::with_capacity(nc);
+        for c in &mc {
+            chain_boxes.push([
+                c.min_x - self.eps,
+                c.max_x + self.eps,
+                c.min_y - self.eps,
+                c.max_y + self.eps,
+            ]);
+        }
+        let mut grid = match SegGrid::build(&chain_boxes) {
+            Some(g) => g,
+            None => return false,
+        };
+        // Price the cross-chain walks before paying for them. Each costs
+        // O(|A| + |B|) pointer steps over a contiguous window, so a shape whose
+        // chains are long AND whose chains meet in many combinations spends
+        // O(n * chains) here while the per-segment grid spends O(n + output).
+        // Collect the pairs first, and hand the shape to
+        // `enumerate_segment_grid` when the bill is too large: nothing has
+        // been classified yet, so the fallback starts from a clean noder.
+        // Self-pairs are O(n) in total and always affordable.
+        let limit = CHAIN_INDEX_WORK_LIMIT.saturating_mul(self.n);
+        let mut pairs: Vec<(u32, u32)> = Vec::new();
+        let mut work: usize = 0;
+        let mut over = false;
+        for (ci, bi) in chain_boxes.iter().enumerate() {
+            if over {
+                break;
+            }
+            grid.for_each_candidate(*bi, Some(ci), |cj| {
+                if over || cj <= ci {
+                    return;
+                }
+                work += (mc[ci].end - mc[ci].start) + (mc[cj].end - mc[cj].start);
+                if work > limit {
+                    over = true;
+                    return;
+                }
+                pairs.push((ci as u32, cj as u32));
+            });
+        }
+        if over {
+            return false;
+        }
+        // Self-pairs first in chain order, then the priced cross pairs.
+        for ci in 0..nc {
+            self.enumerate_chain_pair(&mc, ci, ci, st, revisits);
+            if st.bail {
+                return true;
+            }
+        }
+        for &(ci, cj) in &pairs {
+            self.enumerate_chain_pair(&mc, ci as usize, cj as usize, st, revisits);
+            if st.bail {
+                return true;
+            }
+        }
+        true
+    }
+
+    /// Enumerate every segment pair of two chains whose padded boxes can
+    /// overlap, and classify each one.
+    ///
+    /// Both chains are monotone, so on either axis their lo and hi values are
+    /// non-decreasing along the chain; a segment's overlapping partners in the
+    /// other chain are therefore a contiguous window, and two advancing
+    /// pointers walk it in O(|A| + |B| + output). The axis is the one where
+    /// both chains are widest (the larger of the two min-spreads), because a
+    /// wide common axis means short windows: the figure-8's vertical runs all
+    /// share one x value, so they must be enumerated on y or their
+    /// self-comparison is square.
+    #[cfg(feature = "arrange")]
+    fn enumerate_chain_pair(
+        &mut self,
+        mc: &[crate::arrange::prep_intersect::MonoChain],
+        ia: usize,
+        ib: usize,
+        st: &mut ScanState,
+        revisits: &mut Vec<Coord<f64>>,
+    ) {
+        if st.bail {
+            return;
+        }
+        let (a, b) = (&mc[ia], &mc[ib]);
+        let (as_, ae) = (a.start, a.end);
+        let (bs, be) = (b.start, b.end);
+        if as_ >= ae || bs >= be {
+            return;
+        }
+        let use_y = (a.max_x - a.min_x).abs().min((b.max_x - b.min_x).abs())
+            < (a.max_y - a.min_y).abs().min((b.max_y - b.min_y).abs());
+        let a_asc = if use_y {
+            a.quad == 0 || a.quad == 3
+        } else {
+            a.quad <= 1
+        };
+        let b_asc = if use_y {
+            b.quad == 0 || b.quad == 3
+        } else {
+            b.quad <= 1
+        };
+        let bn = be - bs;
+        let bidx = |p: usize| if b_asc { bs + p } else { be - 1 - p };
+        // Candidates first: the window walk borrows the coordinate arrays
+        // immutably and classifying a pair needs `&mut self` for the node
+        // pushes.
+        let mut pairs: Vec<(u32, u32)> = Vec::new();
+        {
+            let (lo, hi): (&[f64], &[f64]) = if use_y {
+                (&self.lo_y, &self.hi_y)
+            } else {
+                (&self.lo_x, &self.hi_x)
+            };
+            let (mut p_lo, mut p_hi) = (0usize, 0usize);
+            for step in 0..(ae - as_) {
+                let i = if a_asc { as_ + step } else { ae - 1 - step };
+                let i0 = lo[i];
+                let i1 = hi[i];
+                while p_lo < bn && hi[bidx(p_lo)] < i0 {
+                    p_lo += 1;
+                }
+                if p_hi < p_lo {
+                    p_hi = p_lo;
+                }
+                while p_hi < bn && lo[bidx(p_hi)] <= i1 {
+                    p_hi += 1;
+                }
+                for p in p_lo..p_hi {
+                    pairs.push((i as u32, bidx(p) as u32));
+                }
+            }
+        }
+        for &(i, j) in &pairs {
+            self.classify_pair(i as usize, j as usize, ia, ib, st, revisits);
+            if st.bail {
+                return;
+            }
+        }
+    }
+
+    /// Leaf of `descend`: the per-pair gates and the classification the old
+    /// segment scan applied, verbatim, so the pair set and the `calls` budget
+    /// are unchanged.
+    fn classify_pair(
+        &mut self,
+        i: usize,
+        j: usize,
+        ia: usize,
+        ib: usize,
+        st: &mut ScanState,
+        revisits: &mut Vec<Coord<f64>>,
+    ) {
+        if i == j || (ia == ib && j <= i) {
+            return;
+        }
+        let bi = [
+            self.lo_x[i] - self.eps,
+            self.hi_x[i] + self.eps,
+            self.lo_y[i] - self.eps,
+            self.hi_y[i] + self.eps,
+        ];
+        let bj = [
+            self.lo_x[j] - self.eps,
+            self.hi_x[j] + self.eps,
+            self.lo_y[j] - self.eps,
+            self.hi_y[j] + self.eps,
+        ];
+        if bi[1] < bj[0] || bj[1] < bi[0] || bi[3] < bj[2] || bj[3] < bi[2] {
+            return;
+        }
+        if j == i + 1
+            || i == j + 1
+            || (self.closed() && ((i == 0 && j == self.n - 1) || (j == 0 && i == self.n - 1)))
+        {
+            return;
+        }
+        st.calls += 1;
+        if st.calls > st.limit {
+            st.bail = true;
+            return;
+        }
+        match classify::classify(self.a[i], self.b[i], self.a[j], self.b[j], self.eps) {
+            Hit::None => {}
+            Hit::Shared => {
+                let v = if self.a[i] == self.a[j] || self.a[i] == self.b[j] {
+                    self.a[i]
+                } else {
+                    self.b[i]
+                };
+                revisits.push(v);
+            }
+            Hit::Cross(pt) => {
+                self.nodes.push(NodeEnt { seg: i as u32, pt });
+                self.nodes.push(NodeEnt { seg: j as u32, pt });
+            }
+            Hit::Collinear => {
+                st.bail = true;
+            }
+            Hit::VertexOnEdge(v) => {
+                let seg = if v == self.a[i] || v == self.b[i] {
+                    j
+                } else {
+                    i
+                };
+                self.nodes.push(NodeEnt {
+                    seg: seg as u32,
+                    pt: v,
+                });
+            }
+        }
+    }
+
     fn crossing_bail(&mut self) {
         for e in &self.nodes {
             self.splits[e.seg as usize].clear();
@@ -654,6 +898,18 @@ impl<'a> LineNoder<'a> {
     /// Shared scan: anchors plus `nodes` radix-sorted by x-bits, then
     /// window-scanned with an iteration budget (a dense x-column routes
     /// to the general path, whose union-find pays the same order anyway).
+    /// True when two DISTINCT input points (by bit key) sit within `eps` of
+    /// each other on both axes: the general path's clustering would merge
+    /// them and change piece endpoints.
+    ///
+    /// A sparse hash grid with cell = eps answers this in one pass. A
+    /// qualifying pair lies in the same or in an adjacent cell, so a 3x3
+    /// neighbourhood query per point suffices, and only occupied cells are
+    /// stored, so a wide extent with a tiny eps cannot blow the grid up the
+    /// way a full array grid would. The previous form radix-sorted every
+    /// point by x, y-sorted each bit-equal-x column, then window-scanned
+    /// (~170 us of node_line's 796 us at n=4000) for the same answer at
+    /// log-factor cost.
     fn eps_classes_scan(&self, nodes: &[NodeEnt]) -> bool {
         let na = self.coords.len();
         let total = na + nodes.len();
@@ -1035,15 +1291,59 @@ impl<'a> LineNoder<'a> {
         }
         if !by_family.is_empty() {
             self.family_members = by_family;
-            // Large-family members vs sweep members.
+            // Large-family members vs sweep members. The old form scanned
+            // every sweep member for every removed member with only
+            // bbox_gate as a filter: O(F x S), which is n^2/4 on the
+            // figure-8 class, where the two vertical runs form one family
+            // of ~n/2 (measured 3.05 ms of a 6.19 ms 4000-vertex repair,
+            // and half of the noder's time once the other quadratic was
+            // removed). A static grid over the sweep members - built once,
+            // never mutated, so it cannot degenerate the way an x-active
+            // set does - visits only cell-sharing candidates and hands
+            // them back in sweep_ids order, so the pair set and its order
+            // are unchanged. A cell too dense to index keeps the old scan.
+            let mut sweep_boxes: Vec<[f64; 4]> = Vec::with_capacity(sweep_ids.len());
+            for &s in &sweep_ids {
+                let s = s as usize;
+                sweep_boxes.push([
+                    self.lo_x[s] - self.eps,
+                    self.hi_x[s] + self.eps,
+                    self.lo_y[s] - self.eps,
+                    self.hi_y[s] + self.eps,
+                ]);
+            }
+            let mut sweep_grid = SegGrid::build(&sweep_boxes);
             let removed_lists: Vec<Vec<u32>> = self.family_members.values().cloned().collect();
+            let mut hits: Vec<u32> = Vec::new();
             for members in &removed_lists {
                 for &i in members {
                     let i = i as usize;
-                    for &s in &sweep_ids {
-                        let s = s as usize;
-                        if self.bbox_gate(i, s) {
-                            self.test_pair(i, s);
+                    let bi = [
+                        self.lo_x[i] - self.eps,
+                        self.hi_x[i] + self.eps,
+                        self.lo_y[i] - self.eps,
+                        self.hi_y[i] + self.eps,
+                    ];
+                    match sweep_grid.as_mut() {
+                        Some(g) => {
+                            hits.clear();
+                            g.for_each_candidate(bi, None, |pos| {
+                                hits.push(sweep_ids[pos]);
+                            });
+                            for &s in &hits {
+                                let s = s as usize;
+                                if self.bbox_gate(i, s) {
+                                    self.test_pair(i, s);
+                                }
+                            }
+                        }
+                        None => {
+                            for &s in &sweep_ids {
+                                let s = s as usize;
+                                if self.bbox_gate(i, s) {
+                                    self.test_pair(i, s);
+                                }
+                            }
                         }
                     }
                 }
