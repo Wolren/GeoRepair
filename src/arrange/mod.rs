@@ -531,22 +531,12 @@ impl GateAccum<'_> {
     }
 }
 
-/// Basic-form plausibility scan for one ring: closure, min points, adjacent duplicates,
-/// non-finite coords, non-adjacent duplicate scan (shared with the exit validator - the
-/// gate must certify exactly what the validator accepts, 2026-08-07 gate rule). The
-/// same pass also drives the optional accumulators (lines, global bbox, sub-ULP flag) -
-/// the gate's separate collect, envelope scan and sub-ULP scan are all fused here
-/// (measured 2026-08-08: the envelope + sub-ULP passes cost ~15-20 us on a 5000-vertex
-/// ring).
-///
-/// The per-ring duplicate-vertex hash table that used to live here (a 2*2^ceil(log2
-/// n)-slot open-addressed table, 512 KB at 10 000 vertices, hit at a random offset per
-/// vertex) is gone. It measured 11 % of the gate at 500 v rising to 17 % at 10 000 v
-/// (2026-10-17, tls scratch and bitmap clear already in place). Rings at or below
-/// `SMALL_RING_LINES` keep the allocation-free O(n^2) `first_pinch_dup` scan: it is
-/// bounded. The pair predicates now close the repeated-vertex class themselves - see
-/// `prep_intersect::shares_repeated_vertex`, which mirrors GEOS's rule that a same-ring
-/// interaction which is not an adjacent-in-ring endpoint touch is invalid.
+/// Plausibility scan for one ring: closure, minimum points, adjacent and non-adjacent
+/// duplicates, non-finite coords. It matches the exit validator (2026-08-07 gate rule).
+/// The pass fills the accumulators: lines, bbox, sub-ULP (2026-08-08: 15-20 us on a
+/// 5000-vertex ring). It cost 512 KB at 10 000 vertices. 11 % of the gate at 500 v and
+/// 17 % at 10 000 v (2026-10-17). `prep_intersect::shares_repeated_vertex` now closes
+/// that class. Rings at or below `SMALL_RING_LINES` keep the bounded O(n^2) scan.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(crate) fn ring_is_plausible(ring: &geo::LineString<f64>, acc: &mut GateAccum) -> bool {
     let coords = &ring.0;

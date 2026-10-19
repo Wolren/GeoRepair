@@ -291,9 +291,9 @@ pub(super) fn has_nan_or_infinite(p: &Polygon<f64>) -> bool {
 
 /// True when a snap grid (`SNAP_SCALE` = 1e8) cannot hold the coordinates. Integer keys
 /// lose precision past 2^53. Sub-0.5 values collapse. A 5.8e-9 coordinate in a 6.2e7
-/// shell is 0.58 units. It stays on the snap path. GEOS fuzz (2026-08-03): snapping
-/// mixed-magnitude polygons (1e-9 to 1e7) gave self-intersecting output. Polygon((100
-/// 100, 1e15 110, 1e15 100, 100 100)) passes. Seed 5cf953d1 failed at 1.0.
+/// shell is 0.58 units. GEOS fuzz (2026-08-03): snapping mixed-magnitude polygons (1e-9
+/// to 1e7) gave self-intersecting output. Polygon((100 100, 1e15 110, 1e15 100, 100
+/// 100)) passes. Seed 5cf953d1 failed at 1.0.
 pub(crate) fn snap_cannot_represent(poly: &Polygon<f64>) -> bool {
     let mut min_abs = f64::MAX;
     let mut max_abs = 0.0f64;

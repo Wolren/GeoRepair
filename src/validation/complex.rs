@@ -7,17 +7,12 @@ use geo::{
 
 use crate::validation::core::*;
 
-/// Maximum `GeometryCollection` nesting depth accepted by validation.
-///
-/// `validate_at_depth` counts collection levels starting at 0 for the outermost
-/// collection, and rejects a level once `depth > MAX_COLLECTION_DEPTH`, so a chain of
-/// `MAX_COLLECTION_DEPTH + 1` collections (depths `0.=100`) is accepted and one more is
-/// not.
-///
-/// Repair has to honour the same bound: a `GeometryCollection` past this limit is
-/// handed back by [`crate::MakeValid`] verbatim unless the extra wrapper levels are
-/// folded away (see `push_repaired_member`), which would make `make_valid` return a
-/// geometry that still fails `validate()`.
+/// Maximum `GeometryCollection` nesting depth that validation accepts. It rejects a
+/// level once `depth > MAX_COLLECTION_DEPTH` (max_collection_depth). A chain of
+/// `MAX_COLLECTION_DEPTH + 1` collections, depths `0.=100`, is accepted and one more is
+/// not. Repair must honour the same bound. `crate::MakeValid` (crate::makevalid) hands
+/// a collection past the limit back verbatim, unless the wrapper levels fold away as
+/// `push_repaired_member` does.
 pub(crate) const MAX_COLLECTION_DEPTH: usize = 100;
 
 impl GeoValidation for Polygon<f64> {

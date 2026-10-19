@@ -1106,24 +1106,14 @@ impl<'a> LineNoder<'a> {
         Some(())
     }
 
-    /// Cross-family pair test with line-geometry pruning. Two exact- collinear families
-    /// interact only through line geometry:
-    ///
-    /// - Parallel reference lines (|sin| below FAMILY_PARALLEL_SIN): every member of F1
-    ///   is collinear-or-nearly so with every member of F2; when the reference lines
-    ///   are farther apart than FAMILY_PARALLEL_SKIP_DIST x scale no pair can classify
-    ///   Collinear/VertexOnEdge (the validator's own flag distances are 64 eps x len
-    ///   and 1e-12 x len, both far inside the bound).
-    /// - Intersecting reference lines (|sin| >= FAMILY_SHALLOW_SIN): the two lines meet
-    ///   in exactly one point P. Any real node lies at P up to FP drift ((32-ulp offset
-    ///   merge deviation)/sin). Members whose span does not contain P (+
-    ///   FAMILY_SPAN_PAD_EPS x eps) cannot reach P. Only span-containing members are
-    ///   tested pairwise. On the figure-8 class this cuts ~250k pair tests to a few
-    ///   hundred.
-    ///
-    /// Shallow angles (FAMILY_SHALLOW_SIN <= |sin| below ~1e-3) keep the exhaustive
-    /// scan: the P drift budget grows as 1/sin and would need a pad comparable to the
-    /// spans themselves.
+    /// Cross-family pair test with line pruning. Parallel lines below
+    /// FAMILY_PARALLEL_SIN (family_parallel_sin). Apart by more than
+    /// FAMILY_PARALLEL_SKIP_DIST (family_parallel_skip_dist) x scale, give zero pair
+    /// tests. The 64 eps x len and 1e-12 x len validator flags stay inside that gap.
+    /// Lines at or above FAMILY_SHALLOW_SIN (family_shallow_sin) meet at one point P.
+    /// Only spans that hold P, plus FAMILY_SPAN_PAD_EPS (family_span_pad_eps) x eps,
+    /// get tested. Drift is 32 ulp over sin. Figure-8 drops from ~250k tests to a few
+    /// hundred. Angles below ~1e-3 keep the full scan: drift grows as 1/sin.
     fn test_family_pair(&mut self, f1: u32, f2: u32) {
         // Clone the two member lists up front: test_pair mutates self.nodes/splits, so
         // live borrows of self.family_members cannot span the pair loop.
