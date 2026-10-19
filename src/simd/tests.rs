@@ -397,7 +397,6 @@ mod shuffle_kernels {
         );
         black_box((acc, acc2));
 
-        // orient2d batch: scalar vs avx2-dispatch.
         type Triad = ([Coord<f64>; 4], [Coord<f64>; 4], [Coord<f64>; 4]);
         let mut table: Vec<Triad> = Vec::new();
         for _ in 0..64 {

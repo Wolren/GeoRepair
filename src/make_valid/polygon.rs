@@ -225,8 +225,7 @@ impl MakeValid for Polygon<f64> {
         };
         let cleaned = Polygon::new(ext_ring, int_clean);
         // Panic containment (fuzz make_valid seed 0559eed8) A foreign panic degrades to
-        // empty; preserve_valid_input style contracts are recovered downstream by
-        // maybe_collapse_keep.
+        // empty.
         #[cfg(feature = "std")]
         let (repaired, _) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             make_valid_impl(self, &cleaned, config, first_valid)
@@ -238,7 +237,7 @@ impl MakeValid for Polygon<f64> {
         #[cfg(not(feature = "std"))]
         let (repaired, _) = make_valid_impl(self, &cleaned, config, first_valid);
         // The cleaned polygon is not gate-certified (it went through the NaN-filter
-        // path), so strip always runs here.
+        // path).
         let result = strip_degenerate(repaired);
         maybe_collapse_keep(result, config, self)
     }
@@ -358,7 +357,6 @@ pub(super) fn make_valid_impl(
         PolyMethod::Structure => {
             let st = structure_fix_owned(poly.clone(), config, None);
             match st {
-                // Fast path: the gate is a complete certifier (2026-08-07)
                 crate::structure::FixOutcome::Fast(g, min_abs, max_abs, extrema) => {
                     let (g_norm, ok) = enforce_ogc_winding_with_extrema(g, Some(&extrema));
                     if ok {
@@ -402,8 +400,6 @@ pub(super) fn make_valid_impl(
         }
         PolyMethod::Auto => {
             match structure_fix_owned(poly.clone(), config, None) {
-                // Fast: complete-certifier gate (2026-08-07) - same argument as the
-                // Structure arm above.
                 crate::structure::FixOutcome::Fast(g, min_abs, max_abs, extrema) => {
                     let (g_norm, ok) = enforce_ogc_winding_with_extrema(g, Some(&extrema));
                     if ok {
@@ -527,7 +523,7 @@ pub fn make_valid_owned(poly: Polygon<f64>, config: &MakeValidConfig) -> Geometr
         if !has_nan {
             let first = poly.exterior().0[0];
             // Panic containment (mirrors the borrowed path): i_overlay can assert on
-            // degenerate inputs; degrade to empty, never crash.
+            // degenerate inputs.
             #[cfg(feature = "std")]
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 make_valid_impl_owned(poly, config, first, None)

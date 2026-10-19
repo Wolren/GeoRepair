@@ -12,8 +12,8 @@ pub(super) fn detect_hole_cycle(
     #[cfg(feature = "rstar")] shell_tree: Option<&Arc<rstar::RTree<EdgeIdx>>>,
 ) -> bool {
     let n = rings.len();
-    // The vertex lists are radix-sorted by x (std sort cost ~50ms on the giant shells;
-    // measured 2026-08-06).
+    // The vertex lists are radix-sorted by x (std sort cost ~50ms on the giant shells.
+    // Measured 2026-08-06).
     let mut sorted: Vec<Vec<Coord<f64>>> = Vec::with_capacity(n);
     for r in rings {
         let mut v = r.to_vec();

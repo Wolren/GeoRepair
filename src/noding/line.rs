@@ -774,8 +774,7 @@ impl<'a> LineNoder<'a> {
                 nx = -nx;
                 ny = -ny;
             }
-            // The negation turns +0.0 into -0.0, which has different bits and would
-            // split one exact direction into two buckets.
+            // The negation turns +0.0 into -0.0.
             if ny == 0.0 {
                 ny = 0.0;
             }
@@ -972,8 +971,8 @@ impl<'a> LineNoder<'a> {
         }
         if !by_family.is_empty() {
             self.family_members = by_family;
-            // of ~n/2 (measured 3.05 ms of a 6.19 ms 4000-vertex repair, and half of
-            // the noder's time once the other)
+            // of ~n/2 (measured 3.05 ms of a 6.19 ms 4000-vertex repair. Half of the
+            // noder's time once the other)
             let mut sweep_boxes: Vec<[f64; 4]> = Vec::with_capacity(sweep_ids.len());
             for &s in &sweep_ids {
                 let s = s as usize;

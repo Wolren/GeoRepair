@@ -519,8 +519,8 @@ fn degenerate_ring_parses_but_flagged_by_validator() {
 
 #[test]
 fn non_ogc_variants_serialized_losslessly() {
-    // OGC WKT has no Line/Rect/Triangle; they must serialize to their closest OGC
-    // equivalents (coordinate-exact), never silently drop to geometrycollection empty.
+    // They must serialize to their closest OGC equivalents (coordinate-exact), never
+    // silently drop to geometrycollection empty.
     let line = Geometry::Line(geo::Line::new(
         Coord { x: 1.0, y: 2.0 },
         Coord { x: 3.0, y: 4.0 },

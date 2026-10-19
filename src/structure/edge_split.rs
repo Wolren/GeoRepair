@@ -161,8 +161,7 @@ fn split_edges_rtree(edges: &[Line<f64>], split_points: &mut [SplitPoint], eps: 
         .collect();
     let tree = RTree::bulk_load(envs);
 
-    // Measured: noding a 260k-edge giant shell is ~100ms serial; the query phase
-    // dominates and parallelizes near-linearly.
+    // Measured: noding a 260k-edge giant shell is ~100ms serial.
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     {
         use rayon::prelude::*;

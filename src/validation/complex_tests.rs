@@ -12,7 +12,7 @@ fn test_point_nan() {
     // Point(NaN, NaN) is the geo representation of point empty - valid OGC
     assert!(Point::new(f64::NAN, f64::NAN).is_valid());
     // A single NaN ordinate is invalid (GEOS TestValid: "P - invalid NaN X ordinate"
-    // expects isValid=false; CoordinateNaN).
+    // expects isValid=false. CoordinateNaN).
     assert!(!Point::new(f64::NAN, 2.0).is_valid());
     assert!(!Point::new(2.0, f64::NAN).is_valid());
     assert!(Point::new(1.0, 2.0).is_valid());

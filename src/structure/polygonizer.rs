@@ -420,12 +420,10 @@ mod tests {
             Line::new(Coord { x: 20.0, y: 0.0 }, Coord { x: 20.0, y: 20.0 }),
             Line::new(Coord { x: 20.0, y: 20.0 }, Coord { x: 0.0, y: 20.0 }),
             Line::new(Coord { x: 0.0, y: 20.0 }, Coord { x: 0.0, y: 0.0 }),
-            // L1 CW hole: E, S, W, N
             Line::new(Coord { x: 3.0, y: 3.0 }, Coord { x: 17.0, y: 3.0 }),
             Line::new(Coord { x: 17.0, y: 3.0 }, Coord { x: 17.0, y: 17.0 }),
             Line::new(Coord { x: 17.0, y: 17.0 }, Coord { x: 3.0, y: 17.0 }),
             Line::new(Coord { x: 3.0, y: 17.0 }, Coord { x: 3.0, y: 3.0 }),
-            // L2 ccw island: E, N, W, S
             Line::new(Coord { x: 6.0, y: 6.0 }, Coord { x: 14.0, y: 6.0 }),
             Line::new(Coord { x: 14.0, y: 6.0 }, Coord { x: 14.0, y: 14.0 }),
             Line::new(Coord { x: 14.0, y: 14.0 }, Coord { x: 6.0, y: 14.0 }),

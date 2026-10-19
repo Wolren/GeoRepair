@@ -80,7 +80,6 @@ mod tests {
     use geo::{Geometry, LineString, Polygon};
 
     fn bowtie() -> Polygon<f64> {
-        // Self-intersecting quad: (0,0) (10,10) (0,10) (10,0).
         Polygon::new(
             LineString::from(vec![
                 (0.0, 0.0),

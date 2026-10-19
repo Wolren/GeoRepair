@@ -133,7 +133,7 @@ mod tests {
     #[test]
     fn stricter_than_geo_collinear_sliver() {
         // 5e-14 apart (about 28 ulps at this scale) - genuinely separated,
-        // geometrically valid, and GEOS accepts it.
+        // geometrically valid.
         let poly = Polygon::new(
             LineString::from(vec![
                 (0.0, 0.0),

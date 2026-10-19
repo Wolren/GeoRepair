@@ -18,7 +18,6 @@ pub fn build_area(lines: &[geo::Line<f64>]) -> Option<MultiPolygon<f64>> {
         return Some(MultiPolygon::new(Vec::new()));
     }
 
-    // Step 1: rings + orientation classification
     struct Face {
         ring: Vec<Coord<f64>>, // as walked (shells CW, holes CCW)
         envelope_area: f64,

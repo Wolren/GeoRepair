@@ -95,8 +95,7 @@ fn edit_sequence(coords: &[Coord<f64>], min_len: usize, tolerance: f64) -> Optio
         return Some(coords.to_vec());
     }
 
-    // RepeatedInvalidPointFilter: skip invalid coords (leading ones too), exact
-    // duplicates, and points within tolerance of the last kept.
+    // Points within tolerance of the last kept.
     let sq = tolerance * tolerance;
     let mut filt: Vec<Coord<f64>> = Vec::new();
     for &c in coords {

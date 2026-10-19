@@ -403,8 +403,7 @@ fn write_polygon(
 }
 
 fn fmt(v: f64) -> String {
-    // ryu: shortest round-trip formatting (same as the WKT writer); std's Display float
-    // path is 5-10x slower per number.
+    // Std's Display float path is 5-10x slower per number.
     let mut buf = ryu::Buffer::new();
     buf.format(v).to_string()
 }

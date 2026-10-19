@@ -1154,8 +1154,7 @@ mod chain_fusion_tests {
                 )),
             ) {
                 let mk = |mut p: Vec<(f64, f64)>| {
-                    // Pin -0.0 to +0.0: the equivalence below compares bit patterns,
-                    // and ieee min/max breaks ties by operand order.
+                    // Pin -0.0 to +0.0: the equivalence below compares bit patterns.
                     for c in p.iter_mut() {
                         if c.0 == 0.0 {
                             c.0 = 0.0;

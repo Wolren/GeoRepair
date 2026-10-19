@@ -315,8 +315,7 @@ impl<'a> Parser<'a> {
             if self.i >= self.s.len() || self.s[self.i] == b')' {
                 break;
             }
-            // empty element (multipoint (empty, (1 2), .)) - an empty point component;
-            // geo's empty-point convention is NaN coords.
+            // Geo's empty-point convention is NaN coords.
             if self.s[self.i] == b'E' || self.s[self.i] == b'e' {
                 let rest = &self.s[self.i..];
                 if rest.starts_with(b"EMPTY") || rest.starts_with(b"empty") {
@@ -549,8 +548,8 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_any(&mut self, depth: usize) -> Result<Geometry<f64>, WktError> {
-        // geometrycollection nests recursively; a crafted document can nest arbitrarily
-        // deep and overflow the stack (uncatchable abort).
+        // A crafted document can nest arbitrarily deep and overflow the stack
+        // (uncatchable abort).
         if depth > MAX_WKT_NESTING {
             return Err(self.err("geometry nesting exceeds limit"));
         }
