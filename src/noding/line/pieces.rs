@@ -1,3 +1,4 @@
+//! Piece construction, dedup and reconnection for the lean line noder.
 
 use alloc::vec;
 use alloc::vec::Vec;

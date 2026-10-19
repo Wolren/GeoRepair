@@ -1,3 +1,5 @@
+//! Single-pass WKB parser and encoder for 2D geometries, with no dependency beyond
+//! `geo`.
 
 use alloc::vec::Vec;
 use core::fmt;
@@ -7,6 +9,7 @@ use geo::{
     Point, Polygon,
 };
 
+/// Errors that can occur during WKB parsing.
 #[derive(Debug)]
 pub enum WkbError {
     UnexpectedEof,
@@ -62,6 +65,7 @@ impl fmt::Display for WkbError {
 #[cfg(feature = "std")]
 impl std::error::Error for WkbError {}
 
+/// Dimension flags for EWKB extended dimensions (Z/M).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EwkbDims {
     pub has_z: bool,
@@ -86,11 +90,13 @@ impl EwkbDims {
         has_m: true,
     };
 
+    /// Number of coordinate values per point (2 for XY, 3 for xyz/xym, 4 for xyzm).
     pub fn coord_count(self) -> u8 {
         (self.has_z as u8) + (self.has_m as u8) + 2
     }
 }
 
+/// EWKB geometry that keeps SRID and Z/M dimension data.
 #[derive(Debug, Clone)]
 pub struct EwkbGeometry {
     pub geometry: Geometry<f64>,
@@ -99,12 +105,14 @@ pub struct EwkbGeometry {
     pub extra_coords: Vec<f64>,
 }
 
+/// Byte order for WKB serialization.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Endianness {
     LittleEndian,
     BigEndian,
 }
 
+/// Options for WKB writing, controlling byte order and format.
 #[derive(Debug, Clone, Copy)]
 pub struct WriteOptions {
     /// Desired byte order for output.

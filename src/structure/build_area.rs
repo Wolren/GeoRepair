@@ -4,6 +4,7 @@ use rustc_hash::FxHashMap;
 
 use super::fix_ring_graph::{build_graph, extract_all_faces_geos};
 
+/// geos BuildArea port.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn build_area(lines: &[geo::Line<f64>]) -> Option<MultiPolygon<f64>> {
     if lines.is_empty() {
@@ -13,6 +14,8 @@ pub fn build_area(lines: &[geo::Line<f64>]) -> Option<MultiPolygon<f64>> {
     if graph.edges.is_empty() {
         return Some(MultiPolygon::new(Vec::new()));
     }
+    // None as a fallback signal (make_valid.rs polygonizer_fallback, fix_ring.rs) -
+    // keep the semantics
     let faces = extract_all_faces_geos(&graph)?;
     if faces.is_empty() {
         return Some(MultiPolygon::new(Vec::new()));
@@ -56,6 +59,7 @@ pub fn build_area(lines: &[geo::Line<f64>]) -> Option<MultiPolygon<f64>> {
         return Some(MultiPolygon::new(Vec::new()));
     }
 
+    // Step 2: sort by envelope area desc (GEOS CompareByEnvarea)
     faces_out.sort_by(|a, b| {
         b.envelope_area
             .partial_cmp(&a.envelope_area)

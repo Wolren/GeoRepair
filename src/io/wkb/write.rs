@@ -1,3 +1,4 @@
+//! WKB writer: OGC + EWKB encoders and size estimation.
 
 use super::*;
 use alloc::vec::Vec;
@@ -19,6 +20,7 @@ pub fn write_wkb_with_opts(geom: &Geometry<f64>, opts: &WriteOptions) -> Vec<u8>
     buf
 }
 
+/// Serialize a geometry as WKB and write it to any `io::Write` target.
 #[cfg(feature = "std")]
 pub fn write_wkb_to(geom: &Geometry<f64>, writer: &mut impl Write) -> io::Result<()> {
     let bytes = write_wkb(geom);
@@ -68,6 +70,7 @@ fn wkb_size(geom: &Geometry<f64>) -> usize {
     ewkb_size(geom, EwkbDims::XY, false)
 }
 
+/// Compute the byte size of a geometry in EWKB format with given dimension and SRID.
 fn ewkb_size(geom: &Geometry<f64>, dims: EwkbDims, has_srid: bool) -> usize {
     use geo::Geometry::*;
     let header = 1 + 4 + if has_srid { 4 } else { 0 };
@@ -146,7 +149,8 @@ fn write_coord(buf: &mut Vec<u8>, c: &Coord<f64>, le: bool) {
     write_f64(buf, c.y, le);
 }
 
-/// Measured 2026-08-04: about 2.5x fewer operations on the write path.
+/// Measured 2026-08-04: about 2.5x fewer operations on the write path. Const asserts
+/// pin size 16 and align 8.
 fn write_coords_le_bulk(buf: &mut Vec<u8>, coords: &[Coord<f64>]) {
     const _: () = assert!(core::mem::size_of::<Coord<f64>>() == 16);
     const _: () = assert!(core::mem::align_of::<Coord<f64>>() == 8);
@@ -178,6 +182,7 @@ fn write_linestring(buf: &mut Vec<u8>, ls: &LineString<f64>, le: bool) {
 }
 
 fn write_polygon(buf: &mut Vec<u8>, poly: &Polygon<f64>, le: bool) {
+    // 2026-08-04 in tests/wkb_parity.rs .
     if poly.exterior().0.is_empty() && poly.interiors().is_empty() {
         write_u32(buf, 0, le);
         return;
@@ -542,6 +547,7 @@ fn write_geometry_ewkb(
 }
 
 
+/// Read the byte size of the next WKB geometry from `buf` without fully parsing it.
 pub fn estimate_wkb_size(buf: &[u8]) -> Result<usize, WkbError> {
     let mut pos = 0;
     let mut dummy_extra = Vec::new();

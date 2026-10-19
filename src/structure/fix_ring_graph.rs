@@ -84,11 +84,16 @@ pub fn build_graph(lines: &[Line<f64>]) -> Graph {
     }
 }
 
+/// --------------------------------------------------------------------------- Face
+/// extraction - faithful port of GEOS PolygonizeGraph::getEdgeRings (computeNextCWEdges
+/// + findLabeledEdgeRings + convertMaximalToMinimalEdgeRings, then findEdgeRing).
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn extract_all_faces_geos(graph: &Graph) -> Option<Vec<Vec<(usize, usize)>>> {
     let n_edges = graph.edges.len();
     let mut next: Vec<usize> = vec![0; n_edges * 2];
 
+    // Step 1: computeNextCWEdges (maximal rings) Edges around each node are stored in
+    // ccw order in sorted_adj (atan2 sort).
     for (v, neighbors) in graph.sorted_adj.iter().enumerate() {
         let deg = neighbors.len();
         if deg == 0 {
@@ -109,6 +114,7 @@ pub fn extract_all_faces_geos(graph: &Graph) -> Option<Vec<Vec<(usize, usize)>>>
         }
     }
 
+    // Step 2: findLabeledEdgeRings
     let mut label: Vec<i64> = vec![-1; n_edges * 2];
     let mut next_label: i64 = 1;
     for start in 0..n_edges * 2 {
@@ -135,6 +141,8 @@ pub fn extract_all_faces_geos(graph: &Graph) -> Option<Vec<Vec<(usize, usize)>>>
         next_label += 1;
     }
 
+    // Step 3: convertMaximalToMinimalEdgeRings (nodes with degree > 1 within that
+    // label) via computeNextCCWEdges.
     let mut ccw_next: Vec<usize> = next.clone();
     for v in 0..graph.verts.len() {
         let neighbors = &graph.sorted_adj[v];
@@ -189,6 +197,7 @@ pub fn extract_all_faces_geos(graph: &Graph) -> Option<Vec<Vec<(usize, usize)>>>
         }
     }
 
+    // Step 4: findEdgeRing: walk minimal ccw rings
     let mut used = vec![false; n_edges * 2];
     let mut faces: Vec<Vec<(usize, usize)>> = Vec::new();
     for start in 0..n_edges * 2 {
@@ -391,6 +400,8 @@ fn find_next_edge(
     best.map(|(ei, _, to)| (ei, to))
 }
 
+/// --------------------------------------------------------------------------- Split
+/// face at repeated vertices (pinch points) into simple cycles
 pub(crate) fn split_face_at_pinch_points(
     face: &[(usize, usize)],
     edges: &[(usize, usize)],
@@ -473,8 +484,9 @@ fn split_face_at_pinch_points_depth(
 
     vec![face.to_vec()]
 }
-/// A bfs toggle from the exterior is wrong for multi-crossing rings. Measured: 5 of 9
-/// faces kept, geos area 9931.89 against bfs interior
+/// Face labeling by even-odd winding parity, equivalent to geos MakeValidPoly. The geos
+/// BuildArea and symdiff loop selects faces whose winding number against the input ring
+/// is odd. Measured: 5 of 9 faces kept, geos area 9931.89 against bfs interior
 pub fn label_interior_faces(
     _edges: &[Line<f64>],
     verts: &[Coord<f64>],
@@ -493,6 +505,8 @@ pub fn label_interior_faces(
     Some(interior)
 }
 
+/// Interior probe point for a face: midpoint of the first edge, nudged perpendicular
+/// toward the face interior.
 fn face_probe_point(
     face: &[(usize, usize)],
     verts: &[Coord<f64>],

@@ -14,6 +14,7 @@ fn pow2(exp: i32) -> Option<f64> {
     Some(f64::from_bits(((exp + 1023) as u64) << 52))
 }
 
+/// `floor(log2(x))` for finite `x > 0` without std math (no_std path).
 fn exp2_floor(x: f64) -> i32 {
     let e = ((x.to_bits() >> 52) & 0x7ff) as i32;
     if e == 0 { -1023 } else { e - 1023 }
@@ -28,6 +29,8 @@ pub(crate) struct Precondition {
 }
 
 impl Precondition {
+    /// Build a transform for `poly` and the transformed polygon itself when (a) the
+    /// snap guard fires on the original polygon (representable input never needs or
     /// every coordinate, and (c) the transformed polygon satisfies the
     /// guard's two representability inequalities.
     pub(crate) fn try_new(poly: &Polygon<f64>) -> Option<(Self, Polygon<f64>)> {
@@ -200,6 +203,7 @@ mod tests {
 
     #[test]
     fn accepts_uniform_small_magnitude() {
+        // the small end fires the guard (min_abs * 1e8 < 0.5)
         let p = circle(64, 100.0, 1e-12, 0.0);
         assert!(
             Precondition::try_new(&p).is_some(),

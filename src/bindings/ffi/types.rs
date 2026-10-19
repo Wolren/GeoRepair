@@ -1,16 +1,23 @@
+//! abi types: error codes, result structs, buffer wrappers (extracted from
+//! bindings/ffi.rs 2026-08-07; verbatim).
 
 use alloc::string::String;
 use alloc::vec::Vec;
 use std::ffi::{CString, c_char};
 use std::ptr;
 
+/// Programmatic error classification for every ffi result.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeoRepairErrorCode {
     None = 0,
+    /// Input WKB/WKT could not be parsed.
     Parse = 1,
+    /// Null pointer or invalid length argument.
     InvalidInput = 2,
+    /// Validation found violations (result of a validate call, not a failure).
     InvalidGeometry = 3,
+    /// Output geometry could not be encoded.
     Encode = 4,
     /// An internal panic was caught.
     Panic = 5,
@@ -29,6 +36,8 @@ pub struct GeoRepairResult {
     pub wkb_data: *mut u8,
     /// Length of the output WKB buffer in bytes.
     pub wkb_len: usize,
+    /// nul-terminated error/reason string (non-null on failure, and on validate-and-fix
+    /// success when the input was repaired).
     pub error_msg: *mut c_char,
 }
 
@@ -75,6 +84,8 @@ impl GeoRepairResult {
 
 ///
 /// # Safety
+/// The caller must call [`super::geo_repair_free_string_result`] when the result is no
+/// longer needed.
 #[repr(C)]
 #[derive(Debug)]
 pub struct GeoRepairStringResult {
@@ -86,6 +97,8 @@ pub struct GeoRepairStringResult {
     pub data: *mut c_char,
     /// Length of the output WKT string in bytes (excluding the nul).
     pub len: usize,
+    /// nul-terminated error/reason string (non-null on failure, and on validate-and-fix
+    /// success when the input was repaired).
     pub error_msg: *mut c_char,
 }
 
@@ -118,6 +131,7 @@ impl GeoRepairStringResult {
     }
 }
 
+/// Input buffer for the batch WKB API.
 #[repr(C)]
 #[derive(Debug)]
 pub struct GeoRepairWkbBuffer {
@@ -127,6 +141,8 @@ pub struct GeoRepairWkbBuffer {
     pub len: usize,
 }
 
+/// The batch does not fail as a whole, like the Python batch. # Safety Call
+/// super::geo_repair_free_batch_result when the result is no longer needed.
 #[repr(C)]
 #[derive(Debug)]
 pub struct GeoRepairBatchResult {

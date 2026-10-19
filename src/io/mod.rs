@@ -1,3 +1,5 @@
+//! Optional backends (behind feature flags): Shapefile (`io-shp`), csv (`io-csv`), gml
+//! (`io-gml`), GeoPackage (`io-gpkg`).
 //!
 //! # Dispatch API
 //! High-level functions auto-detect the format by file extension:
@@ -24,7 +26,8 @@
 //! ```
 //!
 //! # Feature gates
-//! All I/O requires the `std` feature (enabled by default).
+//! All I/O requires the `std` feature (enabled by default). In no_std mode, only
+//! in-memory WKB parsing is available via `read_wkb` (no file paths).
 
 #[cfg(feature = "std")]
 use crate::MakeValid;
@@ -46,14 +49,20 @@ use std::fs;
 #[cfg(feature = "std")]
 use std::io::Read;
 
+/// Custom binary format for bulk polygon storage (`.bin`).
 #[cfg(feature = "std")]
 pub mod binary;
+/// csv with WKT in the first column (`io-csv`).
 #[cfg(feature = "io-csv")]
 pub mod csv_io;
+/// OGC gml 3.2 geometry subset (`.gml`) (`io-gml`).
 #[cfg(feature = "io-gml")]
 pub mod gml;
+/// GeoPackage (`.gpkg`) via SQLite (`io-gpkg`; default feature, gated out on wasm32 -
+/// bundled SQLite compiles C).
 #[cfg(all(feature = "io-gpkg", not(target_arch = "wasm32")))]
 pub mod gpkg;
+/// esri Shapefile (`.shp`) (`io-shp`).
 #[cfg(feature = "io-shp")]
 pub mod shp;
 /// OGC Well-Known Binary (WKB) parsing and serialization.
@@ -61,14 +70,17 @@ pub mod wkb;
 /// OGC Well-Known Text (WKT) parsing and serialization.
 pub mod wkt;
 
+/// Load polygons from a custom binary file.
 #[cfg(feature = "std")]
 pub use binary::{load_bin, load_bin_stream, write_bin};
+/// Read/write OGC WKB geometry format.
 pub use wkb::{
     Endianness, EwkbDims, EwkbGeometry, WkbError, WriteOptions, estimate_wkb_size, read_ewkb,
     read_wkb, read_wkb_concat, write_ewkb, write_wkb, write_wkb_with_opts,
 };
 #[cfg(feature = "std")]
 pub use wkb::{read_wkb_from, write_wkb_to};
+/// Read/write OGC WKT text format.
 pub use wkt::{WktError, infer_wkt_type, read_wkt, write_wkt};
 #[cfg(feature = "std")]
 pub use wkt::{read_wkt_from, write_wkt_to};
@@ -212,6 +224,7 @@ pub fn save(path: &str, geom: &Geometry<f64>) -> Result<(), String> {
     }
 }
 
+/// Extract all polygons from a geometry for batch binary output.
 #[cfg(feature = "std")]
 fn extract_polygons(geom: &Geometry<f64>) -> Vec<Polygon<f64>> {
     match geom {
@@ -244,6 +257,8 @@ pub fn repair_file(input: &str, output: &str, config: &MakeValidConfig) -> Resul
     save(output, &result)
 }
 
+/// Load geometries from `path` and validate each one, returning per-geometry results
+/// (mirrors GEOS `isValid` / `isValidReason`).
 ///
 /// # Example
 /// ```rust,no_run
@@ -282,6 +297,7 @@ pub fn polygon_area(p: &Polygon<f64>) -> f64 {
     signed_area(&p.exterior().0).abs()
 }
 
+/// Returns 0.0 for non-polygon types.
 pub fn geo_area(g: &Geometry<f64>) -> f64 {
     match g {
         Geometry::Polygon(p) => polygon_area(p),
@@ -290,6 +306,7 @@ pub fn geo_area(g: &Geometry<f64>) -> f64 {
     }
 }
 
+/// Count the number of sub-polygons in a geometry.
 pub fn count_sub_polys(g: &Geometry<f64>) -> usize {
     match g {
         Geometry::Polygon(_) => 1,

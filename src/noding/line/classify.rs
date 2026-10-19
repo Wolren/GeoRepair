@@ -1,3 +1,5 @@
+//! Per-pair classification for the lean line noder: mirrors the validator's own
+//! predicate chain (fast-FP first, robust escalation, collinear, vertex-on-edge, shared
 
 use geo::Coord;
 
@@ -5,6 +7,7 @@ use crate::orient::orient2d;
 
 use super::Hit;
 
+/// Classify a segment pair with the validator's own predicate semantics.
 #[inline]
 pub(super) fn classify(
     a1: Coord<f64>,

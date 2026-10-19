@@ -418,12 +418,15 @@ pub mod snap;
 pub(crate) mod util;
 /// OGC Simple Features geometry validation predicates.
 pub mod validation;
+/// wasm browser fetch (`wasm` feature; wasm32 targets only).
 #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 pub mod wasm;
 /// Z/M coordinate value preservation through the repair pipeline.
 pub mod zm;
 
 #[cfg(feature = "geo-traits")]
+/// geo-traits interop: validate and repair any `GeometryTrait` /
+/// `GeometryCollectionTrait` source (geo, geoarrow, geozero, wkb).
 pub mod interop;
 
 #[cfg(feature = "arrange")]
@@ -439,6 +442,7 @@ pub mod reduce;
 /// GEOS-compatible fast-path polygon repair via planar graph extraction.
 pub mod structure;
 
+/// Language bindings: C ffi and Python (PyO3).
 #[cfg(any(feature = "ffi", feature = "python"))]
 pub mod bindings;
 #[cfg(feature = "ffi")]
@@ -448,12 +452,16 @@ pub use bindings::python;
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 /// Rayon-based parallel batch geometry repair.
 pub mod parallel;
+/// Geometric predicates (orientation, point-in-ring, aabb, snapping).
 pub mod simd;
 
 /// Tolerance-based repeated-point removal.
 pub use cleanup::{remove_repeated_coords, remove_repeated_points};
+/// Repair configuration, error types, and polygon method selection.
 pub use core::{MakeValidConfig, MakeValidError, PolyMethod, Tuning};
+/// Coordinate reference system wrapper.
 pub use crs::Crs;
+/// A feature combining geometry with optional attributes and crs.
 pub use feature::Feature;
 pub use io::{
     Endianness, EwkbDims, EwkbGeometry, WkbError, WktError, WriteOptions, infer_wkt_type,
@@ -465,10 +473,15 @@ pub use io::{
     diagnose_file, load, load_bin, load_bin_stream, read_wkb_from, read_wkt_from, repair_file,
     save, write_wkb_to, write_wkt_to,
 };
+/// Trait for repairing invalid geometries.
 pub use make_valid::MakeValid;
 #[cfg(any(feature = "arrange", feature = "structure"))]
+/// Combines validation and repair in a single step, returning errors for violations
+/// that could not be automatically repaired.
 pub use make_valid::ValidateAndFix;
+/// Coordinate snapping functions.
 pub use snap::{DEFAULT_GRID, snap_coord, snap_coord_default, snap_line, snap_lines};
+/// OGC validation predicates and result types.
 pub use validation::{
     GeoRepairValidation, GeoValidation, GeometryValidationError, ValidationResult, is_valid,
     map_geo_invalid, validate, validate_reason,

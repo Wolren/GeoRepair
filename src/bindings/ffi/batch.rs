@@ -1,3 +1,4 @@
+//! parallel batch API (extracted from bindings/ffi.rs 2026-08-07; verbatim).
 
 use super::types::*;
 use super::util::*;
@@ -7,6 +8,7 @@ use alloc::vec::Vec;
 use geo::Geometry;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
+/// Free the returned GeoRepairBatchResult with super::geo_repair_free_batch_result.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_make_valid_batch(
     inputs: *const GeoRepairWkbBuffer,

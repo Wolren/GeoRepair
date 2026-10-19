@@ -1,3 +1,4 @@
+//! csv backend (`.csv`): one geometry per row, first column = WKT.
 
 use alloc::string::String;
 use alloc::vec::Vec;

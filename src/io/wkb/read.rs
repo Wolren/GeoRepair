@@ -1,3 +1,4 @@
+//! WKB reader: single-pass parsing with EWKB flag/SRID/Z-M handling.
 
 use super::*;
 use alloc::vec::Vec;
@@ -23,6 +24,7 @@ pub fn read_wkb(buf: &[u8]) -> Result<Geometry<f64>, WkbError> {
     Ok(geom)
 }
 
+/// Read a WKB geometry from any `io::Read` source.
 #[cfg(feature = "std")]
 pub fn read_wkb_from(mut reader: impl Read) -> Result<Geometry<f64>, WkbError> {
     let mut buf = Vec::new();
@@ -30,6 +32,7 @@ pub fn read_wkb_from(mut reader: impl Read) -> Result<Geometry<f64>, WkbError> {
     read_wkb(&buf)
 }
 
+/// Parse a single EWKB geometry from `buf`, preserving SRID and Z/M data.
 pub fn read_ewkb(buf: &[u8]) -> Result<EwkbGeometry, WkbError> {
     let mut pos = 0;
     let mut extra_coords = Vec::new();
@@ -46,6 +49,8 @@ pub fn read_ewkb(buf: &[u8]) -> Result<EwkbGeometry, WkbError> {
         extra_coords,
     })
 }
+/// Low-level: read one geometry from `buf` starting at `pos`, advancing `pos` past the
+/// geometry.
 pub(crate) fn read_geometry_inner(
     buf: &[u8],
     pos: &mut usize,
@@ -149,6 +154,7 @@ pub(crate) fn read_geometry_inner(
     Ok((geom?, srid, dims, type_code))
 }
 
+/// Read byte order byte.
 fn read_byte_order(buf: &[u8], pos: &mut usize) -> Result<bool, WkbError> {
     if *pos >= buf.len() {
         return Err(WkbError::UnexpectedEof);
@@ -163,7 +169,8 @@ fn read_byte_order(buf: &[u8], pos: &mut usize) -> Result<bool, WkbError> {
 }
 
 /// The bound stops a 4-byte count field from driving `Vec::with_capacity` into an oom
-/// abort.
+/// abort. Measured 2026-08-04: a crafted MultiPoint count requested a 120 GB
+/// allocation.
 #[inline]
 fn read_bounded_count(
     buf: &[u8],
@@ -188,6 +195,8 @@ fn read_u32(buf: &[u8], pos: &mut usize, le: bool) -> Result<u32, WkbError> {
     // x86_64/aarch64.
     let v = unsafe { (buf.as_ptr().add(*pos) as *const u32).read_unaligned() };
     *pos += 4;
+    // On x86_64 (LE), this simplifies to: le == true -> v (direct, no conversion) le ==
+    // false -> v.swap_bytes()
     Ok(if cfg!(target_endian = "little") == le {
         v
     } else {

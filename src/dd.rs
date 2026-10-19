@@ -28,17 +28,20 @@ pub(crate) struct DD {
 }
 
 impl DD {
+    /// Create a DD from explicit hi and lo parts.
     #[inline]
     #[allow(dead_code)]
     pub fn new(hi: f64, lo: f64) -> Self {
         DD { hi, lo }
     }
 
+    /// Create a DD from a single f64 (lo = 0).
     #[inline]
     pub fn from_f64(x: f64) -> Self {
         DD { hi: x, lo: 0.0 }
     }
 
+    /// Sum of two numbers with error term (Knuth's two-sum).
     #[inline]
     fn two_sum(a: f64, b: f64) -> (f64, f64) {
         let x = a + b;
@@ -59,6 +62,7 @@ impl DD {
         (hi, lo)
     }
 
+    /// Error-free product of two f64s (Dekker's two-product).
     #[inline]
     fn two_prod(a: f64, b: f64) -> (f64, f64) {
         let x = a * b;
@@ -71,6 +75,7 @@ impl DD {
         (x, lo)
     }
 
+    /// Renormalize after accumulation to reduce lo component.
     #[inline]
     #[allow(dead_code)]
     fn renormalize(hi: f64, lo: f64) -> Self {
@@ -105,6 +110,7 @@ impl DD {
         DD { hi: x, lo: y }
     }
 
+    /// DD × f64 multiplication.
     #[allow(dead_code)]
     pub fn mul_f64(self, other: f64) -> DD {
         let (p1, p2) = Self::two_prod(self.hi, other);
@@ -134,6 +140,7 @@ impl DD {
         term1.sub(term2)
     }
 
+    /// Dot product: self.x * other.x + self.y * other.y.
     #[allow(dead_code)]
     pub fn dot(self_x: DD, self_y: DD, other_x: DD, other_y: DD) -> DD {
         let term1 = self_x.mul(other_x);
@@ -141,6 +148,7 @@ impl DD {
         term1.add(term2)
     }
 
+    /// Squared length (in DD).
     #[allow(dead_code)]
     pub fn sq_len(x: DD, y: DD) -> DD {
         let xx = x.mul(x);
@@ -148,6 +156,7 @@ impl DD {
         xx.add(yy)
     }
 
+    /// Convert to f64 (hi + lo).
     #[inline]
     pub fn to_f64(self) -> f64 {
         self.hi + self.lo
@@ -190,6 +199,7 @@ type NormResult = (
     Coord<f64>,
 );
 
+/// Returns (normalized_coords, scale, origin) where:
 /// - scale is a power of 2 for exact ieee 754 multiplication/division
 pub(crate) fn normalize_four(
     a: Coord<f64>,
@@ -218,8 +228,12 @@ pub(crate) fn normalize_four(
     (norm(a), norm(b), norm(c), norm(d), scale, origin)
 }
 
-/// Return `Some((point, t, u))` when the lines intersect at any point, including
-/// outside the segment bounds. Return `None` when the lines are parallel.
+/// Compute the intersection of two line segments with double-double arithmetic. Return
+/// `Some((point, t, u))` when the lines intersect at any point, including outside the
+/// segment bounds. Return `None` when the lines are parallel. `t` is the parameter
+/// along AB and `u` along CD, at DD precision. `point` is the intersection as f64.
+/// Check `t` and `u` against your range: `0..1` for the interior, `-eps..1+eps` for the
+/// extended segment.
 pub(crate) fn segment_intersection_dd(
     a: Coord<f64>,
     b: Coord<f64>,

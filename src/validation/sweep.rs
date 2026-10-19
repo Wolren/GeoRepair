@@ -60,6 +60,7 @@ thread_local! {
         core::cell::RefCell::new(SweepScratch::default());
 }
 
+/// Run a closure against the radix-sort scratch buffers.
 #[cfg(feature = "std")]
 fn with_scratch<R>(f: impl FnOnce(&mut SweepScratch) -> R) -> R {
     SWEEP_SCRATCH.with(|s| f(&mut s.borrow_mut()))
@@ -133,6 +134,7 @@ fn radix_sort_u64(
     }
 }
 
+/// Radix sort of (keys, order) using the tls scratch buffers (no caller borrow held).
 pub(crate) fn radix_sort_keys_tls(keys: &mut Vec<u64>, order: &mut Vec<u32>) {
     with_scratch(|s| {
         let SweepScratch {
@@ -146,7 +148,11 @@ pub(crate) fn radix_sort_keys_tls(keys: &mut Vec<u64>, order: &mut Vec<u32>) {
 }
 
 /// Static uniform-grid index over a set of bounding boxes (`[lo_x, hi_x, lo_y, hi_y]`).
-/// `build` returns `None` when one cell holds more than [`GRID_MAX_CELL`] boxes.
+/// Measured 2026-10-17 on the figure-8 ladder: that degeneration was ~90 % of a
+/// 4000-vertex noder call, split across three separate scans
+/// (`sweep_ring_self_intersects`, `crossing_only`'s candidate loop. `run_full`'s
+/// removed-family-vs-sweep loop), all reached through different flags but all the same
+/// bug. `build` returns `None` when one cell holds more than [`GRID_MAX_CELL`] boxes.
 pub(crate) struct SegGrid {
     min_x: f64,
     min_y: f64,
@@ -157,6 +163,8 @@ pub(crate) struct SegGrid {
     offsets: Vec<u32>,
     /// Cell contents: positions in build order, ascending within a cell.
     items: Vec<u32>,
+    /// Per-position dedup stamp; `seen[p] == epoch` means position `p` was already
+    /// handed to the caller for this query.
     seen: Vec<u32>,
     epoch: u32,
 }
@@ -245,6 +253,8 @@ impl SegGrid {
         })
     }
 
+    /// Visit every position whose box shares a grid cell with `b`, ascending, skipping
+    /// `exclude` and without repeats.
     pub(crate) fn for_each_candidate<F: FnMut(usize)>(
         &mut self,
         b: [f64; 4],
@@ -277,12 +287,15 @@ impl SegGrid {
     }
 }
 
+/// Active-set size at which [`sweep_ring_self_intersects`] gives up and lets the caller
+/// use the index or brute-force path.
 const SWEEP_DENSE_ACTIVE_LIMIT: usize = 256;
 
 /// Longest equal-`lo_x` run tolerated by the incremental active set in
 /// [`sweep_ring_self_intersects`] before it switches to the static grid.
 const SWEEP_DEGENERATE_RUN: usize = 32;
 
+/// It returns Some(true) on an intersection, Some(false) when clean.
 pub(crate) fn sweep_ring_self_intersects(
     ring: &[Coord<f64>],
     eps: f64,
@@ -449,6 +462,8 @@ fn sweep_with_grid(
     Some(false)
 }
 
+/// R-tree self-intersection check (the dense-ring fallback; kept exact - same predicate
+/// and pair rules as the sweep).
 #[cfg(feature = "rstar")]
 pub(crate) fn ring_tree_self_intersects(ring: &[Coord<f64>], n: usize, eps: f64) -> bool {
     struct EdgeEnv {

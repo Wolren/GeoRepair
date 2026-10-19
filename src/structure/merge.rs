@@ -2,6 +2,8 @@ use alloc::vec::Vec;
 use geo::{Area, Coord, LineString, MultiPolygon, Polygon, Winding};
 use log::warn;
 
+/// BuildArea even-parent rule: sort shells by area, count containing larger shells, and
+/// keep only shells with an even parent count.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
     if shells.is_empty() {
@@ -112,6 +114,8 @@ pub fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
         return MultiPolygon::new(kept);
     }
 
+    // `is_fill_top` assertion on degenerate shell sets (measured seed: shell
+    // [(54.36,0),(0,0),(18.55,82.91),(-48.92,33.44)] + 6-vert hole).
     let mp = MultiPolygon::new(kept);
     let before: f64 = mp.0.iter().map(|p| p.unsigned_area()).sum();
     let eps = 1e-9;
@@ -145,7 +149,11 @@ pub fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
     unioned.unwrap_or(mp)
 }
 
-/// It guards area. validation::is_valid cannot be trusted not to panic.
+/// It guards area. validation::is_valid cannot be trusted not to panic. The geo relate
+/// engine carries a debug_assert false topology conflict at geo 0.33.1
+/// edge_end_bundle_star.rs:116. The assertion escaped as a fuzz crash. make_valid
+/// panicked on wkb in mode Auto, fuzz-nightly run 35836311392. It was slow: 30 to 45 s,
+/// where mp_looks_valid takes ~100 ms.
 #[cfg(feature = "std")]
 fn shells_look_valid(mp: &MultiPolygon<f64>) -> bool {
     std::panic::catch_unwind(core::panic::AssertUnwindSafe(|| {
@@ -170,6 +178,8 @@ fn ring_fully_inside(ring: &[Coord<f64>], poly: &Polygon<f64>) -> bool {
             return false;
         }
     }
+    // hole loses its area (measured: general_TestValid island sharing hole-ring
+    // vertices -> -3.75% even-odd area).
     if let Some(probe) = crate::util::ring_interior_probe(ring)
         && poly
             .interiors()
@@ -185,6 +195,8 @@ fn ring_fully_inside(ring: &[Coord<f64>], poly: &Polygon<f64>) -> bool {
     true
 }
 
+/// Duplicate shells cancel: hole==shell must yield empty, duplicate MP components must
+/// not become DuplicatedRings.
 fn cancel_identical_shells(shells: Vec<Polygon<f64>>) -> Vec<Polygon<f64>> {
     type ShellFingerprint = (Vec<(u64, u64)>, Polygon<f64>);
     let mut fingerprints: Vec<ShellFingerprint> = shells

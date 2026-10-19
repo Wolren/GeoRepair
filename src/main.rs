@@ -143,6 +143,8 @@ fn main() {
     }
 }
 
+/// Repair a mixed batch: polygons go through the parallel owned batch path (zero-copy
+/// passthrough for valid inputs), other geometry types are repaired individually.
 fn repair_batch(
     geoms: Vec<Geometry<f64>>,
     config: &MakeValidConfig,

@@ -1,3 +1,5 @@
+//! Edge splitting at intersection points: R-tree / sweep-line / brute-force strategies
+//! chosen by topology, with parametric intersection math.
 
 use alloc::vec::Vec;
 use geo::{Coord, Line};
@@ -12,6 +14,8 @@ use crate::orient::{orient2d, orient2d_fast};
 /// Per-edge split points: parametric position + intersection coordinate.
 type SplitPoint = SmallVec<[(f64, Coord<f64>); 2]>;
 
+/// --------------------------------------------------------------------------- Edge
+/// splitting at intersection points
 fn should_use_sweepline(edges: &[Line<f64>], n: usize) -> bool {
     if n < 128 {
         return false;
@@ -31,6 +35,8 @@ pub fn split_edges(edges: &[Line<f64>]) -> Vec<Line<f64>> {
     split_edges_tuned(edges, &core::Tuning::default())
 }
 
+/// Tuned variant of [`split_edges`]: the repair pipeline threads the caller's
+/// [`core::Tuning`] through the dispatch thresholds.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(crate) fn split_edges_tuned(edges: &[Line<f64>], tuning: &core::Tuning) -> Vec<Line<f64>> {
     let n = edges.len();

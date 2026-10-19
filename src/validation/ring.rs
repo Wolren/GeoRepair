@@ -13,6 +13,9 @@ pub fn check_ring_validity(ring: &[Coord<f64>], is_exterior: bool) -> Vec<Geomet
     let mut errors = Vec::new();
 
     let interior_n = ring.len().saturating_sub(1);
+    // - four former full passes (measured 2026-08-08: the separate NaN + bbox +
+    //   repeated + extremal scans cost ~15-25 us) Error priority is preserved: NaN wins
+    //   regardless of position (matches the old separate first pass).
     let mut min_x = f64::MAX;
     let mut max_x = f64::MIN;
     let mut min_y = f64::MAX;
@@ -63,6 +66,7 @@ pub fn check_ring_validity(ring: &[Coord<f64>], is_exterior: bool) -> Vec<Geomet
     let n = interior_n;
     let scale = (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
     let eps = 1e-12 * scale;
+    // 00c11200 sibling → DegenerateExterior on a triangle GEOS validates .
     let x_scale = max_x.abs().max(min_x.abs()).max(1.0);
     let y_scale = max_y.abs().max(min_y.abs()).max(1.0);
     if (max_x - min_x).abs() < f64::EPSILON * x_scale
@@ -171,7 +175,10 @@ pub fn check_ring_validity(ring: &[Coord<f64>], is_exterior: bool) -> Vec<Geomet
 
 /// A coordinate that is an exact multiple of 2^m (any large-magnitude regular grid:
 /// projected-crs values, snapped data, synthetic 1e12-scale benches - 1e12 = 2^12 *
-/// 5^12) has all-zero low mantissa bits.
+/// 5^12) has all-zero low mantissa bits. The raw `(kx ^ ky.rotate_left(32))` hash
+/// collapsed every axis-aligned side of such a ring to a single bucket and the linear
+/// probe ran O(n^2) - measured 11.4 ms on an 8000-vertex 1e12 square vs 0.3 ms with the
+/// mix (stage probe 2026-10-08).
 pub(crate) fn pinch_key_hash(kx: u64, ky: u64) -> u64 {
     let ax = kx.wrapping_mul(0x9E3779B97F4A7C15);
     let ay = ky.wrapping_mul(0xC2B2AE3D27D4EB4F);
@@ -349,6 +356,8 @@ pub(crate) fn ring_dup_fingerprint(ring: &[Coord<f64>]) -> (usize, u64) {
     (ring.len(), h_fwd ^ h_rev)
 }
 
+/// Check whether two rings (with closing point) are duplicates starting at a different
+/// vertex.
 pub(crate) fn is_rotated_duplicate(a: &[Coord<f64>], b: &[Coord<f64>]) -> bool {
     if a.len() != b.len() || a.len() < 2 {
         return false;

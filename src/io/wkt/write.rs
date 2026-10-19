@@ -1,9 +1,11 @@
+//! WKT writer: geometry serializer + type inference.
 
 use super::*;
 use alloc::string::String;
 #[cfg(feature = "std")]
 use std::io::{self, Write};
 
+/// Serialize a `Geometry<f64>` to WKT and write it to any `io::Write` target.
 #[cfg(feature = "std")]
 pub fn write_wkt_to(geom: &Geometry<f64>, writer: &mut impl Write) -> io::Result<()> {
     let s = write_wkt(geom);

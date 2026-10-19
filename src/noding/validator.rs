@@ -6,6 +6,7 @@ use geo::{Coord, Line};
 #[cfg(feature = "rstar")]
 use rustc_hash::FxHashSet;
 
+/// A violation found by [`NodingValidator`].
 #[derive(Clone, Debug)]
 #[allow(dead_code)]
 pub struct NodingViolation {
@@ -17,6 +18,7 @@ pub struct NodingViolation {
     pub at: Coord<f64>,
 }
 
+/// Validates that a set of noded line segments has no remaining intersections.
 pub struct NodingValidator {
     edges: Vec<Line<f64>>,
     violations: Vec<NodingViolation>,
@@ -202,6 +204,7 @@ fn check_crossing_violation(
     }
 }
 
+/// Recursive MCIndex divide-and-conquer: check all leaf pairs between two chains.
 #[cfg(feature = "rstar")]
 fn check_chain_pair(
     edges: &[Line<f64>],
@@ -286,6 +289,7 @@ impl NodingValidator {
         }
     }
 
+    /// Return the edge set being validated.
     #[allow(dead_code)]
     pub fn edges(&self) -> &[Line<f64>] {
         &self.edges
@@ -301,6 +305,7 @@ impl NodingValidator {
         !self.violations.is_empty()
     }
 
+    /// Validate all non-adjacent edge pairs.
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn validate(&mut self) {
         self.violations.clear();

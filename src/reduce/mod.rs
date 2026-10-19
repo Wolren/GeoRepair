@@ -17,11 +17,14 @@ use crate::validation::GeoValidation;
 pub enum RoundingMode {
     /// The usual rounding behaviour.
     Round,
+    /// Always floor (for conservative envelope expansions).
     Floor,
+    /// Always ceil.
     Ceil,
 }
 
-/// Describes a fixed-precision grid for coordinate reduction.
+/// Describes a fixed-precision grid for coordinate reduction. `scale` is the grid
+/// resolution (e.g., `1e-8` snaps to 8 decimal places).
 #[derive(Clone, Copy, Debug)]
 pub struct PrecisionModel {
     /// Smaller values give finer precision (e.g. `1e-8` ≈ 1 cm at geographic scale).

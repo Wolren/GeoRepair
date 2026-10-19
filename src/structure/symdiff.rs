@@ -9,10 +9,13 @@ use log::warn;
 
 use super::fix_ring::{basic_cleanup, collapse_sub_ulp_vertices, is_collinear_ring};
 
+/// Single-pass geos MakeValid-style repair.
 pub fn single_pass_fix(poly: &Polygon<f64>) -> Option<MultiPolygon<f64>> {
     single_pass_fix_tuned(poly, &crate::core::Tuning::default())
 }
 
+/// Tuned variant of [`single_pass_fix`]: the repair pipeline threads the caller's
+/// [`crate::core::Tuning`] through the dispatch thresholds.
 pub(crate) fn single_pass_fix_tuned(
     poly: &Polygon<f64>,
     tuning: &crate::core::Tuning,
@@ -77,6 +80,8 @@ pub(crate) fn single_pass_fix_tuned(
     Some(mp)
 }
 
+/// GEOS MakeValidPoly::buildArea loop: repeatedly BuildArea the remaining cut edges,
+/// xor into the accumulated area.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn make_valid_poly_symdiff(cut_edges: &[Line<f64>]) -> Vec<Polygon<f64>> {
     let snap = |c: Coord<f64>| Coord {
@@ -173,6 +178,9 @@ pub fn symdiff_test(a: &[Polygon<f64>], b: &[Polygon<f64>]) -> Vec<Polygon<f64>>
     symdiff_polygons(a, b)
 }
 
+/// Symmetric difference of two polygon sets, accumulated xor, for the MakeValidPoly
+/// loop. build_area returns atomic subdivision cells with no CascadedPolygonUnion
+/// dissolve, so the faces of iteration N are a subset of iteration 1 faces.
 fn symdiff_polygons(a: &[Polygon<f64>], b: &[Polygon<f64>]) -> Vec<Polygon<f64>> {
     if a.is_empty() {
         return b.to_vec();
@@ -237,7 +245,7 @@ mod tests {
     use crate::{MakeValid, MakeValidConfig, PolyMethod};
     use geo::{Area, LineString, Polygon};
 
-    /// Deterministic torus-wrapped random walk, the bench's `spaghetti` rows.
+    /// Verbatim replication of benches/bench.rs::make_spaghetti_ring.
     fn spaghetti_ring(n: usize) -> Polygon<f64> {
         let span = (n as f64).sqrt().ceil() as i64;
         let mut x = 0i64;
@@ -272,6 +280,10 @@ mod tests {
         Polygon::new(LineString::new(coords), Vec::new())
     }
 
+    /// The symdiff loop used to cycle on this class: the same faces were rebuilt every
+    /// pass, so it ran into the 64-iteration guard and the returned area turned on that
+    /// constant's parity (n=500 gave 184.681818 at guard 64 and 193.681818 at guard
+    /// 65).
     #[test]
     fn symdiff_converges_on_self_crossing_walk() {
         let cfg = MakeValidConfig {

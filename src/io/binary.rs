@@ -1,3 +1,4 @@
+//! Loader and streaming iterator for the custom binary bulk polygon format.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -7,6 +8,8 @@ use std::io::Write;
 
 use geo::{Coord, LineString, Polygon};
 
+/// Load polygons from a custom binary format. - u32 LE: number of polygons - For each
+/// polygon: - u32 LE: number of exterior ring coords - f64 LE × N: exterior ring coords
 pub fn load_bin(path: &str) -> Result<Vec<Polygon<f64>>, String> {
     let mut buf = Vec::new();
     File::open(path)

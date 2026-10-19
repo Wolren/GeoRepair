@@ -1,3 +1,5 @@
+//! Best-effort: geo_repair checks 18 ogc rules, geo enums cover a subset, and geo
+//! carries payloads that geo_repair errors omit.
 
 use alloc::boxed::Box;
 use geo::Geometry;
@@ -39,6 +41,8 @@ impl Validation for GeoRepairValidation<'_> {
     }
 }
 
+/// Best-effort mapping of one geo_repair validation error into geo's
+/// [`InvalidGeometry`] taxonomy for the given geometry.
 pub fn map_geo_invalid(
     geometry: &Geometry<f64>,
     err: &GeometryValidationError,
@@ -161,6 +165,7 @@ mod tests {
 
     #[test]
     fn flags_true_t_junction_that_geo_accepts() {
+        // geo_repair flags SelfIntersection (GEOS IsValidOp Test 22 also rejects it).
         let poly = Polygon::new(
             LineString::from(vec![
                 (0.0, 0.0),

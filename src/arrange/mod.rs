@@ -46,7 +46,7 @@ fn build_cdt_safe(
 
 pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Geometry<f64> {
     // (1e8 + 1e-9 coords) have sub-precision spikes that fail basic form (measured:
-    // seed 00c11200 → MultiPolygon with cross-component SelfIntersection. GEOS snaps
+    // seed 00c11200 → MultiPolygon with cross-component SelfIntersection; GEOS snaps
     // the spike to the grid).
     if has_sub_ulp_edge(poly, None) {
         let ext: LineString<f64> = LineString::new(
@@ -117,6 +117,8 @@ pub(crate) fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Geom
     fallback_polygon_fix(poly)
 }
 
+/// Collect a polygon's lines for the repair path (used when the basic form fails
+/// mid-scan: the fused scan's partial lines are unusable).
 fn fix_from_poly_lines(poly: &Polygon<f64>) -> Geometry<f64> {
     let lines: Vec<_> = poly.lines_iter().collect();
     if lines.is_empty() {
@@ -128,6 +130,8 @@ fn fix_from_poly_lines(poly: &Polygon<f64>) -> Geometry<f64> {
     }
 }
 
+/// Run cdt on polygon edges, falling back to boolean difference when cdt produces empty
+/// output (e.g. hole touching shell at 2 points).
 pub(crate) fn fallback_polygon_fix(poly: &Polygon<f64>) -> Geometry<f64> {
     let lines: Vec<_> = poly.lines_iter().collect();
     if let Some(mp) = fix_from_lines(lines)
@@ -146,11 +150,17 @@ pub(crate) fn fallback_polygon_fix(poly: &Polygon<f64>) -> Geometry<f64> {
         .collect();
     match boolean_difference_catch(&shell, &holes) {
         Some(diff) if !diff.0.is_empty() => Geometry::MultiPolygon(diff),
+        // boolean difference panicked (i_overlay is_fill_top assertion on degenerate
+        // input) or produced empty: polygon split failed for hole-touching-2-places.
         _ => empty(),
     }
 }
 
-/// A panic inside a rayon batch kills the whole run.
+/// `boolean_op(Difference)` wrapped in `catch_unwind`. i_overlay 4.5.2 asserts
+/// `is_fill_top(link.fill)` internally on some degenerate inputs (measured: shell
+/// [(54.36,0),(0,0),(18.55,82.91),(-48.92,33.44)] with a 6-vertex hole). A panic inside
+/// a rayon batch kills the whole run, so callers must catch and route to their
+/// BuildArea fallback instead.
 pub(crate) fn boolean_difference_catch(
     shell: &Polygon<f64>,
     holes: &[Polygon<f64>],
@@ -177,6 +187,7 @@ pub(crate) fn boolean_difference_catch(
     result
 }
 
+/// Supplement to the first-vertex probe: it catches a hole poking out of the shell.
 pub(crate) fn holes_contained_cheap(poly: &Polygon<f64>, tuning: &crate::core::Tuning) -> bool {
     let shell = poly.exterior();
     if shell.0.len() < 3 {
@@ -228,6 +239,7 @@ pub(crate) fn holes_contained_cheap(poly: &Polygon<f64>, tuning: &crate::core::T
     true
 }
 
+/// Validate a polygon against GEOS-compatible validity rules.
 pub fn validate_polygon(poly: &Polygon<f64>) -> bool {
     // One pass over the coords does the basic form (closure, adjacent duplicates, NaN)
     // and the bit-exact duplicate scan (measured 2026-08-07: the collect was a full
@@ -372,6 +384,8 @@ fn edge_is_sub_ulp(a: geo::Coord<f64>, b: geo::Coord<f64>) -> bool {
     eps > 0.0 && (b.x - a.x).abs().max((b.y - a.y).abs()) < eps
 }
 
+/// One pass collects two guards: any sub-ULP edge and the smallest non-zero absolute
+/// ordinate, the extreme-magnitude denominator.
 pub(crate) fn ring_guards(ring: &[geo::Coord<f64>]) -> (bool, f64) {
     let mut sub_ulp = false;
     let mut min_abs = f64::INFINITY;
@@ -419,6 +433,7 @@ pub fn has_sub_ulp_edge(poly: &Polygon<f64>, _scale_hint: Option<f64>) -> bool {
     poly.interiors().iter().any(|h| ring_has_sub_ulp(&h.0))
 }
 
+/// Winding-number point-in-ring test (strict interior, boundary counts as outside).
 #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
 #[derive(Default)]
 pub struct ArrangeTiming {
@@ -436,6 +451,7 @@ pub struct ArrangeTiming {
     pub total_secs: f64,
 }
 
+/// Profile the cdt arrange pipeline on a polygon, returning stage timing.
 #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
 pub fn diagnose_arrange(poly: &Polygon<f64>) -> Option<ArrangeTiming> {
     use std::time::Instant;
@@ -467,10 +483,19 @@ pub fn diagnose_arrange(poly: &Polygon<f64>) -> Option<ArrangeTiming> {
     Some(t)
 }
 
+/// Side-channel accumulators for the gate's fused scan: optional line collection (the
+/// gate's separate collect), the global bbox (the envelope degeneracy check), and the
 pub(crate) struct GateAccum<'a> {
     pub lines: Option<&'a mut Vec<geo::Line<f64>>>,
+    /// Fused monotone-chain index: pushed in lockstep with `lines` (same windows, same
+    /// order) so the gate owns a chain index after its walk and never makes the second
+    /// pass `build_mono_chains` costs. Set by callers that will sweep with
+    /// [`prep_intersect::has_no_intersections_from_chains`]; `None` keeps the plain
+    /// collect-then-build flow.
     pub chains: Option<&'a mut prep_intersect::ChainSink>,
     pub bbox: Option<&'a mut (f64, f64, f64, f64)>,
+    /// Per-ring min-x extremal index (tie min-y, strict <, candidate 0, interior range
+    /// [1.n)) recorded by [`ring_is_plausible`] so the caller's OGC winding
     pub extremal: Option<&'a mut Vec<usize>>,
 }
 
@@ -487,8 +512,8 @@ impl GateAccum<'_> {
 
 /// The pass fills the accumulators: lines, bbox, sub-ULP (2026-08-08: 15-20 us on a
 /// 5000-vertex ring). It cost 512 KB at 10 000 vertices. 11 % of the gate at 500 v and
-/// 17 % at 10 000 v (2026-10-17). Rings at or below `SMALL_RING_LINES` keep the bounded
-/// O(n^2) scan.
+/// 17 % at 10 000 v (2026-10-17). `prep_intersect::shares_repeated_vertex` now closes
+/// that class. Rings at or below `SMALL_RING_LINES` keep the bounded O(n^2) scan.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(crate) fn ring_is_plausible(ring: &geo::LineString<f64>, acc: &mut GateAccum) -> bool {
     let coords = &ring.0;
@@ -504,6 +529,8 @@ pub(crate) fn ring_is_plausible(ring: &geo::LineString<f64>, acc: &mut GateAccum
 
 /// The shared windows loop of [`ring_is_plausible`].
 fn plausible_body(coords: &[geo::Coord<f64>], n: usize, acc: &mut GateAccum) -> bool {
+    // Extremal recording (min-x, tie min-y, strict <, candidate 0, interior range
+    // [1.n)): matches min_x_vertex in util.rs exactly
     let track_ext = acc.extremal.is_some();
     let mut ext_min_x = coords[0].x;
     let mut ext_min_y = coords[0].y;

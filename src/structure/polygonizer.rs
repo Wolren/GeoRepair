@@ -1,3 +1,4 @@
+//! Face extraction from fully-noded edge sets, in geos BuildArea order.
 
 use alloc::vec::Vec;
 use geo::{Coord, Line, LineString, MultiPolygon, Polygon, Winding};
@@ -299,6 +300,8 @@ fn signed_area_x2(coords: &[Coord<f64>]) -> f64 {
     sum
 }
 
+/// Split a ring at pinch points (vertices that appear more than once), producing
+/// separate rings.
 fn split_at_pinch_point(ring: &[Coord<f64>]) -> Vec<Vec<Coord<f64>>> {
     if ring.len() < 4 {
         return vec![ring.to_vec()];

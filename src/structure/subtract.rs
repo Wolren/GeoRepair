@@ -71,6 +71,7 @@ fn needs_build_area_holes(mp: &MultiPolygon<f64>) -> bool {
     false
 }
 
+/// True if two rings share a collinear edge segment with positive-length overlap.
 fn build_area_shell_holes(
     shell: &Polygon<f64>,
     holes: &[Polygon<f64>],

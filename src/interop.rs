@@ -1,6 +1,8 @@
 //! Exposes the validation and repair engines over [`geo_traits::GeometryTrait`] and
 //! [`geo_traits::GeometryCollectionTrait`], the trait layer shared by the georust data
-//! ecosystem (geo, geoarrow, geozero, the `wkb` crate).
+//! ecosystem (geo, geoarrow, geozero, the `wkb` crate). Callers that need the result
+//! back in their own representation convert with their crate's geo-traits writer (e.g.
+//! `wkb::writer::write_wkb`, geoarrow's `ToWKB`).
 //!
 //! # Example
 //! ```rust
@@ -24,6 +26,9 @@ use geo_traits::{GeometryCollectionTrait, GeometryTrait};
 use crate::make_valid::MakeValid;
 use crate::validation::ValidationResult;
 
+/// Geometry that cannot be represented as geo geometry (an empty point, or a MultiPoint
+/// containing an empty point) is returned as an empty [`GeometryCollection`], matching
+/// geo's own representation limits.
 pub fn make_valid_geometry<G>(geometry: &G) -> Geometry<f64>
 where
     G: GeometryTrait<T = f64>,
@@ -34,6 +39,7 @@ where
     }
 }
 
+/// Repair every geometry in a collection, preserving order.
 pub fn make_valid_geometries<G>(collection: &G) -> Vec<Geometry<f64>>
 where
     G: GeometryCollectionTrait<T = f64>,

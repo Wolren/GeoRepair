@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+//! Noding utilities for linear geometry repair. 1.
 
 use alloc::vec::Vec;
 pub(crate) mod intersection;
@@ -27,6 +28,7 @@ use crate::orient::orient2d as orient2d_robust;
 #[cfg(any(feature = "arrange", feature = "structure"))]
 use log::warn;
 
+/// Node a line string by removing repeated points and splitting at self-intersections.
 pub(crate) fn node_line_string<T: NodingFloat>(ls: &LineString<T>) -> Geometry<T> {
     let coords: Vec<Coord<T>> =
         ls.0.iter()

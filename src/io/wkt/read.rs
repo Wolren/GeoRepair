@@ -1,3 +1,4 @@
+//! WKT parser: single-pass tokenizer + reader.
 
 use alloc::string::String;
 use alloc::string::ToString;
@@ -576,6 +577,7 @@ pub(crate) enum Keyword {
     GeometryCollection,
 }
 
+/// Parse a WKT string into a `Geometry<f64>`.
 pub fn read_wkt(input: &str) -> Result<Geometry<f64>, WktError> {
     let mut p = Parser {
         s: input.as_bytes(),
@@ -593,6 +595,7 @@ pub fn read_wkt(input: &str) -> Result<Geometry<f64>, WktError> {
     Ok(geom)
 }
 
+/// Read a WKT geometry from any `io::Read` source.
 #[cfg(feature = "std")]
 pub fn read_wkt_from(mut reader: impl Read) -> Result<Geometry<f64>, WktError> {
     let mut s = String::new();

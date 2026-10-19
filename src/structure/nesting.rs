@@ -1,3 +1,4 @@
+//! Extracted from structure/mod.rs on 2026-08-07 (file-size governance).
 
 use crate::core::MakeValidConfig;
 use crate::util;
@@ -43,6 +44,8 @@ fn point_in_ring_exclusive(pt: Coord<f64>, ring: &[Coord<f64>]) -> bool {
     crate::simd::point_in_ring_exclusive(pt, ring)
 }
 
+/// Boundary-touching holes (all vertices exactly on the shell, e.g. cgal
+/// square_hole_rhombus) return false.
 pub(crate) fn hole_vertex_strictly_outside(
     hole: &LineString<f64>,
     shell: &LineString<f64>,
@@ -98,11 +101,16 @@ pub(crate) fn all_vertices_inside_ring(inner: &[Coord<f64>], outer: &[Coord<f64>
     inner.iter().all(|pt| point_in_ring_exclusive(*pt, outer))
 }
 
+/// Check if two bounding boxes overlap.
 #[inline]
 pub(crate) fn bboxes_overlap(a: (f64, f64, f64, f64), b: (f64, f64, f64, f64)) -> bool {
     a.0 <= b.1 && a.1 >= b.0 && a.2 <= b.3 && a.3 >= b.2
 }
 
+/// Resolve hole-hole nesting among the inner holes of a shell. to_subtract holds depth
+/// 1 holes inside the shell and subtracts them by boolean difference. islands holds
+/// holes at depth 2 or more, which become separate polygons with depth 3 sub-holes as
+/// interior rings.
 pub(crate) fn resolve_nesting(
     holes: &[LineString<f64>],
 ) -> (Vec<LineString<f64>>, Vec<Polygon<f64>>) {
@@ -242,6 +250,8 @@ pub(crate) fn ensure_cw(mut ring: LineString<f64>) -> LineString<f64> {
     ring
 }
 
+/// When keep_collapsed is true and the polygon shell collapsed during repair, return a
+/// Point or LineString instead of empty.
 pub(crate) fn handle_collapse_result(
     exterior: &LineString<f64>,
     _config: &MakeValidConfig,

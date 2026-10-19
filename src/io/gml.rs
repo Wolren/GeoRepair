@@ -1,3 +1,4 @@
+//! gml (`.gml`) backend: OGC gml 3.2 geometry subset via `quick-xml`.
 
 use alloc::string::String;
 use alloc::string::ToString;
@@ -10,6 +11,7 @@ use geo::{Coord, Geometry, LineString, MultiLineString, MultiPoint, Point, Polyg
 use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
 
+/// Load every gml geometry from a file (any element in a `gml` namespace).
 pub fn load_gml(path: &str) -> Result<Vec<Geometry<f64>>, String> {
     let data = fs::read(path).map_err(|e| format!("{path}: {e}"))?;
     let mut reader = Reader::from_reader(data.as_slice());
@@ -129,6 +131,8 @@ fn parse_geometry(reader: &mut Reader<&[u8]>, local: &[u8]) -> Result<Geometry<f
     }
 }
 
+/// Read a `<pos>` element: exactly one coordinate tuple (honors `srsDimension` on the
+/// element; extra ordinates are dropped).
 fn read_pos(reader: &mut Reader<&[u8]>, container: &[u8]) -> Result<Vec<f64>, String> {
     let mut nums = Vec::new();
     loop {
@@ -149,6 +153,8 @@ fn read_pos(reader: &mut Reader<&[u8]>, container: &[u8]) -> Result<Vec<f64>, St
     Ok(nums)
 }
 
+/// Read a `<posList>` element: a flat list of coordinate tuples (honors `srsDimension`
+/// on the element; extra ordinates are dropped).
 fn read_pos_list(reader: &mut Reader<&[u8]>, container: &[u8]) -> Result<Vec<Coord<f64>>, String> {
     let mut nums = Vec::new();
     let mut dim = 2usize;
@@ -247,6 +253,8 @@ fn dimension_of(e: &BytesStart) -> usize {
         .unwrap_or(2)
 }
 
+/// Read a multi-geometry: every member element (e.g. `polygonMember`) wrapping a
+/// geometry element (`Polygon`, `Surface`, .).
 fn read_members(
     reader: &mut Reader<&[u8]>,
     container: &[u8],
@@ -282,6 +290,8 @@ fn read_members(
     Ok(out)
 }
 
+/// Skip an element and everything nested inside it (depth-based; correct even when
+/// element names repeat at different nesting levels).
 fn skip_element(reader: &mut Reader<&[u8]>) -> Result<(), String> {
     let mut depth = 1usize;
     while depth > 0 {
@@ -295,6 +305,8 @@ fn skip_element(reader: &mut Reader<&[u8]>) -> Result<(), String> {
     Ok(())
 }
 
+/// Turn a flat number list into coordinates, validating the count against the declared
+/// dimension (3D ordinates are dropped).
 fn coords_from_flat(nums: &[f64], ctx: &[u8], dim: usize) -> Result<Vec<Coord<f64>>, String> {
     if nums.is_empty() {
         return Ok(Vec::new());

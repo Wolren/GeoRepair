@@ -27,6 +27,7 @@ pub trait MakeValid {
     /// The scalar coordinate type (e.g. `f64`, `f32`).
     type Scalar: GeoFloat;
 
+    /// Repair this geometry using default configuration.
     fn make_valid(&self) -> Geometry<Self::Scalar> {
         self.make_valid_with_config(&MakeValidConfig::default())
     }
@@ -34,6 +35,7 @@ pub trait MakeValid {
     /// Repair this geometry with the given configuration.
     fn make_valid_with_config(&self, config: &MakeValidConfig) -> Geometry<Self::Scalar>;
 
+    /// Repair this geometry in parallel using default configuration.
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     fn par_make_valid(&self) -> Geometry<Self::Scalar>
     where
@@ -134,6 +136,9 @@ impl<T: NodingFloat> MakeValid for LineString<T> {
     type Scalar = T;
 
     fn make_valid_with_config(&self, _config: &MakeValidConfig) -> Geometry<T> {
+        // (the old two-step collect + remove_consecutive_duplicates paid two Vecs and
+        // two walks for every line - measured 2026-08-09, the valid-ls) Semantics
+        // identical: dropping NaN coords first, then dedup of consecutive equals.
         let mut deduped: Vec<Coord<T>> = Vec::with_capacity(self.0.len());
         let mut prev: Option<Coord<T>> = None;
         for c in &self.0 {
@@ -165,6 +170,7 @@ impl<T: NodingFloat> MakeValid for LineString<T> {
                 let runs = match crate::noding::line::node_line(&fd) {
                     Some(runs) => runs,
                     None => {
+                        // (fuzz 52812: fallback part 0 = NotSimple, part 1 fine).
                         let runs: Vec<Vec<Coord<f64>>> = simple_subline(&fd)
                             .into_iter()
                             .filter(|r| {
@@ -191,6 +197,8 @@ impl<T: NodingFloat> MakeValid for LineString<T> {
     }
 }
 
+/// Greedy simplification of a non-simple line: walk the segments, keep a segment unless
+/// it conflicts with an already-kept segment, using the same pairwise tests as
 fn simple_subline(coords: &[Coord<f64>]) -> Vec<Vec<Coord<f64>>> {
     let n = coords.len() - 1;
     if n < 2 {
@@ -291,6 +299,8 @@ fn run_to_line<T: NodingFloat>(run: &[Coord<f64>]) -> LineString<T> {
     )
 }
 
+/// Greedy cross-component conflict filter (mirror of the validator's
+/// [`check_line_components_intersect`] rule): keep a run unless it conflicts with an
 fn keep_conflicting_runs(runs: &[Vec<Coord<f64>>]) -> Option<Vec<usize>> {
     if runs.len() < 2 {
         return None;
@@ -539,7 +549,7 @@ impl<T: NodingFloat> MakeValid for GeometryCollection<T> {
 /// }
 /// ```
 pub trait ValidateAndFix: MakeValid<Scalar = f64> + GeoValidation<Scalar = f64> {
-    /// Validate the geometry, then fix it if invalid.
+    /// Returns (validation_result, fixed_geometry).
     fn validate_and_fix(&self) -> (ValidationResult, Geometry<f64>) {
         let result = <Self as GeoValidation>::validate(self);
         if result.valid {
@@ -549,6 +559,7 @@ pub trait ValidateAndFix: MakeValid<Scalar = f64> + GeoValidation<Scalar = f64> 
         }
     }
 
+    /// Validate the geometry, then fix it if invalid.
     fn validate_and_fix_always(&self) -> (ValidationResult, Geometry<f64>) {
         (
             <Self as GeoValidation>::validate(self),

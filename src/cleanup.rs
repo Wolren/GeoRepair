@@ -89,13 +89,15 @@ pub fn remove_repeated_points(geom: &Geometry<f64>, tolerance: f64) -> Geometry<
     }
 }
 
-/// Returns `None` when the component collapses.
+/// GEOS `RepeatedPointCoordinateOperation::edit` (with the invalid-coordinate filter
+/// and end repair). Returns `None` when the component collapses.
 fn edit_sequence(coords: &[Coord<f64>], min_len: usize, tolerance: f64) -> Option<Vec<Coord<f64>>> {
     if coords.len() <= min_len {
         return Some(coords.to_vec());
     }
 
-    // Points within tolerance of the last kept.
+    // RepeatedInvalidPointFilter: skip invalid coords (leading ones too), exact
+    // duplicates.
     let sq = tolerance * tolerance;
     let mut filt: Vec<Coord<f64>> = Vec::new();
     for &c in coords {

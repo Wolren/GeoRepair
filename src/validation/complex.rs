@@ -7,6 +7,9 @@ use geo::{
 
 use crate::validation::core::*;
 
+/// It rejects a level once `depth > MAX_COLLECTION_DEPTH` (max_collection_depth).
+/// `crate::MakeValid` (crate::makevalid) hands a collection past the limit back
+/// verbatim, unless the wrapper levels fold away as `push_repaired_member` does.
 pub(crate) const MAX_COLLECTION_DEPTH: usize = 100;
 
 impl GeoValidation for Polygon<f64> {
@@ -22,6 +25,8 @@ impl GeoValidation for Polygon<f64> {
         // regression (3.83s vs 3.17s on the 1.58M dataset)
         let ext_errors = check_ring_validity(&self.exterior().0, true);
         if !ext_errors.is_empty() {
+            // ring errors but continued to the holes when only (IsValidOp t2 expects
+            // HoleOutsideShell alongside the shell's WrongOrientation).
             let only_orientation = ext_errors
                 .iter()
                 .all(|e| matches!(e, GeometryValidationError::WrongOrientation));
@@ -65,6 +70,8 @@ impl GeoValidation for Polygon<f64> {
     }
 }
 
+/// True when any hole duplicates another hole or the shell (rotated-start duplicates
+/// included).
 pub(crate) fn has_duplicate_rings(interiors: &[&[Coord<f64>]], shell: &[Coord<f64>]) -> bool {
     if interiors.len() > 1 {
         let mut groups: rustc_hash::FxHashMap<(usize, u64), Vec<usize>> =
@@ -162,6 +169,8 @@ impl GeoValidation for MultiPolygon<f64> {
                     errors.push(GeometryValidationError::SelfIntersection);
                     return ValidationResult::invalid(errors);
                 }
+                // shell's hole is a valid island (Test 616/641 in
+                // general_TestValid2.xml) whose own hole may also sit
                 if all_rings[a].1 != all_rings[b].1 {
                     if all_rings[a].1
                         && ring_has_vertex_inside(ra, rb2, rb[b], &comp_holes[all_rings[b].0])
@@ -271,6 +280,8 @@ trait ValidateDepth {
     fn validate_at_depth(&self, depth: usize, max_depth: usize) -> ValidationResult;
 }
 
+/// Any vertex of `probe` strictly inside `target`'s fill (bbox-prefiltered; vertices
+/// inside `exclusions` - the target component's own holes - are excised and do not
 fn ring_has_vertex_inside(
     probe: &[Coord<f64>],
     target: &[Coord<f64>],

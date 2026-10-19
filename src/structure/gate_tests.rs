@@ -85,6 +85,8 @@ mod gate_completeness {
     }
 
     fn eps_collinear_sliver() -> Polygon<f64> {
+        // Two same-ring edges within 5e-14 of collinear overlap (the 32*eps*scale
+        // collinear gate class; geo_bridge catches it).
         Polygon::new(
             ring(&[
                 (0.0, 0.0),
@@ -194,6 +196,8 @@ mod gate_completeness {
         cases.push(bowtie_subdivided(4));
         cases.push(bowtie_subdivided(125));
         cases.push(mixed_magnitude());
+        // Fast path must route it to arrange (fuzz invariant_mixed_fp_in_same_ring
+        // perm=1, keep_collapsed=true).
         cases.push(Polygon::new(
             LineString::new(vec![
                 Coord {
@@ -212,6 +216,8 @@ mod gate_completeness {
             ]),
             Vec::new(),
         ));
+        // than f64::epsilon (DegenerateExterior) even though the ring
+        // (fuzz_inprocess_loop, 2026-08-07).
         cases.push(Polygon::new(
             LineString::new(vec![
                 Coord {
@@ -329,6 +335,8 @@ mod gate_completeness {
         v
     }
 
+    /// Non-adjacent repeated vertex on a ring larger than `SMALL_RING_LINES`
+    /// (2026-10-17).
     #[test]
     fn gate_rejects_repeated_vertex_on_chain_path() {
         let clean = Polygon::new(LineString::new(ngon(40, 100.0, 500.0, 500.0)), Vec::new());
@@ -413,6 +421,8 @@ mod gate_retrace_ring {
     }
 }
 
+/// `ring_guards` is the gate's whole-ring guard reduction (sub-ULP edge flag plus
+/// smallest non-zero |ordinate|), and `has_sub_ulp_edge` is the pre-collapse pass's
 mod ring_guards_agreement {
     use crate::arrange::{has_sub_ulp_edge, ring_guards};
     use geo::{Coord, LineString, Polygon};

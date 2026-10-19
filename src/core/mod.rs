@@ -1,3 +1,4 @@
+//! Core configuration, error types, and numeric constants for geometry repair.
 
 use alloc::string::String;
 use geo::algorithm::bool_ops::FillRule;
@@ -12,18 +13,28 @@ pub(crate) const EPS: f64 = 1e-12;
 /// Epsilon for parametric (t/u) intersection comparisons.
 pub(crate) const EPS_PARAM: f64 = 1e-14;
 
+/// Compile-time stack capacity for the small-ring fast paths: the `SmallVec` inline
+/// buffers in the structure gate and the fixed-size `ring_of` array in
+/// `arrange::prep_intersect`. `Tuning::small_ring_lines` defaults to this value;
+/// runtime values above it only widen the line-collection dispatch (SmallVec spills to
+/// the heap), while the fixed-array paths clamp at this constant.
 pub const SMALL_RING_LINES: usize = 32;
 
 /// Snap scale factor for integer-keyed graph construction.
 pub(crate) const SNAP_SCALE: f64 = 1e8;
 
+/// Leaf helpers without a config (for example arrange::validate_polygon) use the
+/// defaults.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Tuning {
     /// At n=2000 the brute-force 2M pair checks completes in ~5ms for most geometries,
     /// well below the cost of grid construction.
     pub grid_threshold_n: usize,
+    /// Edge-split dispatch: below this, the O(n^2) pair loop is the fastest option.
     /// Measured 2026-08-07: a 500-edge bowtie took 3.29 ms through the bruteforce (250k
-    /// exact pair tests) vs ~260 us via the indexed paths.
+    /// exact pair tests) vs ~260 us via the indexed paths. A 100-edge bowtie was faster
+    /// bruteforce (173 us vs 337 us rtree bulk_load) - the crossover sits near 128. The
+    /// old 2000-edge gate was a 5-60x latency tax on mid-size repairs.
     pub split_bruteforce_max_n: usize,
     /// Below it the serial loop's lower dispatch overhead wins (the serial rebuild was
     /// ~30ms of the 71ms noding on a 260k-edge shell).
@@ -31,6 +42,8 @@ pub struct Tuning {
     /// Maximum total vertices for the fast-path validity check in
     /// `structure::fix_polygon`.
     pub fast_path_max_verts: usize,
+    /// Small-ring dispatch threshold: inputs at or below this vertex count use the
+    /// allocation-free pairwise sweep and stack buffers.
     pub small_ring_lines: usize,
     /// Single-pass repair routing threshold. Measurement (2026-08-02): single-pass
     /// costs 0.03 ms/poly below 64 edges, 1.7 ms/poly for 64 to 4096 edges. It costs
@@ -80,17 +93,23 @@ impl Default for Tuning {
 /// ```
 #[derive(Clone, Debug)]
 pub struct MakeValidConfig {
+    /// When true, geometries that collapse to empty during repair (e.g. zero-area after
+    /// self-intersection resolution) are kept rather than discarded.
     pub keep_collapsed: bool,
 
+    /// Which polygon repair strategy to use.
     pub poly_method: PolyMethod,
 
+    /// - `NonZero`: holes treated as positive space
     pub fill_rule: FillRule,
 
     /// When set, used for crs-aware tolerance and metadata preservation.
     pub crs: Option<Crs>,
 
+    /// Target output crs.
     pub target_crs: Option<Crs>,
 
+    /// Performance dispatch thresholds for the repair pipeline.
     pub tuning: Tuning,
 }
 
@@ -107,25 +126,31 @@ impl Default for MakeValidConfig {
     }
 }
 
+/// Polygon repair strategy selector. - [`Auto`](PolyMethod::Auto): Try Structure first
+/// (fast path), fall back to Arrange for complex topology -
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PolyMethod {
+    /// Automatic selection: try Structure first, fall back to Arrange.
     Auto,
     /// Structure fast path (planar graph extraction). 10-100x faster on valid/simple
     /// inputs.
     Structure,
+    /// cdt-based repair (handles any topology, slower).
     Arrange,
 }
 
 
 ///
 /// # Feature gating
-/// The `std::error::Error` impl is only available when the `std` feature is enabled.
+/// The `std::error::Error` impl is only available when the `std` feature is enabled. In
+/// no_std mode, only `Display` is available.
 #[derive(Error, Clone, Debug)]
 pub enum MakeValidError {
     /// A coordinate value was NaN at the given index.
     #[error("coordinate value is NaN at index {idx}")]
     CoordinateIsNaN { idx: usize },
 
+    /// A coordinate value was infinite at the given index.
     #[error("coordinate value is infinite at index {idx}")]
     CoordinateIsInfinite { idx: usize },
 
@@ -133,18 +158,23 @@ pub enum MakeValidError {
     #[error("constraint edge insertion failed in CDT — likely numerical precision issue")]
     ConstraintFailure,
 
+    /// The constrained Delaunay triangulation failed.
     #[error("triangulation error: {0}")]
     TriangulationError(String),
 
+    /// An I/O error occurred (file not found, permission denied, etc.).
     #[error("I/O error: {0}")]
     IoError(String),
 
+    /// A parsing error occurred (invalid WKB, malformed GeoJSON, etc.).
     #[error("parse error: {0}")]
     ParseError(String),
 
+    /// The requested format is not supported.
     #[error("unsupported format: {0}")]
     UnsupportedFormat(String),
 
+    /// A crs-related error occurred.
     #[error("CRS error: {0}")]
     CrsError(String),
 }

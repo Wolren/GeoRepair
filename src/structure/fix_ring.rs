@@ -22,6 +22,8 @@ pub fn repair_ring(ring: &LineString<f64>) -> Option<Vec<Polygon<f64>>> {
     repair_ring_tuned(ring, &core::Tuning::default())
 }
 
+/// Tuned variant of [`repair_ring`]: the repair pipeline threads the caller's
+/// [`core::Tuning`] through the dispatch thresholds.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(crate) fn repair_ring_tuned(
     ring: &LineString<f64>,
@@ -270,6 +272,8 @@ fn has_self_intersections_bruteforce(coords: &[Coord<f64>], eps: f64) -> bool {
     false
 }
 
+/// Strict proper crossing of two segments (endpoints excluded), used by the R-tree
+/// sweep for `has_proper_self_crossing`.
 #[inline(always)]
 pub fn segments_properly_cross_seg(
     a1: Coord<f64>,
@@ -369,6 +373,7 @@ pub(crate) fn check_edge_pair(coords: &[Coord<f64>], i: usize, j: usize, eps: f6
     false
 }
 
+/// Check if edges i and j have a proper crossing (not just endpoint touch).
 pub(crate) fn edge_intersection(
     coords: &[Coord<f64>],
     i: usize,
@@ -409,6 +414,8 @@ pub(crate) fn edge_intersection(
     }
 }
 
+/// Split a self-intersecting ring at the first proper crossing into two simple
+/// (non-self-intersecting) rings.
 pub(crate) fn split_ring_at_intersection(
     coords: &[Coord<f64>],
     i: usize,
@@ -477,6 +484,8 @@ pub(crate) fn try_fast_fix_tuned(
     Some(vec![LineString::new(ring1), LineString::new(ring2)])
 }
 
+/// Only called for rings within GRID_THRESHOLD_N (larger rings route to
+/// sweep::find_second_intersection, O(n log n)).
 fn find_second_intersection_bruteforce(
     coords: &[Coord<f64>],
     eps: f64,
@@ -518,11 +527,14 @@ fn find_first_intersection_bruteforce(
     None
 }
 
+/// ---------------------------------------------------------------------------
+/// Self-intersecting ring fixer
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn fix_self_intersecting(coords: &[Coord<f64>]) -> Option<Vec<Polygon<f64>>> {
     fix_self_intersecting_tuned(coords, &core::Tuning::default())
 }
 
+/// Tuned variant of [`fix_self_intersecting`].
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(crate) fn fix_self_intersecting_tuned(
     coords: &[Coord<f64>],

@@ -1,3 +1,4 @@
+//! EWKB/extra-binary-format tests (split 2026-08-07; verbatim).
 
 use super::*;
 

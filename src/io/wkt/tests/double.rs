@@ -198,6 +198,7 @@ fn double_roundtrip_gc_empty() {
     assert_eq!(geom, parsed);
 }
 
+// read_f64 edge cases
 #[test]
 fn parse_nan() {
     let geom = read_wkt("POINT (NaN NaN)").unwrap();

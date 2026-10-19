@@ -1,3 +1,4 @@
+//! Full Bentley-Ottmann sweep-line for finding all proper edge intersections.
 
 use alloc::vec::Vec;
 use rustc_hash::FxHashSet;

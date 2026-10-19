@@ -1,3 +1,4 @@
+//! Handle collapsed geometries (polygon → line → point).
 
 use geo::{CoordNum, GeoFloat, Geometry, LineString, Point};
 

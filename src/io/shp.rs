@@ -46,6 +46,8 @@ pub fn save_shp(path: &str, geoms: &[Geometry<f64>]) -> Result<(), String> {
     Ok(())
 }
 
+/// Convert a shapefile `Shape` to a geo `Geometry`; `None` for types with no geo
+/// equivalent (null shapes, multipatch).
 fn shape_to_geo(shape: Shape) -> Option<Geometry<f64>> {
     Some(match shape {
         Shape::NullShape | Shape::Multipatch(_) => return None,

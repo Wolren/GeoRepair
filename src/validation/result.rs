@@ -52,8 +52,8 @@ impl ValidationResult {
         }
     }
 
-    /// Returns `"Valid Geometry"` when valid, or a semicolon-separated list of
-    /// violations when invalid.
+    /// Human-readable validity reason (like GEOS `isValidReason`). Returns `"Valid
+    /// Geometry"` when valid, or a semicolon-separated list of violations when invalid.
     pub fn reason(&self) -> String {
         if self.valid {
             "Valid Geometry".to_string()

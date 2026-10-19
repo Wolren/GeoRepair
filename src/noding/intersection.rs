@@ -29,6 +29,7 @@ mod private {
 
 pub(crate) use private::NodingFloat;
 
+/// Returns true when every edge shares one of two common endpoints.
 fn is_radial<T: GeoFloat>(edges: &[Line<T>]) -> bool {
     if edges.len() < 3 {
         return false;
@@ -300,6 +301,7 @@ pub(crate) fn dist2<T: GeoFloat>(a: Coord<T>, b: Coord<T>) -> T {
     (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y)
 }
 
+/// Returns `(splits_on_e1, splits_on_e2)`.
 pub(crate) fn collinear_split_params<T: GeoFloat>(
     e1: &Line<T>,
     e2: &Line<T>,
@@ -341,6 +343,7 @@ pub(crate) fn collinear_split_params<T: GeoFloat>(
     (p1, p2)
 }
 
+/// f64‑only DD‑based intersection for maximum robustness.
 fn compute_intersection_param_dd(e1: &Line<f64>, e2: &Line<f64>) -> Option<(f64, f64, Coord<f64>)> {
     crate::dd::segment_intersection_dd(e1.start, e1.end, e2.start, e2.end)
         .map(|(pt, t, u)| (t.to_f64(), u.to_f64(), pt))

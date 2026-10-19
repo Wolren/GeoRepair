@@ -145,6 +145,8 @@ impl MakeValid for MultiPolygon<f64> {
 }
 
 
+/// The validator rejects that as `DisconnectedInteriorRing`. Seeds `3111ecaf` and
+/// `edf6e65b`.
 fn validity_gate(g: Geometry<f64>, orig: Vec<Polygon<f64>>) -> Geometry<f64> {
     use geo::Area;
     if is_valid_with_geo(&g) {
@@ -186,6 +188,8 @@ fn validity_gate(g: Geometry<f64>, orig: Vec<Polygon<f64>>) -> Geometry<f64> {
     }
 }
 
+/// Drop components that are invalid on their own; `None` when nothing usable is left,
+/// so the caller can try the next candidate instead of returning empty.
 #[cfg(feature = "arrange")]
 fn keep_valid_components(mp: MultiPolygon<f64>) -> Option<Geometry<f64>> {
     let kept: Vec<Polygon<f64>> =
@@ -338,6 +342,8 @@ pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
         return enforce_ogc_winding(Geometry::Polygon(kept.into_iter().next().unwrap())).0;
     }
     let mp_kept = MultiPolygon::new(kept);
+    // SelfIntersection (measured: 3 valid comps → 4 comps with SI on seed a27dfba6) -
+    // hence `mp_looks_valid`
     let geo_valid = mp_looks_valid(&mp_kept);
     if geo_valid {
         return enforce_ogc_winding(Geometry::MultiPolygon(mp_kept)).0;

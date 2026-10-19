@@ -9,15 +9,19 @@ use alloc::vec::Vec;
 use std::ffi::{CStr, CString, c_char};
 use std::ptr;
 
+/// Static nul-terminated version string, derived from Cargo.toml at compile time
+/// (`CARGO_PKG_VERSION`) so the C API and the crate can never drift.
 static VERSION_CSTR: &CStr = unsafe {
     CStr::from_bytes_with_nul_unchecked(concat!(env!("CARGO_PKG_VERSION"), "\0").as_bytes())
 };
 
+/// Return the geo-repair library version as a nul-terminated string.
 #[unsafe(no_mangle)]
 pub extern "C" fn geo_repair_version() -> *const c_char {
     VERSION_CSTR.as_ptr()
 }
 
+/// Free a [`GeoRepairResult`] returned by any WKB `geo_repair_*` function.
 ///
 /// # Safety
 /// `result` must not be null and must point to a valid result that has not been freed
@@ -41,6 +45,7 @@ pub unsafe extern "C" fn geo_repair_free_result(result: *mut GeoRepairResult) {
     r.error_msg = ptr::null_mut();
 }
 
+/// Free a [`GeoRepairStringResult`] returned by any WKT `geo_repair_*` function.
 ///
 /// # Safety
 /// `result` must not be null and must point to a valid result that has not been freed
@@ -64,6 +69,7 @@ pub unsafe extern "C" fn geo_repair_free_string_result(result: *mut GeoRepairStr
     r.error_msg = ptr::null_mut();
 }
 
+/// Free a [`GeoRepairBatchResult`] returned by [`geo_repair_make_valid_batch`].
 ///
 /// # Safety
 /// `result` must not be null and must point to a valid result that has not been freed

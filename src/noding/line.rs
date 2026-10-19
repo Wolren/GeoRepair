@@ -17,6 +17,8 @@ mod classify;
 mod pieces;
 const NO_FAMILY: u32 = u32::MAX;
 const NO_SEG: u32 = u32::MAX;
+/// Active-set limit for the 2-D sweep; beyond it the noder bails to the caller's
+/// fallback (a dense active set means the retain loop is O(n²) anyway - the family pass
 const SWEEP_ACTIVE_LIMIT: usize = 512;
 /// Families larger than this are removed from the 2-D sweep (their members span long
 /// x-ranges and would pin the active set open); cross-family pairs are tested directly
@@ -33,6 +35,9 @@ const FAMILY_SHALLOW_SIN: f64 = 1e-6;
 /// and vertex-on-edge within 1e-12 x len. Family members deviate from their reference
 /// line by at most the 32-ulp offset merge (~7e-15 x scale).
 const FAMILY_PARALLEL_SKIP_DIST: f64 = 1e-9;
+/// Covers the worst legal drift of a true member-pair crossing from the reference
+/// crossing point ((32-ulp deviation)/sin at the FAMILY_SHALLOW_SIN floor ~ 7e-9 x
+/// scale) with margin; eps is 1e-12 x scale, so the pad is 1e-7 x scale.
 const FAMILY_SPAN_PAD_EPS: f64 = 1e5;
 /// Crossing-only fast path: per-pair classify budget (factor x n plus a floor).
 const CROSSING_ONLY_PAIR_FACTOR: usize = 32;
@@ -41,18 +46,28 @@ const CROSSING_ONLY_PAIR_FLOOR: usize = 1024;
 /// Measured 2026-10-17: it lost 30% on the ringing ladder, 90 to 116 us at 1000
 /// vertices, against 5a07c75.
 const CHAIN_INDEX_WORK_LIMIT: usize = 0;
+/// eps-class guard scan budget (iterations over x-sorted points, factor x points plus a
+/// floor).
 const EPS_CLASS_SCAN_FACTOR: usize = 64;
 const EPS_CLASS_SCAN_FLOOR: usize = 4096;
 
+/// A chain the validator rejects on sight: fewer than 2 points (RingTooFewPoints) or an
+/// adjacent-duplicate pair (RepeatedPoint).
 fn chain_degenerate(chain: &[Coord<f64>]) -> bool {
     chain.len() < 2 || chain.windows(2).any(|w| w[0] == w[1])
 }
 
+/// Outcome of the lean per-pair test (mirrors the validator's predicate chain: fast-FP
+/// first, robust escalation, collinear, vertex-on-edge, shared endpoint).
 #[derive(Clone, Copy, Debug)]
 enum Hit {
+    /// No intersection per the validator's predicates.
     None,
+    /// Segments share an endpoint exactly (vertex revisit).
     Shared,
+    /// Proper crossing; the point is the DD intersection, shared by both segments.
     Cross(Coord<f64>),
+    /// Collinear overlap (adaptive gate, t-overlap beyond eps).
     Collinear,
     /// The returned vertex lies strictly on the other segment's interior (segment-local
     /// tolerance).
@@ -78,13 +93,18 @@ pub(crate) struct LineNoder<'a> {
     family: Vec<u32>,
     family_size: Vec<usize>,
     nodes: Vec<NodeEnt>,
+    /// Set when a near-collinear (non-exact) overlap pair was noded; the tolerant
+    /// piece-dedup sweep then runs to drop coincident residuals.
     near_collinear: bool,
     splits: Vec<Vec<Coord<f64>>>,
     /// Cluster canonical lookup for piece-endpoint snapping.
     canon_map: FxHashMap<(u64, u64), Coord<f64>>,
+    /// Members of each removed family (size > FAMILY_IN_SWEEP_LIMIT), populated in
+    /// `sweep_pass` and consumed by `test_family_pair`.
     family_members: FxHashMap<u32, Vec<u32>>,
 }
 
+/// Node a non-simple line into simple chains.
 pub(crate) fn node_line(coords: &[Coord<f64>]) -> Option<Vec<Vec<Coord<f64>>>> {
     let n = coords.len() - 1;
     if n < 2 {
@@ -174,6 +194,8 @@ impl<'a> LineNoder<'a> {
         self.run_full()
     }
 
+    /// An earlier form sorted every coordinate by x first, which was ~95 us of
+    /// node_line's 796 us at n=4000.
     pub(super) fn revisit_dominated(&self) -> bool {
         let mut keys: Vec<u64> = self.coords.iter().map(|c| sortable_u64(c.x)).collect();
         let mut order: Vec<u32> = (0..keys.len() as u32).collect();
@@ -195,6 +217,7 @@ impl<'a> LineNoder<'a> {
         max_freq * 2 + 2 >= self.n as u32
     }
 
+    /// Fast path for the crossing-only class.
     pub(super) fn crossing_only(&mut self) -> Option<Vec<Vec<Coord<f64>>>> {
         if self.n < 2 {
             return None;
@@ -399,6 +422,8 @@ impl<'a> LineNoder<'a> {
         false
     }
 
+    /// Reset what the fast path touched, so the general path sees the noder as new()
+    /// built it.
     fn enumerate_segment_grid(&mut self, st: &mut ScanState, revisits: &mut Vec<Coord<f64>>) {
         let mut boxes: Vec<[f64; 4]> = Vec::with_capacity(self.n);
         for i in 0..self.n {
@@ -429,6 +454,7 @@ impl<'a> LineNoder<'a> {
         }
     }
 
+    /// Chain-index candidate enumeration.
     #[cfg(feature = "arrange")]
     fn enumerate_by_chain_index(
         &mut self,
@@ -497,6 +523,7 @@ impl<'a> LineNoder<'a> {
         true
     }
 
+    /// Enumerate every segment pair of two chains whose padded boxes can overlap.
     #[cfg(feature = "arrange")]
     fn enumerate_chain_pair(
         &mut self,
@@ -563,6 +590,8 @@ impl<'a> LineNoder<'a> {
         }
     }
 
+    /// Leaf of `descend`: the per-pair gates and the classification the old segment
+    /// scan applied, verbatim, so the pair set and the `calls` budget are unchanged.
     fn classify_pair(
         &mut self,
         i: usize,
@@ -639,10 +668,14 @@ impl<'a> LineNoder<'a> {
         self.nodes.clear();
     }
 
+    /// True when two distinct points among the input anchors and the node points lie
+    /// within eps (Chebyshev) of each other.
     fn eps_classes_present(&self) -> bool {
         self.eps_classes_scan(&self.nodes)
     }
 
+    /// Anchor-only eps classes, checked before the candidate scan: an anchor-level
+    /// near-coincidence already forces the general path, so the scan (and its classify
     fn eps_classes_anchors(&self) -> bool {
         self.eps_classes_scan(&[])
     }
@@ -715,6 +748,8 @@ impl<'a> LineNoder<'a> {
         false
     }
 
+    /// The general path: exact-collinear families, adjacency noding, the 2-D sweep, eps
+    /// clustering, piece construction and reconnection.
     pub(super) fn run_full(&mut self) -> Option<Vec<Vec<Coord<f64>>>> {
         self.family_pass();
         let pure_collinear = if self.n > 0 && self.family[0] != NO_FAMILY {
@@ -742,6 +777,9 @@ impl<'a> LineNoder<'a> {
         }
         let chains = self.reconnect(pieces);
         for chain in &chains {
+            // (n < 2 early-out) but fail the validator (RepeatedPoint /
+            // RingTooFewPoints) - a computed [P, P] chain shipped once (fuzz 55853: eps
+            // clustering collapsed both split points of a piece onto one coordinate).
             if chain_degenerate(chain)
                 || crate::validation::impls::check_linestring_self_intersection(chain)
             {
@@ -842,6 +880,8 @@ impl<'a> LineNoder<'a> {
         }
     }
 
+    /// 1-D interval noding for an exact-collinear family: every member splits at every
+    /// other member's original endpoints that fall strictly inside its span (beyond eps
     fn node_family_1d(&mut self, members: &[u32]) {
         let r = members[0] as usize;
         let dx = self.b[r].x - self.a[r].x;
@@ -1029,14 +1069,13 @@ impl<'a> LineNoder<'a> {
         Some(())
     }
 
-    /// Cross-family pair test with line pruning. Parallel lines below
-    /// FAMILY_PARALLEL_SIN (family_parallel_sin). Apart by more than
-    /// FAMILY_PARALLEL_SKIP_DIST (family_parallel_skip_dist) x scale, give zero pair
-    /// tests. The 64 eps x len and 1e-12 x len validator flags stay inside that gap.
-    /// Lines at or above FAMILY_SHALLOW_SIN (family_shallow_sin) meet at one point P.
-    /// Only spans that hold P, plus FAMILY_SPAN_PAD_EPS (family_span_pad_eps) x eps,
-    /// get tested. Drift is 32 ulp over sin. Figure-8 drops from ~250k tests to a few
-    /// hundred. Angles below ~1e-3 keep the full scan: drift grows as 1/sin.
+    /// Parallel lines below FAMILY_PARALLEL_SIN (family_parallel_sin). Apart by more
+    /// than FAMILY_PARALLEL_SKIP_DIST (family_parallel_skip_dist) x scale, give zero
+    /// pair tests. The 64 eps x len and 1e-12 x len validator flags stay inside that
+    /// gap. Lines at or above FAMILY_SHALLOW_SIN (family_shallow_sin) meet at one point
+    /// P. Only spans that hold P, plus FAMILY_SPAN_PAD_EPS (family_span_pad_eps) x eps,
+    /// get tested. Drift is 32 ulp over sin. Angles below ~1e-3 keep the full scan:
+    /// drift grows as 1/sin.
     fn test_family_pair(&mut self, f1: u32, f2: u32) {
         let m1: Vec<u32> = self.family_members[&f1].clone();
         let m2: Vec<u32> = self.family_members[&f2].clone();
@@ -1119,6 +1158,7 @@ impl<'a> LineNoder<'a> {
         }
     }
 
+    /// eps-padded bbox gate, identical to `edges_intersect_general`'s.
     #[inline]
     fn bbox_gate(&self, i: usize, j: usize) -> bool {
         let ai = self.a[i];

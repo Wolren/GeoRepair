@@ -1,3 +1,4 @@
+//! WebAssembly browser support (`wasm` feature, wasm32 targets only).
 //! ```ignore
 //! // browser (wasm32-unknown-unknown)
 //! let g = geo_repair::wasm::fetch_geometry("https://example.com/polygon.wkb")?;
@@ -40,6 +41,8 @@ pub fn fetch_bytes(url: &str) -> Result<Vec<u8>, String> {
     }
 }
 
+/// A leading WKB endian byte (`0x00` big- or `0x01` little-endian) parses as WKB via
+/// `io::wkb::read_wkb`.
 pub fn fetch_geometry(url: &str) -> Result<Geometry<f64>, String> {
     let bytes = fetch_bytes(url)?;
     if bytes.len() >= 1 && (bytes[0] == 0x00 || bytes[0] == 0x01) {

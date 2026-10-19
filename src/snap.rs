@@ -8,6 +8,7 @@ use geo::{Coord, Line};
 /// [`snap_coord_default`] and the geometry precision reducer.
 pub const DEFAULT_GRID: f64 = 1e-10;
 
+/// Snap a coordinate to a grid of the given resolution.
 #[inline]
 pub fn snap_coord(c: Coord<f64>, resolution: f64) -> Coord<f64> {
     Coord {
@@ -16,6 +17,7 @@ pub fn snap_coord(c: Coord<f64>, resolution: f64) -> Coord<f64> {
     }
 }
 
+/// Snap a coordinate to the default grid.
 #[inline]
 pub fn snap_coord_default(c: Coord<f64>) -> Coord<f64> {
     snap_coord(c, DEFAULT_GRID)

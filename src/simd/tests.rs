@@ -1,3 +1,4 @@
+//! SIMD predicate test battery.
 
 #[cfg(test)]
 use super::*;
@@ -360,7 +361,9 @@ mod shuffle_kernels {
 
     /// An orient2d batch-of-4 avx2 kernel is ~1.17x faster. Runtime dispatch costs ~0.8
     /// ns per call on a ~3 ns kernel. The net is a 0.90x loss, so the code stays
-    /// scalar.
+    /// scalar. Verdicts from 2026-08-16, i5-12400F, rustc 1.97: an aabb
+    /// shuffle-transpose avx kernel is ~4x faster than scalar and feeds
+    /// aabb_minmax_simd.
     #[test]
     fn microbench_kernels() {
         let coords = pseudo_coords(100_000);

@@ -9,6 +9,8 @@ pub(crate) fn orient2d_batch_4(
     pb: &[Coord<f64>; 4],
     pc: &[Coord<f64>; 4],
 ) -> [f64; 4] {
+    // target_feature boundary costs ~0.8ns/call on a ~3ns kernel The 2026-08-02 verdict
+    // stands for this kernel.
     scalar_orient2d_batch(pa, pb, pc)
 }
 
@@ -77,6 +79,9 @@ pub fn aabb_minmax_simd(coords: &[Coord<f64>]) -> (f64, f64, f64, f64) {
     (mnx, mxx, mny, mxy)
 }
 
+/// Restored from the pre-fe4c831 kernel and reworked from setr_pd gathers (measured
+/// 4.5x vs scalar on the bbox scan. The shuffle form measures faster still - see
+/// simd/tests.rs microbench_kernels).
 #[cfg(all(not(feature = "simd-portable"), target_arch = "x86_64"))]
 #[target_feature(enable = "avx")]
 pub(crate) unsafe fn aabb_minmax_avx(coords: &[Coord<f64>]) -> (f64, f64, f64, f64) {

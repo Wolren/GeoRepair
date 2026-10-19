@@ -1,3 +1,4 @@
+//! Coordinate Reference System (crs) metadata and transformation.
 
 //! Stores crs information (authority, geographic or projected) and tolerance heuristics
 //! per crs type. The Crs type is embedded in crate::Feature for I/O round-tripping and
@@ -92,7 +93,6 @@ impl Crs {
     }
 
     /// Suggest an appropriate epsilon tolerance for geometric predicates in this crs.
-    ///
     /// - Geographic crs: `1e-10` degrees (~0.01 mm near equator)
     /// - Projected crs: `1e-6` metres (1 micron)
     /// - Unknown: `1e-12` (normalised by coordinate scale downstream)
@@ -149,6 +149,7 @@ impl Crs {
         }
     }
 
+    /// Generate a WKT1 (esri-flavoured .prj-style) crs string.
     pub fn to_esri_wkt(&self) -> Option<String> {
         let srid = self.srid()?;
         let auth_clause = format!(",AUTHORITY[\"EPSG\",\"{srid}\"]");
@@ -202,6 +203,8 @@ impl Crs {
     }
 }
 
+/// Authoritative WKT2:2019 (iso 19162:2019 / OGC 18-010r11) definition of EPSG:4326
+/// (wgs 84), as published by the EPSG registry / proj.
 const WKT2_EPSG_4326: &str = r#"GEOGCRS["WGS 84",
     ENSEMBLE["World Geodetic System 1984 ensemble",
         MEMBER["World Geodetic System 1984 (Transit)"],
@@ -297,6 +300,8 @@ const WKT2_EPSG_3857: &str = r#"PROJCRS["WGS 84 / Pseudo-Mercator",
         BBOX[-85.06,-180,85.06,180]],
     ID["EPSG",3857]]"#;
 
+/// ascii-whitespace skip, matching the predicate the WKT1 reader uses in
+/// `src/io/wkt/read.rs`.
 #[inline]
 fn skip_ws(s: &[u8], i: &mut usize) {
     while *i < s.len() && s[*i].is_ascii_whitespace() {
@@ -304,11 +309,14 @@ fn skip_ws(s: &[u8], i: &mut usize) {
     }
 }
 
+/// Identifier byte, matching the WKT1 reader's keyword predicate
+/// (`is_ascii_alphabetic() || b'_'`).
 #[inline]
 fn is_ident_byte(b: u8) -> bool {
     b.is_ascii_alphabetic() || b == b'_'
 }
 
+/// Return the authority and code of the last crs identifier in `wkt`.
 fn last_identifier(wkt: &str) -> Option<(&str, u32)> {
     let s = wkt.as_bytes();
     let n = s.len();
@@ -343,6 +351,8 @@ fn last_identifier(wkt: &str) -> Option<(&str, u32)> {
     result
 }
 
+/// Parse the `["org", code]` / `["org", "code"]` argument list that follows an `ID` /
+/// `AUTHORITY` keyword, starting at byte offset `i`.
 fn parse_clause(wkt: &str, mut i: usize) -> Option<(&str, u32)> {
     let s = wkt.as_bytes();
     let n = s.len();
@@ -392,6 +402,7 @@ impl Default for Crs {
     }
 }
 
+/// Transform a geometry between two crs.
 #[cfg(feature = "proj")]
 pub fn transform_geometry(
     geom: &Geometry<f64>,
@@ -414,6 +425,8 @@ pub fn transform_geometry(
         .map_err(|e| MakeValidError::CrsError(format!("PROJ transform: {e}")))
 }
 
+/// Classify an EPSG code as geographic (lon/lat) or projected. - Geographic crs codes
+/// (2D): 4000-4999 (mostly), plus explicit known codes - Projected crs codes: 2000-3999
 fn epsg_is_geographic(code: u32) -> bool {
     match code {
         4326 | 4258 | 4269 | 4267 | 4275 | 4617 | 4618 | 4619 | 4620 | 4937 | 4936 | 4979

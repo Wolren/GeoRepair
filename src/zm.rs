@@ -1,7 +1,9 @@
+//! Z and M coordinate value preservation and querying.
 
 use alloc::vec::Vec;
 use geo::{Coord, Geometry};
 
+/// A single Z (elevation) and M (measure) value associated with a coordinate.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ZmValue {
     /// Elevation (Z) value, or `None` if Z is not present.
@@ -54,10 +56,12 @@ impl ZmValue {
     }
 }
 
+/// A geometry with per-coordinate Z/M data stored alongside.
 #[derive(Clone, Debug)]
 pub struct ZmGeometry {
     /// The underlying geometry (repaired or original).
     pub geometry: Geometry<f64>,
+    /// Per-coordinate Z/M values.
     pub zm: Vec<ZmValue>,
 }
 
@@ -71,6 +75,7 @@ impl ZmGeometry {
         }
     }
 
+    /// Create a ZmGeometry with explicit Z/M data.
     pub fn with_zm(geometry: Geometry<f64>, zm: Vec<ZmValue>) -> Self {
         Self { geometry, zm }
     }
@@ -96,6 +101,7 @@ impl ZmGeometry {
     }
 }
 
+/// Count the total number of coordinates (vertices) in a geometry.
 pub fn count_coords(geom: &Geometry<f64>) -> usize {
     match geom {
         Geometry::Point(_) => 1,

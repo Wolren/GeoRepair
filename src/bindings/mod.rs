@@ -1,3 +1,4 @@
+//! Language bindings: C ffi and Python (PyO3).
 
 #[cfg(feature = "ffi")]
 pub mod ffi;

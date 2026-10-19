@@ -11,6 +11,8 @@ pub(super) fn has_nan(g: &Geometry<f64>) -> bool {
         .any(|c| !c.x.is_finite() || !c.y.is_finite())
 }
 
+/// Candidate demotion line from a ring: drop the closing vertex and consecutive
+/// duplicates (a collapsed ring demotes to its open path).
 fn ring_demotion_candidate(ring: &[Coord<f64>]) -> Option<LineString<f64>> {
     if ring.len() < 2 || ring.iter().any(|c| !c.x.is_finite() || !c.y.is_finite()) {
         return None;
@@ -27,6 +29,8 @@ fn ring_demotion_candidate(ring: &[Coord<f64>]) -> Option<LineString<f64>> {
     }
 }
 
+/// A real 1000 x 2e-9 sliver read as collinear and was demoted into a NotSimple line
+/// (fuzz-nightly crash 2026-09-14).
 fn ring_is_exactly_collinear(ext: &[Coord<f64>], interior_n: usize, ia: usize, ib: usize) -> bool {
     let a = ext[ia];
     let b = ext[ib];
@@ -36,6 +40,10 @@ fn ring_is_exactly_collinear(ext: &[Coord<f64>], interior_n: usize, ia: usize, i
     (0..interior_n).all(|i| crate::orient::orient2d(a, b, ext[i]) == 0.0)
 }
 
+/// Use the MultiLineString validator rule and scale-derived eps from
+/// check_line_components_intersect. prep::has_no_intersections uses other tolerances
+/// and passed a subnormal sliver that the validator flags NotSimple (fuzz nightly crash
+/// 2026-09-14).
 fn filter_demoted_lines(candidates: Vec<LineString<f64>>) -> Vec<LineString<f64>> {
     let simple: Vec<LineString<f64>> = candidates
         .into_iter()
@@ -70,6 +78,8 @@ fn filter_demoted_lines(candidates: Vec<LineString<f64>>) -> Vec<LineString<f64>
     kept
 }
 
+/// Emit demoted lines: LineString for one, MultiLineString for several, empty when none
+/// survived the contract filter.
 fn emit_lines(mut lines: Vec<LineString<f64>>) -> Geometry<f64> {
     match lines.len() {
         0 => empty_geom::<f64>(),
@@ -78,6 +88,8 @@ fn emit_lines(mut lines: Vec<LineString<f64>>) -> Geometry<f64> {
     }
 }
 
+/// The raw closed-ring emission turned them into a NotSimple multilinestring
+/// (fuzz-nightly crash 2026-09-18: two valid ~1e-15-area triangles).
 fn polygon_component_is_kept(p: &Polygon<f64>) -> bool {
     let ext = &p.exterior().0;
     if ext.len() < 4 || ext.iter().any(|c| !c.x.is_finite() || !c.y.is_finite()) {
@@ -183,6 +195,8 @@ pub(super) fn strip_degenerate(g: Geometry<f64>) -> Geometry<f64> {
                 if polygon_component_is_kept(&p) {
                     valid_polys.push(p);
                 } else {
+                    // NotSimple the moment two closed components shared a vertex
+                    // (fuzz-nightly crash 2026-09-18).
                     if let Some(l) = ring_demotion_candidate(&p.exterior().0) {
                         boundary_lines.push(l);
                     }
@@ -230,6 +244,9 @@ pub(super) fn enforce_ccw(mut ring: LineString<f64>) -> (LineString<f64>, usize,
     (ring, idx, reversed)
 }
 
+/// Variant of [`enforce_ccw`] with the extremal index already located by the fast-path
+/// gate's plausibility pass (2026-08-09): the O(n) `min_x_vertex` search is skipped,
+/// everything else is identical.
 pub(super) fn enforce_ccw_with_idx(
     mut ring: LineString<f64>,
     idx: usize,

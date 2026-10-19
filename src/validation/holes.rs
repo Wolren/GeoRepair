@@ -7,6 +7,8 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use geo::{Coord, LineString};
 
+/// Per-hole boundary check (crossing / exact touches / any-inside), shared by the
+/// serial and parallel per-hole phases.
 #[cfg(feature = "rstar")]
 fn per_hole_check(
     shell: &[Coord<f64>],
@@ -23,6 +25,7 @@ fn per_hole_check(
         return Some(GeometryValidationError::HoleOutsideShell);
     }
 
+    // (GEOS isValid=true; measured 2026-08-06).
     let hole_touches: Vec<Coord<f64>> = match tree {
         Some(t) => ring_touch_points(&hole.0[..], shell, t),
         None => hole
@@ -57,6 +60,7 @@ fn per_hole_check(
     None
 }
 
+/// Per-hole boundary check for non-rstar builds (identical semantics).
 #[cfg(not(feature = "rstar"))]
 fn per_hole_check(
     shell: &[Coord<f64>],
@@ -145,6 +149,8 @@ pub(crate) fn check_holes_valid(
             }
         }
 
+        // --- hole-cycle detection (GEOS PolygonRing::findHoleCycleLocation +
+        // scanForHoleCycle port, source-verified 2026-08-05)
         #[cfg(feature = "rstar")]
         let cycle = detect_hole_cycle(&rings, &bboxes, eps, shell_tree.as_ref());
         #[cfg(not(feature = "rstar"))]
@@ -167,7 +173,12 @@ pub(crate) fn check_holes_valid(
     errors
 }
 
+// Ring-touch graph helpers (GEOS PolygonRing / PolygonTopologyAnalyzer /
+// PolygonNodeTopology ports, source-verified against the GEOS clone at 24ec89dc3,
+// 2026-08-05).
 
+/// Candidate ring pairs (i < j) with overlapping bounding boxes, skipping rings below
+/// `min_ring` (0 includes the shell, 1 = holes only).
 pub(crate) fn overlap_pairs(bboxes: &[[f64; 4]], min_ring: usize) -> Vec<(usize, usize)> {
     let n = bboxes.len();
     if n <= 16 {
@@ -230,7 +241,8 @@ pub(crate) fn overlap_pairs(bboxes: &[[f64; 4]], min_ring: usize) -> Vec<(usize,
     }
 }
 
-/// Every boundary candidate lies within 1e-12 of pt.
+/// Every boundary candidate lies within 1e-12 of pt. The query box is the +x ray slab
+/// [pt.x, max_x] x [pt.y +/- 1e-12].
 #[cfg(feature = "rstar")]
 fn point_in_ring_exclusive_tree(
     pt: Coord<f64>,
