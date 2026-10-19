@@ -1,7 +1,3 @@
-//! GeoPackage (`.gpkg`) backend: OGC 12-128r17 subset via `rusqlite`.
-//!
-//! Writes a minimal conforming GeoPackage (wgs 84 / EPSG:4326) with a single
-//! `georepair` feature table.
 
 use alloc::string::String;
 use alloc::string::ToString;
@@ -52,10 +48,6 @@ pub fn load_gpkg(path: &str) -> Result<Vec<Geometry<f64>>, String> {
     Ok(out)
 }
 
-/// Strip the GeoPackage binary header (OGC 12-128r15, section 6.1) from a geometry
-/// blob, returning the embedded WKB. The header is `GP`, version, flags (bit 1 =
-/// envelope present, bits 2-3 = envelope type), and a 4-byte srs id, followed by an
-/// optional envelope and then the WKB.
 fn strip_gpkg_header(blob: &[u8]) -> Result<&[u8], String> {
     if blob.len() < 8 || blob[0] != b'G' || blob[1] != b'P' {
         return Ok(blob);
@@ -152,7 +144,6 @@ pub fn save_gpkg(path: &str, geoms: &[Geometry<f64>]) -> Result<(), String> {
     .map_err(|e| format!("{path}: geom cols: {e}"))?;
 
     {
-        // minutes instead of seconds (2026-08-06, qgis-export run).
         let tx = conn
             .transaction()
             .map_err(|e| format!("{path}: begin tx: {e}"))?;
@@ -187,8 +178,6 @@ fn quote(ident: &str) -> String {
     format!("\"{}\"", ident.replace('"', "\"\""))
 }
 
-/// Collect all coordinates from a geometry (polygons and lines only; points are
-/// included as single coordinates).
 fn coords_of(g: &Geometry<f64>) -> Vec<Coord<f64>> {
     let mut out = Vec::new();
     match g {

@@ -1,10 +1,5 @@
-//! ring validity: closure, self-intersection, orientation, points, duplicates
-//!
 //! Extracted from validation/core.rs on 2026-08-07 (file-size governance: core.rs was
-//! 2540 lines; the cap is 800). Content is verbatim - no behavior changes; sibling
-//! modules resolve shared items through the `crate::validation::core` facade.
-//!
-//! See validation/mod.rs for the module map.
+//! 2540 lines; the cap is 800).
 
 use crate::validation::core::*;
 use alloc::vec::Vec;
@@ -18,9 +13,6 @@ pub fn check_ring_validity(ring: &[Coord<f64>], is_exterior: bool) -> Vec<Geomet
     let mut errors = Vec::new();
 
     let interior_n = ring.len().saturating_sub(1);
-    // - four former full passes (measured 2026-08-08: the separate NaN + bbox +
-    //   repeated + extremal scans cost ~15-25 us) Error priority is preserved: NaN wins
-    //   regardless of position (matches the old separate first pass).
     let mut min_x = f64::MAX;
     let mut max_x = f64::MIN;
     let mut min_y = f64::MAX;
@@ -71,7 +63,6 @@ pub fn check_ring_validity(ring: &[Coord<f64>], is_exterior: bool) -> Vec<Geomet
     let n = interior_n;
     let scale = (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
     let eps = 1e-12 * scale;
-    // 00c11200 sibling → DegenerateExterior on a triangle GEOS validates .
     let x_scale = max_x.abs().max(min_x.abs()).max(1.0);
     let y_scale = max_y.abs().max(min_y.abs()).max(1.0);
     if (max_x - min_x).abs() < f64::EPSILON * x_scale
@@ -135,8 +126,6 @@ pub fn check_ring_validity(ring: &[Coord<f64>], is_exterior: bool) -> Vec<Geomet
                 let a1 = ring[i];
                 let a2 = ring[(i + 1) % n];
                 for j in i + 2..n {
-                    // share vertex 0 but may overlap collinearly beyond See the rstar
-                    // branch comment (differential fuzz 2026-08-03).
                     if padded_bbox_overlap(a1, a2, ring[j], ring[(j + 1) % n])
                         && check_edge_pair_intersection(ring, i, j, eps)
                     {
@@ -166,7 +155,6 @@ pub fn check_ring_validity(ring: &[Coord<f64>], is_exterior: bool) -> Vec<Geomet
         }
     }
 
-    // extremal search pass is gone (2026-08-08).
     if errors.is_empty() {
         let ccw = crate::util::robust_is_ccw_at(ring, min_idx);
         if is_exterior {
@@ -181,14 +169,9 @@ pub fn check_ring_validity(ring: &[Coord<f64>], is_exterior: bool) -> Vec<Geomet
     errors
 }
 
-/// Bit-mix for the pinch table's raw coordinate keys.
-///
 /// A coordinate that is an exact multiple of 2^m (any large-magnitude regular grid:
 /// projected-crs values, snapped data, synthetic 1e12-scale benches - 1e12 = 2^12 *
-/// 5^12) has all-zero low mantissa bits. The raw `(kx ^ ky.rotate_left(32))` hash
-/// collapsed every axis-aligned side of such a ring to a single bucket and the linear
-/// probe ran O(n^2) - measured 11.4 ms on an 8000-vertex 1e12 square vs 0.3 ms with the
-/// mix (stage probe 2026-10-08).
+/// 5^12) has all-zero low mantissa bits.
 pub(crate) fn pinch_key_hash(kx: u64, ky: u64) -> u64 {
     let ax = kx.wrapping_mul(0x9E3779B97F4A7C15);
     let ay = ky.wrapping_mul(0xC2B2AE3D27D4EB4F);
@@ -196,11 +179,9 @@ pub(crate) fn pinch_key_hash(kx: u64, ky: u64) -> u64 {
 }
 
 /// First non-adjacent duplicate vertex in a ring's interior coords (normalized -0.0
-/// keys), or None. Shared by the exit validator's pinch classification and the
-/// fast-path gate's duplicate scan - the gate must certify exactly what the validator
-/// accepts (2026-08-07 gate rule). Larger rings use a custom open-addressing table
-/// (bit-exact keys, no hasher - the FxHashMap was measured ~15 us slower on a
-/// 5000-vertex ring, 2026-08-08).
+/// keys), or None. Larger rings use a custom open-addressing table (bit-exact keys, no
+/// hasher - the FxHashMap was measured ~15 us slower on a 5000-vertex ring,
+/// 2026-08-08).
 pub(crate) fn first_pinch_dup(coords: &[Coord<f64>]) -> Option<usize> {
     let n = coords.len();
     if n <= 32 {
@@ -304,11 +285,10 @@ pub(crate) fn point_on_segment(pt: Coord<f64>, a: Coord<f64>, b: Coord<f64>, eps
     pt.x >= min_x && pt.x <= max_x && pt.y >= min_y && pt.y <= max_y
 }
 
-/// exact point-on-segment (GEOS parity). Uses the robust orient2d so that
-/// exactly-collinear representable points count (the naive cross product can round to
-/// 1e-16 for them), but near-miss vertices do not touch: the tolerance-based
-/// point_on_segment fabricated touches from near-miss vertices in real cadastral giants
-/// (GEOS isValid=true on all 12 sampled, measured 2026-08-06).
+/// Uses the robust orient2d so that exactly-collinear representable points count (the
+/// naive cross product can round to 1e-16 for them). Near-miss vertices do not touch:
+/// the tolerance-based point_on_segment fabricated touches from near-miss vertices in
+/// real cadastral giants (GEOS isValid=true on all 12 sampled, measured 2026-08-06).
 pub(crate) fn point_on_segment_exact(pt: Coord<f64>, a: Coord<f64>, b: Coord<f64>) -> bool {
     if crate::orient::orient2d(a, b, pt) != 0.0 {
         return false;
@@ -369,9 +349,6 @@ pub(crate) fn ring_dup_fingerprint(ring: &[Coord<f64>]) -> (usize, u64) {
     (ring.len(), h_fwd ^ h_rev)
 }
 
-/// Check whether two rings (with closing point) are duplicates starting at a different
-/// vertex. Both rings must have the same length and contain the same sequence of
-/// coordinates up to a cyclic rotation.
 pub(crate) fn is_rotated_duplicate(a: &[Coord<f64>], b: &[Coord<f64>]) -> bool {
     if a.len() != b.len() || a.len() < 2 {
         return false;

@@ -69,8 +69,6 @@ impl MakeValid for MultiPolygon<f64> {
             if is_valid_with_geo(&Geometry::MultiPolygon(mp.clone())) {
                 return enforce_ogc_winding(Geometry::MultiPolygon(mp)).0;
             }
-            // entirely (bench gate: `overlap mp 100sh` paid for re-validating an
-            // already-valid union).
             let orig_shells = mp.0.clone();
             let filtered = crate::structure::merge::merge_shells(mp.0);
             if filtered.0.is_empty() {
@@ -107,7 +105,6 @@ impl MakeValid for MultiPolygon<f64> {
                         }
                     }
                     if certified {
-                        // `re_valid` already ruled out nesting and invalid
                         best.expect("certified implies a retry result")
                     } else {
                         let unioned = best
@@ -148,11 +145,6 @@ impl MakeValid for MultiPolygon<f64> {
 }
 
 
-/// Final validity gate for the MultiPolygon pipeline. `merge_shells` turns a fully
-/// contained component into a parent hole, but fingerprints only rings the parent
-/// already had. The merge then yields intersecting interiors. The validator rejects
-/// that as `DisconnectedInteriorRing`. Valid but thin beats invalid: the contract is
-/// `out.validate().valid`. Seeds `3111ecaf` and `edf6e65b`.
 fn validity_gate(g: Geometry<f64>, orig: Vec<Polygon<f64>>) -> Geometry<f64> {
     use geo::Area;
     if is_valid_with_geo(&g) {
@@ -194,8 +186,6 @@ fn validity_gate(g: Geometry<f64>, orig: Vec<Polygon<f64>>) -> Geometry<f64> {
     }
 }
 
-/// Drop components that are invalid on their own; `None` when nothing usable is left,
-/// so the caller can try the next candidate instead of returning empty.
 #[cfg(feature = "arrange")]
 fn keep_valid_components(mp: MultiPolygon<f64>) -> Option<Geometry<f64>> {
     let kept: Vec<Polygon<f64>> =
@@ -316,8 +306,6 @@ pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
             if ext_j.len() < 4 {
                 return false;
             }
-            // - checking only the exterior ring drops it (measured: square-with-hole +
-            //   island → island 64 lost; GEOS keeps it).
             let in_ext = pt_candidates
                 .iter()
                 .any(|&pt| point_in_ring_exclusive_even_odd(pt, ext_j));
@@ -350,10 +338,6 @@ pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
         return enforce_ogc_winding(Geometry::Polygon(kept.into_iter().next().unwrap())).0;
     }
     let mp_kept = MultiPolygon::new(kept);
-    // (edge-sharing components / nested holes); re-polygonizing valid shells re-expands
-    // the whole face decomposition (measured: 5 shells → 9 faces). SelfIntersection
-    // (measured: 3 valid comps → 4 comps with SI on seed a27dfba6) - hence
-    // `mp_looks_valid`
     let geo_valid = mp_looks_valid(&mp_kept);
     if geo_valid {
         return enforce_ogc_winding(Geometry::MultiPolygon(mp_kept)).0;
@@ -364,8 +348,6 @@ pub fn drop_nested_components(mp: MultiPolygon<f64>) -> Geometry<f64> {
             return strip_degenerate(g);
         }
     }
-    // Polygonizer failed - filter out components with PinchPoint, RepeatedPoint, or
-    // other remaining errors.
     let valid: Vec<Polygon<f64>> = mp_kept
         .0
         .into_iter()

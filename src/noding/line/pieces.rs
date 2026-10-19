@@ -1,4 +1,3 @@
-//! Piece construction, dedup and reconnection for the lean line noder.
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -74,7 +73,6 @@ impl<'a> super::LineNoder<'a> {
             .unwrap_or(p)
     }
 
-    // Phase 4: clustering at the validator's eps + per-segment splits
 
     pub(super) fn cluster_and_split(&mut self) {
         let n_anchors = self.coords.len();
@@ -167,8 +165,6 @@ impl<'a> super::LineNoder<'a> {
                 has[r] = true;
             }
         }
-        // Node -> sorted position: the pre-sort index n_anchors + k is invalid once the
-        // sort reorders the points.
         let mut node_pos: Vec<usize> = vec![0; self.nodes.len()];
         for (i, &(_, _, tag)) in pts.iter().enumerate() {
             if tag != 0 {
@@ -189,7 +185,6 @@ impl<'a> super::LineNoder<'a> {
         }
     }
 
-    // Phase 5: pieces
 
     /// Piece construction for the pure-collinear fast path: identical to `build_pieces`
     /// but endpoints are used as-is (the 1-D split points are the other members'

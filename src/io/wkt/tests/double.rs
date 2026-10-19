@@ -198,7 +198,6 @@ fn double_roundtrip_gc_empty() {
     assert_eq!(geom, parsed);
 }
 
-// read_f64 edge cases
 #[test]
 fn parse_nan() {
     let geom = read_wkt("POINT (NaN NaN)").unwrap();
@@ -514,8 +513,6 @@ fn malformed_wkt_rejected() {
 
 #[test]
 fn degenerate_ring_parses_but_flagged_by_validator() {
-    // A 2-coordinate ring is structurally parsed (Polygon::new auto-closes), then the
-    // validator flags
     let g = read_wkt("POLYGON ((0 0, 1 1))").unwrap();
     assert!(!crate::validation::validate(&g).valid);
 }

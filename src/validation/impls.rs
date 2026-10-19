@@ -39,7 +39,6 @@ impl GeoValidation for MultiPoint<f64> {
                 errors.extend(r.errors);
             }
         }
-        // OGC Simple Features: MultiPoint must not contain duplicate points
         if self.0.len() > 1 {
             let mut seen: rustc_hash::FxHashSet<(u64, u64)> =
                 rustc_hash::FxHashSet::with_capacity_and_hasher(self.0.len(), Default::default());
@@ -98,7 +97,6 @@ impl GeoValidation for LineString<f64> {
                 return ValidationResult::invalid(vec![GeometryValidationError::RepeatedPoint]);
             }
         }
-        // OGC Simple Features: LineString must be simple (no self-intersection)
         if check_linestring_self_intersection(coords) {
             return ValidationResult::invalid(vec![GeometryValidationError::NotSimple]);
         }
@@ -106,9 +104,6 @@ impl GeoValidation for LineString<f64> {
     }
 }
 
-/// Check a non-closed LineString for self-intersecting segments. Adjacent segments may
-/// touch only at their shared vertex. The first and last segments of a closed line may
-/// touch only at the closure vertex.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool {
     let n = coords.len() - 1;
@@ -130,9 +125,8 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
         let sp = (max_x - min_x).abs().max((max_y - min_y).abs());
         (sp, sp.max(1.0))
     };
-    // O(L^2) orient product underflows to 0, so both predicates collapse and an
-    // exactly-simple line falsely reports NotSimple (wkb seed 146242f1). The scaled
-    // span lands in [0.5, 4), so the recursion cannot re-trigger.
+    // Both predicates collapse and an exactly-simple line falsely reports NotSimple
+    // (wkb seed 146242f1). The scaled span lands in [0.5, 4).
     if raw_span > 0.0 && raw_span < 1e-100 {
         let mut k = (-(raw_span.log2())).ceil() as i32;
         let mut scaled = coords.to_vec();
@@ -184,8 +178,6 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
             return true;
         }
         if ambiguous {
-            // non-simple ("interior intersection at vertices", GEOS TestSimple
-            // linestring (20 80, 80 20, 80 80, 140 60, 80 20, 160 20)).
             if a1 == b1 || a1 == b2 || a2 == b1 || a2 == b2 {
                 return true;
             }
@@ -207,8 +199,6 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
 
     // The former flat O(n) hash pass cost 5-9 us on every 500-vertex
 
-    // bulk_load costs ~1 us/item (measured 2026-08-07: 948 us to build the tree for a
-    // 500-vertex line)
     match crate::validation::sweep::sweep_ring_self_intersects(coords, eps, true) {
         Some(true) => true,
         Some(false) => false,
@@ -271,8 +261,6 @@ pub(crate) fn check_linestring_self_intersection(coords: &[Coord<f64>]) -> bool 
     }
 }
 
-/// Full segment-intersection predicate: proper crossing, collinear positive- length
-/// overlap, or a vertex of one segment lying on the other.
 pub(crate) fn segments_intersect_any(
     a1: Coord<f64>,
     a2: Coord<f64>,
@@ -319,8 +307,6 @@ pub(crate) fn segments_intersect_any(
     false
 }
 
-/// True if both segments are collinear and overlap over a positive-length interval
-/// (endpoint-only touching is not an overlap).
 pub(crate) fn segments_collinear_overlap(
     a1: Coord<f64>,
     a2: Coord<f64>,
@@ -379,7 +365,6 @@ pub(crate) fn check_line_components_intersect(
         return false;
     }
 
-    // multilinestring((0 0,1 0,1 1,0 0),(0 0,1 1)) = non-simple.
     {
         let open_ends = |ls: &[Coord<f64>]| -> (bool, Coord<f64>, Coord<f64>) {
             let closed = ls.len() > 1 && ls[0] == ls[ls.len() - 1];
@@ -482,7 +467,6 @@ impl GeoValidation for MultiLineString<f64> {
                 errors.extend(r.errors);
             }
         }
-        // OGC Simple Features: MultiLineString must not contain duplicate linestrings
         if self.0.len() > 1 {
             let mut seen: rustc_hash::FxHashSet<Vec<(u64, u64)>> =
                 rustc_hash::FxHashSet::with_capacity_and_hasher(self.0.len(), Default::default());
@@ -573,26 +557,15 @@ impl GeoValidation for Triangle<f64> {
 }
 
 
-/// Check whether a geometry is OGC-valid.
-///
-/// Convenience wrapper around [`GeoValidation::is_valid`] that does not require
-/// importing the trait.
 pub fn is_valid(geom: &geo::Geometry<f64>) -> bool {
     GeoValidation::is_valid(geom)
 }
 
-/// Validate a geometry, returning all OGC violations found.
-///
-/// Convenience wrapper around [`GeoValidation::validate`].
 pub fn validate(geom: &geo::Geometry<f64>) -> ValidationResult {
     GeoValidation::validate(geom)
 }
 
-/// Validate and return a human-readable description of violations.
-///
 /// Returns `"Valid Geometry"` when the geometry passes all checks.
-///
-/// Convenience wrapper around [`GeoValidation::validate_reason`].
 pub fn validate_reason(geom: &geo::Geometry<f64>) -> String {
     GeoValidation::validate_reason(geom)
 }

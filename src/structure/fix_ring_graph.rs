@@ -84,19 +84,11 @@ pub fn build_graph(lines: &[Line<f64>]) -> Graph {
     }
 }
 
-/// --------------------------------------------------------------------------- Face
-/// extraction - faithful port of GEOS PolygonizeGraph::getEdgeRings (computeNextCWEdges
-/// + findLabeledEdgeRings + convertMaximalToMinimalEdgeRings, then findEdgeRing).
-///   Without this, faces merge across shared edges (measured: 7 faces instead of the
-///   correct 10 on a 9-vertex multi-crossing ring).
-///   ---------------------------------------------------------------------------
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn extract_all_faces_geos(graph: &Graph) -> Option<Vec<Vec<(usize, usize)>>> {
     let n_edges = graph.edges.len();
     let mut next: Vec<usize> = vec![0; n_edges * 2];
 
-    // Step 1: computeNextCWEdges (maximal rings) Edges around each node are stored in
-    // ccw order in sorted_adj (atan2 sort).
     for (v, neighbors) in graph.sorted_adj.iter().enumerate() {
         let deg = neighbors.len();
         if deg == 0 {
@@ -108,7 +100,6 @@ pub fn extract_all_faces_geos(graph: &Graph) -> Option<Vec<Vec<(usize, usize)>>>
             next[rev] = fwd;
             continue;
         }
-        // For i, prev = (i+deg-1)%deg.
         for i in 0..deg {
             let (_, e_curr) = neighbors[i];
             let (_, e_prev) = neighbors[(i + deg - 1) % deg];
@@ -118,7 +109,6 @@ pub fn extract_all_faces_geos(graph: &Graph) -> Option<Vec<Vec<(usize, usize)>>>
         }
     }
 
-    // Step 2: findLabeledEdgeRings
     let mut label: Vec<i64> = vec![-1; n_edges * 2];
     let mut next_label: i64 = 1;
     for start in 0..n_edges * 2 {
@@ -145,8 +135,6 @@ pub fn extract_all_faces_geos(graph: &Graph) -> Option<Vec<Vec<(usize, usize)>>>
         next_label += 1;
     }
 
-    // Step 3: convertMaximalToMinimalEdgeRings (nodes with degree > 1 within that
-    // label) via computeNextCCWEdges.
     let mut ccw_next: Vec<usize> = next.clone();
     for v in 0..graph.verts.len() {
         let neighbors = &graph.sorted_adj[v];
@@ -201,7 +189,6 @@ pub fn extract_all_faces_geos(graph: &Graph) -> Option<Vec<Vec<(usize, usize)>>>
         }
     }
 
-    // Step 4: findEdgeRing: walk minimal ccw rings
     let mut used = vec![false; n_edges * 2];
     let mut faces: Vec<Vec<(usize, usize)>> = Vec::new();
     for start in 0..n_edges * 2 {
@@ -404,9 +391,6 @@ fn find_next_edge(
     best.map(|(ei, _, to)| (ei, to))
 }
 
-/// --------------------------------------------------------------------------- Split
-/// face at repeated vertices (pinch points) into simple cycles
-/// ---------------------------------------------------------------------------
 pub(crate) fn split_face_at_pinch_points(
     face: &[(usize, usize)],
     edges: &[(usize, usize)],
@@ -489,12 +473,8 @@ fn split_face_at_pinch_points_depth(
 
     vec![face.to_vec()]
 }
-/// Face labeling by even-odd winding parity, equivalent to geos MakeValidPoly. The geos
-/// BuildArea and symdiff loop selects faces whose winding number against the input ring
-/// is odd. A bfs toggle from the exterior is wrong for multi-crossing rings. Beyond a
-/// second crossing, a face can be reachable through an odd edge count but still have
-/// even winding. Measured: 5 of 9 faces kept, geos area 9931.89 against bfs interior
-/// 11956. Winding parity is exact: the winding number of any interior probe point.
+/// A bfs toggle from the exterior is wrong for multi-crossing rings. Measured: 5 of 9
+/// faces kept, geos area 9931.89 against bfs interior
 pub fn label_interior_faces(
     _edges: &[Line<f64>],
     verts: &[Coord<f64>],
@@ -513,8 +493,6 @@ pub fn label_interior_faces(
     Some(interior)
 }
 
-/// Interior probe point for a face: midpoint of the first edge, nudged perpendicular
-/// toward the face interior.
 fn face_probe_point(
     face: &[(usize, usize)],
     verts: &[Coord<f64>],
@@ -523,7 +501,6 @@ fn face_probe_point(
     if face.len() < 3 {
         return None;
     }
-    // First edge of the face: (v0 -> v1) where v1 = to0 is the traversal destination.
     let (e0, to0) = face[0];
     let (from0, to1) = graph_edges[e0];
     let v0 = if to1 == to0 { verts[from0] } else { verts[to1] };
@@ -532,7 +509,6 @@ fn face_probe_point(
         x: (v0.x + v1.x) * 0.5,
         y: (v0.y + v1.y) * 0.5,
     };
-    // into the ring (winding 1 → mislabeled interior, measured).
     let scale = (mid.x.abs().max(mid.y.abs())).max(1.0);
     let eps = 1e-9 * scale;
     let dx = v1.x - v0.x;

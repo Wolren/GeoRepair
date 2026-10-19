@@ -1,12 +1,5 @@
-//! cumulative per-stage timing counters and the profile printer
-//!
-//! Extracted from structure/mod.rs on 2026-08-07 (file-size governance). Content is
-//! verbatim - no behavior changes; items are re-exported by structure/mod.rs so
-//! `crate::structure::X` paths keep resolving.
 
 use ::core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-/// Enables the per-stage clocks; they are off otherwise so the default hot path pays
-/// nothing.
 pub static PROFILE_ON: AtomicBool = AtomicBool::new(false);
 pub static PROFILE_FP_NS: AtomicU64 = AtomicU64::new(0);
 pub static PROFILE_SR_NS: AtomicU64 = AtomicU64::new(0);

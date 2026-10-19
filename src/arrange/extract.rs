@@ -146,7 +146,6 @@ mod tests {
 
     #[test]
     fn test_split_ring_at_pinch_points_one_pinch() {
-        // A figure-8 shape with a single pinch point
         let coords = vec![
             Coord { x: 0.0, y: 0.0 },
             Coord { x: 1.0, y: 1.0 },

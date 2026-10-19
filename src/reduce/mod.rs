@@ -1,7 +1,5 @@
-//! Geometry precision reduction with topology preservation.
-//!
-//! Supports multiple precision models and automatic retry with progressively coarser
-//! grids.
+//! Geometry precision reduction with topology preservation. Supports multiple precision
+//! models and automatic retry with progressively coarser grids.
 
 use alloc::vec::Vec;
 use geo::{
@@ -17,37 +15,24 @@ use crate::validation::GeoValidation;
 /// Controls how coordinates are rounded to a precision grid.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum RoundingMode {
-    /// Round to nearest grid point (standard).
-    ///
     /// The usual rounding behaviour.
     Round,
-    /// Always floor (for conservative envelope expansions).
-    ///
-    /// Never rounds upward.
     Floor,
-    /// Always ceil.
-    ///
-    /// Never rounds downward.
     Ceil,
 }
 
 /// Describes a fixed-precision grid for coordinate reduction.
-///
-/// `scale` is the grid resolution (e.g., `1e-8` snaps to 8 decimal places). The grid is
-/// always origin-centered.
 #[derive(Clone, Copy, Debug)]
 pub struct PrecisionModel {
-    /// Grid resolution: coordinate values are snapped to multiples of this. Smaller
-    /// values give finer precision (e.g. `1e-8` ≈ 1 cm at geographic scale).
+    /// Smaller values give finer precision (e.g. `1e-8` ≈ 1 cm at geographic scale).
     pub scale: f64,
     /// Rounding mode: standard round-to-nearest, floor, or ceil.
     pub mode: RoundingMode,
 }
 
 impl PrecisionModel {
-    /// Create a new precision model with the given grid scale.
-    ///
-    /// Uses [`RoundingMode::Round`] (standard rounding to nearest).
+    /// Create a new precision model with the given grid scale. Uses
+    /// [`RoundingMode::Round`] (standard rounding to nearest).
     pub fn new(scale: f64) -> Self {
         Self {
             scale,
@@ -98,10 +83,8 @@ impl PrecisionModel {
 
 
 /// Reduces geometry precision with topology preservation.
-///
 /// 1. Snap all coordinates to the precision grid
-/// 2. Validate the result
-/// 3. If invalid, run MakeValid to repair topology issues
+/// 2. If invalid, run MakeValid to repair topology issues
 pub struct GeometryPrecisionReducer {
     model: PrecisionModel,
     config: MakeValidConfig,
@@ -243,10 +226,8 @@ impl GeometryPrecisionReducer {
 }
 
 
-/// Try to reduce precision at progressively coarser grids until success.
-///
-/// Starts at `1e-10` and degrades by factor 100 each step until `1e-4`. Returns the
-/// first valid result, or the last (possibly invalid) result.
+/// Try to reduce precision at progressively coarser grids until success. Starts at
+/// `1e-10` and degrades by factor 100 each step until `1e-4`.
 pub fn reduce_with_retry(geom: &Geometry<f64>, config: &MakeValidConfig) -> Geometry<f64> {
     let scales = [1e-10, 1e-8, 1e-6, 1e-4];
     for &scale in &scales {

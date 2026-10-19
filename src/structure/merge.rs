@@ -2,10 +2,6 @@ use alloc::vec::Vec;
 use geo::{Area, Coord, LineString, MultiPolygon, Polygon, Winding};
 use log::warn;
 
-/// Merge overlapping shells with an even-parent filter to prevent NestedHoles. When
-/// shells are fully nested, unary_union makes MultiPolygon components with a hole that
-/// exactly matches the next component. BuildArea even-parent rule: sort shells by area,
-/// count containing larger shells, and keep only shells with an even parent count.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
     if shells.is_empty() {
@@ -49,8 +45,6 @@ pub fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
     with_area.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(core::cmp::Ordering::Equal));
 
     let n = with_area.len();
-    // not dropped -dropping loses the covered area (measured: nested squares → 144, not
-    // 400). parent[i] = immediate parent
     let mut parent_count: Vec<usize> = vec![0; n];
     let mut parent: Vec<Option<usize>> = vec![None; n];
     for i in 0..n {
@@ -118,10 +112,6 @@ pub fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
         return MultiPolygon::new(kept);
     }
 
-    // `is_fill_top` assertion on degenerate shell sets (measured seed: shell
-    // [(54.36,0),(0,0),(18.55,82.91),(-48.92,33.44)] + 6-vert hole). (measured:
-    // square-with-hole ∪ island-inside-hole → 144, island 64 lost; GEOS returns
-    // multipolygon(square-with-hole, island) = 400-64).
     let mp = MultiPolygon::new(kept);
     let before: f64 = mp.0.iter().map(|p| p.unsigned_area()).sum();
     let eps = 1e-9;
@@ -155,12 +145,7 @@ pub fn merge_shells(shells: Vec<Polygon<f64>>) -> MultiPolygon<f64> {
     unioned.unwrap_or(mp)
 }
 
-/// Winding-insensitive probe: are the filtered shells already valid? It guards area.
-/// validation::is_valid cannot be trusted not to panic. The geo relate engine carries a
-/// debug_assert false topology conflict at geo 0.33.1 edge_end_bundle_star.rs:116. The
-/// assertion escaped as a fuzz crash. make_valid panicked on wkb in mode Auto,
-/// fuzz-nightly run 35836311392. It was slow: 30 to 45 s, where mp_looks_valid takes
-/// ~100 ms.
+/// It guards area. validation::is_valid cannot be trusted not to panic.
 #[cfg(feature = "std")]
 fn shells_look_valid(mp: &MultiPolygon<f64>) -> bool {
     std::panic::catch_unwind(core::panic::AssertUnwindSafe(|| {
@@ -175,8 +160,7 @@ fn shells_look_valid(mp: &MultiPolygon<f64>) -> bool {
 }
 
 /// True if every vertex of `ring` lies strictly inside `poly` (exterior exclusive, not
-/// inside any hole of `poly`). Used by the even-parent filter: a shell is only "nested"
-/// when fully contained - partial overlaps must be kept so unary_union can merge them.
+/// inside any hole of `poly`).
 fn ring_fully_inside(ring: &[Coord<f64>], poly: &Polygon<f64>) -> bool {
     if ring.len() < 4 {
         return false;
@@ -186,14 +170,11 @@ fn ring_fully_inside(ring: &[Coord<f64>], poly: &Polygon<f64>) -> bool {
             return false;
         }
     }
-    // hole loses its area (measured: general_TestValid island sharing hole-ring
-    // vertices -> -3.75% even-odd area).
     if let Some(probe) = crate::util::ring_interior_probe(ring)
         && poly
             .interiors()
             .iter()
             .any(|h| crate::util::point_in_ring_exclusive_even_odd(probe, &h.0))
-        // (measured: 300 -> 400 even-odd area).
         && !poly
             .interiors()
             .iter()
@@ -204,9 +185,6 @@ fn ring_fully_inside(ring: &[Coord<f64>], poly: &Polygon<f64>) -> bool {
     true
 }
 
-/// Remove shells that appear more than once with the same coordinate set (as unordered
-/// sets - winding/reversal/rotation-insensitive). Duplicate shells cancel: hole==shell
-/// must yield empty, duplicate MP components must not become DuplicatedRings.
 fn cancel_identical_shells(shells: Vec<Polygon<f64>>) -> Vec<Polygon<f64>> {
     type ShellFingerprint = (Vec<(u64, u64)>, Polygon<f64>);
     let mut fingerprints: Vec<ShellFingerprint> = shells
@@ -382,8 +360,6 @@ mod tests {
         );
         let result = merge_shells(vec![l0, l1, l2]);
         assert!(result.is_valid(), "Even-parent should handle deep nesting");
-        // L0 (0 parents) kept, L1 (1 parent) dropped, L2 (2 parents) kept but union
-        // handles it
         assert!(!result.0.is_empty());
     }
 

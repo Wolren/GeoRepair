@@ -1,7 +1,5 @@
 //! Tolerance-based repeated-point removal with GEOS RepeatedPointRemover semantics
-//! (cad26ad98). 2D only. - Sequence: keep the first coordinate, then each coordinate
-//! outside tolerance of the last kept. Tolerance 0 removes exact consecutive
-//! duplicates. - Geometry: skip non-finite coordinates, including leading ones.
+//! (cad26ad98). 2D only. - Sequence: keep the first coordinate.
 
 use alloc::vec::Vec;
 use geo::{Coord, Geometry, HasDimensions, LineString, MultiLineString, MultiPolygon, Polygon};
@@ -91,8 +89,7 @@ pub fn remove_repeated_points(geom: &Geometry<f64>, tolerance: f64) -> Geometry<
     }
 }
 
-/// GEOS `RepeatedPointCoordinateOperation::edit` (with the invalid-coordinate filter
-/// and end repair). Returns `None` when the component collapses.
+/// Returns `None` when the component collapses.
 fn edit_sequence(coords: &[Coord<f64>], min_len: usize, tolerance: f64) -> Option<Vec<Coord<f64>>> {
     if coords.len() <= min_len {
         return Some(coords.to_vec());

@@ -1,7 +1,3 @@
-//! Bridge to the geo Validation trait and georust vocabulary. Best-effort: geo_repair
-//! checks 18 ogc rules, geo enums cover a subset, and geo carries payloads that
-//! geo_repair errors omit. Classes with no counterpart, such as closure, pinch or
-//! nested holes, stay visible via crate::validate api.
 
 use alloc::boxed::Box;
 use geo::Geometry;
@@ -12,9 +8,6 @@ use geo::algorithm::validation::{
 
 use super::{GeometryValidationError, validate};
 
-/// Adapter exposing geo_repair's validation engine through geo's [`Validation`] trait.
-///
-///
 /// ```rust
 /// # use geo::{Geometry, Polygon, LineString};
 /// # let poly = Polygon::new(LineString::from(vec![
@@ -46,13 +39,6 @@ impl Validation for GeoRepairValidation<'_> {
     }
 }
 
-/// Best-effort mapping of one geo_repair validation error into geo's
-/// [`InvalidGeometry`] taxonomy for the given geometry.
-///
-/// Returns `None` for error classes with no geo counterpart (geo does not model ring
-/// closure, pinch points, nested holes, orientation, collinearity, or duplicates) and
-/// for geometry types geo models with a different shape (multi-geometries, collections,
-/// rect, triangle).
 pub fn map_geo_invalid(
     geometry: &Geometry<f64>,
     err: &GeometryValidationError,
@@ -141,15 +127,13 @@ mod tests {
             InvalidGeometry::InvalidPolygon(InvalidPolygon::SelfIntersection(RingRole::Exterior))
         ));
 
-        // check_validation mirrors the same single error.
         assert!(adapter.check_validation().is_err());
     }
 
     #[test]
     fn stricter_than_geo_collinear_sliver() {
         // 5e-14 apart (about 28 ulps at this scale) - genuinely separated,
-        // geometrically valid, and GEOS accepts it. `32 * epsilon * L^2` collinear gate
-        // swallowed near-parallel pairs
+        // geometrically valid, and GEOS accepts it.
         let poly = Polygon::new(
             LineString::from(vec![
                 (0.0, 0.0),
@@ -177,7 +161,6 @@ mod tests {
 
     #[test]
     fn flags_true_t_junction_that_geo_accepts() {
-        // geo_repair flags SelfIntersection (GEOS IsValidOp Test 22 also rejects it).
         let poly = Polygon::new(
             LineString::from(vec![
                 (0.0, 0.0),

@@ -1,15 +1,7 @@
-//! geo-repair-cli: batch validate and repair GIS geometry files.
-//!
-//!
-//!
 //! ```text
 //!   geo-repair-cli <input> [output] [--method auto|structure|arrange]
 //!                  [--jobs N] [--validate-only] [--json]
 //! ```
-//!
-//!
-//! Exit codes: 0 success, 1 one or more invalid geometries found in --validate-only
-//! mode, 2 usage or I/O error.
 
 use std::time::Instant;
 
@@ -151,8 +143,6 @@ fn main() {
     }
 }
 
-/// Repair a mixed batch: polygons go through the parallel owned batch path (zero-copy
-/// passthrough for valid inputs), other geometry types are repaired individually.
 fn repair_batch(
     geoms: Vec<Geometry<f64>>,
     config: &MakeValidConfig,
@@ -282,8 +272,6 @@ fn save_output(path: &str, geoms: &[Geometry<f64>]) -> Result<(), String> {
             }
             std::fs::write(path, out).map_err(|e| format!("cannot write {path}: {e}"))
         }
-        // gpkg save needs the backend (absent on wasm32 / without io-gpkg); the
-        // fallback arm reports the format as unsupported there.
         #[cfg(all(feature = "io-gpkg", not(target_arch = "wasm32")))]
         "gpkg" => geo_repair::io::gpkg::save_gpkg(path, geoms),
         other => Err(format!(

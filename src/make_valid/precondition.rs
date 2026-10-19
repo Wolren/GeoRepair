@@ -1,8 +1,6 @@
 //! Bit-exact preconditioning for uniform input that the snap guard sends to cdt. The
-//! transform is exact in ieee f64, with zero rounding. The guard used max * 1e8 > 2^53.
-//! Mixed input outside the snap grid fails precondition::try_new and keeps cdt. Fuzz
-//! class, 2026-08-03. Measured 2026-09-18: large coord 1e12 readme rows ran at 0.08 to
-//! 0.12x of geos.
+//! guard used max * 1e8 > 2^53. Measured 2026-09-18: large coord 1e12 readme rows ran
+//! at 0.08 to 0.12x of geos.
 
 use crate::core::{MakeValidConfig, SNAP_SCALE};
 use alloc::vec::Vec;
@@ -16,8 +14,6 @@ fn pow2(exp: i32) -> Option<f64> {
     Some(f64::from_bits(((exp + 1023) as u64) << 52))
 }
 
-/// `floor(log2(x))` for finite `x > 0` without std math (no_std path). Subnormal inputs
-/// clamp to -1023; callers reject those via `pow2`.
 fn exp2_floor(x: f64) -> i32 {
     let e = ((x.to_bits() >> 52) & 0x7ff) as i32;
     if e == 0 { -1023 } else { e - 1023 }
@@ -32,10 +28,6 @@ pub(crate) struct Precondition {
 }
 
 impl Precondition {
-    /// Build a transform for `poly` and the transformed polygon itself when (a) the
-    /// snap guard fires on the original polygon (representable input never needs or
-    /// gets a transform - a no-op transform would recurse forever), (b) the translation
-    /// and scaling are exact for
     /// every coordinate, and (c) the transformed polygon satisfies the
     /// guard's two representability inequalities.
     pub(crate) fn try_new(poly: &Polygon<f64>) -> Option<(Self, Polygon<f64>)> {
@@ -117,7 +109,6 @@ impl Precondition {
         for h in poly.interiors() {
             holes.push(map_ring(h)?);
         }
-        // the snap grid reject the transform and keep the cdt route.
         if max_abs * SNAP_SCALE > (1u64 << 53) as f64 {
             return None;
         }
@@ -167,8 +158,7 @@ impl Precondition {
     }
 }
 
-/// Bit-exact preconditioning entry. The gate sub-ulp checks are absolute, so a
-/// certificate cannot cross the scale change.
+/// Bit-exact preconditioning entry.
 #[cfg(feature = "structure")]
 pub(crate) fn precondition_fix(
     poly: &Polygon<f64>,
@@ -176,8 +166,6 @@ pub(crate) fn precondition_fix(
 ) -> Option<crate::structure::FixOutcome> {
     use crate::structure::FixOutcome;
     let (pre, tp) = Precondition::try_new(poly)?;
-    // `tp` satisfies the guard by construction (try_new checked it), so the recursive
-    // fix cannot re-enter preconditioning.
     match crate::structure::fix_polygon_owned(tp, config, None) {
         FixOutcome::Fast(g, _, _, _) | FixOutcome::Repaired(g) => {
             Some(FixOutcome::Repaired(pre.inverse_geometry(g)))
@@ -212,7 +200,6 @@ mod tests {
 
     #[test]
     fn accepts_uniform_small_magnitude() {
-        // the small end fires the guard (min_abs * 1e8 < 0.5)
         let p = circle(64, 100.0, 1e-12, 0.0);
         assert!(
             Precondition::try_new(&p).is_some(),

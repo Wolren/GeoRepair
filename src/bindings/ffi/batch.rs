@@ -1,4 +1,3 @@
-//! parallel batch API (extracted from bindings/ffi.rs 2026-08-07; verbatim).
 
 use super::types::*;
 use super::util::*;
@@ -8,9 +7,6 @@ use alloc::vec::Vec;
 use geo::Geometry;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-/// Repair an array of WKB geometries in one call. A nonzero parallel enables the rayon
-/// batch when the crate has the parallel feature (sequential otherwise). Free the
-/// returned GeoRepairBatchResult with super::geo_repair_free_batch_result.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_make_valid_batch(
     inputs: *const GeoRepairWkbBuffer,
@@ -33,8 +29,6 @@ pub unsafe extern "C" fn geo_repair_make_valid_batch(
             #[cfg(feature = "parallel")]
             {
                 use rayon::prelude::*;
-                // GeoRepairWkbBuffer holds raw pointers (!Send/!Sync) so the raw slice
-                // cannot enter a rayon closure directly; GeoRepairResult is also !Send
                 let parsed: Vec<Result<Geometry<f64>, GeoRepairErrorCode>> = slice
                     .iter()
                     .map(|buf| geometry_from_wkb(buf.data, buf.len))

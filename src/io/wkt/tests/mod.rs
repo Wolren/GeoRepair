@@ -1,5 +1,3 @@
-//! wkt test battery (split from tests.rs 2026-08-07 for file-size governance; content
-//! verbatim).
 
 #[cfg(test)]
 use super::*;
@@ -236,7 +234,6 @@ fn empty_input_rejected() {
     assert!(read_wkt("   ").is_err());
 }
 
-/// Roundtrip all geometry types against the wkt crate to verify equivalence.
 #[test]
 fn roundtrip_all_types_vs_wkt_crate() {
     use wkt::ToWkt;

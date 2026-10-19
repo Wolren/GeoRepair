@@ -1,9 +1,7 @@
-//! Z and M coordinate value preservation and querying.
 
 use alloc::vec::Vec;
 use geo::{Coord, Geometry};
 
-/// A single Z (elevation) and M (measure) value associated with a coordinate.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ZmValue {
     /// Elevation (Z) value, or `None` if Z is not present.
@@ -16,11 +14,8 @@ impl ZmValue {
     /// A ZmValue with neither Z nor M set (all `None`).
     pub const NONE: ZmValue = ZmValue { z: None, m: None };
 
-    /// Create a new ZmValue from optional Z and M values.
-    ///
     ///
     /// # Examples
-    ///
     /// ```rust
     /// use geo_repair::zm::ZmValue;
     /// let zv = ZmValue::new(Some(100.5), Some(1.0));
@@ -59,16 +54,10 @@ impl ZmValue {
     }
 }
 
-/// A geometry with per-coordinate Z/M data stored alongside.
-///
-/// The `zm` vector has exactly one entry per coordinate in the geometry, in the order
-/// defined by `CoordsIter` (depth-first traversal).
 #[derive(Clone, Debug)]
 pub struct ZmGeometry {
     /// The underlying geometry (repaired or original).
     pub geometry: Geometry<f64>,
-    /// Per-coordinate Z/M values. Length must equal the number of coordinates returned
-    /// by [`crate::zm::count_coords`].
     pub zm: Vec<ZmValue>,
 }
 
@@ -82,10 +71,6 @@ impl ZmGeometry {
         }
     }
 
-    /// Create a ZmGeometry with explicit Z/M data.
-    ///
-    /// The `zm` vector must have one entry per coordinate in the geometry, in
-    /// depth-first traversal order.
     pub fn with_zm(geometry: Geometry<f64>, zm: Vec<ZmValue>) -> Self {
         Self { geometry, zm }
     }
@@ -111,10 +96,6 @@ impl ZmGeometry {
     }
 }
 
-/// Count the total number of coordinates (vertices) in a geometry.
-///
-/// Returns the count in depth-first traversal order, matching the iteration order of
-/// [`geo::CoordsIter`].
 pub fn count_coords(geom: &Geometry<f64>) -> usize {
     match geom {
         Geometry::Point(_) => 1,
@@ -136,8 +117,6 @@ fn count_polygon_coords(p: &geo::Polygon<f64>) -> usize {
     p.exterior().0.len() + p.interiors().iter().map(|h| h.0.len()).sum::<usize>()
 }
 
-/// Attempt to preserve Z/M values from an original geometry to a repaired geometry.
-///
 /// Matches coordinates by position index for same-topology geometries, otherwise falls
 /// back to nearest-coordinate matching with tolerance.
 pub fn preserve_zm(

@@ -1,4 +1,3 @@
-//! Loader and streaming iterator for the custom binary bulk polygon format.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -8,16 +7,6 @@ use std::io::Write;
 
 use geo::{Coord, LineString, Polygon};
 
-/// Load polygons from a custom binary format.
-///
-/// - u32 LE: number of polygons
-/// - For each polygon:
-///   - u32 LE: number of exterior ring coords
-///   - f64 LE × N: exterior ring coords (x,y pairs)
-///   - u32 LE: number of interior rings
-///   - For each interior ring:
-///     - u32 LE: number of coords
-///     - f64 LE × N: coord pairs
 pub fn load_bin(path: &str) -> Result<Vec<Polygon<f64>>, String> {
     let mut buf = Vec::new();
     File::open(path)
@@ -76,29 +65,14 @@ pub fn load_bin(path: &str) -> Result<Vec<Polygon<f64>>, String> {
     Ok(polys)
 }
 
-/// Stream polygons from a binary file without loading everything into memory.
-///
-/// Returns an iterator that reads polygons one at a time from a custom binary format
-/// file.
 ///
 /// # Format
-///
 /// Same format as [`load_bin`]:
-/// - u32 LE: number of polygons
-/// - For each polygon:
-///   - u32 LE: exterior ring coord count
-///   - f64 LE × N: (x, y) pairs
-///   - u32 LE: interior ring count
-///   - For each interior ring:
-///     - u32 LE: coord count
-///     - f64 LE × N: (x, y) pairs
 ///
 /// # Panics
-///
 /// Panics on I/O errors (file not found, read failure).
 ///
 /// # Example
-///
 /// ```rust,ignore
 /// use geo_repair::load_bin_stream;
 ///
@@ -174,19 +148,8 @@ impl Iterator for LoadBinStream {
     }
 }
 
-/// Write polygons to the custom binary format.
-///
-/// - u32 LE: number of polygons
-/// - For each polygon:
-///   - u32 LE: exterior ring coord count
-///   - f64 LE × N: (x, y) pairs
-///   - u32 LE: interior ring count
-///   - For each interior ring:
-///     - u32 LE: coord count
-///     - f64 LE × N: (x, y) pairs
 ///
 /// # Example
-///
 /// ```rust,ignore
 /// use geo_repair::{load_bin, write_bin};
 ///

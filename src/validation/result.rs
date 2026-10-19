@@ -11,11 +11,8 @@ use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec::Vec;
 
-/// Result of an OGC validity check.
-///
 ///
 /// # Examples
-///
 /// ```rust
 /// # use geo::{Geometry, Point};
 /// # let geometry = Geometry::Point(Point::new(0.0, 0.0));
@@ -55,8 +52,6 @@ impl ValidationResult {
         }
     }
 
-    /// Human-readable validity reason (like GEOS `isValidReason`).
-    ///
     /// Returns `"Valid Geometry"` when valid, or a semicolon-separated list of
     /// violations when invalid.
     pub fn reason(&self) -> String {

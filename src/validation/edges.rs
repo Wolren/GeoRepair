@@ -1,10 +1,5 @@
-//! edge-pair intersection predicates and ring edge trees
-//!
 //! Extracted from validation/core.rs on 2026-08-07 (file-size governance: core.rs was
-//! 2540 lines; the cap is 800). Content is verbatim - no behavior changes; sibling
-//! modules resolve shared items through the `crate::validation::core` facade.
-//!
-//! See validation/mod.rs for the module map.
+//! 2540 lines; the cap is 800).
 
 #[cfg(feature = "rstar")]
 use alloc::vec::Vec;
@@ -53,8 +48,6 @@ pub(crate) fn edges_intersect_general(
     let f2 = dx_a * (b2.y - a1.y) - dy_a * (b2.x - a1.x);
     let f3 = dx_b * (a1.y - b1.y) - dy_b * (a1.x - b1.x);
     let f4 = dx_b * (a2.y - b1.y) - dy_b * (a2.x - b1.x);
-    // `32 * epsilon * max(la2, lb2)` margin used the edge lengths The product-sum bound
-    // for the same pair is ~1e-20 - the orient is definitively not collinear.
     #[inline(always)]
     fn orient_err(t1: f64, t2: f64) -> f64 {
         32.0 * f64::EPSILON * (t1.abs() + t2.abs())
@@ -76,8 +69,6 @@ pub(crate) fn edges_intersect_general(
     let o3 = crate::orient::orient2d(b1, b2, a1);
     let o4 = crate::orient::orient2d(b1, b2, a2);
 
-    // collinear touch as a crossing (false SelfIntersection on valid geometry with -0.0
-    // coordinates; measured: this inflated the real-world "2,298 invalid")
     if (o1 > 0.0 && o2 < 0.0 || o1 < 0.0 && o2 > 0.0)
         && (o3 > 0.0 && o4 < 0.0 || o3 < 0.0 && o4 > 0.0)
     {
@@ -126,11 +117,8 @@ pub(crate) fn edges_intersect_general(
     false
 }
 
-/// Lean pair intersection, decision-equivalent to edges_intersect_general or
-/// edges_vertex_on_edge; strong pairs skip that chain. The gate is 1e-12 times tested
-/// len2, plus the error margin. The voe gate is 140x the margin, so a voe-range
-/// endpoint sits 70x beyond (2026-08-07). The strong test must cover both bounds, or
-/// lean misses vertex-on-edge. All 120k star-comb pairs are strong.
+/// The gate is 1e-12 times tested len2, plus the error margin. The voe gate is 140x the
+/// margin. A voe-range endpoint sits 70x beyond (2026-08-07).
 #[inline]
 pub(crate) fn lean_pair_intersects(
     a1: Coord<f64>,
@@ -205,20 +193,16 @@ pub(crate) fn check_edge_pair_intersection(
 ) -> bool {
     let n = coords.len() - 1;
     let a1 = coords[i];
-    // last coordinate (the % n wrap turns segment n-1 into a phantom crossing chord -
-    // measured 2026-08-07, sine-wave lines flagged)
     let a2 = coords[(i + 1).min(n)];
     let b1 = coords[j];
     let b2 = coords[(j + 1).min(n)];
-    // The T-junction class (vertex strictly on a non-adjacent edge, GEOS Test 22)
-    // escalates through the lean's vertex-on-edge gate.
     let mut ambiguous = false;
     lean_pair_intersects(a1, a2, b1, b2, eps, &mut ambiguous)
 }
 
-/// Lean vertex-on-edge prefilter. It returns true only when an endpoint fast orient
-/// sits within the voe threshold: 1e-12 * len2 plus the orient bound. That chain costs
-/// 40-80 ns per pair on clean data (2026-08-07).
+/// It returns true only when an endpoint fast orient sits within the voe threshold:
+/// 1e-12 * len2 plus the orient bound. That chain costs 40-80 ns per pair on clean data
+/// (2026-08-07).
 #[inline]
 pub(crate) fn lean_voe_possible(
     a1: Coord<f64>,
@@ -246,11 +230,9 @@ pub(crate) fn lean_voe_possible(
         || f4.abs() <= voe_b + e4
 }
 
-/// Strict-interior vertex-on-edge touch: an endpoint of one segment lies strictly
-/// inside the other. This runs in the per-pair small-ring sweep on the 1.58M-poly hot
-/// path, and a non-inlined call cost +25 % overall. The tolerance is segment-local,
-/// 1e-12 * len2 of the tested segment. A pair-max tolerance inflates past micro
-/// segments in mixed rings. Differential fuzz (2026-08-03, seed 85) shows the class.
+/// This runs in the per-pair small-ring sweep on the 1.58M-poly hot path. A non-inlined
+/// call cost +25 % overall. The tolerance is segment-local, 1e-12 * len2 of the tested
+/// segment. Differential fuzz (2026-08-03, seed 85) shows the class.
 #[inline]
 pub(crate) fn edges_vertex_on_edge(
     a1: Coord<f64>,
@@ -287,11 +269,9 @@ pub(crate) fn edges_vertex_on_edge(
         || point_strictly_on_segment(b2, a1, a2)
 }
 
-/// True if p lies strictly inside segment (a, b): within eps of its line, between the
-/// endpoints. Endpoint equality returns false. Measured: a 3e-8 closing edge crossed by
-/// a vertex of a 2.3e6-scale edge. The pair-max eps, 1e-12 * 1.8e13 or about 18, made
-/// the test vacuous. geos flagged Ring Self-intersection[1e-08 -1e-08]; we accepted it
-/// (2026-08-03).
+/// Measured: a 3e-8 closing edge crossed by a vertex of a 2.3e6-scale edge. The
+/// pair-max eps, 1e-12 * 1.8e13 or about 18, made the test vacuous. geos flagged Ring
+/// Self-intersection[1e-08 -1e-08]; we accepted it (2026-08-03).
 pub(crate) fn point_strictly_on_segment(p: Coord<f64>, a: Coord<f64>, b: Coord<f64>) -> bool {
     if p == a || p == b {
         return false;
@@ -308,7 +288,6 @@ pub(crate) fn point_strictly_on_segment(p: Coord<f64>, a: Coord<f64>, b: Coord<f
     (p.x > lo_x + eps && p.x < hi_x - eps) || (p.y > lo_y + eps && p.y < hi_y - eps)
 }
 
-/// Minimal edge-index wrapper for R-tree intersection queries.
 #[cfg(feature = "rstar")]
 pub(crate) struct EdgeIdx {
     pub(crate) idx: usize,
@@ -322,7 +301,6 @@ impl rstar::RTreeObject for EdgeIdx {
     }
 }
 
-/// Build an R-tree over a ring's edges (wrapping at len-1 for closing point).
 #[cfg(feature = "rstar")]
 pub(crate) fn build_ring_edge_tree(ring: &[Coord<f64>]) -> rstar::RTree<EdgeIdx> {
     let n = ring.len() - 1;
@@ -342,7 +320,6 @@ pub(crate) fn build_ring_edge_tree(ring: &[Coord<f64>]) -> rstar::RTree<EdgeIdx>
     )
 }
 
-/// Build an R-tree over a linestring's segments (non-ring, no wrap-around).
 #[cfg(feature = "rstar")]
 pub(crate) fn build_ls_edge_tree(coords: &[Coord<f64>]) -> rstar::RTree<EdgeIdx> {
     let n = coords.len() - 1;

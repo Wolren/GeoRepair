@@ -1,8 +1,4 @@
 #![allow(dead_code)]
-//! Noding utilities for linear geometry repair.
-//!
-//! 1. Removing invalid/repeated coordinates
-//! 2. Noding self-intersections by splitting crossing edges
 
 use alloc::vec::Vec;
 pub(crate) mod intersection;
@@ -31,8 +27,6 @@ use crate::orient::orient2d as orient2d_robust;
 #[cfg(any(feature = "arrange", feature = "structure"))]
 use log::warn;
 
-/// Node a line string by removing repeated points and splitting at self-intersections.
-/// Returns a MultiLineString if splitting occurred, or a single LineString otherwise.
 pub(crate) fn node_line_string<T: NodingFloat>(ls: &LineString<T>) -> Geometry<T> {
     let coords: Vec<Coord<T>> =
         ls.0.iter()
@@ -54,7 +48,6 @@ pub(crate) fn node_line_string<T: NodingFloat>(ls: &LineString<T>) -> Geometry<T
         return Geometry::LineString(LineString::new(deduped));
     }
 
-    // Split at self-intersections (now uses DD arithmetic for f64)
     let split_edges = split_edges_at_intersections(&edges);
     if split_edges.is_empty() {
         return empty();

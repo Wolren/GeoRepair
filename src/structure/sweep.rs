@@ -19,8 +19,6 @@ impl RTreeObject for EdgeEnvelope {
     }
 }
 
-/// Build bounding envelope for edge i, expanded so that nearly-vertical edges and
-/// near-touching intervals are still detected.
 fn edge_envelope(coords: &[Coord<f64>], i: usize) -> AABB<[f64; 2]> {
     let lo_x = coords[i].x.min(coords[i + 1].x);
     let hi_x = coords[i].x.max(coords[i + 1].x);
@@ -30,10 +28,7 @@ fn edge_envelope(coords: &[Coord<f64>], i: usize) -> AABB<[f64; 2]> {
     AABB::from_corners([lo_x - ext, lo_y - ext], [hi_x + ext, hi_y + ext])
 }
 
-/// Proper self-crossing detection over a polygon, exterior plus holes, with an R-tree
-/// over edge bounding boxes. Interior-interior crossings only. A shared endpoint does
-/// not count, such as a hole touching the shell at a vertex, which geos makeValid
-/// emits. That loop is fatal: 59k vertices take 9.1s and 181k take 143s.
+/// That loop is fatal: 59k vertices take 9.1s and 181k take 143s.
 pub(crate) fn has_proper_self_crossing_sweep(
     coords: &[Coord<f64>],
     ring_offsets: &[usize],
@@ -54,8 +49,6 @@ pub(crate) fn has_proper_self_crossing_sweep(
     let tree = RTree::bulk_load(edges);
 
     for i in 0..n_edges {
-        // Skip phantom segments (closure-vertex boundary lines that do not exist in the
-        // geometry) when querying too.
         if is_phantom_segment(i, ring_offsets) {
             continue;
         }
@@ -97,8 +90,6 @@ pub(crate) fn has_proper_self_crossing_sweep(
                     coords[j + 1],
                 )
             {
-                // Same-ring vertex-on-edge self-touch (T-junction): GEOS rejects a ring
-                // vertex on a non-adjacent edge (Test 22).
                 ::core::ops::ControlFlow::Break(())
             } else {
                 ::core::ops::ControlFlow::Continue(())
@@ -111,10 +102,6 @@ pub(crate) fn has_proper_self_crossing_sweep(
     false
 }
 
-/// True if segment index `s` is a phantom - the last index before a ring boundary,
-/// which spans (closure vertex of ring r) → (first vertex of ring r+1). That line does
-/// not exist in the geometry (the flat array just concatenates rings) and must never be
-/// tested.
 fn is_phantom_segment(s: usize, ring_offsets: &[usize]) -> bool {
     ring_offsets.iter().skip(1).any(|&off| s + 1 == off)
 }
@@ -131,8 +118,6 @@ fn ring_of_segment(s: usize, ring_offsets: &[usize]) -> usize {
     r
 }
 
-/// True if segment indices `i` and `j` are adjacent within the same ring (consecutive
-/// segments, or first/last of a closed ring).
 fn segments_adjacent_in_ring(i: usize, j: usize, ring_offsets: &[usize]) -> bool {
     if is_phantom_segment(j, ring_offsets) {
         return true;
@@ -146,7 +131,6 @@ fn segments_adjacent_in_ring(i: usize, j: usize, ring_offsets: &[usize]) -> bool
     }
     let start = ring_offsets[r];
     let end = ring_offsets.get(r + 1).copied().unwrap_or(usize::MAX);
-    // (end-1 is the phantom spanning into the next ring).
     let seg_end = end.saturating_sub(1);
     let in_ring = |s: usize| s >= start && s < seg_end;
     if !in_ring(j) {
@@ -158,8 +142,6 @@ fn segments_adjacent_in_ring(i: usize, j: usize, ring_offsets: &[usize]) -> bool
     j == start && i == seg_end - 1
 }
 
-/// Edge envelope as a flat [min_x, max_x, min_y, max_y] with the same epsilon expansion
-/// as [`edge_envelope`].
 fn edge_env_array(coords: &[Coord<f64>], i: usize) -> [f64; 4] {
     let lo_x = coords[i].x.min(coords[i + 1].x);
     let hi_x = coords[i].x.max(coords[i + 1].x);
@@ -174,7 +156,6 @@ fn env_intersect(a: [f64; 4], b: [f64; 4]) -> bool {
     a[0] <= b[1] && a[1] >= b[0] && a[2] <= b[3] && a[3] >= b[2]
 }
 
-/// Node of the parallel-str index.
 #[derive(Clone, Copy)]
 struct StrNode {
     env: [f64; 4],
@@ -183,13 +164,6 @@ struct StrNode {
     is_leaf: bool,
 }
 
-/// Multi-level str index built with rayon-parallel sorts.
-///
-/// Replaces rstar's serial str bulk_load (~20ms on a 260k-edge giant shell) with a
-/// parallel sort + pack (~8ms). The structure mirrors rstar's bulk_load: at each level
-/// the ranges are sorted by the level's axis center (x, then y, alternating) and split
-/// into sqrt(leaves-below) children, recursing until ranges hold at most
-/// [`STR_LEAF_CAP`] edges.
 struct StrIndex {
     /// levels[0] = root, last level = leaves.
     levels: Vec<Vec<StrNode>>,
@@ -214,8 +188,6 @@ impl StrIndex {
             ca.partial_cmp(&cb).unwrap_or(::core::cmp::Ordering::Equal)
         };
 
-        // Pass 1 (top-down): sort each level's ranges by the level's axis, then split
-        // every range into sqrt(leaves-below) children.
         let mut level_ranges: Vec<Vec<::core::ops::Range<usize>>> = Vec::new();
         let mut level_parents: Vec<Vec<u32>> = Vec::new();
         let mut ranges: Vec<::core::ops::Range<usize>> = ::core::iter::once(0..n).collect();
@@ -265,7 +237,6 @@ impl StrIndex {
         level_ranges.push(ranges);
         level_parents.push(parents);
 
-        // Pass 2 (bottom-up): leaves first, then internal levels.
         let n_levels = level_ranges.len();
         let mut levels: Vec<Vec<StrNode>> = Vec::with_capacity(n_levels);
 
@@ -367,9 +338,6 @@ impl StrIndex {
     }
 }
 
-/// Self-intersection detection with a parallel str index over edge bounding boxes.
-/// Build it with a rayon-parallel sort and pack: about 8ms for 260k edges, against 20ms
-/// for rstar bulk_load.
 pub(crate) fn has_self_intersections(coords: &[Coord<f64>], eps: f64) -> bool {
     let n = coords.len();
     let n_edges = n.saturating_sub(1);
@@ -390,7 +358,6 @@ pub(crate) fn has_self_intersections(coords: &[Coord<f64>], eps: f64) -> bool {
         );
     }
 
-    // splitting the 260k-edge giant shells across workers.
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     {
         use rayon::prelude::*;
@@ -479,7 +446,6 @@ pub(crate) fn has_self_intersections(coords: &[Coord<f64>], eps: f64) -> bool {
     }
 }
 
-/// Find any proper crossing other than the pair (i0, j0), using the parallel-str index.
 /// The brute-force variant is O(n^2) and costs ~90ms on a 260k-edge giant shell (the
 /// sweep branch of try_fast_fix has no GRID_THRESHOLD_N bound, so the small-ring
 /// comment on the brute force does not apply there).
@@ -499,8 +465,6 @@ pub(crate) fn find_second_intersection(
             if j <= i {
                 return false;
             }
-            // The pair try_fast_fix already split at is not a "second" crossing (i0 <
-            // j0 by construction of find_first_intersection).
             if i == i0 && j == j0 {
                 return false;
             }
@@ -542,11 +506,8 @@ pub(crate) fn find_second_intersection(
     None
 }
 
-/// Find any proper edge intersection with the parallel str index. Return (edge_i,
-/// edge_j, intersection_point) with i less than j. This early-exit variant of
-/// has_self_intersections also returns the intersection geometry, for the atr fast-path
-/// ring splitter. The serial rstar variant scanned to the lowest-index crossing: about
-/// 90ms on 260k-edge giants with a high first crossing.
+/// The serial rstar variant scanned to the lowest-index crossing: about 90ms on
+/// 260k-edge giants with a high first crossing.
 pub(crate) fn find_first_intersection(
     coords: &[Coord<f64>],
     eps: f64,

@@ -1,6 +1,4 @@
-//! Geometry repair through the MakeValid and ValidateAndFix traits. Points get NaN and
-//! Inf filtering plus deduplication. Entry points: `MakeValid::make_valid` uses the
-//! default config, and `MakeValid::make_valid_with_config` takes a custom config.
+//! Points get NaN and Inf filtering plus deduplication.
 
 use crate::util::{point_in_ring_exclusive_even_odd, shoelace_abs_sum};
 use geo::{
@@ -20,22 +18,15 @@ use crate::validation::{GeoValidation, MAX_COLLECTION_DEPTH, ValidationResult};
 use alloc::vec::Vec;
 use log::warn;
 
-/// Trait for repairing invalid geometries.
-///
 /// Returns a valid geometry (possibly empty or decomposed into a
-/// [`GeometryCollection`]) when the input violates OGC Simple Features rules.
-///
-/// Use [`make_valid`](MakeValid::make_valid) with default config, or
+/// [`GeometryCollection`]) when the input violates OGC Simple Features rules. Use
+/// [`make_valid`](MakeValid::make_valid) with default config, or
 /// [`make_valid_with_config`](MakeValid::make_valid_with_config) for fine-grained
 /// control over the repair strategy.
 pub trait MakeValid {
     /// The scalar coordinate type (e.g. `f64`, `f32`).
     type Scalar: GeoFloat;
 
-    /// Repair this geometry using default configuration.
-    ///
-    /// Returns a valid geometry (possibly empty or simplified) when the input contains
-    /// OGC violations.
     fn make_valid(&self) -> Geometry<Self::Scalar> {
         self.make_valid_with_config(&MakeValidConfig::default())
     }
@@ -43,9 +34,6 @@ pub trait MakeValid {
     /// Repair this geometry with the given configuration.
     fn make_valid_with_config(&self, config: &MakeValidConfig) -> Geometry<Self::Scalar>;
 
-    /// Repair this geometry in parallel using default configuration.
-    ///
-    /// Only available when the `parallel` feature is enabled (non-wasm).
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     fn par_make_valid(&self) -> Geometry<Self::Scalar>
     where
@@ -54,8 +42,6 @@ pub trait MakeValid {
         self.par_make_valid_with_config(&MakeValidConfig::default())
     }
 
-    /// Repair this geometry in parallel with the given configuration.
-    ///
     /// Falls back to [`make_valid_with_config`](MakeValid::make_valid_with_config) when
     /// the default implementation is used (single-threaded dispatch).
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
@@ -148,9 +134,6 @@ impl<T: NodingFloat> MakeValid for LineString<T> {
     type Scalar = T;
 
     fn make_valid_with_config(&self, _config: &MakeValidConfig) -> Geometry<T> {
-        // (the old two-step collect + remove_consecutive_duplicates paid two Vecs and
-        // two walks for every line - measured 2026-08-09, the valid-ls) Semantics
-        // identical: dropping NaN coords first, then dedup of consecutive equals.
         let mut deduped: Vec<Coord<T>> = Vec::with_capacity(self.0.len());
         let mut prev: Option<Coord<T>> = None;
         for c in &self.0 {
@@ -171,8 +154,6 @@ impl<T: NodingFloat> MakeValid for LineString<T> {
             return Geometry::Point(Point(deduped[0]));
         }
         if deduped.len() >= 3 {
-            // Check with the validator's own predicate, then repair by dropping the
-            // conflicting segments (f64 space is lossless for f32 too).
             let fd: Vec<Coord<f64>> = deduped
                 .iter()
                 .map(|c| Coord {
@@ -184,7 +165,6 @@ impl<T: NodingFloat> MakeValid for LineString<T> {
                 let runs = match crate::noding::line::node_line(&fd) {
                     Some(runs) => runs,
                     None => {
-                        // (fuzz 52812: fallback part 0 = NotSimple, part 1 fine).
                         let runs: Vec<Vec<Coord<f64>>> = simple_subline(&fd)
                             .into_iter()
                             .filter(|r| {
@@ -211,11 +191,6 @@ impl<T: NodingFloat> MakeValid for LineString<T> {
     }
 }
 
-/// Greedy simplification of a non-simple line: walk the segments, keep a segment unless
-/// it conflicts with an already-kept segment, using the same pairwise tests as
-/// [`check_linestring_self_intersection`] (adjacent segments may touch only at their
-/// shared vertex; collinear overlap beyond it is a conflict; non-adjacent segments
-/// conflict on any intersection, including vertex revisits).
 fn simple_subline(coords: &[Coord<f64>]) -> Vec<Vec<Coord<f64>>> {
     let n = coords.len() - 1;
     if n < 2 {
@@ -316,11 +291,6 @@ fn run_to_line<T: NodingFloat>(run: &[Coord<f64>]) -> LineString<T> {
     )
 }
 
-/// Greedy cross-component conflict filter (mirror of the validator's
-/// [`check_line_components_intersect`] rule): keep a run unless it conflicts with an
-/// already-kept one. Returns `None` when every run is kept (the common case - no
-/// allocation), `Some(kept indices)` otherwise. Shared by `LineString::make_valid`
-/// (multi-run noding output) and `MultiLineString::make_valid`.
 fn keep_conflicting_runs(runs: &[Vec<Coord<f64>>]) -> Option<Vec<usize>> {
     if runs.len() < 2 {
         return None;
@@ -395,9 +365,6 @@ impl<T: NodingFloat> MakeValid for MultiLineString<T> {
                 _ => {}
             }
         }
-        // Validity contract: components must not intersect each other except at
-        // boundary points (mirror of the validator's check_line_components_intersect
-        // rule).
         if lines.len() > 1 {
             let fd: Vec<Vec<Coord<f64>>> = lines
                 .iter()
@@ -470,7 +437,6 @@ impl<T: GeoFloat> MakeValid for Rect<T> {
     }
 }
 
-// Triangle - concrete f64 when polygon features available
 
 #[cfg(any(feature = "arrange", feature = "structure"))]
 mod multipolygon;
@@ -489,10 +455,7 @@ pub use polygon::make_valid_owned;
 pub(crate) use polygon::snap_cannot_represent;
 pub use strip::strip_degenerate_test;
 
-/// Append a repaired member to `out`. Fold wrapper levels that push nesting past
-/// `MAX_COLLECTION_DEPTH`. A `GeometryCollection` is re-wrapped while `member_depth <=
-/// MAX_COLLECTION_DEPTH`; deeper, members splice into the parent. Runs 35973600308 and
-/// 36113501091 did so on 2026-09-24 and 2026-09-25.
+/// Runs 35973600308 and 36113501091 did so on 2026-09-24 and 2026-09-25.
 pub(crate) fn push_repaired_member<T: CoordNum>(
     out: &mut Vec<Geometry<T>>,
     member: Geometry<T>,
@@ -559,20 +522,12 @@ impl<T: NodingFloat> MakeValid for GeometryCollection<T> {
 }
 
 
-/// Combine validation and repair into a single pipeline.
-///
 ///
 /// # Methods
-///
 /// - [`validate_and_fix`](ValidateAndFix::validate_and_fix): validate first, fix if
 ///   invalid
-/// - [`validate_and_fix_always`](ValidateAndFix::validate_and_fix_always): always run
-///   both validation and repair
-/// - [`validate_or_fix`](ValidateAndFix::validate_or_fix): return `Ok(fixed)` if valid
-///   after repair, `Err` otherwise
 ///
 /// # Example
-///
 /// ```rust
 /// # use geo::{Geometry, Point};
 /// # let geometry = Geometry::Point(Point::new(0.0, 0.0));
@@ -584,8 +539,7 @@ impl<T: NodingFloat> MakeValid for GeometryCollection<T> {
 /// }
 /// ```
 pub trait ValidateAndFix: MakeValid<Scalar = f64> + GeoValidation<Scalar = f64> {
-    /// Validate the geometry, then fix it if invalid. Returns (validation_result,
-    /// fixed_geometry).
+    /// Validate the geometry, then fix it if invalid.
     fn validate_and_fix(&self) -> (ValidationResult, Geometry<f64>) {
         let result = <Self as GeoValidation>::validate(self);
         if result.valid {
@@ -595,8 +549,6 @@ pub trait ValidateAndFix: MakeValid<Scalar = f64> + GeoValidation<Scalar = f64> 
         }
     }
 
-    /// Validate the geometry, then fix it if invalid. Returns the fixed geometry
-    /// unconditionally (fix even valid geoms).
     fn validate_and_fix_always(&self) -> (ValidationResult, Geometry<f64>) {
         (
             <Self as GeoValidation>::validate(self),
@@ -604,9 +556,8 @@ pub trait ValidateAndFix: MakeValid<Scalar = f64> + GeoValidation<Scalar = f64> 
         )
     }
 
-    /// Return the validated geometry, or fix it if invalid. Returns Ok(geometry) if
-    /// valid or fix succeeded, Err((validation_errors, fixed_geometry)) if still
-    /// invalid.
+    /// Returns Ok(geometry) if valid or fix succeeded, Err((validation_errors,
+    /// fixed_geometry)) if still invalid.
     fn validate_or_fix(&self) -> Result<Geometry<f64>, (ValidationResult, Geometry<f64>)> {
         let result = <Self as GeoValidation>::validate(self);
         if result.valid {

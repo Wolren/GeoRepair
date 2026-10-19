@@ -107,13 +107,11 @@ fn test_check_self_intersections_none() {
 
 #[test]
 fn test_check_self_intersections_bowtie() {
-    // A bowtie shape: (0,0) → (2,2) → (2,0) → (0,2)
     let edges = vec![
         Line::new(Coord { x: 0.0, y: 0.0 }, Coord { x: 2.0, y: 2.0 }),
         Line::new(Coord { x: 2.0, y: 2.0 }, Coord { x: 2.0, y: 0.0 }),
         Line::new(Coord { x: 2.0, y: 0.0 }, Coord { x: 0.0, y: 2.0 }),
     ];
-    // Edge 0 crosses edge 2 (non-adjacent, i=0, j=2)
     assert!(check_self_intersections(&edges));
 }
 
@@ -213,8 +211,6 @@ fn test_split_edges_crossing() {
         Line::new(Coord { x: 2.0, y: 2.0 }, Coord { x: 2.0, y: 0.0 }),
         Line::new(Coord { x: 2.0, y: 0.0 }, Coord { x: 0.0, y: 2.0 }),
     ];
-    // Edge 0 (0->2) and edge 2 (2->0) cross at (1,1) Edge 0 should split into two:
-    // (0,0)-(1,1) and (1,1)-(2,2)
     let result = split_edges_at_intersections(&edges);
     assert!(result.len() >= 3);
 }
@@ -328,7 +324,6 @@ fn test_node_line_string_no_self_intersection() {
 
 #[test]
 fn test_node_line_string_self_intersecting() {
-    // Bowtie path: (0,0) → (2,2) → (2,0) → (0,2)
     let ls = LineString::new(vec![
         Coord { x: 0.0, y: 0.0 },
         Coord { x: 2.0, y: 2.0 },

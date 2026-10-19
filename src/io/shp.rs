@@ -1,6 +1,5 @@
-//! esri Shapefile (`.shp`) backend over the `shapefile` crate. Records use the crate
-//! ring classes `PolygonRing::Outer` and `Inner`. No `.dbf` is written, because the
-//! backend carries geometry only.
+//! esri Shapefile (`.shp`) backend over the `shapefile` crate. No `.dbf` is written,
+//! because the backend carries geometry only.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -47,8 +46,6 @@ pub fn save_shp(path: &str, geoms: &[Geometry<f64>]) -> Result<(), String> {
     Ok(())
 }
 
-/// Convert a shapefile `Shape` to a geo `Geometry`; `None` for types with no geo
-/// equivalent (null shapes, multipatch).
 fn shape_to_geo(shape: Shape) -> Option<Geometry<f64>> {
     Some(match shape {
         Shape::NullShape | Shape::Multipatch(_) => return None,

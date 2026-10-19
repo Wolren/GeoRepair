@@ -1,5 +1,3 @@
-//! Polygon repair: Triangle/Polygon MakeValid impls, strategy dispatch, OGC winding
-//! enforcement, and reduction fallbacks.
 
 use super::strip::{enforce_ccw, enforce_cw, has_nan, strip_degenerate};
 use super::strip::{enforce_ccw_with_idx, enforce_cw_with_idx};
@@ -8,11 +6,7 @@ use super::*;
 // Shared polygon-entry steps (2026-09-04) carried identical copies of the pre-scan, the
 // NaN-filter rebuild
 
-/// Fused exterior pre-scan: bbox extremes, NaN flag. The avx kernel
-/// `crate::simd::aabb_minmax_simd` measures 4.5x the scalar loop. It was 16% of the
-/// valid gate on a 10 000-vertex ring (2026-10-17). Trust avx only for all-finite
-/// input. For non-finite input, use the scalar rule: init from `coords[0]`, fold, Rust
-/// `f64::min`/`f64::max`. A `-0.0`/`0.0` tie can pick the other.
+/// Fused exterior pre-scan: bbox extremes, NaN flag.
 fn scan_exterior_bbox_nan(coords: &[Coord<f64>]) -> (f64, f64, f64, f64, bool) {
     let (min_x, max_x, min_y, max_y) = crate::simd::aabb_minmax_simd(coords);
     let mut has_nan = false;
@@ -51,8 +45,6 @@ fn interiors_have_nan(poly: &Polygon<f64>) -> bool {
         .any(|ring| ring.0.iter().any(|c| !c.x.is_finite() || !c.y.is_finite()))
 }
 
-/// Short-ring exit: fewer than 4 exterior vertices with collapsing disabled leaves
-/// nothing to repair.
 fn short_ring_exit(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geometry<f64>> {
     if !config.keep_collapsed && poly.exterior().0.len() < 4 {
         if config.keep_collapsed && !poly.exterior().0.is_empty() {
@@ -88,8 +80,7 @@ fn filter_finite_rings(poly: &Polygon<f64>) -> (Vec<Coord<f64>>, Vec<LineString<
     (ext_clean, int_clean)
 }
 
-/// Dedup plus reclose of the NaN-cleaned exterior. Returns the closed ring with its
-/// first valid coord, or the early Geometry when fewer than 3 distinct points survive.
+/// Dedup plus reclose of the NaN-cleaned exterior.
 fn dedup_and_close(
     ext_clean: Vec<Coord<f64>>,
 ) -> Result<(LineString<f64>, Coord<f64>), Geometry<f64>> {
@@ -182,7 +173,6 @@ impl<T: GeoFloat> MakeValid for Triangle<T> {
     }
 }
 
-// Polygon - concrete f64 impl
 
 #[cfg(any(feature = "arrange", feature = "structure"))]
 impl MakeValid for Polygon<f64> {
@@ -213,7 +203,6 @@ impl MakeValid for Polygon<f64> {
                     });
                 #[cfg(not(feature = "std"))]
                 let (repaired, certified) = make_valid_impl(self, self, config, coords[0]);
-                // re-walk the same coords (2026-08-09).
                 let result = if certified {
                     repaired
                 } else {
@@ -227,7 +216,6 @@ impl MakeValid for Polygon<f64> {
         if let Some(g) = short_ring_exit(self, config) {
             return g;
         }
-        // keep_collapsed: true with >= 4 verts: fall through to make_valid_impl
 
         // NaN path: filter, dedup, rebuild.
         let (ext_clean, int_clean) = filter_finite_rings(self);
@@ -256,11 +244,8 @@ impl MakeValid for Polygon<f64> {
     }
 }
 
-/// Repair of valid input must preserve it: a polygon our validator accepts never comes
-/// back emptied or decomposed. This is fuzz validate contract 2. Nightly runs
-/// 35430371542 and 35703833356 on 2026-09-19 and 2026-09-22 shipped geometrycollection
-/// empty for valid inputs. The sub-ULP gate rejects some valid thin rings as
-/// un-certifiable. The full repair then snaps the micro-edge away and returns nothing.
+/// Nightly runs 35430371542 and 35703833356 on 2026-09-19 and 2026-09-22 shipped
+/// geometrycollection empty for valid inputs.
 fn preserve_valid_input(
     result: Geometry<f64>,
     config: &MakeValidConfig,
@@ -289,11 +274,11 @@ pub(super) fn has_nan_or_infinite(p: &Polygon<f64>) -> bool {
             .any(|ring| ring.0.iter().any(|c| !c.x.is_finite() || !c.y.is_finite()))
 }
 
-/// True when a snap grid (`SNAP_SCALE` = 1e8) cannot hold the coordinates. Integer keys
-/// lose precision past 2^53. Sub-0.5 values collapse. A 5.8e-9 coordinate in a 6.2e7
-/// shell is 0.58 units. GEOS fuzz (2026-08-03): snapping mixed-magnitude polygons (1e-9
-/// to 1e7) gave self-intersecting output. Polygon((100 100, 1e15 110, 1e15 100, 100
-/// 100)) passes. Seed 5cf953d1 failed at 1.0.
+/// True when a snap grid (`SNAP_SCALE` = 1e8) cannot hold the coordinates. Sub-0.5
+/// values collapse. A 5.8e-9 coordinate in a 6.2e7 shell is 0.58 units. GEOS fuzz
+/// (2026-08-03): snapping mixed-magnitude polygons (1e-9 to 1e7) gave self-intersecting
+/// output. Polygon((100 100, 1e15 110, 1e15 100, 100 100)) passes. Seed 5cf953d1 failed
+/// at 1.0.
 pub(crate) fn snap_cannot_represent(poly: &Polygon<f64>) -> bool {
     let mut min_abs = f64::MAX;
     let mut max_abs = 0.0f64;
@@ -316,10 +301,6 @@ pub(crate) fn snap_cannot_represent(poly: &Polygon<f64>) -> bool {
     min_abs * scale < 0.5 || max_abs * scale > (1u64 << 53) as f64
 }
 
-/// Collapse a degenerate ring to lower-dimensional geometry, used only when
-/// `keep_collapsed` is set and every repair path came back empty. Mirrors GEOS
-/// MakeValid keepCollapsed semantics: collapsed geometry is preserved as a lower
-/// dimension rather than dropped.
 pub(crate) fn collapse_degenerate(poly: &Polygon<f64>) -> Option<Geometry<f64>> {
     let coords: Vec<Coord<f64>> = crate::noding::remove_consecutive_duplicates(
         &poly.exterior().0[..poly.exterior().0.len().saturating_sub(1)],
@@ -338,14 +319,9 @@ pub(crate) fn collapse_degenerate(poly: &Polygon<f64>) -> Option<Geometry<f64>> 
     }
 }
 
-/// Gated arrange → precision-reduction → empty chain. Every arm of the strategy
-/// dispatch funnels through this so no repair path can ship geometry our validator
-/// rejects: measured on fuzz + differential runs, the cdt path handles routed
-/// extreme-magnitude inputs correctly but can still emit invalid output for degenerate
-/// ones, and the precision ladder can too.
+/// Gated arrange → precision-reduction → empty chain.
 #[cfg(any(feature = "arrange", feature = "structure"))]
 fn arrange_chain(poly: &Polygon<f64>, config: &MakeValidConfig) -> Geometry<f64> {
-    // and a 1-unit base validated under both our validator and geo's
     if is_valid_with_geo(&Geometry::Polygon(poly.clone())) {
         return enforce_ogc_winding(Geometry::Polygon(poly.clone())).0;
     }
@@ -364,7 +340,6 @@ fn arrange_chain(poly: &Polygon<f64>, config: &MakeValidConfig) -> Geometry<f64>
     }
 }
 
-/// Common strategy dispatch after degeneracy checks.
 #[cfg(any(feature = "arrange", feature = "structure"))]
 pub(super) fn make_valid_impl(
     _self: &Polygon<f64>,
@@ -385,9 +360,6 @@ pub(super) fn make_valid_impl(
             match st {
                 // Fast path: the gate is a complete certifier (2026-08-07)
                 crate::structure::FixOutcome::Fast(g, min_abs, max_abs, extrema) => {
-                    // invalidate (extreme-magnitude rings in the exact-orient ~0 zone -
-                    // fuzz invariant_mixed_fp_in_same_ring). from the enforce pass's
-                    // extremal indices (no re-search - winding fusion, 2026-08-08)
                     let (g_norm, ok) = enforce_ogc_winding_with_extrema(g, Some(&extrema));
                     if ok {
                         // at subnormal/huge magnitude mixes (fuzz crash-65111cd0) and
@@ -403,9 +375,6 @@ pub(super) fn make_valid_impl(
                             );
                             (arrange_chain(poly, config), false)
                         } else {
-                            // (the gate already proved finiteness, non-degeneracy,
-                            // collinear-free rings) -the certified flag skips them
-                            // (2026-08-09).
                             (g_norm, true)
                         }
                     } else {
@@ -438,9 +407,7 @@ pub(super) fn make_valid_impl(
                 crate::structure::FixOutcome::Fast(g, min_abs, max_abs, extrema) => {
                     let (g_norm, ok) = enforce_ogc_winding_with_extrema(g, Some(&extrema));
                     if ok {
-                        // NaN no-cross verdicts - fuzz crash-65111cd0 . The extrema
-                        // come fused from the fast-path gate's plausibility pass (no
-                        // re-scan of the coords, 2026-08-09).
+                        // NaN no-cross verdicts - fuzz crash-65111cd0 .
                         if fast_gate_needs_full_validation(min_abs, max_abs)
                             && !is_valid_with_geo(&g_norm)
                         {
@@ -474,7 +441,6 @@ pub(super) fn make_valid_impl(
             }
         }
     };
-    // - removed 2026-08-08.
     if !certified && has_nan(&result) {
         (empty_geom::<f64>(), false)
     } else {
@@ -482,10 +448,8 @@ pub(super) fn make_valid_impl(
     }
 }
 
-/// Owned twin of `make_valid_impl`. It owns the working polygon, so the Structure fast
-/// path can move it into the output rather than clone. It returns `(geometry,
-/// verified)`. `verified == true` means the fast-path passthrough, which is provably
-/// non-degenerate and NaN-free.
+/// `verified == true` means the fast-path passthrough, which is provably non-degenerate
+/// and NaN-free.
 #[cfg(any(feature = "arrange", feature = "structure"))]
 pub(super) fn make_valid_impl_owned(
     poly: Polygon<f64>,
@@ -504,9 +468,6 @@ pub(super) fn make_valid_impl_owned(
             #[cfg(feature = "structure")]
             {
                 match structure_fix_owned(poly, config, ext_scale) {
-                    // orientation O(1) (extreme-magnitude rings can sit in the
-                    // exact-orient ~0 zone, fuzz invariant_mixed_fp_in_same_ring). (no
-                    // re-search, 2026-08-09).
                     crate::structure::FixOutcome::Fast(g, _, _, extrema) => {
                         let (g, ok) = enforce_ogc_winding_with_extrema(g, Some(&extrema));
                         if ok {
@@ -552,8 +513,6 @@ pub(super) fn make_valid_impl_owned(
     }
 }
 
-/// Owned twin of [`Polygon::make_valid_with_config`] for batch pipelines that already
-/// own their polygons (e.g. [`crate::parallel::par_fix_polygon_batch_owned`]).
 /// Zero-copy for the ~99.85% of real-world polygons that are already valid.
 #[cfg(any(feature = "arrange", feature = "structure"))]
 pub fn make_valid_owned(poly: Polygon<f64>, config: &MakeValidConfig) -> Geometry<f64> {
@@ -601,20 +560,13 @@ pub fn make_valid_owned(poly: Polygon<f64>, config: &MakeValidConfig) -> Geometr
     maybe_collapse_keep(result, config, &poly)
 }
 
-/// Enforce OGC winding. The call consumes the geometry, rebuilds rings in place, and
-/// does not clone. It reverses a ring only when the winding is wrong. Returns the
-/// geometry and orientation_ok, the ogc_orientation_ok verdict. The verify pass does
-/// not re-run the per-ring extremal search. Winding fusion, 2026-08-08, 1.58M polygons.
+/// It reverses a ring only when the winding is wrong. Winding fusion, 2026-08-08, 1.58M
+/// polygons.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(crate) fn enforce_ogc_winding(g: Geometry<f64>) -> (Geometry<f64>, bool) {
     enforce_ogc_winding_with_extrema(g, None)
 }
 
-/// [`enforce_ogc_winding`] with per-ring extremal indices already located by the
-/// fast-path gate's plausibility pass (2026-08-09): the O(n) min-x searches are
-/// skipped. `extrema` must follow the ring order exterior, then holes. Exactly what the
-/// gate pushes. When the slice length mismatches (defensive; can only happen on a
-/// caller bug) the per-ring search falls back per ring.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(crate) fn enforce_ogc_winding_with_extrema(
     g: Geometry<f64>,
@@ -666,10 +618,6 @@ pub(crate) fn enforce_ogc_winding_with_extrema(
     }
 }
 
-/// Post-winding orientation verdict for one ring, computed from the enforce pass's
-/// extremal index. The orient and the ~0-zone shoelace fallback are recomputed on the
-/// current ring - identical to what the old `ogc_orientation_ok`'s fresh search would
-/// produce (the min vertex is order-independent; only the O(n) search is saved).
 fn winding_ok(ring: &[Coord<f64>], idx: usize, reversed: bool, shell: bool) -> bool {
     let n = ring.len() - 1;
     let mapped = if reversed {
@@ -738,9 +686,6 @@ fn arrange_or_empty(_poly: &Polygon<f64>, _config: &MakeValidConfig) -> Geometry
 }
 
 #[cfg(feature = "structure")]
-/// Owned structure fix: distinguishes the zero-copy fast-path passthrough (see
-/// [`FixOutcome`]) from rebuilt geometry, and returns the polygon unconsumed when
-/// repair produced nothing.
 #[cfg(feature = "structure")]
 pub(super) fn structure_fix_owned(
     poly: Polygon<f64>,
@@ -750,11 +695,10 @@ pub(super) fn structure_fix_owned(
     crate::structure::fix_polygon_owned(poly, config, ext_scale)
 }
 
-/// True when the f64 sweep can miss a self-intersection, so the full Shewchuk validator
-/// must run. Ratio > 1e100: huge and subnormal mixes overlap all bbox pairs. Fuzz crash
-/// 65111cd0. max_abs > 1e150: orient products overflow f64 near 1.8e308 to inf.
-/// Products overflow at 6.7e153, so 1e150 keeps margin. Fuzz crash 53657: coords 1.5e82
-/// to 1.4e166 span 9.4e83, below the ratio guard.
+/// Ratio > 1e100: huge and subnormal mixes overlap all bbox pairs. Fuzz crash 65111cd0.
+/// max_abs > 1e150: orient products overflow f64 near 1.8e308 to inf. Products overflow
+/// at 6.7e153, so 1e150 keeps margin. Fuzz crash 53657: coords 1.5e82 to 1.4e166 span
+/// 9.4e83, below the ratio guard.
 fn fast_gate_needs_full_validation(min_abs: f64, max_abs: f64) -> bool {
     (min_abs.is_finite() && min_abs > 0.0 && max_abs / min_abs > 1e100)
         || (max_abs.is_finite() && max_abs > 1e150)
@@ -766,8 +710,7 @@ pub fn is_valid_with_geo(g: &Geometry<f64>) -> bool {
     g.is_valid()
 }
 
-/// Last-resort fallback: BuildArea on noded boundary, then precision snap. Uses only
-/// `reduce_raw` (snap only, no MakeValid call) to avoid recursion.
+/// Last-resort fallback: BuildArea on noded boundary, then precision snap.
 #[cfg(any(feature = "arrange", feature = "structure"))]
 pub(super) fn reduce_fallback(poly: &Polygon<f64>, config: &MakeValidConfig) -> Geometry<f64> {
     use crate::reduce::{GeometryPrecisionReducer, PrecisionModel};
@@ -826,7 +769,6 @@ pub(super) fn shells_have_overlapping_bboxes(mp: &MultiPolygon<f64>) -> bool {
     false
 }
 
-/// Check if any vertex of one shell is strictly inside another shell's ring.
 #[cfg(any(feature = "arrange", feature = "structure"))]
 pub(super) fn shells_have_vertex_inside(mp: &MultiPolygon<f64>) -> bool {
     for i in 0..mp.0.len() {

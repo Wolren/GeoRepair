@@ -42,7 +42,6 @@ use geo::{
     Point, Polygon,
 };
 
-/// Errors that can occur during WKT parsing.
 #[derive(Debug)]
 pub enum WktError {
     ParseError {

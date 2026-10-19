@@ -1,4 +1,3 @@
-//! EWKB/extra-binary-format tests (split 2026-08-07; verbatim).
 
 use super::*;
 
@@ -59,7 +58,6 @@ fn coord_count(geom: &Geometry<f64>) -> usize {
 
 #[test]
 fn ewkb_read_2d_no_extra() {
-    // Plain 2D WKB through read_ewkb yields empty extra_coords
     let bytes = write_wkb(&make_test_geom());
     let ewkb = read_ewkb(&bytes).unwrap();
     assert_eq!(ewkb.geometry, make_test_geom());
@@ -305,7 +303,6 @@ fn ewkb_roundtrip_gc_xy() {
 
 #[test]
 fn ewkb_write_then_read_wkb_2d() {
-    // write_ewkb → read_wkb returns 2D geo with no metadata
     let ewkb = EwkbGeometry {
         geometry: make_test_geom(),
         srid: Some(4326),
@@ -357,7 +354,6 @@ fn write_wkb_with_opts_be_roundtrip_point() {
         endianness: Endianness::BigEndian,
     };
     let wkb = write_wkb_with_opts(&g, &opts);
-    // Verify byte order marker is 0 (BE)
     assert_eq!(wkb[0], 0);
     let back = read_wkb(&wkb).unwrap();
     assert_eq!(g, back);
@@ -449,7 +445,6 @@ fn write_wkb_default_is_le() {
 
 #[test]
 fn write_wkb_with_opts_mixed_endian_explicit() {
-    // Ensure LE and BE produce different byte sequences
     let g = Geometry::Point(Point::new(1.0, 2.0));
     let le_opts = WriteOptions {
         endianness: Endianness::LittleEndian,
@@ -515,14 +510,12 @@ fn write_wkb_to_writer_be_via_opts() {
 
 #[test]
 fn mixed_byte_order_multipolygon() {
-    // Inner polygon 1: BE Inner polygon 2: LE
     let mut wkb = Vec::new();
 
     wkb.push(1);
     wkb.extend_from_slice(&6u32.to_le_bytes()); // MultiPolygon
     wkb.extend_from_slice(&2u32.to_le_bytes()); // 2 polygons
 
-    // Polygon 1: BE
     wkb.push(0); // BE
     wkb.extend_from_slice(&3u32.to_be_bytes()); // Polygon
     wkb.extend_from_slice(&1u32.to_be_bytes()); // 1 ring
@@ -538,7 +531,6 @@ fn mixed_byte_order_multipolygon() {
     wkb.extend_from_slice(&0.0f64.to_be_bytes());
     wkb.extend_from_slice(&0.0f64.to_be_bytes());
 
-    // Polygon 2: LE
     wkb.push(1); // LE
     wkb.extend_from_slice(&3u32.to_le_bytes()); // Polygon
     wkb.extend_from_slice(&1u32.to_le_bytes()); // 1 ring
@@ -562,8 +554,6 @@ fn mixed_byte_order_multipolygon() {
     }
 }
 
-// Production-readiness battery: truncation, garbage, trailing bytes, non-OGC variants,
-// empty geometries, precise error codes.
 
 /// Every strict prefix of a valid WKB buffer must fail cleanly (no panics, no silent
 /// truncation acceptance).
@@ -708,8 +698,6 @@ fn empty_geometries_roundtrip_wkb() {
 
 #[test]
 fn wrong_subtype_reports_real_code() {
-    // multipoint containing a linestring sub-geometry: the error must carry the actual
-    // sub type code (2 = linestring), not 0.
     let mut buf = Vec::new();
     buf.push(1u8); // NDR
     buf.extend_from_slice(&WKB_MULTIPOINT.to_le_bytes());
@@ -730,7 +718,6 @@ fn wrong_subtype_reports_real_code() {
 
 #[test]
 fn invalid_byte_order_and_unknown_code() {
-    // Byte order byte must be 0 or 1.
     let err = read_wkb(&[0x02, 0x00, 0x00, 0x00, 0x01]).unwrap_err();
     assert!(matches!(err, WkbError::InvalidByteOrder(2)));
     // Unknown type code 99 (0x63).

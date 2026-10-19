@@ -1,7 +1,6 @@
 use alloc::vec::Vec;
 use geo::{Coord, LineString};
 
-/// Check if a hole ring is entirely outside a shell ring by testing its first point.
 fn is_hole_outside(hole: &LineString<f64>, shell: &LineString<f64>) -> bool {
     let first = match hole.0.first() {
         Some(pt) => *pt,
@@ -41,9 +40,6 @@ fn is_hole_outside(hole: &LineString<f64>, shell: &LineString<f64>) -> bool {
     true
 }
 
-/// True if two rings are the same coordinate set (rotation/reversal/
-/// closure-insensitive). hole==shell is a degenerate invalid polygon whose hole must
-/// not be reclassified inner by the centroid test.
 fn ring_set_equal(a: &LineString<f64>, b: &LineString<f64>) -> bool {
     if a.0.len() != b.0.len() {
         return false;

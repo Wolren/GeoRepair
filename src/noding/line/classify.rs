@@ -1,6 +1,3 @@
-//! Per-pair classification for the lean line noder: mirrors the validator's own
-//! predicate chain (fast-FP first, robust escalation, collinear, vertex-on-edge, shared
-//! endpoint).
 
 use geo::Coord;
 
@@ -8,7 +5,6 @@ use crate::orient::orient2d;
 
 use super::Hit;
 
-/// Classify a segment pair with the validator's own predicate semantics.
 #[inline]
 pub(super) fn classify(
     a1: Coord<f64>,
@@ -45,7 +41,6 @@ pub(super) fn classify(
             && (p.x - s1.x).abs().max((p.y - s1.y).abs()) > eps
             && (p.x - s2.x).abs().max((p.y - s2.y).abs()) > eps
     };
-    // f1 = orient(a1, a2, b1) tests b1 against line a, etc.
     let vertex_contact = || -> Option<Coord<f64>> {
         if contact(a1, b1, b2, f3, e3) {
             return Some(a1);

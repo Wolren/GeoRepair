@@ -1,7 +1,3 @@
-//! Handle collapsed geometries (polygon → line → point).
-//!
-//! When keep_collapsed is true, degenerate higher-dimensional geometries are preserved
-//! as lower-dimensional types instead of becoming empty.
 
 use geo::{CoordNum, GeoFloat, Geometry, LineString, Point};
 

@@ -3,10 +3,6 @@ use alloc::string::ToString;
 use alloc::vec::Vec;
 use geo::GeoFloat;
 
-/// Trait for OGC geometry validation.
-///
-/// Call [`validate`](GeoValidation::validate) to get a [`ValidationResult`] with all
-/// violations, or [`is_valid`](GeoValidation::is_valid) for a quick boolean check.
 pub trait GeoValidation {
     /// The scalar coordinate type (e.g. `f64`, `f32`).
     type Scalar: GeoFloat;
@@ -19,8 +15,6 @@ pub trait GeoValidation {
     /// Full validation - returns a [`ValidationResult`] with all violations found.
     fn validate(&self) -> ValidationResult;
 
-    /// Human-readable validity reason (like GEOS `isValidReason`).
-    ///
     /// Returns `"Valid Geometry"` when valid, or a semicolon-separated list of
     /// violation descriptions when invalid.
     fn validate_reason(&self) -> String {
@@ -39,10 +33,6 @@ pub trait GeoValidation {
 }
 
 pub(crate) use super::edges::*;
-/// Facade: re-export the extracted submodules so existing `crate::validation::core::*`
-/// imports keep resolving. Modules whose items are all pub(crate) re-export at
-/// pub(crate) scope (the facade itself is crate-internal; mod.rs owns the public
-/// surface).
 pub use super::errors::*;
 pub(crate) use super::holes::*;
 pub use super::impls::*;

@@ -1,9 +1,4 @@
-//! SIMD-accelerated geometric predicates. # Kernel selection history (measured,
-//! 2026-08-02, i5-12400F) Hand-written avx2 and avx-512 intrinsics lost to scalar code
-//! and are removed. is_ring_ccw was 2.8x slower, point_in_ring 8.4x slower,
-//! orient2d_batch_4 a tie, aabb_minmax 4.5x faster, snap_coords 1.8x faster. A -C
-//! target-cpu=native build regressed the 1.58M pass by 25%, from 3.73s to 4.69s. The
-//! std::simd path remains. Call sites use crate::simd without a feature guard.
+//! A -C target-cpu=native build regressed the 1.58M pass by 25%, from 3.73s to 4.69s.
 
 #[cfg(feature = "simd-portable")]
 use geo::Coord;
@@ -67,10 +62,6 @@ fn point_in_ring_scalar_loop(
     wn
 }
 
-/// Point-in-ring test that accepts boundary points as inside (inclusive). Used by the
-/// large-valid fast-path gate: GEOS IsValidOp allows a hole to touch the shell at a
-/// point (OGC polygon validity), so a hole whose probe vertex lies exactly ON the shell
-/// must not disqualify the polygon.
 pub fn point_in_ring_inclusive_test(pt: Coord<f64>, coords: &[Coord<f64>]) -> bool {
     point_in_ring_inclusive(pt, coords)
 }
@@ -133,7 +124,6 @@ mod portable;
 #[cfg(test)]
 mod tests;
 
-/// Public aabb for external diagnostics (examples).
 #[cfg(not(feature = "simd-portable"))]
 pub use fallback::aabb_minmax_simd as aabb_minmax_public;
 #[cfg(not(feature = "simd-portable"))]

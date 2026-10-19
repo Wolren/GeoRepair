@@ -1,16 +1,14 @@
 use alloc::vec::Vec;
 use geo::{Area, Coord, LinesIter, MultiPolygon, Polygon};
 
-/// Subtract holes from a shell to give ogc-valid polygon parts. They force noding and
-/// polygonize on nearly every polygon: a 50-100x regression, 305s against 5.5s on 2298
-/// invalid polygons.
+/// They force noding and polygonize on nearly every polygon: a 50-100x regression, 305s
+/// against 5.5s on 2298 invalid polygons.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn subtract_holes(shell: &Polygon<f64>, holes: &[Polygon<f64>]) -> MultiPolygon<f64> {
     if holes.is_empty() {
         return MultiPolygon::new(vec![shell.clone()]);
     }
 
-    // touches the shell in 2+ places splits the shell into multiple
     let result = match crate::arrange::boolean_difference_catch(shell, holes) {
         Some(mp) => mp,
         // i_overlay panic (is_fill_top assertion on degenerate input): the panic must
@@ -61,7 +59,6 @@ fn needs_build_area_holes(mp: &MultiPolygon<f64>) -> bool {
                 }
             }
         }
-        // big shells (10k+ verts) make the pair scan prohibitive
         let shell = p.exterior().0.as_slice();
         if shell.len() <= 64 {
             for h in &holes {
@@ -74,8 +71,6 @@ fn needs_build_area_holes(mp: &MultiPolygon<f64>) -> bool {
     false
 }
 
-/// True if two rings share a collinear edge segment with positive-length overlap.
-/// Vertex-only touches (hourglass patterns) return false.
 fn build_area_shell_holes(
     shell: &Polygon<f64>,
     holes: &[Polygon<f64>],

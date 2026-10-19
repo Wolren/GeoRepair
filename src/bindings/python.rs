@@ -1,8 +1,5 @@
-//! Python bindings via PyO3.
-//!
 //!
 //! # Build and install
-//!
 //! ```bash
 //! pip install maturin
 //! python -m maturin build --release --features python
@@ -10,7 +7,6 @@
 //! ```
 //!
 //! # Python usage
-//!
 //! ```python
 //! import geo_repair
 //!
@@ -25,9 +21,6 @@
 //!
 //! print(geo_repair.version())
 //! ```
-//!
-//! **qgis integration:** See `qgis/qgis_geo_repair.py` for a complete processing script
-//! (batched WKB streaming, memory O(1)).
 
 use alloc::string::String;
 use alloc::string::ToString;
@@ -51,7 +44,6 @@ type WktValidateAndFix = (bool, Vec<String>, String);
 /// `(fixed_wkt, was_valid_before, errors)` for one WKT geometry.
 type WktRepairValidate = (String, bool, Vec<String>);
 
-/// Library version string (identical to the Rust crate version).
 #[pyfunction]
 fn version() -> &'static str {
     VERSION
@@ -82,8 +74,6 @@ fn repair_one(geom: geo::Geometry<f64>, config: &MakeValidConfig) -> geo::Geomet
     geom.make_valid_with_config(config)
 }
 
-/// Collect validation errors as strings; for GeometryCollection inputs each child's
-/// errors are prefixed with `[geom N]` so callers can tell which component failed.
 fn error_strings(geom: &geo::Geometry<f64>) -> Vec<String> {
     if let geo::Geometry::GeometryCollection(gc) = geom {
         let mut out = Vec::new();
@@ -143,13 +133,6 @@ fn geo_repair_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
 }
 
 
-/// Repair a single WKB geometry (bytes).
-///
-/// Args: wkb: Raw WKB bytes of the geometry to repair. method: Optional repair method
-/// (``"auto"``, ``"arrange"``, ``"structure"``). keep_collapsed: Optional; when True,
-/// collapsed (zero-area) components are kept instead of dropped.
-///
-/// Returns: WKB bytes of the repaired geometry.
 #[pyfunction]
 #[pyo3(signature = (wkb, method = None, keep_collapsed = None))]
 fn repair_wkb(
@@ -163,9 +146,6 @@ fn repair_wkb(
     Ok(write_wkb(&fixed))
 }
 
-/// Repair a list of WKB byte buffers.
-///
-/// Unparseable inputs are returned unchanged (the batch never fails as a whole).
 #[pyfunction]
 #[pyo3(signature = (wkbs, method = None, keep_collapsed = None))]
 fn repair_wkb_batch(
@@ -188,7 +168,6 @@ fn repair_wkb_batch(
     Ok(results)
 }
 
-/// Parallel repair of a list of WKB buffers (requires ``parallel`` feature).
 #[cfg(feature = "parallel")]
 #[pyfunction]
 #[pyo3(signature = (wkbs, method = None, keep_collapsed = None))]
@@ -212,17 +191,12 @@ fn par_repair_wkb_batch(
     Ok(results)
 }
 
-/// Check whether a WKB geometry is OGC-valid.
-///
-///
-/// Returns: ``True`` if the geometry is valid, ``False`` otherwise.
 #[pyfunction]
 fn is_valid_wkb(wkb: Vec<u8>) -> PyResult<bool> {
     let geom = parse_wkb(&wkb)?;
     Ok(geom.is_valid())
 }
 
-/// Validate a WKB geometry and return (is_valid, [errors]).
 #[pyfunction]
 fn validate_wkb(wkb: Vec<u8>) -> PyResult<(bool, Vec<String>)> {
     let geom = parse_wkb(&wkb)?;
@@ -231,8 +205,6 @@ fn validate_wkb(wkb: Vec<u8>) -> PyResult<(bool, Vec<String>)> {
     Ok((valid, errors))
 }
 
-/// Validate a WKB geometry, then fix it if invalid.
-///
 /// Returns: ``(was_valid, errors_before_repair, fixed_wkb_bytes)`` If the geometry was
 /// already valid, `errors_before_repair` is empty and `fixed_wkb_bytes` equals the
 /// original input.
@@ -251,7 +223,6 @@ fn validate_and_fix_wkb(
     Ok((valid, errors, write_wkb(&fixed)))
 }
 
-/// Check whether each WKB geometry is OGC-valid.
 #[pyfunction]
 fn is_valid_wkb_batch(wkbs: Vec<Vec<u8>>) -> PyResult<Vec<bool>> {
     let mut results = Vec::with_capacity(wkbs.len());
@@ -264,7 +235,6 @@ fn is_valid_wkb_batch(wkbs: Vec<Vec<u8>>) -> PyResult<Vec<bool>> {
     Ok(results)
 }
 
-/// Validate each WKB geometry, returning ``[(is_valid, [errors]), .]``.
 #[pyfunction]
 fn validate_wkb_batch(wkbs: Vec<Vec<u8>>) -> PyResult<Vec<(bool, Vec<String>)>> {
     let mut results = Vec::with_capacity(wkbs.len());
@@ -282,9 +252,6 @@ fn validate_wkb_batch(wkbs: Vec<Vec<u8>>) -> PyResult<Vec<(bool, Vec<String>)>> 
     Ok(results)
 }
 
-/// Validate then fix each WKB geometry.
-///
-/// Returns ``[(was_valid, errors_before_repair, fixed_wkb_bytes), .]``.
 #[pyfunction]
 #[pyo3(signature = (wkbs, method = None, keep_collapsed = None))]
 fn validate_and_fix_wkb_batch(
@@ -309,9 +276,6 @@ fn validate_and_fix_wkb_batch(
     Ok(results)
 }
 
-/// Repair + validate a single WKB buffer.
-///
-/// Returns ``(wkb_bytes, is_valid_before, [errors])``.
 #[pyfunction]
 #[pyo3(signature = (wkb, method = None, keep_collapsed = None))]
 fn repair_validate_wkb(
@@ -330,9 +294,6 @@ fn repair_validate_wkb(
     Ok((write_wkb(&fixed), valid, errors))
 }
 
-/// Repair + validate a list of WKB buffers.
-///
-/// Returns ``[(wkb_bytes, is_valid_before, [errors]), .]``.
 #[pyfunction]
 #[pyo3(signature = (wkbs, method = None, keep_collapsed = None))]
 fn repair_validate_wkb_batch(
@@ -358,13 +319,6 @@ fn repair_validate_wkb_batch(
 }
 
 
-/// Repair a WKT geometry string.
-///
-/// Args: wkt: WKT text of the geometry to repair. method: Optional repair method
-/// (``"auto"``, ``"arrange"``, ``"structure"``). keep_collapsed: Optional; when True,
-/// collapsed (zero-area) components are kept instead of dropped.
-///
-/// Returns: WKT text of the repaired geometry.
 #[pyfunction]
 #[pyo3(signature = (wkt, method = None, keep_collapsed = None))]
 fn repair_wkt(wkt: &str, method: Option<&str>, keep_collapsed: Option<bool>) -> PyResult<String> {
@@ -374,7 +328,6 @@ fn repair_wkt(wkt: &str, method: Option<&str>, keep_collapsed: Option<bool>) -> 
     Ok(write_wkt(&fixed))
 }
 
-/// Repair a list of WKT strings.
 #[pyfunction]
 #[pyo3(signature = (wkts, method = None, keep_collapsed = None))]
 fn repair_wkt_batch(
@@ -394,7 +347,6 @@ fn repair_wkt_batch(
     Ok(results)
 }
 
-/// Parallel repair of a list of WKT strings (requires ``parallel`` feature).
 #[cfg(feature = "parallel")]
 #[pyfunction]
 #[pyo3(signature = (wkts, method = None, keep_collapsed = None))]
@@ -415,14 +367,12 @@ fn par_repair_wkt_batch(
     Ok(results)
 }
 
-/// Check whether a WKT geometry is OGC-valid.
 #[pyfunction]
 fn is_valid_wkt(wkt: &str) -> PyResult<bool> {
     let geom = parse_wkt(wkt)?;
     Ok(geom.is_valid())
 }
 
-/// Validate a list of WKT strings, returning ``[bool, .]``.
 #[pyfunction]
 fn is_valid_wkt_batch(wkts: Vec<String>) -> PyResult<Vec<bool>> {
     let mut results = Vec::with_capacity(wkts.len());
@@ -435,14 +385,12 @@ fn is_valid_wkt_batch(wkts: Vec<String>) -> PyResult<Vec<bool>> {
     Ok(results)
 }
 
-/// Validate a WKT geometry, returning the list of violations.
 #[pyfunction]
 fn validate_wkt(wkt: &str) -> PyResult<Vec<String>> {
     let geom = parse_wkt(wkt)?;
     Ok(error_strings(&geom))
 }
 
-/// Validate a list of WKT strings, returning ``[[errors], .]``.
 #[pyfunction]
 fn validate_wkt_batch(wkts: Vec<String>) -> PyResult<Vec<Vec<String>>> {
     let mut results = Vec::with_capacity(wkts.len());
@@ -455,9 +403,6 @@ fn validate_wkt_batch(wkts: Vec<String>) -> PyResult<Vec<Vec<String>>> {
     Ok(results)
 }
 
-/// Validate a WKT geometry, then fix it if invalid.
-///
-/// Returns ``(was_valid, errors_before_repair, fixed_wkt)``.
 #[pyfunction]
 #[pyo3(signature = (wkt, method = None, keep_collapsed = None))]
 fn validate_and_fix_wkt(
@@ -473,9 +418,6 @@ fn validate_and_fix_wkt(
     Ok((valid, errors, write_wkt(&fixed)))
 }
 
-/// Validate then fix each WKT geometry.
-///
-/// Returns ``[(was_valid, errors_before_repair, fixed_wkt), .]``.
 #[pyfunction]
 #[pyo3(signature = (wkts, method = None, keep_collapsed = None))]
 fn validate_and_fix_wkt_batch(
@@ -500,9 +442,6 @@ fn validate_and_fix_wkt_batch(
     Ok(results)
 }
 
-/// Repair + validate a single WKT string.
-///
-/// Returns ``(fixed_wkt, is_valid_before, [errors])``.
 #[pyfunction]
 #[pyo3(signature = (wkt, method = None, keep_collapsed = None))]
 fn repair_validate_wkt(
@@ -521,9 +460,6 @@ fn repair_validate_wkt(
     Ok((write_wkt(&fixed), valid, errors))
 }
 
-/// Repair + validate a list of WKT strings.
-///
-/// Returns ``[(fixed_wkt, is_valid_before, [errors]), .]``.
 #[pyfunction]
 #[pyo3(signature = (wkts, method = None, keep_collapsed = None))]
 fn repair_validate_wkt_batch(

@@ -1,7 +1,4 @@
-//! geos-compatible fast-path polygon repair by planar graph extraction. It is 10 to
-//! 100x faster than cdt on valid or simple input and needs only geo.
-//! - merge: face merging - subtract: hole subtraction - sweep: plane-sweep intersection
-//!   detection
+//! It is 10 to 100x faster than cdt on valid or simple input and needs only geo.
 
 use alloc::vec::Vec;
 /// GEOS BuildArea port: polygonize linework → shell/hole classification → even-parent
@@ -35,10 +32,9 @@ use crate::util;
 use log::warn;
 
 
-/// Borrowed convenience wrapper: clones the polygon and delegates to
-/// `fix_polygon_owned`. The hot batch paths use the owned variant to avoid the clone
-/// (measured: the fast-path clone was ~2 allocs + full ring memcpy per polygon, the
-/// dominant per-poly cost on the 1.58M-poly full pass).
+/// The hot batch paths use the owned variant to avoid the clone (measured: the
+/// fast-path clone was ~2 allocs + full ring memcpy per polygon, the dominant per-poly
+/// cost on the 1.58M-poly full pass).
 pub fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geometry<f64>> {
     match fix_polygon_owned(poly.clone(), config, None) {
         FixOutcome::Fast(g, _, _, _) | FixOutcome::Repaired(g) => Some(g),
@@ -46,30 +42,19 @@ pub fn fix_polygon(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Geom
     }
 }
 
-/// Outcome of [`fix_polygon_owned`]. Distinguishes the zero-copy fast path
-/// (passthrough. Provably non-degenerate and NaN-free, so the caller can skip the
-/// redundant `strip_degenerate`/`has_nan` passes) from rebuilt geometry that still
-/// needs those checks.
+/// Distinguishes the zero-copy fast path (passthrough. Provably non-degenerate and
+/// NaN-free. The caller can skip the redundant `strip_degenerate`/`has_nan` passes)
+/// from rebuilt geometry that still needs those checks.
 pub(crate) enum FixOutcome {
-    /// Input polygon moved straight into the output. Validated by the fast-path gates:
-    /// >=4 coords, no sub-ULP edges, no self-intersections, valid holes, spread >= eps
-    /// * scale (checked by the caller), NaN-free. The last field is the per-ring min-x
-    ///   extremal index recorded during the gate's plausibility pass (exterior first.
-    ///   Holes, matching enforce_ogc_winding's ring order) so the caller's OGC winding
-    ///   normalization skips its own O(n) search (2026-08-09).
+    /// * scale (checked by the caller), NaN-free.
     Fast(Geometry<f64>, f64, f64, Vec<usize>),
-    /// Rebuilt geometry (repair / fallback paths).
     Repaired(Geometry<f64>),
     /// Structure repair produced nothing; the polygon is returned unconsumed for the
     /// caller's precision-reduction fallback.
     Unconsumed(Polygon<f64>),
 }
 
-/// The fast path moves the polygon into the output instead of cloning it. About 99.85%
-/// of real-world polygons are already valid. This is a zero-copy passthrough that
-/// matches the geos shared-geometry return. ext_scale is the caller precomputed
-/// exterior bbox scale, the max spread floored at 1.0. The sub-ulp test no longer reads
-/// it, because that rule went per-edge-local on 2026-08-04.
+/// About 99.85% of real-world polygons are already valid.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(crate) fn fix_polygon_owned(
     poly: Polygon<f64>,
@@ -81,8 +66,6 @@ pub(crate) fn fix_polygon_owned(
     {
         let mut min_abs = f64::INFINITY;
         let mut max_abs = 0.0f64;
-        // Per-ring min-x extremal indices from the plausibility pass: the caller's
-        // winding normalization consumes them instead of re-searching (2026-08-09).
         let mut extremal: Vec<usize> = Vec::new();
         if fast_path_check(
             &poly,
@@ -98,11 +81,8 @@ pub(crate) fn fix_polygon_owned(
     }
     PROFILE_FP_NS.fetch_add(_t_fp.ns(), Ordering::Relaxed);
 
-    /// Fast-path gate, zero-copy. It accepts exactly what the exit validator accepts,
-    /// because the Fast path skips that validator (2026-08-07). Gates: basic form,
-    /// sub-ulp edges, a per-ring pair predicate with ring-local eps, and a 32-line
-    /// SmallVec. The R-tree proper-crossing sweep was cheaper only in constants and
-    /// missed collinear and T-junction classes.
+    /// It accepts exactly what the exit validator accepts, because the Fast path skips
+    /// that validator (2026-08-07).
     #[cfg(feature = "arrange")]
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn fast_path_check(
@@ -120,7 +100,6 @@ pub(crate) fn fix_polygon_owned(
         }
         // extreme-span gate (crash-65111cd0 guard, 2026-08-09) does not
         let mut bbox = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
-        // along in that walk at ~16 scalar ops per vertex on every valid ring
         let (mut sub_ulp, ext_min_abs) = crate::arrange::ring_guards(&poly.exterior().0);
         *min_abs = (*min_abs).min(ext_min_abs);
         for hole in poly.interiors() {
@@ -131,26 +110,20 @@ pub(crate) fn fix_polygon_owned(
         if sub_ulp {
             return false;
         }
-        // path (measured 2026-08-09: the separate poly.lines_iter() collect cost a full
-        // pass; the plausible loop already walks every window).
         let collect_lines = total_verts > tuning.small_ring_lines;
-        // Pre-sized: a mid-size ring pushes one line per window, so Vec::new pays three
-        // or four reallocations over a 10000-vertex ring (measured 2026-09-25: 5.7 us
-        // of growth alone).
+        // Vec::new pays three or four reallocations over a 10000-vertex ring (measured
+        // 2026-09-25: 5.7 us of growth alone).
         let mut lines: Vec<Line<f64>> = if collect_lines {
             Vec::with_capacity(total_verts)
         } else {
             Vec::new()
         };
-        // walk (one pass instead of walk + build_mono_chains).
         let fused_chains =
             total_verts > tuning.small_ring_lines && total_verts <= tuning.fast_path_max_verts;
         let mut sink = crate::arrange::prep_intersect::ChainSink::default();
         let mut acc = crate::arrange::GateAccum {
             lines: collect_lines.then_some(&mut lines),
             chains: fused_chains.then_some(&mut sink),
-            // push_line measured slower (interleaved A/B 2026-09-25: 3/3 rounds, 260.1
-            // vs 247.1 us median at 10000v).
             bbox: (!fused_chains).then_some(&mut bbox),
             extremal: Some(extremal),
         };
@@ -187,7 +160,6 @@ pub(crate) fn fix_polygon_owned(
             return false;
         }
         if total_verts <= tuning.fast_path_max_verts {
-            // SmallVec: ~95.6% of the real-world dataset has <= 32 vertices
             if total_verts <= tuning.small_ring_lines {
                 let lines: SmallVec<[Line<f64>; crate::core::SMALL_RING_LINES]> =
                     poly.lines_iter().collect();
@@ -214,8 +186,6 @@ pub(crate) fn fix_polygon_owned(
                             )
                             .is_empty()
                     }
-                    // fused_chains is exactly this branch's condition; a None here
-                    // would only mean the index was never built
                     None => false,
                 }
             }
@@ -240,8 +210,6 @@ pub(crate) fn fix_polygon_owned(
         }
     }
 
-    // (sub-grid small end or > 2^53 large end) must not go through it: Measured:
-    // differential fuzz 2026-08-03.
     if crate::make_valid::snap_cannot_represent(&poly) {
         if let Some(outcome) = crate::make_valid::precondition::precondition_fix(&poly, config) {
             return outcome;
@@ -260,8 +228,6 @@ pub(crate) fn fix_polygon_owned(
         }
     }
 
-    // Neither the i_overlay difference (returns a single quantized ring with 1e-9-grid
-    // node artifacts; measured: hole vertex split into two nodes)
     #[cfg(feature = "arrange")]
     {
         let shell_bbox = ring_bbox(poly.exterior().0.as_slice());
@@ -300,8 +266,6 @@ pub(crate) fn fix_polygon_owned(
                 if shell_polys.is_empty() {
                     return None;
                 }
-                // Polygons carry structural holes from BuildArea (self-crossing lobes):
-                // they must survive into the subtract step.
                 let valid: Vec<Polygon<f64>> = shell_polys
                     .into_iter()
                     .filter(|p| p.exterior().0.len() >= 4)
@@ -420,12 +384,8 @@ pub(crate) fn fix_polygon_owned(
         (valid_shells, hole_rings_cw)
     };
 
-    // The shell may already carry structural holes from BuildArea (lobes of a
-    // self-crossing shell that must remain void)
     let process_shell = |shell: Polygon<f64>| -> Vec<Polygon<f64>> {
         let mut shell_poly = shell;
-        // Structural holes: ensure CW orientation (geo convention) and drop any that
-        // are invalid or collinear.
         let struct_holes: Vec<LineString<f64>> = shell_poly
             .interiors()
             .iter()
@@ -505,11 +465,9 @@ pub(crate) fn fix_polygon_owned(
     }
 
     let result = if result_polys.len() == 1 {
-        // Safe: len==1 verified above on local Vec
         let p = result_polys.pop().expect("len==1 verified");
         #[cfg(feature = "arrange")]
         {
-            // (GEOS makeValid emits them) must survive.
             if has_proper_self_crossing(&p) {
                 Geometry::GeometryCollection(geo::GeometryCollection(Vec::new()))
             } else {

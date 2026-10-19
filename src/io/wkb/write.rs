@@ -1,4 +1,3 @@
-//! WKB writer: OGC + EWKB encoders and size estimation.
 
 use super::*;
 use alloc::vec::Vec;
@@ -20,20 +19,14 @@ pub fn write_wkb_with_opts(geom: &Geometry<f64>, opts: &WriteOptions) -> Vec<u8>
     buf
 }
 
-/// Serialize a geometry as WKB and write it to any `io::Write` target.
 #[cfg(feature = "std")]
 pub fn write_wkb_to(geom: &Geometry<f64>, writer: &mut impl Write) -> io::Result<()> {
     let bytes = write_wkb(geom);
     writer.write_all(&bytes)
 }
 
-/// Encode an EWKB geometry with SRID and Z/M dimension preservation.
-///
-/// Produces little-endian EWKB bytes that include SRID (if set) and Z/M dimension flags
-/// with extra coordinate values.
 ///
 /// # Example
-///
 /// ```rust
 /// use geo_repair::{EwkbDims, EwkbGeometry, read_ewkb, write_ewkb};
 ///
@@ -48,9 +41,6 @@ pub fn write_wkb_to(geom: &Geometry<f64>, writer: &mut impl Write) -> io::Result
 /// let roundtrip = read_ewkb(&bytes).unwrap();
 /// assert_eq!(roundtrip.extra_coords, vec![3.0]);
 /// ```
-///
-/// For endianness control, construct a byte buffer manually and write with
-/// [`write_wkb_with_opts`].
 pub fn write_ewkb(geom: &EwkbGeometry) -> Vec<u8> {
     let size = ewkb_size(&geom.geometry, geom.dims, geom.srid.is_some());
     let mut buf = Vec::with_capacity(size);
@@ -78,7 +68,6 @@ fn wkb_size(geom: &Geometry<f64>) -> usize {
     ewkb_size(geom, EwkbDims::XY, false)
 }
 
-/// Compute the byte size of a geometry in EWKB format with given dimension and SRID.
 fn ewkb_size(geom: &Geometry<f64>, dims: EwkbDims, has_srid: bool) -> usize {
     use geo::Geometry::*;
     let header = 1 + 4 + if has_srid { 4 } else { 0 };
@@ -157,11 +146,7 @@ fn write_coord(buf: &mut Vec<u8>, c: &Coord<f64>, le: bool) {
     write_f64(buf, c.y, le);
 }
 
-/// The WKB little-endian wire form of a `Coord<f64>` is exactly its 16 in-memory bytes.
-/// Measured 2026-08-04: about 2.5x fewer operations on the write path. `Coord<f64>` is
-/// two f64 fields, and const asserts pin size 16 and align 8. The bit-exact WKB
-/// roundtrip invariant (fuzz target plus probe) gates field order. Only the
-/// little-endian 2D path uses this copy.
+/// Measured 2026-08-04: about 2.5x fewer operations on the write path.
 fn write_coords_le_bulk(buf: &mut Vec<u8>, coords: &[Coord<f64>]) {
     const _: () = assert!(core::mem::size_of::<Coord<f64>>() == 16);
     const _: () = assert!(core::mem::align_of::<Coord<f64>>() == 8);
@@ -193,7 +178,6 @@ fn write_linestring(buf: &mut Vec<u8>, ls: &LineString<f64>, le: bool) {
 }
 
 fn write_polygon(buf: &mut Vec<u8>, poly: &Polygon<f64>, le: bool) {
-    // 2026-08-04 in tests/wkb_parity.rs .
     if poly.exterior().0.is_empty() && poly.interiors().is_empty() {
         write_u32(buf, 0, le);
         return;
@@ -445,7 +429,6 @@ fn write_geometry_ewkb(
             }
             write_u32(buf, mp.0.len() as u32, le);
             for p in &mp.0 {
-                // Sub-geometries never carry SRID (inherited from parent)
                 write_geometry_ewkb(buf, &Geometry::Point(*p), dims, None, extra, offset, le);
             }
         }
@@ -559,7 +542,6 @@ fn write_geometry_ewkb(
 }
 
 
-/// Read the byte size of the next WKB geometry from `buf` without fully parsing it.
 pub fn estimate_wkb_size(buf: &[u8]) -> Result<usize, WkbError> {
     let mut pos = 0;
     let mut dummy_extra = Vec::new();

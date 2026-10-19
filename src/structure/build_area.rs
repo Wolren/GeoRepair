@@ -4,8 +4,6 @@ use rustc_hash::FxHashMap;
 
 use super::fix_ring_graph::{build_graph, extract_all_faces_geos};
 
-/// geos BuildArea port. Classify by ring orientation in edgering::computehole:
-/// clockwise is a shell, ccw is a hole.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn build_area(lines: &[geo::Line<f64>]) -> Option<MultiPolygon<f64>> {
     if lines.is_empty() {
@@ -15,8 +13,6 @@ pub fn build_area(lines: &[geo::Line<f64>]) -> Option<MultiPolygon<f64>> {
     if graph.edges.is_empty() {
         return Some(MultiPolygon::new(Vec::new()));
     }
-    // None as a fallback signal (make_valid.rs polygonizer_fallback, fix_ring.rs) -
-    // keep the semantics
     let faces = extract_all_faces_geos(&graph)?;
     if faces.is_empty() {
         return Some(MultiPolygon::new(Vec::new()));
@@ -61,14 +57,12 @@ pub fn build_area(lines: &[geo::Line<f64>]) -> Option<MultiPolygon<f64>> {
         return Some(MultiPolygon::new(Vec::new()));
     }
 
-    // Step 2: sort by envelope area desc (GEOS CompareByEnvarea)
     faces_out.sort_by(|a, b| {
         b.envelope_area
             .partial_cmp(&a.envelope_area)
             .unwrap_or(core::cmp::Ordering::Equal)
     });
 
-    // Step 3: assign holes to smallest containing shell
     let shell_idx: Vec<usize> = faces_out
         .iter()
         .enumerate()
@@ -100,8 +94,6 @@ pub fn build_area(lines: &[geo::Line<f64>]) -> Option<MultiPolygon<f64>> {
         }
     }
 
-    // Step 4: even-parent filter (ring equality, direction-agnostic) owner_of_ring:
-    // fingerprint of a hole ring -> the shell that owns it.
     let mut owner_of_ring: FxHashMap<Vec<(u64, u64)>, usize> = FxHashMap::default();
     for f in &faces_out {
         if let Some(s) = f.parent {

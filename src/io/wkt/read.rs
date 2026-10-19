@@ -1,11 +1,9 @@
-//! WKT parser: single-pass tokenizer + reader.
 
 use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec::Vec;
-/// Maximum geometrycollection nesting depth. Each level consumes at least ~14 bytes of
-/// input, so the cap never rejects real data while bounding recursion (stack overflow
-/// is an uncatchable abort).
+/// Each level consumes at least ~14 bytes of input. The cap never rejects real data
+/// while bounding recursion (stack overflow is an uncatchable abort).
 const MAX_WKT_NESTING: usize = 256;
 
 use super::*;
@@ -101,8 +99,6 @@ impl<'a> Parser<'a> {
             return Err(self.err("expected number"));
         }
 
-        // The historical hand-rolled u64 accumulator + 10f64.powi(exp) assembly was
-        // not: measured output re-parsed to a different f64 (roundtrip fuzz target).
         let bytes = &self.s;
         let n = bytes.len();
         if self.i < n && (bytes[self.i] == b'-' || bytes[self.i] == b'+') {
@@ -173,8 +169,6 @@ impl<'a> Parser<'a> {
 
     fn read_coord_list(&mut self, dims: u32) -> Result<Vec<Coord<f64>>, WktError> {
         self.skip_ws();
-        // A bare '(' ')' coordinate list is rejected (GEOS rejects it too); emptiness
-        // is expressed with the empty keyword.
         let mut coords = Vec::new();
         coords.push(self.read_coord(dims)?);
         loop {
@@ -256,7 +250,6 @@ impl<'a> Parser<'a> {
             if self.i < self.s.len() && self.s[self.i] == b')' {
                 break;
             }
-            // polygon (empty, (0 0, 1 1, 0 1, 0 0)) is a polygon
             if self.i < self.s.len() && (self.s[self.i] == b'E' || self.s[self.i] == b'e') {
                 let rest = &self.s[self.i..];
                 if rest.starts_with(b"EMPTY") || rest.starts_with(b"empty") {
@@ -292,8 +285,6 @@ impl<'a> Parser<'a> {
             saw_any = true;
         }
         self.expect(b')')?;
-        // polygon () is rejected (GEOS rejects it too); polygon (empty) is a valid
-        // empty polygon.
         if !saw_any {
             return Err(self.err("expected at least one ring"));
         }
@@ -355,7 +346,6 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect(b')')?;
-        // multipoint () is rejected (GEOS rejects it too).
         if !saw_any {
             return Err(self.err("expected at least one point"));
         }
@@ -388,8 +378,6 @@ impl<'a> Parser<'a> {
             if self.i < self.s.len() && self.s[self.i] == b')' {
                 break;
             }
-            // empty element (multilinestring (empty, (1 1, 2 2))) - an empty line
-            // component.
             if self.i < self.s.len() && (self.s[self.i] == b'E' || self.s[self.i] == b'e') {
                 let rest = &self.s[self.i..];
                 if rest.starts_with(b"EMPTY") || rest.starts_with(b"empty") {
@@ -406,7 +394,6 @@ impl<'a> Parser<'a> {
             saw_any = true;
         }
         self.expect(b')')?;
-        // multilinestring () is rejected (GEOS rejects it too).
         if !saw_any {
             return Err(self.err("expected at least one line"));
         }
@@ -439,8 +426,6 @@ impl<'a> Parser<'a> {
             if self.i < self.s.len() && self.s[self.i] == b')' {
                 break;
             }
-            // empty element (multipolygon (empty, ((0 0, .)))) - an empty polygon
-            // component.
             if self.i < self.s.len() && (self.s[self.i] == b'E' || self.s[self.i] == b'e') {
                 let rest = &self.s[self.i..];
                 if rest.starts_with(b"EMPTY") || rest.starts_with(b"empty") {
@@ -498,7 +483,6 @@ impl<'a> Parser<'a> {
                 saw_ring = true;
             }
             self.expect(b')')?;
-            // (GEOS rejects it too); (empty) is a valid empty component.
             if !saw_ring {
                 return Err(self.err("expected at least one ring"));
             }
@@ -511,7 +495,6 @@ impl<'a> Parser<'a> {
             saw_any = true;
         }
         self.expect(b')')?;
-        // multipolygon () is rejected (GEOS rejects it too).
         if !saw_any {
             return Err(self.err("expected at least one polygon"));
         }
@@ -559,7 +542,6 @@ impl<'a> Parser<'a> {
             saw_any = true;
         }
         self.expect(b')')?;
-        // geometrycollection () is rejected (GEOS rejects it too).
         if !saw_any {
             return Err(self.err("expected at least one element"));
         }
@@ -595,10 +577,6 @@ pub(crate) enum Keyword {
     GeometryCollection,
 }
 
-/// Parse a WKT string into a `Geometry<f64>`.
-///
-/// Z, M, and ZM dimension modifiers are rejected with
-/// [`WktError::UnsupportedDimension`].
 pub fn read_wkt(input: &str) -> Result<Geometry<f64>, WktError> {
     let mut p = Parser {
         s: input.as_bytes(),
@@ -616,9 +594,6 @@ pub fn read_wkt(input: &str) -> Result<Geometry<f64>, WktError> {
     Ok(geom)
 }
 
-/// Read a WKT geometry from any `io::Read` source.
-///
-/// Supports the same geometry types and rejects Z/M/ZM modifiers.
 #[cfg(feature = "std")]
 pub fn read_wkt_from(mut reader: impl Read) -> Result<Geometry<f64>, WktError> {
     let mut s = String::new();
@@ -629,17 +604,12 @@ pub fn read_wkt_from(mut reader: impl Read) -> Result<Geometry<f64>, WktError> {
 /// Peek at the beginning of a WKT string to determine the geometry type name and
 /// dimension (always 2 for GeoRepair, since Z/M/ZM are rejected).
 ///
-/// This function reads only the type keyword and optional dimension modifier, without
-/// parsing the full geometry.
-///
 /// # Errors
-///
 /// Returns [`WktError::UnknownGeometryType`] if the keyword is not recognized,
 /// [`WktError::UnsupportedDimension`] for Z/M/ZM modifiers, and
 /// [`WktError::EmptyInput`] for empty/whitespace-only strings.
 ///
 /// # Example
-///
 /// ```rust
 /// use geo_repair::infer_wkt_type;
 ///

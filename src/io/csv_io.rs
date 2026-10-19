@@ -1,8 +1,3 @@
-//! csv backend (`.csv`): one geometry per row, first column = WKT.
-//!
-//! The reader accepts any csv with a WKT geometry in the first column and ignores
-//! additional attribute columns (the `Vec<Geometry>` return type cannot carry
-//! attributes).
 
 use alloc::string::String;
 use alloc::vec::Vec;

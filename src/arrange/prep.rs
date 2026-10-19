@@ -7,8 +7,6 @@ use crate::snap;
 use geo::{Coord, Line};
 use rstar::{AABB, RTree, RTreeObject};
 
-/// Prepared edge set: snapped, deduplicated, and intersection-split segments ready for
-/// cdt construction.
 #[derive(Debug)]
 pub struct PreparedLines {
     /// The processed line segments (snapped, deduped, split at intersections).
@@ -63,7 +61,6 @@ fn snap_or_push_grid(
     cell_size: f64,
 ) -> Coord<f64> {
     let key = grid_key(coord, cell_size);
-    // Check this cell and all 8 neighbors (use saturating arithmetic for edge cells)
     for dc in -1..=1i64 {
         for dr in -1..=1i64 {
             if let Some(&existing) = grid.get(&(key.0.saturating_add(dc), key.1.saturating_add(dr)))
@@ -126,8 +123,6 @@ fn on_segment(a: Coord<f64>, b: Coord<f64>, c: Coord<f64>, eps: f64) -> bool {
     c.x >= minx && c.x <= maxx && c.y >= miny && c.y <= maxy
 }
 
-/// Returns the intersection point of two segments if they properly cross. For collinear
-/// overlaps, returns the endpoints of the overlapping portion.
 fn segment_intersection(
     a: Coord<f64>,
     b: Coord<f64>,
@@ -691,7 +686,6 @@ mod tests {
         let result = split_segments(lines);
         assert!(result.is_ok());
         let split = result.unwrap();
-        // Should split each crossing segment into 2, plus snap
         assert!(split.len() >= 3);
     }
 

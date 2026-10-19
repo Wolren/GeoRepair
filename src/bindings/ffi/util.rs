@@ -1,5 +1,3 @@
-//! conversion helpers: WKB/WKT to Geometry, config, error strings (extracted from
-//! bindings/ffi.rs 2026-08-07; verbatim).
 
 use super::types::*;
 use crate::core::MakeValidConfig;

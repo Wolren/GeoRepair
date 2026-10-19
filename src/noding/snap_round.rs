@@ -30,8 +30,8 @@ fn snap_to_grid(c: Coord<f64>) -> Coord<f64> {
     }
 }
 
-/// A hot pixel represents a grid cell at SNAP_GRID resolution. Its center is snapped to
-/// the grid, and it can detect if a segment passes through it within HOT_PIXEL_RADIUS.
+/// Its center is snapped to the grid, and it can detect if a segment passes through it
+/// within HOT_PIXEL_RADIUS.
 struct HotPixel {
     center: Coord<f64>,
 }
@@ -43,8 +43,6 @@ impl HotPixel {
         }
     }
 
-    /// Returns true if the segment passes within HOT_PIXEL_RADIUS of this hot pixel's
-    /// center (including exactly through it).
     fn touches(&self, seg: &Line<f64>) -> bool {
         let dx = seg.end.x - seg.start.x;
         let dy = seg.end.y - seg.start.y;
@@ -64,8 +62,6 @@ impl HotPixel {
         d2 <= HOT_PIXEL_RADIUS * HOT_PIXEL_RADIUS
     }
 
-    /// Returns the parameter of the closest point on the segment to this hot pixel's
-    /// center.
     fn closest_param(&self, seg: &Line<f64>) -> f64 {
         let dx = seg.end.x - seg.start.x;
         let dy = seg.end.y - seg.start.y;
@@ -78,7 +74,6 @@ impl HotPixel {
     }
 }
 
-/// R-tree entry for a hot pixel center.
 #[cfg(feature = "rstar")]
 struct HpEntry {
     center: Coord<f64>,
@@ -107,7 +102,6 @@ impl rstar::RTreeObject for HpEntry {
 }
 
 
-/// Direction quadrant (0-3) for a segment vector.
 #[cfg(feature = "rstar")]
 fn quadrant(dx: f64, dy: f64) -> u8 {
     if dx > 0.0 {
@@ -119,7 +113,6 @@ fn quadrant(dx: f64, dy: f64) -> u8 {
     }
 }
 
-/// A monotone chain of consecutive segments in the same direction quadrant.
 #[cfg(feature = "rstar")]
 struct MonoChain {
     start: usize,
@@ -195,7 +188,6 @@ impl rstar::RTreeObject for ChainEnv {
     }
 }
 
-/// Collect all intersection points using MCIndex spatial indexing.
 #[cfg(feature = "rstar")]
 fn collect_intersections_mcindex(
     segments: &[Line<f64>],
@@ -219,7 +211,6 @@ fn collect_intersections_mcindex(
     }
 }
 
-/// Recursive divide-and-conquer: split larger chain, check leaf pairs.
 #[cfg(feature = "rstar")]
 fn check_chain_pair(
     segments: &[Line<f64>],
@@ -282,7 +273,6 @@ fn check_chain_pair(
     }
 }
 
-/// Build a sub-chain from `segments[start.end]` with a computed bounding box.
 #[cfg(feature = "rstar")]
 fn sub_chain(segments: &[Line<f64>], start: usize, end: usize) -> MonoChain {
     let mut min_x = f64::MAX;
@@ -320,25 +310,17 @@ impl SnapRoundingNoder {
         }
     }
 
-    /// Nodes a set of line segments by:
-    /// 1. Collecting all unique coordinates (endpoints + intersection points)
-    /// 2. Creating hot pixels at each coordinate snapped to grid
-    /// 3. Falling near-coincident points to the same hot pixel
-    /// 4. Subdividing each segment at all hot pixels it passes through
-    /// 5. Snapping all coordinates to grid
     fn node(&mut self, segments: &[Line<f64>]) -> Vec<Line<f64>> {
         if segments.is_empty() {
             return Vec::new();
         }
 
-        // Step 1a: Collect all unique endpoints
         let mut coords: Vec<Coord<f64>> = Vec::with_capacity(segments.len() * 2);
         for seg in segments {
             coords.push(seg.start);
             coords.push(seg.end);
         }
 
-        // Step 1b: Compute interior intersection points.
         let n = segments.len();
         #[cfg(feature = "rstar")]
         if n >= MCINDEX_THRESHOLD {
@@ -389,7 +371,6 @@ impl SnapRoundingNoder {
         });
         coords.dedup();
 
-        // Step 2 & 3: Create hot pixels, merging near-coincident points
         for &c in &coords {
             if !c.x.is_finite() || !c.y.is_finite() {
                 continue;
@@ -419,7 +400,6 @@ impl SnapRoundingNoder {
             }
         }
 
-        // Step 4 & 5: Subdivide each segment at hot pixels and snap to grid
         let eps = 1e-14;
         let mut result: Vec<Line<f64>> = Vec::new();
         #[cfg(feature = "rstar")]
@@ -520,8 +500,6 @@ impl SnapRoundingNoder {
     }
 }
 
-/// Snap-round line segments to a uniform grid in the HotPixel style of
-/// SnapRoundingNoder.
 pub(crate) fn snap_round_lines(lines: &[Line<f64>]) -> Vec<Line<f64>> {
     let mut noder = SnapRoundingNoder::new();
     noder.node(lines)
@@ -662,7 +640,6 @@ mod tests {
             Line::new(Coord { x: 5.0, y: 1e-11 }, Coord { x: 5.0, y: -1e-11 }),
         ];
         let result = snap_round_lines(&lines);
-        // The first segment should be subdivided at the hot pixel near (5,0)
         assert!(result.len() >= 2);
     }
 

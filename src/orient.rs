@@ -1,14 +1,11 @@
-//! Adaptive-precision orientation predicates (Shewchuk's algorithm).
-//!
-//! Wraps the `robust` crate to provide robust `orient2d` with machine-precision fast
-//! path and exact arithmetic slow path.
+//! Adaptive-precision orientation predicates (Shewchuk's algorithm). Wraps the `robust`
+//! crate to provide robust `orient2d` with machine-precision fast path and exact
+//! arithmetic slow path.
 
 use geo::Coord;
 
-/// Robust 2D orientation test. Returns a positive value if `pa`, `pb`, `pc` are
-/// counter-clockwise, negative if clockwise, and zero if collinear.
-///
-/// Uses Shewchuk's adaptive precision algorithm via the `robust` crate.
+/// Returns a positive value if `pa`, `pb`, `pc` are counter-clockwise, negative if
+/// clockwise. Uses Shewchuk's adaptive precision algorithm via the `robust` crate.
 #[inline(always)]
 pub fn orient2d(pa: Coord<f64>, pb: Coord<f64>, pc: Coord<f64>) -> f64 {
     robust::orient2d(

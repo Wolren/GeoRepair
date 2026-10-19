@@ -4,7 +4,6 @@ use alloc::vec::Vec;
 use core::mem;
 use geo::{Coord, GeoFloat, Line};
 
-// Only f64 and f32 implement NodingFloat.
 
 mod private {
     use geo::{Coord, GeoFloat};
@@ -30,8 +29,6 @@ mod private {
 
 pub(crate) use private::NodingFloat;
 
-/// Returns true when every edge shares one of two common endpoints. A radial/star
-/// topology that cannot produce proper crossings.
 fn is_radial<T: GeoFloat>(edges: &[Line<T>]) -> bool {
     if edges.len() < 3 {
         return false;
@@ -195,8 +192,6 @@ pub(crate) fn edges_intersect<T: GeoFloat>(e1: &Line<T>, e2: &Line<T>, eps: T) -
     if e1.end == e2.end && orient2d_generic(e1.end, e1.start, e2.start) != T::zero() {
         return false;
     }
-    // For f64, use robust orient2d (Shewchuk's algorithm) to avoid false negatives with
-    // near-collinear edges at large coordinates.
     if mem::size_of::<T>() == 8 {
         return edges_intersect_f64_robust(
             &Line::new(
@@ -279,13 +274,11 @@ fn collinear_overlap<T: GeoFloat>(e1: &Line<T>, e2: &Line<T>, eps: T) -> bool {
         return false;
     }
 
-    // Project e2 endpoints onto e1's direction (t parameter along e1)
     let t2s = ((e2.start.x - e1.start.x) * dx + (e2.start.y - e1.start.y) * dy) / dot_d;
     let t2e = ((e2.end.x - e1.start.x) * dx + (e2.end.y - e1.start.y) * dy) / dot_d;
 
     let (t2_min, t2_max) = if t2s < t2e { (t2s, t2e) } else { (t2e, t2s) };
 
-    // Overlap region on [0, 1]
     let lo = T::zero().max(t2_min);
     let hi = T::one().min(t2_max);
 
@@ -307,8 +300,6 @@ pub(crate) fn dist2<T: GeoFloat>(a: Coord<T>, b: Coord<T>) -> T {
     (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y)
 }
 
-/// For two collinear segments, compute split t-parameters where one edge's endpoint
-/// falls strictly inside the other. Returns `(splits_on_e1, splits_on_e2)`.
 pub(crate) fn collinear_split_params<T: GeoFloat>(
     e1: &Line<T>,
     e2: &Line<T>,
@@ -316,7 +307,6 @@ pub(crate) fn collinear_split_params<T: GeoFloat>(
 ) -> (Vec<T>, Vec<T>) {
     let eps_sq = eps * eps;
 
-    // Project e2 endpoints onto e1's direction
     let dx1 = e1.end.x - e1.start.x;
     let dy1 = e1.end.y - e1.start.y;
     let dot1 = dx1 * dx1 + dy1 * dy1;
@@ -333,7 +323,6 @@ pub(crate) fn collinear_split_params<T: GeoFloat>(
         }
     }
 
-    // Project e1 endpoints onto e2's direction
     let dx2 = e2.end.x - e2.start.x;
     let dy2 = e2.end.y - e2.start.y;
     let dot2 = dx2 * dx2 + dy2 * dy2;
@@ -352,9 +341,6 @@ pub(crate) fn collinear_split_params<T: GeoFloat>(
     (p1, p2)
 }
 
-/// f64‑only DD‑based intersection for maximum robustness. Callers must still check t/u
-/// in the desired range (this function returns the intersection even when the crossing
-/// falls outside segments).
 fn compute_intersection_param_dd(e1: &Line<f64>, e2: &Line<f64>) -> Option<(f64, f64, Coord<f64>)> {
     crate::dd::segment_intersection_dd(e1.start, e1.end, e2.start, e2.end)
         .map(|(pt, t, u)| (t.to_f64(), u.to_f64(), pt))
@@ -365,7 +351,6 @@ pub(crate) fn compute_intersection_param<T: GeoFloat>(
     e2: &Line<T>,
     eps: T,
 ) -> Option<(T, T, Coord<T>)> {
-    // For f64: GEOS-style two-phase: orient2d detection then DD computation.
     if core::mem::size_of::<T>() == 8 {
         let ef1 = Line::new(
             Coord {
@@ -403,9 +388,6 @@ pub(crate) fn compute_intersection_param<T: GeoFloat>(
             return None;
         }
 
-        // Phase 2: Computation via DD (106-bit mantissa) for any
-        // non-trivially-separated case: proper crossing, endpoint-on-segment, or
-        // near-parallel.
         return compute_intersection_param_dd(&ef1, &ef2).map(|(t, u, pt)| {
             (
                 T::from(t).expect("intersection param in range"),
@@ -418,7 +400,6 @@ pub(crate) fn compute_intersection_param<T: GeoFloat>(
         });
     }
 
-    // Generic fallback for non-f64 types (f32, etc.)
     let denom = (e1.end.x - e1.start.x) * (e2.end.y - e2.start.y)
         - (e1.end.y - e1.start.y) * (e2.end.x - e2.start.x);
     if denom.abs() < eps {

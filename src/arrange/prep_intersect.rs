@@ -4,14 +4,10 @@ use rstar::{AABB, RTree, RTreeObject};
 
 use crate::validation::sweep::{radix_sort_keys_tls, sortable_u64};
 
-/// Active-set limit for the edge-level spiky-ring sweep; beyond it the input is dense
-/// and belongs on the grid/R-tree path (same rationale as the line noder's limit).
 const EDGE_SWEEP_ACTIVE_LIMIT: usize = 512;
 
-/// Robust orientation of one line pair against another, batched as a single 4-wide SIMD
-/// call: [o(li, lj.start), o(li, lj.end), o(lj, li.start), o(lj, li.end)]. Measured ~2x
-/// faster than four separate robust calls in the small-ring sweep that dominates the
-/// 1.58M-polygon fast path.
+/// Measured ~2x faster than four separate robust calls in the small-ring sweep that
+/// dominates the 1.58M-polygon fast path.
 #[inline(always)]
 fn orient4(li: &Line<f64>, lj: &Line<f64>) -> [f64; 4] {
     let pa = [li.start, li.start, lj.start, lj.start];
@@ -20,14 +16,9 @@ fn orient4(li: &Line<f64>, lj: &Line<f64>) -> [f64; 4] {
     crate::simd::orient2d_batch_4_robust(&pa, &pb, &pc)
 }
 
-/// Strict proper-crossing test for two line segments using the batched orientation
-/// helper.
 #[inline(always)]
 fn segments_properly_cross(li: &Line<f64>, lj: &Line<f64>) -> bool {
     let [o1, o2, o3, o4] = orient4(li, lj);
-    // The (o1 > 0) != (o2 > 0) form treats Measured: 276/300 real-world repaired
-    // components rejected by the --fast gate while the full validator and GEOS accept
-    // them (2026-08-03).
     (o1 > 0.0 && o2 < 0.0 || o1 < 0.0 && o2 > 0.0) && (o3 > 0.0 && o4 < 0.0 || o3 < 0.0 && o4 > 0.0)
 }
 
@@ -51,9 +42,6 @@ pub(crate) struct MonoChain {
     pub(crate) max_x: f64,
     pub(crate) max_y: f64,
     pub(crate) ring_id: u32,
-    /// 1e-12 * ring bbox scale, computed once per ring in build_mono_chains. Used by
-    /// the same-ring full pair predicate (the gate must match check_ring_validity's
-    /// ring-local eps).
     ring_eps: f64,
 }
 
@@ -80,9 +68,6 @@ pub(crate) fn build_mono_chains(lines: &[Line<f64>]) -> (Vec<MonoChain>, (f64, f
         return (vec![], (f64::MAX, f64::MIN, f64::MAX, f64::MIN));
     }
 
-    // stamped on its chains (measured 2026-08-07: the old pre-scan cost ~15 us on a
-    // 5000-vertex ring). (measured 2026-08-09: one fewer pass on the valid-polygon
-    // path).
 
     let l0 = &lines[0];
     let dx = l0.end.x - l0.start.x;
@@ -183,14 +168,8 @@ pub(crate) fn build_mono_chains(lines: &[Line<f64>]) -> (Vec<MonoChain>, (f64, f
     (chains, (gmin_x, gmax_x, gmin_y, gmax_y))
 }
 
-/// Monotone-chain builder that the gate feeds one line at a time. Callers feed rings in
-/// order (begin_ring, lines, finish), as every caller of
-/// crate::arrange::ring_is_plausible does: exterior first, then holes. Ring boundaries
-/// are known here, so the builder does not re-detect them from line.start != prev.end.
 pub(crate) struct ChainSink {
     chains: Vec<MonoChain>,
-    /// Flat line index of the next push; mirrors the index into the caller's `lines`
-    /// vector (both are pushed in lockstep).
     flat: usize,
     start: usize,
     quad: u8,
@@ -351,9 +330,7 @@ impl ChainSink {
         }
     }
 
-    /// Stamp the open ring's scale-relative eps on its chains, and fold its bbox into
-    /// the global envelope. It costs four min/max per ring, not per vertex
-    /// (2026-10-17).
+    /// It costs four min/max per ring, not per vertex (2026-10-17).
     fn stamp_ring_eps(&mut self) {
         let scale = (self.ring_max_x - self.ring_min_x)
             .abs()
@@ -370,8 +347,6 @@ impl ChainSink {
         self.any = true;
     }
 
-    /// Close the open ring exactly as the reference builder closes it after its loop:
-    /// flush the last chain (no foreign line folded in) and stamp the ring's eps.
     fn flush_ring(&mut self) {
         self.push_open_chain(self.flat);
         self.stamp_ring_eps();
@@ -395,10 +370,6 @@ impl ChainSink {
     }
 }
 
-/// Repeated-vertex class for a non-adjacent edge pair. GEOS
-/// PolygonIntersectionAnalyzer::findInvalidIntersection treats a non-adjacent
-/// same-segString intersection as eRingSelfIntersection. lean_pair_intersects marks an
-/// exact shared endpoint ambiguous and not intersecting, so this leaf closes the class.
 #[inline]
 fn shares_repeated_vertex(a: &Line<f64>, b: &Line<f64>) -> bool {
     a.start == b.start || a.end == b.end || a.end == b.start
@@ -420,7 +391,6 @@ fn rec_overlaps(
         if i == j {
             return false;
         }
-        // Closing pair is not skipped: shared vertex 0 aside
         if mc1.ring_id == mc2.ring_id && (j == i + 1 || j + 1 == i) {
             return false;
         }
@@ -429,7 +399,6 @@ fn rec_overlaps(
         if segments_properly_cross(li, lj) {
             return true;
         }
-        // polygon the exit validator would reject (2026-08-07).
         if mc1.ring_id == mc2.ring_id {
             let eps = mc1.ring_eps;
             let mut ambiguous = false;
@@ -443,8 +412,6 @@ fn rec_overlaps(
             ) {
                 return true;
             }
-            // This replaces the per-ring duplicate-vertex hash table the caller used to
-            // carry (2026-10-17) - same verdicts, no table.
             if ambiguous && shares_repeated_vertex(li, lj) {
                 return true;
             }
@@ -486,11 +453,6 @@ fn compute_overlaps(lines: &[Line<f64>], mc1: &MonoChain, mc2: &MonoChain) -> bo
     rec_overlaps(lines, mc1, mc1.start, mc1.end, mc2, mc2.start, mc2.end)
 }
 
-/// Small-ring O(n^2) proper-crossing sweep. It copies rec_overlaps for n <=
-/// SMALL_RING_LINES lines: - proper crossing: (o1 > 0.0) != (o2 > 0.0) and (o3 > 0.0)
-/// != (o4 > 0.0), via orient2d (crate::orient) - same-ring adjacency: j == i + 1 or j +
-/// 1 == i. The closing pair (first, last) is skipped, as in rec_overlaps lines 148-156.
-/// - different rings always compare.
 pub fn has_no_intersections_small(lines: &[Line<f64>]) -> bool {
     let n = lines.len();
     debug_assert!(n <= crate::core::SMALL_RING_LINES);
@@ -531,8 +493,6 @@ pub fn has_no_intersections_small(lines: &[Line<f64>]) -> bool {
         let ri = ring_of[i] as usize;
         for j in (i + 1)..n {
             if ri == ring_of[j] as usize {
-                // The closing pair (first vs last edge) is not skipped: the two share
-                // vertex 0
                 if j == i + 1 || j + 1 == i {
                     continue;
                 }
@@ -541,9 +501,6 @@ pub fn has_no_intersections_small(lines: &[Line<f64>]) -> bool {
             if segments_properly_cross(li, lj) {
                 return false;
             }
-            // (proper crossing + eps-collinear overlap + vertex-on-edge T-junction)
-            // with the ring's own eps - identical to check_ring_validity's sweep
-            // (2026-08-07).
             if ri == ring_of[j] as usize {
                 let eps = eps_by_ring[ri];
                 let mut ambiguous = false;
@@ -582,8 +539,6 @@ pub fn has_no_intersections(lines: &[Line<f64>]) -> bool {
     has_no_intersections_tuned(lines, &crate::core::Tuning::default())
 }
 
-/// Tuned variant of [`has_no_intersections`]: the repair pipeline threads the caller's
-/// [`crate::core::Tuning`] through the small-ring dispatch.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(crate) fn has_no_intersections_tuned(
     lines: &[Line<f64>],
@@ -615,7 +570,6 @@ pub fn has_no_intersections_nan_ok(lines: &[Line<f64>]) -> bool {
     has_no_intersections_nan_ok_tuned(lines, &crate::core::Tuning::default())
 }
 
-/// Tuned variant of [`has_no_intersections_nan_ok`].
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(crate) fn has_no_intersections_nan_ok_tuned(
     lines: &[Line<f64>],
@@ -635,11 +589,6 @@ pub(crate) fn has_no_intersections_nan_ok_tuned(
     has_no_intersections_from_chains(lines, &chains, global_bbox, tuning)
 }
 
-/// The chain-index half of [`has_no_intersections_nan_ok_tuned`], split out so a caller
-/// that already owns a chain index - the gate builds it inside its plausibility scan
-/// via [`ChainSink`] instead of making a second pass over the collected lines - pays no
-/// extra traversal. The verdict must be identical whichever way `chains` was produced
-/// (enforced by the `chain_fusion_equivalence` unit tests).
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(crate) fn has_no_intersections_from_chains(
     lines: &[Line<f64>],
@@ -745,10 +694,9 @@ pub(crate) fn has_no_intersections_from_chains(
     true
 }
 
-/// Spiky-chain detector: the fraction of chains that hold exactly one edge. `frac` is
-/// the Tuning threshold (default 0.8). Floor of 128 chains: below that the grid is
-/// small and cheap regardless of shape (measured: star poly 100v, 92 chains - the
-/// sweep's setup cost more than the 10x10 grid it replaced).
+/// Floor of 128 chains: below that the grid is small and cheap regardless of shape
+/// (measured: star poly 100v, 92 chains - the sweep's setup cost more than the 10x10
+/// grid it replaced).
 fn nc_is_spiky(chains: &[MonoChain], tuning: &crate::core::Tuning) -> bool {
     if chains.len() < 128 || chains.len() > tuning.spiky_max_chains {
         return false;
@@ -757,12 +705,6 @@ fn nc_is_spiky(chains: &[MonoChain], tuning: &crate::core::Tuning) -> bool {
     (ones as f64) >= tuning.spiky_chain_frac * (chains.len() as f64)
 }
 
-/// Edge-level x-radix sweep for spiky rings. It returns None when the active set
-/// explodes (dense input goes to the R-tree). Pair rules: - proper crossing via orient4
-/// or segments_properly_cross - same-ring pairs escalate to lean_pair_intersects with
-/// the ring's own eps (proper crossing, eps-collinear overlap, vertex-on-edge) - skip
-/// same-ring adjacent edges, but not the closing pair - cross-ring pairs test proper
-/// crossings only.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn has_no_intersections_edge_sweep(lines: &[Line<f64>]) -> Option<bool> {
     let n = lines.len();
@@ -878,8 +820,7 @@ fn has_no_intersections_edge_sweep(lines: &[Line<f64>]) -> Option<bool> {
     Some(true)
 }
 
-/// Fast grid path for `has_no_intersections`. Returns `None` if the grid is too dense,
-/// triggering the R-tree fallback.
+/// Returns `None` if the grid is too dense, triggering the R-tree fallback.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn has_no_intersections_grid(
     chains: &[MonoChain],
@@ -947,10 +888,9 @@ mod chain_fusion_tests {
     use crate::arrange::{GateAccum, ring_is_plausible};
     use geo::{LineString, LinesIter, Polygon};
 
-    /// One fused walk (lines + chain index + envelope in a single pass), next to the
-    /// reference outputs computed from the same collected lines. Coordinates in the
-    /// fixtures avoid signed zero: ieee min/max returns the second operand on a tie, so
-    /// -0.0 vs 0.0 can make two correct accumulators differ in representation only.
+    /// Coordinates in the fixtures avoid signed zero: ieee min/max returns the second
+    /// operand on a tie. -0.0 vs 0.0 can make two correct accumulators differ in
+    /// representation only.
     struct Snapshot {
         ok: bool,
         lines: Vec<Line<f64>>,
@@ -961,8 +901,6 @@ mod chain_fusion_tests {
         ref_bbox: (f64, f64, f64, f64),
     }
 
-    /// Drive `ring_is_plausible` exactly the way the fast-path gate does: exterior
-    /// first, then holes, with the line, chain and bbox accumulators live.
     fn walk(poly: &Polygon<f64>) -> Snapshot {
         let mut lines = Vec::new();
         let mut sink = ChainSink::default();
@@ -1017,10 +955,6 @@ mod chain_fusion_tests {
             .collect()
     }
 
-    /// The invariant the gate's mid-size branch rests on: whatever the fused walk
-    /// produced, `build_mono_chains` would have produced it too, from the same lines,
-    /// with the same envelope. On a completed walk the line collection must also be the
-    /// polygon's full line set.
     fn assert_equivalent(poly: &Polygon<f64>) -> Snapshot {
         let s = walk(poly);
         assert_eq!(
@@ -1093,8 +1027,6 @@ mod chain_fusion_tests {
 
     #[test]
     fn shell_plus_hole_travels_two_rings() {
-        // Two rings: ring_id and the per-ring eps stamp must line up with the
-        // reference's ring-boundary re-detection.
         let poly = polygon_with_holes(
             circle(64, 0.0, 0.0, 100.0),
             vec![circle(48, 3.0, 7.0, 20.0)],
@@ -1165,7 +1097,6 @@ mod chain_fusion_tests {
 
     #[test]
     fn tiny_ring_below_the_fuse_threshold() {
-        // a 4-vertex ring must still index identically.
         assert_same_verdict(&polygon_with_holes(
             LineString::new(vec![
                 geo::Coord { x: 2.0, y: 2.0 },
@@ -1190,7 +1121,6 @@ mod chain_fusion_tests {
 
     #[test]
     fn aborted_walk_indexes_only_the_prefix_it_collected() {
-        // Adjacent duplicate at window 20: the walk stops mid-ring
         let mut pts: Vec<geo::Coord<f64>> = (0..40)
             .map(|i| geo::Coord {
                 x: 10.0 + (i as f64) * 0.7,

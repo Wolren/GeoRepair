@@ -1,8 +1,3 @@
-//! Post-noding validation: verify that no non-adjacent edges cross.
-//!
-//! Uses MCIndex (monotone chain + R-tree) spatial indexing for O(n log n) validation
-//! instead of brute-force O(n²).
-//!
 //! If this check fails, a different noding algorithm or tolerance should be used.
 
 use crate::orient::orient2d;
@@ -11,7 +6,6 @@ use geo::{Coord, Line};
 #[cfg(feature = "rstar")]
 use rustc_hash::FxHashSet;
 
-/// A violation found by [`NodingValidator`].
 #[derive(Clone, Debug)]
 #[allow(dead_code)]
 pub struct NodingViolation {
@@ -23,9 +17,6 @@ pub struct NodingViolation {
     pub at: Coord<f64>,
 }
 
-/// Validates that a set of noded line segments has no remaining intersections.
-///
-/// Only checks non-adjacent, non-consecutive edge pairs.
 pub struct NodingValidator {
     edges: Vec<Line<f64>>,
     violations: Vec<NodingViolation>,
@@ -151,7 +142,6 @@ fn check_crossing_violation(
     if j == i + 1 && edges[i].end == edges[j].start {
         return;
     }
-    // Skip ring wrap: edge[n-1] → edge[0]
     if i == 0 && j == edges.len() - 1 && edges[j].end == edges[i].start {
         return;
     }
@@ -212,7 +202,6 @@ fn check_crossing_violation(
     }
 }
 
-/// Recursive MCIndex divide-and-conquer: check all leaf pairs between two chains.
 #[cfg(feature = "rstar")]
 fn check_chain_pair(
     edges: &[Line<f64>],
@@ -288,8 +277,6 @@ fn check_chain_pair(
 }
 
 impl NodingValidator {
-    /// Create a new validator for the given edge set.
-    ///
     /// Validation is not performed until [`validate`](NodingValidator::validate) is
     /// called.
     pub fn new(edges: Vec<Line<f64>>) -> Self {
@@ -299,7 +286,6 @@ impl NodingValidator {
         }
     }
 
-    /// Return the edge set being validated.
     #[allow(dead_code)]
     pub fn edges(&self) -> &[Line<f64>] {
         &self.edges
@@ -315,7 +301,6 @@ impl NodingValidator {
         !self.violations.is_empty()
     }
 
-    /// Validate all non-adjacent edge pairs.
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn validate(&mut self) {
         self.violations.clear();

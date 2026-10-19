@@ -1,4 +1,3 @@
-//! WKB single-geometry API (extracted from bindings/ffi.rs 2026-08-07; verbatim).
 
 use super::types::*;
 use super::util::*;
@@ -9,12 +8,9 @@ use alloc::vec::Vec;
 use std::ffi::CString;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-/// Repair a geometry from WKB using default configuration.
 ///
 /// # Safety
-///
-/// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes. The returned
-/// [`GeoRepairResult`] must be freed with [`super::geo_repair_free_result`].
+/// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_make_valid(
     wkb_data: *const u8,
@@ -38,13 +34,9 @@ pub unsafe extern "C" fn geo_repair_make_valid(
     }
 }
 
-/// Repair a geometry from WKB with configuration.
-///
 ///
 /// # Safety
-///
-/// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes. The returned
-/// [`GeoRepairResult`] must be freed with [`super::geo_repair_free_result`].
+/// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_make_valid_with_config(
     wkb_data: *const u8,
@@ -71,13 +63,9 @@ pub unsafe extern "C" fn geo_repair_make_valid_with_config(
     }
 }
 
-/// Repair a geometry from WKB with full configuration.
-///
 ///
 /// # Safety
-///
-/// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes. The returned
-/// [`GeoRepairResult`] must be freed with [`super::geo_repair_free_result`].
+/// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_make_valid_with_config_full(
     wkb_data: *const u8,
@@ -107,12 +95,8 @@ pub unsafe extern "C" fn geo_repair_make_valid_with_config_full(
 }
 
 
-/// Check whether a WKB-encoded geometry is OGC-valid.
-///
-/// Returns 1 if valid, 0 if invalid, 0 on parse failure.
 ///
 /// # Safety
-///
 /// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_is_valid(wkb_data: *const u8, wkb_len: usize) -> u8 {
@@ -126,13 +110,9 @@ pub unsafe extern "C" fn geo_repair_is_valid(wkb_data: *const u8, wkb_len: usize
     .unwrap_or_default()
 }
 
-/// Validate a WKB-encoded geometry.
-///
 ///
 /// # Safety
-///
-/// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes. The returned
-/// [`GeoRepairResult`] must be freed with [`super::geo_repair_free_result`].
+/// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_validate(
     wkb_data: *const u8,
@@ -157,13 +137,9 @@ pub unsafe extern "C" fn geo_repair_validate(
     }
 }
 
-/// Validate a WKB-encoded geometry and return the violation reasons.
-///
 ///
 /// # Safety
-///
-/// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes. The returned
-/// [`GeoRepairResult`] must be freed with [`super::geo_repair_free_result`].
+/// `wkb_data` must point to a valid WKB buffer of `wkb_len` bytes.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_validate_reason(
     wkb_data: *const u8,
@@ -173,10 +149,6 @@ pub unsafe extern "C" fn geo_repair_validate_reason(
 }
 
 
-/// Validate a WKB geometry, then repair it if invalid. When it was invalid, error_code
-/// == InvalidGeometry and error_msg holds the reasons. # Safety wkb_data must point to
-/// a valid WKB buffer of wkb_len bytes. Free the returned GeoRepairResult with
-/// super::geo_repair_free_result.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_validate_and_fix(
     wkb_data: *const u8,
@@ -215,10 +187,6 @@ pub unsafe extern "C" fn geo_repair_validate_and_fix(
     }
 }
 
-/// Validate a WKB geometry, then repair it with configuration. poly_method: 0 Auto, 1
-/// Arrange, 2 Structure. When it was invalid, error_code == InvalidGeometry and
-/// error_msg holds the reasons. # Safety wkb_data must point to a valid WKB buffer of
-/// wkb_len bytes. Free the returned GeoRepairResult with super::geo_repair_free_result.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_validate_and_fix_with_config(
     wkb_data: *const u8,

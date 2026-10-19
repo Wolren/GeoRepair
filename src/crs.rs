@@ -1,4 +1,3 @@
-//! Coordinate Reference System (crs) metadata and transformation.
 
 //! Stores crs information (authority, geographic or projected) and tolerance heuristics
 //! per crs type. The Crs type is embedded in crate::Feature for I/O round-tripping and
@@ -14,12 +13,10 @@ use alloc::string::ToString;
 #[cfg(feature = "proj")]
 use geo::Geometry;
 
-/// Coordinate Reference System metadata.
-///
 /// Stores crs information and provides crs-aware tolerance heuristics.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Crs {
-    /// Authority string, e.g. `"EPSG:4326"`.
+    /// Authority string, e.g.
     authority: Option<String>,
     /// `true` if this is a geographic (lon/lat) crs.
     is_geographic: bool,
@@ -47,8 +44,6 @@ impl Crs {
         }
     }
 
-    /// Create an unknown crs (no metadata, not geographic).
-    ///
     /// Tolerance defaults to the general-purpose value.
     pub fn unknown() -> Self {
         Self {
@@ -111,22 +106,10 @@ impl Crs {
         }
     }
 
-    /// Parse the crs identifier out of a WKT crs string.
-    ///
-    /// Handles both WKT1 (`.prj`-style) and WKT2 (iso 19162:2019) text:
-    ///
-    /// - WKT1 writes `AUTHORITY["EPSG","4326"]` (both arguments quoted);
-    /// - WKT2 writes `ID["EPSG",4326]` (code unquoted).
-    ///
-    ///
     /// Returns `None` when the string carries no identifier, which is common for
     /// hand-authored `.prj` files.
     ///
-    /// The scan is byte-oriented and allocation-free (it borrows the organisation out
-    /// of `wkt`); only the resulting authority string is allocated.
-    ///
     /// # Example
-    ///
     /// ```
     /// use geo_repair::Crs;
     ///
@@ -141,29 +124,15 @@ impl Crs {
         })
     }
 
-    /// Parse a `.prj`-style WKT string to extract the authority.
-    ///
-    /// Retained for backwards compatibility; this is an alias for [`Crs::from_wkt`],
-    /// which additionally understands the WKT2 `ID` keyword. Returns `None` if no
-    /// authority is found.
+    /// Returns `None` if no authority is found.
     pub fn from_prj_wkt(wkt: &str) -> Option<Self> {
         Self::from_wkt(wkt)
     }
 
-    /// Emit an iso 19162:2019 (WKT2:2019) crs definition.
-    ///
-    /// WKT2:2019 is the current OGC WKT-crs edition (OGC 18-010r11), aligned with iso
-    /// 19162:2019.
-    ///
-    /// EPSG:4326, EPSG:4269 and EPSG:3857. [`Crs`] stores only an authority code, so it
-    /// cannot synthesise a correct definition for any other code; those return `None`
-    /// rather than a fabricated (and probably wrong) datum or projection. Use
-    /// [`Crs::authority`] or [`Crs::srid`] to obtain the code in that case.
-    ///
-    /// For WKT1 output see [`Crs::to_esri_wkt`].
+    /// Those return `None` rather than a fabricated (and probably wrong) datum or
+    /// projection.
     ///
     /// # Example
-    ///
     /// ```
     /// use geo_repair::Crs;
     ///
@@ -180,10 +149,6 @@ impl Crs {
         }
     }
 
-    /// Generate a WKT1 (esri-flavoured .prj-style) crs string. This is WKT1, not WKT2:
-    /// geogcs or projcs keywords, esri parameter names (D_WGS_1984) and an authority
-    /// clause for round-tripping. Returns None if the crs has no authority string. It
-    /// is not an OGC or iso WKT2 string; see crs::to_wkt2.
     pub fn to_esri_wkt(&self) -> Option<String> {
         let srid = self.srid()?;
         let auth_clause = format!(",AUTHORITY[\"EPSG\",\"{srid}\"]");
@@ -237,8 +202,6 @@ impl Crs {
     }
 }
 
-/// Authoritative WKT2:2019 (iso 19162:2019 / OGC 18-010r11) definition of EPSG:4326
-/// (wgs 84), as published by the EPSG registry / proj.
 const WKT2_EPSG_4326: &str = r#"GEOGCRS["WGS 84",
     ENSEMBLE["World Geodetic System 1984 ensemble",
         MEMBER["World Geodetic System 1984 (Transit)"],
@@ -334,8 +297,6 @@ const WKT2_EPSG_3857: &str = r#"PROJCRS["WGS 84 / Pseudo-Mercator",
         BBOX[-85.06,-180,85.06,180]],
     ID["EPSG",3857]]"#;
 
-/// ascii-whitespace skip, matching the predicate the WKT1 reader uses in
-/// `src/io/wkt/read.rs`.
 #[inline]
 fn skip_ws(s: &[u8], i: &mut usize) {
     while *i < s.len() && s[*i].is_ascii_whitespace() {
@@ -343,17 +304,11 @@ fn skip_ws(s: &[u8], i: &mut usize) {
     }
 }
 
-/// Identifier byte, matching the WKT1 reader's keyword predicate
-/// (`is_ascii_alphabetic() || b'_'`).
 #[inline]
 fn is_ident_byte(b: u8) -> bool {
     b.is_ascii_alphabetic() || b == b'_'
 }
 
-/// Return the authority and code of the last crs identifier in `wkt`. The only
-/// allocation on the `from_wkt` path is the authority string. `ID` matches only as a
-/// whole word, so `ELLIPSOID` cannot match. Quoted spans are skipped, so text inside a
-/// name or `REMARK` cannot match.
 fn last_identifier(wkt: &str) -> Option<(&str, u32)> {
     let s = wkt.as_bytes();
     let n = s.len();
@@ -388,8 +343,6 @@ fn last_identifier(wkt: &str) -> Option<(&str, u32)> {
     result
 }
 
-/// Parse the `["org", code]` / `["org", "code"]` argument list that follows an `ID` /
-/// `AUTHORITY` keyword, starting at byte offset `i`.
 fn parse_clause(wkt: &str, mut i: usize) -> Option<(&str, u32)> {
     let s = wkt.as_bytes();
     let n = s.len();
@@ -418,8 +371,6 @@ fn parse_clause(wkt: &str, mut i: usize) -> Option<(&str, u32)> {
     }
     i += 1;
     skip_ws(s, &mut i);
-    // WKT2 writes the code unquoted (`ID["EPSG",4326]`); WKT1 quotes it
-    // (`AUTHORITY["EPSG","4326"]`).
     if i < n && s[i] == b'"' {
         i += 1;
         skip_ws(s, &mut i);
@@ -441,9 +392,6 @@ impl Default for Crs {
     }
 }
 
-/// Transform a geometry between two crs.
-///
-/// Requires the `proj` feature (via `geo/proj`).
 #[cfg(feature = "proj")]
 pub fn transform_geometry(
     geom: &Geometry<f64>,
@@ -466,11 +414,6 @@ pub fn transform_geometry(
         .map_err(|e| MakeValidError::CrsError(format!("PROJ transform: {e}")))
 }
 
-/// Classify an EPSG code as geographic (lon/lat) or projected.
-///
-/// - Geographic crs codes (2D): 4000-4999 (mostly), plus explicit known codes
-/// - Projected crs codes: 2000-3999 (utm zones), 5000-5999, 10000+
-/// - utm zones: 32600-32760 (wgs 84 / utm north/south) are projected
 fn epsg_is_geographic(code: u32) -> bool {
     match code {
         4326 | 4258 | 4269 | 4267 | 4275 | 4617 | 4618 | 4619 | 4620 | 4937 | 4936 | 4979
@@ -489,13 +432,10 @@ fn epsg_is_geographic(code: u32) -> bool {
         | 4365 | 4366 | 4367 | 4368 | 4369 | 4370 | 4371 | 4372 | 4373 | 4374 | 4375 | 4376
         | 4377 | 4378 | 4379 | 4380 | 4381 | 4382 | 4383 | 4384 | 4385 | 4386 | 4387 | 4388
         | 4389 | 4390 | 4391 | 4392 | 4393 | 4394 | 4395 | 4396 | 4397 | 4398 | 4399 => true,
-        // Projected exceptions in the 4000-4999 range
         4087 | 4088 | 4465 | 4466 | 4470 | 4471 | 4555 | 4556 | 4647 => false,
         c if (4400..=4999).contains(&c) => true,
-        // wgs 84 / Pseudo-Mercator
         3857..=3859 => false,
         c if (32600..=32760).contains(&c) => false,
-        // ED50 / utm zones
         c if (23000..=23099).contains(&c) => false,
         _ => false,
     }
@@ -629,8 +569,6 @@ mod tests {
     fn test_to_wkt2_none_for_unbundled_code() {
         assert_eq!(Crs::from_epsg(32633).to_wkt2(), None);
         assert_eq!(Crs::unknown().to_wkt2(), None);
-        // A non-EPSG authority that happens to carry an EPSG code must not be served
-        // the EPSG definition.
         assert_eq!(Crs::from_authority("ESRI:4326").to_wkt2(), None);
     }
 
@@ -664,16 +602,12 @@ mod tests {
 
     #[test]
     fn test_from_wkt_prefers_crs_level_identifier() {
-        // EPSG:3857 nests ID["EPSG",4326] in basegeogcrs and ID["EPSG",1024] plus
-        // parameter IDs in the conversion; the crs-level ID is last.
         let wkt = Crs::from_epsg(3857).to_wkt2().unwrap();
         assert_eq!(Crs::from_wkt(&wkt).unwrap().srid(), Some(3857));
     }
 
     #[test]
     fn test_from_wkt_ignores_quoted_and_substring_id() {
-        // "ellipsoid" ends in ID but is a distinct token; an ID-shaped sequence inside
-        // a quoted value must be skipped.
         let wkt = r#"GEOGCRS["ID test",REMARK["see ID["ESRI",9999]"],ID["ESRI",102100]]"#;
         assert_eq!(Crs::from_wkt(wkt), Some(Crs::from_authority("ESRI:102100")));
     }
@@ -681,8 +615,6 @@ mod tests {
     #[test]
     fn test_from_wkt_none_without_identifier() {
         assert_eq!(Crs::from_wkt(r#"GEOGCRS["No identifier here"]"#), None);
-        // Hand-authored esri WKT1 with no authority clause (as found in real `.prj`
-        // files, e.g. an Albers definition).
         let esri = r#"PROJCS["Albers Equal Area",GEOGCS["clark66",DATUM["D_North_American_1927",SPHEROID["Clarke_1866",6378206.4,294.9786982]]]]"#;
         assert_eq!(Crs::from_wkt(esri), None);
     }

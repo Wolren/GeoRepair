@@ -1,4 +1,3 @@
-//! Face extraction from fully-noded edge sets, in geos BuildArea order.
 
 use alloc::vec::Vec;
 use geo::{Coord, Line, LineString, MultiPolygon, Polygon, Winding};
@@ -20,7 +19,6 @@ pub fn polygonize(lines: &[Line<f64>]) -> Vec<Polygon<f64>> {
         None => return Vec::new(),
     };
 
-    // Split faces at repeated vertices (figure-8 pinch points)
     let face_edges: Vec<Vec<(usize, usize)>> = face_edges
         .into_iter()
         .flat_map(|face| fix_ring_graph::split_face_at_pinch_points(&face, &graph.edges))
@@ -208,7 +206,6 @@ fn build_area_filter(polys: Vec<Polygon<f64>>) -> Vec<Polygon<f64>> {
     if result.len() <= 1 {
         return result;
     }
-    // inside a hole of a kept shell (deep nesting L0+hole + L2 island).
     let mp = MultiPolygon::new(result);
     geo::algorithm::bool_ops::unary_union(&mp).0
 }
@@ -302,8 +299,6 @@ fn signed_area_x2(coords: &[Coord<f64>]) -> f64 {
     sum
 }
 
-/// Split a ring at pinch points (vertices that appear more than once), producing
-/// separate rings.
 fn split_at_pinch_point(ring: &[Coord<f64>]) -> Vec<Vec<Coord<f64>>> {
     if ring.len() < 4 {
         return vec![ring.to_vec()];
@@ -420,7 +415,6 @@ mod tests {
 
     #[test]
     fn test_deep_nesting() {
-        // L0 outer, L1 hole (CW), L2 island (ccw inside hole)
         let lines = vec![
             Line::new(Coord { x: 0.0, y: 0.0 }, Coord { x: 20.0, y: 0.0 }),
             Line::new(Coord { x: 20.0, y: 0.0 }, Coord { x: 20.0, y: 20.0 }),

@@ -11,8 +11,6 @@ pub(super) fn has_nan(g: &Geometry<f64>) -> bool {
         .any(|c| !c.x.is_finite() || !c.y.is_finite())
 }
 
-/// Candidate demotion line from a ring: drop the closing vertex and consecutive
-/// duplicates (a collapsed ring demotes to its open path).
 fn ring_demotion_candidate(ring: &[Coord<f64>]) -> Option<LineString<f64>> {
     if ring.len() < 2 || ring.iter().any(|c| !c.x.is_finite() || !c.y.is_finite()) {
         return None;
@@ -29,10 +27,6 @@ fn ring_demotion_candidate(ring: &[Coord<f64>]) -> Option<LineString<f64>> {
     }
 }
 
-/// Exact-collinearity test for a ring exterior, anchored on the widest vertex pair (the
-/// dominant axis's extremes). The first-edge anchor is unsound: a subnormal-length
-/// leading edge underflows every orientation to zero, so a real 1000 x 2e-9 sliver read
-/// as collinear and was demoted into a NotSimple line (fuzz-nightly crash 2026-09-14).
 fn ring_is_exactly_collinear(ext: &[Coord<f64>], interior_n: usize, ia: usize, ib: usize) -> bool {
     let a = ext[ia];
     let b = ext[ib];
@@ -42,11 +36,6 @@ fn ring_is_exactly_collinear(ext: &[Coord<f64>], interior_n: usize, ia: usize, i
     (0..interior_n).all(|i| crate::orient::orient2d(a, b, ext[i]) == 0.0)
 }
 
-/// Contract filter for demoted lines. Keep only candidates that the validator accepts
-/// as simple. Use the MultiLineString validator rule and scale-derived eps from
-/// check_line_components_intersect. prep::has_no_intersections uses other tolerances
-/// and passed a subnormal sliver that the validator flags NotSimple (fuzz nightly crash
-/// 2026-09-14). The validator predicate is the contract.
 fn filter_demoted_lines(candidates: Vec<LineString<f64>>) -> Vec<LineString<f64>> {
     let simple: Vec<LineString<f64>> = candidates
         .into_iter()
@@ -81,8 +70,6 @@ fn filter_demoted_lines(candidates: Vec<LineString<f64>>) -> Vec<LineString<f64>
     kept
 }
 
-/// Emit demoted lines: LineString for one, MultiLineString for several, empty when none
-/// survived the contract filter.
 fn emit_lines(mut lines: Vec<LineString<f64>>) -> Geometry<f64> {
     match lines.len() {
         0 => empty_geom::<f64>(),
@@ -91,11 +78,6 @@ fn emit_lines(mut lines: Vec<LineString<f64>>) -> Geometry<f64> {
     }
 }
 
-/// Keep/demote decision for one MultiPolygon component. Components at or above the
-/// historical area cut stay as they are; smaller ones are kept only when the validator
-/// accepts them. The absolute cut demoted valid micro-polygons, and the raw closed-ring
-/// emission turned them into a NotSimple multilinestring (fuzz-nightly crash
-/// 2026-09-18: two valid ~1e-15-area triangles).
 fn polygon_component_is_kept(p: &Polygon<f64>) -> bool {
     let ext = &p.exterior().0;
     if ext.len() < 4 || ext.iter().any(|c| !c.x.is_finite() || !c.y.is_finite()) {
@@ -108,8 +90,7 @@ fn polygon_component_is_kept(p: &Polygon<f64>) -> bool {
 }
 
 /// Remove degenerate Polygon/MultiPolygon components: exterior rings with <4
-/// coordinates, shoelace area below epsilon, or NaN/Inf coordinates. Returns boundary
-/// LineString for degenerate polygons (GEOS-style type degradation).
+/// coordinates, shoelace area below epsilon, or NaN/Inf coordinates.
 pub fn strip_degenerate_test(g: Geometry<f64>) -> Geometry<f64> {
     strip_degenerate(g)
 }
@@ -124,7 +105,6 @@ pub(super) fn strip_degenerate(g: Geometry<f64>) -> Geometry<f64> {
                 // Single-pass: compute bbox, shoelace, and NaN simultaneously
                 let n = ext.len();
                 let interior_n = if ext.first() == ext.last() { n - 1 } else { n };
-                // Guard: fewer than 3 unique vertices can never form a valid polygon.
                 if interior_n < 3 {
                 } else {
                     let (mut min_x, mut max_x, mut min_y, mut max_y) =
@@ -159,10 +139,8 @@ pub(super) fn strip_degenerate(g: Geometry<f64>) -> Geometry<f64> {
                     let y_scale = max_y.abs().max(min_y.abs());
                     let bbox_ok = (max_x - min_x).abs() > f64::EPSILON * x_scale
                         && (max_y - min_y).abs() > f64::EPSILON * y_scale;
-                    // Area degeneracy: a ring is degenerate iff its vertices lie
-                    // bit-exactly on one line (robust orient == 0). The historical
-                    // magnitude-based noise bound demoted real slivers at large
-                    // coordinate magnitude (0.14.2 changelog).
+                    // The historical magnitude-based noise bound demoted real slivers
+                    // at large coordinate magnitude (0.14.2 changelog).
                     let (ia, ib) = if (max_x - min_x).abs() >= (max_y - min_y).abs() {
                         (imin_x, imax_x)
                     } else {
@@ -205,8 +183,6 @@ pub(super) fn strip_degenerate(g: Geometry<f64>) -> Geometry<f64> {
                 if polygon_component_is_kept(&p) {
                     valid_polys.push(p);
                 } else {
-                    // NotSimple the moment two closed components shared a vertex
-                    // (fuzz-nightly crash 2026-09-18).
                     if let Some(l) = ring_demotion_candidate(&p.exterior().0) {
                         boundary_lines.push(l);
                     }
@@ -244,7 +220,7 @@ pub(super) fn strip_degenerate(g: Geometry<f64>) -> Geometry<f64> {
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(super) fn enforce_ccw(mut ring: LineString<f64>) -> (LineString<f64>, usize, bool) {
-    // 1e12 and 1e-12 in same ring . (winding fusion, 2026-08-08).
+    // 1e12 and 1e-12 in same ring .
     let (is_ccw, idx) = crate::util::robust_is_ccw_with_index(&ring.0);
     let reversed = !is_ccw;
     if reversed {
@@ -254,9 +230,6 @@ pub(super) fn enforce_ccw(mut ring: LineString<f64>) -> (LineString<f64>, usize,
     (ring, idx, reversed)
 }
 
-/// Variant of [`enforce_ccw`] with the extremal index already located by the fast-path
-/// gate's plausibility pass (2026-08-09): the O(n) `min_x_vertex` search is skipped,
-/// everything else is identical.
 pub(super) fn enforce_ccw_with_idx(
     mut ring: LineString<f64>,
     idx: usize,

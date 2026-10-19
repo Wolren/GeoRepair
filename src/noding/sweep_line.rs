@@ -1,4 +1,3 @@
-//! Full Bentley-Ottmann sweep-line for finding all proper edge intersections.
 
 use alloc::vec::Vec;
 use rustc_hash::FxHashSet;
@@ -413,7 +412,6 @@ mod tests {
 
     #[test]
     fn test_spoke_wheel_no_cross() {
-        // Spoke wheel segments: origin(0,0) to rim and back
         let n = 10;
         let mut edges = Vec::new();
         for i in 0..n {
