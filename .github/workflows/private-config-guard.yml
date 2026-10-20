@@ -1,0 +1,29 @@
+name: private config guard
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: private config guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Block the private commentkit config
+        run: |
+          set -e
+          if git ls-files | grep -iE '(^|/)\.commentkit\.toml$|(^|/)\.commentkit/'; then
+            echo "::error::.commentkit.toml is private working config. Untrack it and add it to .gitignore."
+            exit 1
+          fi
+          if git log --all --oneline -- .commentkit.toml | head -5 | grep .; then
+            echo "::error::Commit history contains .commentkit.toml. Remove it with git filter-repo."
+            exit 1
+          fi
+          echo "no private config found"
