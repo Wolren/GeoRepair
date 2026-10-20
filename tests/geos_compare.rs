@@ -18,7 +18,6 @@ use std::process::Command;
 use wkt::ToWkt;
 use wkt::TryFromWkt;
 
-
 fn find_geosop() -> Option<PathBuf> {
     // 1. explicit env override
     if let Ok(p) = std::env::var("GEOSOP") {
@@ -99,7 +98,6 @@ fn geos_is_valid(geosop: &PathBuf, wkt: &str) -> Option<bool> {
         None
     }
 }
-
 
 /// Normalize a ring to a canonical coordinate-set fingerprint:
 /// rotation/reversal/closure-insensitive. Coordinates are quantized to
@@ -260,7 +258,6 @@ fn type_family_match(a: &Geometry<f64>, b: &Geometry<f64>) -> bool {
     };
     fam(a) == fam(b)
 }
-
 
 struct CompareResult {
     ok: bool,
@@ -424,7 +421,6 @@ fn compare_one(
         ),
     }
 }
-
 
 fn make_valid_fixtures() -> Vec<(&'static str, &'static str)> {
     vec![

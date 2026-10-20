@@ -18,13 +18,11 @@ use geo::{
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 use std::panic::{self, AssertUnwindSafe};
 
-
 /// Assert that an expression does NOT panic.
 fn assert_no_panic<F: FnOnce() + std::panic::UnwindSafe>(f: F) {
     let r = panic::catch_unwind(AssertUnwindSafe(f));
     assert!(r.is_ok(), "PANIC detected! Fix the pipeline.");
 }
-
 
 /// All the fp value classes that could cause panics.
 struct FpClass {

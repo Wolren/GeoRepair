@@ -566,7 +566,6 @@ impl GeoValidation for Triangle<f64> {
     }
 }
 
-
 /// Check whether a geometry is OGC-valid.
 pub fn is_valid(geom: &geo::Geometry<f64>) -> bool {
     GeoValidation::is_valid(geom)

@@ -253,7 +253,6 @@ fn make_valid_line_contract() {
     assert!(out.is_valid(), "make_valid output must be valid");
 }
 
-
 /// Subdivide a closed coordinate loop to exactly n vertices by arc length (the bench's
 /// figure-8 construction).
 fn subdivide(pairs: &[(f64, f64)], n: usize) -> Vec<Coord<f64>> {

@@ -83,7 +83,6 @@ fn geos_valid(g: &GeosGeometry) -> Option<bool> {
     g.is_valid().ok()
 }
 
-
 fn coord_strategy() -> impl Strategy<Value = (f64, f64)> {
     prop_oneof![
         (-1e3f64..1e3, -1e3f64..1e3),
@@ -162,7 +161,6 @@ fn any_polygon() -> impl Strategy<Value = Polygon<f64>> {
         bowtie().boxed(),
     ]
 }
-
 
 fn check_polygon(poly: &Polygon<f64>, case: usize) {
     let geom = Geometry::Polygon(poly.clone());

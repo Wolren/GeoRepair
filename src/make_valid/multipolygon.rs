@@ -144,7 +144,6 @@ impl MakeValid for MultiPolygon<f64> {
     }
 }
 
-
 /// The validator rejects that as `DisconnectedInteriorRing`. Seeds `3111ecaf` and
 /// `edf6e65b`.
 fn validity_gate(g: Geometry<f64>, orig: Vec<Polygon<f64>>) -> Geometry<f64> {
@@ -202,7 +201,6 @@ fn keep_valid_components(mp: MultiPolygon<f64>) -> Option<Geometry<f64>> {
         _ => Some(Geometry::MultiPolygon(MultiPolygon::new(kept))),
     }
 }
-
 
 #[cfg(any(feature = "arrange", feature = "structure"))]
 impl MakeValid for Geometry<f64> {
@@ -419,7 +417,8 @@ pub(super) fn polygonizer_fallback(mp: &MultiPolygon<f64>) -> Option<Geometry<f6
         .into_iter()
         .filter(|p| {
             let ext = &p.exterior().0;
-            ext.len() >= 4 && !ext.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
+            ext.len() >= 4
+                && !ext.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
                 && shoelace_abs_sum(ext) >= 1e-12
                 && !crate::structure::has_proper_self_crossing(p)
         })
@@ -467,4 +466,3 @@ pub(super) fn reduce_mp_at_scale(
             .collect();
     MultiPolygon::new(snapped)
 }
-

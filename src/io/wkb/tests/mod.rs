@@ -224,5 +224,4 @@ fn ewkb_z_in_multi_sub_geom_now_returns_2d() {
     }
 }
 
-
 mod ewkb;

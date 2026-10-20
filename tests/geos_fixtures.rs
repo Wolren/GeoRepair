@@ -17,7 +17,6 @@ use geo::{
 use geo_repair::MakeValid;
 use geo_repair::validation::GeoValidation;
 
-
 #[test]
 fn geos_self_touching_ring() {
     let g = geom_from_wkt("POLYGON ((0 0, 0 10, 10 10, 10 0, 5 5, 0 0))");
@@ -25,7 +24,6 @@ fn geos_self_touching_ring() {
     assert_valid_ogc(&result);
     assert_not_empty(&result);
 }
-
 
 #[test]
 fn geos_zero_area_collinear() {
@@ -48,7 +46,6 @@ fn geos_two_vertex() {
     assert_is_empty(&result);
 }
 
-
 #[test]
 fn geos_duplicate_consecutive_points() {
     let g = geom_from_wkt("POLYGON ((0 0, 0 0, 10 0, 10 10, 10 10, 0 10, 0 0, 0 0))");
@@ -56,7 +53,6 @@ fn geos_duplicate_consecutive_points() {
     assert_valid_ogc(&result);
     assert_simple_polygon(&result);
 }
-
 
 #[test]
 fn geos_multipolygon_with_empty() {
@@ -66,7 +62,6 @@ fn geos_multipolygon_with_empty() {
     assert_simple_polygon(&result);
 }
 
-
 #[test]
 fn geos_hole_crosses_shell() {
     let g = geom_from_wkt("POLYGON ((0 0, 20 0, 20 20, 0 20, 0 0), (5 5, 15 5, 5 15, 15 15, 5 5))");
@@ -74,7 +69,6 @@ fn geos_hole_crosses_shell() {
     assert_valid_ogc(&result);
     assert_not_empty(&result);
 }
-
 
 #[test]
 fn geos_nested_geometry_collection() {
@@ -88,7 +82,6 @@ fn geos_nested_geometry_collection() {
     assert_valid_ogc(&result);
     assert_not_empty(&result);
 }
-
 
 #[test]
 fn geos_extreme_coords() {
@@ -132,7 +125,6 @@ fn geos_nan_polygon() {
     assert_is_empty(&result);
 }
 
-
 #[test]
 fn geos_self_intersecting_linestring() {
     // Line-validity contract (2026-08-07): make_valid never ships a non-simple line - the crossing is noded into simple pieces
@@ -149,7 +141,6 @@ fn geos_self_intersecting_linestring() {
     }
 }
 
-
 #[test]
 fn geos_multilinestring_with_self_intersection() {
     let g = geom_from_wkt("MULTILINESTRING ((0 0, 1 0), (0 0, 2 2, 2 0, 0 2))");
@@ -160,7 +151,6 @@ fn geos_multilinestring_with_self_intersection() {
         Geometry::MultiLineString(_) | Geometry::GeometryCollection(_)
     ));
 }
-
 
 #[test]
 fn geos_overlapping_shells_arrange() {
@@ -175,14 +165,12 @@ fn geos_overlapping_shells_arrange() {
     assert!(matches!(&result, Geometry::MultiPolygon(_)));
 }
 
-
 #[test]
 fn geos_empty_after_fix() {
     let g = geom_from_wkt("POLYGON ((0 0, 0 0, 0 0, 0 0, 0 0))");
     let result = g.make_valid_with_config(&cfg_auto());
     assert_is_empty(&result);
 }
-
 
 #[test]
 fn geos_complex_bowtie() {
@@ -192,14 +180,12 @@ fn geos_complex_bowtie() {
     assert_multipolygon_count(&result, 2);
 }
 
-
 #[test]
 fn geos_hole_exactly_matches_shell() {
     let g = geom_from_wkt("POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (0 0, 10 0, 10 10, 0 10, 0 0))");
     let result = g.make_valid_with_config(&cfg_auto());
     assert_is_empty(&result);
 }
-
 
 #[test]
 fn geos_valid_linestring_unchanged() {
@@ -209,7 +195,6 @@ fn geos_valid_linestring_unchanged() {
     assert_not_empty(&result);
     assert_eq!(result, g);
 }
-
 
 #[test]
 fn geos_bowtie_arrange() {
@@ -235,7 +220,6 @@ fn geos_figure_eight() {
     assert_not_empty(&result);
 }
 
-
 #[test]
 fn geos_hourglass() {
     let g = geom_from_wkt("POLYGON ((0 0, 0 10, 5 5, 10 10, 10 0, 5 5, 0 0))");
@@ -244,7 +228,6 @@ fn geos_hourglass() {
     assert_multipolygon_count(&result, 2);
 }
 
-
 #[test]
 fn geos_spike() {
     let g = geom_from_wkt("POLYGON ((0 0, 10 0, 10 10, 5 5, 0 10, 0 0))");
@@ -252,7 +235,6 @@ fn geos_spike() {
     assert_valid_ogc(&result);
     assert_simple_polygon(&result);
 }
-
 
 #[test]
 fn geos_hole_outside() {
@@ -274,14 +256,12 @@ fn geos_self_touching() {
     assert_not_empty(&result);
 }
 
-
 #[test]
 fn geos_micro_polygon() {
     let g = geom_from_wkt("POLYGON ((0 0, 1e-15 0, 1e-15 1e-15, 0 1e-15, 0 0))");
     let result = g.make_valid_with_config(&cfg_auto());
     assert_valid_ogc(&result);
 }
-
 
 #[test]
 fn geos_clockwise_exterior() {
@@ -315,7 +295,6 @@ fn geos_collection_mixed() {
     assert_not_empty(&result);
 }
 
-
 #[test]
 fn geos_repeated_coords() {
     let g =
@@ -325,7 +304,6 @@ fn geos_repeated_coords() {
     assert_simple_polygon(&result);
 }
 
-
 #[test]
 fn geos_unclosed_ring() {
     let g = geom_from_wkt("POLYGON ((0 0, 10 0, 10 10, 0 10))");
@@ -333,7 +311,6 @@ fn geos_unclosed_ring() {
     assert_valid_ogc(&result);
     assert_simple_polygon(&result);
 }
-
 
 #[test]
 fn geos_nested_bowties() {
@@ -348,7 +325,6 @@ fn geos_nested_bowties() {
     assert!(matches!(&result, Geometry::MultiPolygon(_)));
 }
 
-
 #[test]
 fn geos_large_coords() {
     let g = geom_from_wkt("POLYGON ((1e6 1e6, 2e6 1e6, 2e6 2e6, 1e6 2e6, 1e6 1e6))");
@@ -357,7 +333,6 @@ fn geos_large_coords() {
     assert_simple_polygon(&result);
 }
 
-
 #[test]
 fn geos_negative_coords() {
     let g = geom_from_wkt("POLYGON ((-10 -10, 0 -10, 0 0, -10 0, -10 -10))");
@@ -365,7 +340,6 @@ fn geos_negative_coords() {
     assert_valid_ogc(&result);
     assert_simple_polygon(&result);
 }
-
 
 #[test]
 fn geos_overlapping_shells() {
@@ -390,7 +364,6 @@ fn geos_point_nan() {
     let result = g.make_valid_with_config(&cfg_auto());
     assert_is_empty(&result);
 }
-
 
 #[test]
 fn geos_point_inf() {
@@ -429,7 +402,6 @@ fn geos_linestring_nan_collapse() {
     );
 }
 
-
 #[test]
 fn geos_linestring_many_repeated() {
     let g = geom_from_wkt("LINESTRING (0 0, 0 0, 0 0, 0 0, 0 0, 1 1)");
@@ -437,7 +409,6 @@ fn geos_linestring_many_repeated() {
     assert_valid_ogc(&result);
     assert!(matches!(&result, Geometry::LineString(_)));
 }
-
 
 #[test]
 fn geos_polygon_zero_area_overlap_holes() {
@@ -450,7 +421,6 @@ fn geos_polygon_zero_area_overlap_holes() {
     assert_valid_ogc(&result);
 }
 
-
 #[test]
 fn geos_polygon_pos_neg_overlap() {
     let g = geom_from_wkt(
@@ -460,7 +430,6 @@ fn geos_polygon_pos_neg_overlap() {
     assert_valid_ogc(&result);
     assert_not_empty(&result);
 }
-
 
 #[test]
 fn geos_holes_touching_complex() {
@@ -483,7 +452,6 @@ fn geos_empty_multipolygon() {
     assert_is_empty(&result);
 }
 
-
 #[test]
 fn geos_multipolygon_multi_empty() {
     let g = geom_from_wkt("MULTIPOLYGON (EMPTY, EMPTY)");
@@ -491,14 +459,12 @@ fn geos_multipolygon_multi_empty() {
     assert_is_empty(&result);
 }
 
-
 #[test]
 fn geos_geometry_collection_empty() {
     let g = Geometry::GeometryCollection(GeometryCollection(Vec::new()));
     let result = g.make_valid_with_config(&cfg_auto());
     assert_is_empty(&result);
 }
-
 
 #[test]
 fn geos_gc_all_empty() {

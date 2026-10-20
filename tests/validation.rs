@@ -7,7 +7,6 @@ use geo_repair::validation::GeoValidation;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 use wkt::TryFromWkt;
 
-
 fn assert_valid<T: GeoValidation + std::fmt::Debug>(geom: &T) {
     let r = geom.validate();
     assert!(r.valid, "expected valid, got: {:?}", r);
@@ -41,7 +40,6 @@ fn config_structure() -> MakeValidConfig {
 fn config_auto() -> MakeValidConfig {
     MakeValidConfig::default()
 }
-
 
 #[test]
 fn test_point_valid() {
@@ -100,7 +98,6 @@ fn test_point_infinite_y() {
     assert!(!p.is_valid());
 }
 
-
 #[test]
 fn test_line_valid() {
     let l = Line::new(Point::new(0.0, 0.0), Point::new(1.0, 1.0));
@@ -127,7 +124,6 @@ fn test_line_nan_start() {
         Geometry::GeometryCollection(GeometryCollection(Vec::new()))
     );
 }
-
 
 #[test]
 fn test_linestring_valid() {
@@ -205,7 +201,6 @@ fn test_linestring_nan_filtered() {
     assert_eq!(result, Geometry::LineString(expected));
 }
 
-
 #[test]
 fn test_multipoint_valid() {
     let mp = MultiPoint::new(vec![Point::new(0.0, 0.0), Point::new(1.0, 1.0)]);
@@ -245,7 +240,6 @@ fn test_multipoint_all_invalid() {
     }
 }
 
-
 #[test]
 fn test_multilinestring_valid() {
     let mls = MultiLineString::new(vec![LineString::new(vec![
@@ -263,14 +257,12 @@ fn test_multilinestring_valid() {
     );
 }
 
-
 #[test]
 fn test_rect_valid() {
     let r = Rect::new(Point::new(0.0, 0.0), Point::new(10.0, 10.0));
     let result = r.make_valid();
     assert_eq!(result, Geometry::Rect(r));
 }
-
 
 #[test]
 fn test_triangle_valid() {
@@ -329,7 +321,6 @@ fn test_triangle_nan() {
     );
 }
 
-
 #[test]
 fn test_valid_polygon_arrange() {
     let poly = Polygon::new(
@@ -381,7 +372,6 @@ fn test_valid_polygon_auto() {
     assert_not_empty(&result);
 }
 
-
 fn make_bowtie() -> Polygon<f64> {
     Polygon::new(
         LineString::new(vec![
@@ -426,7 +416,6 @@ fn test_bowtie_auto() {
     assert_not_empty(&result);
 }
 
-
 fn make_polygon_with_hole() -> Polygon<f64> {
     Polygon::new(
         LineString::new(vec![
@@ -461,7 +450,6 @@ fn test_polygon_with_hole_structure() {
     assert_geometry_valid(&result);
     assert_not_empty(&result);
 }
-
 
 #[test]
 fn test_polygon_repeated_ring_coords() {
@@ -503,7 +491,6 @@ fn test_polygon_nan_ring() {
     assert_geometry_valid(&result);
 }
 
-
 #[test]
 fn test_valid_multipolygon() {
     let mp = MultiPolygon::new(vec![
@@ -541,7 +528,6 @@ fn test_multipolygon_with_bowtie() {
     assert_geometry_valid(&result);
     assert_not_empty(&result);
 }
-
 
 #[test]
 fn test_geometry_dispatch_point() {
@@ -643,7 +629,6 @@ fn test_geometrycollection_all_empty() {
     }
 }
 
-
 #[test]
 fn test_valid_geom_short_circuits_validation() {
     let p = Point::new(1.0, 2.0);
@@ -668,7 +653,6 @@ fn test_valid_polygon_short_circuits() {
     let result = poly.make_valid();
     assert_geometry_valid(&result);
 }
-
 
 fn geom_from_wkt(s: &str) -> Geometry<f64> {
     Geometry::<f64>::try_from_wkt_str(s).unwrap()
@@ -730,7 +714,6 @@ fn test_wkt_geometry_collection() {
     assert_geometry_valid(&result);
 }
 
-
 #[test]
 fn test_keep_collapsed_default_false() {
     let config = MakeValidConfig::default();
@@ -742,7 +725,6 @@ fn test_default_poly_method_auto() {
     let config = MakeValidConfig::default();
     assert_eq!(config.poly_method, PolyMethod::Auto);
 }
-
 
 #[test]
 fn test_polygon_spike() {
@@ -802,7 +784,6 @@ fn test_hole_outside_shell() {
     assert_not_empty(&result);
 }
 
-
 #[test]
 fn test_many_valid_polygons() {
     for i in 1..=20 {
@@ -823,7 +804,6 @@ fn test_many_valid_polygons() {
         assert_not_empty(&result);
     }
 }
-
 
 #[test]
 
@@ -869,7 +849,6 @@ fn test_all_poly_methods_on_valid() {
     }
 }
 
-
 #[test]
 fn test_valid_returns_original_geom() {
     let poly = Polygon::new(
@@ -886,7 +865,6 @@ fn test_valid_returns_original_geom() {
     assert_eq!(result, Geometry::Polygon(poly.clone()));
 }
 
-
 #[test]
 fn test_degenerate_ring_too_few_points() {
     let poly = Polygon::new(
@@ -896,7 +874,6 @@ fn test_degenerate_ring_too_few_points() {
     let result = poly.make_valid();
     assert_geometry_valid(&result);
 }
-
 
 use geo_repair::ValidateAndFix;
 

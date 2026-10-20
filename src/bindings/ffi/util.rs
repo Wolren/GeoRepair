@@ -77,4 +77,3 @@ pub(crate) fn all_error_reasons(geom: &Geometry<f64>) -> String {
         .collect::<Vec<_>>()
         .join("; ")
 }
-

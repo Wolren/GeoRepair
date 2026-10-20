@@ -2,7 +2,6 @@
 
 use super::*;
 
-
 #[cfg(feature = "simd-portable")]
 pub(crate) fn orient2d_batch_4(
     pa: &[Coord<f64>; 4],

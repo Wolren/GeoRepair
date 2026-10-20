@@ -31,7 +31,6 @@ use crate::core::MakeValidConfig;
 use crate::util;
 use log::warn;
 
-
 /// The hot batch paths use the owned variant to avoid the clone (measured: the
 /// fast-path clone was ~2 allocs + full ring memcpy per polygon, the dominant per-poly
 /// cost on the 1.58M-poly full pass).

@@ -347,7 +347,6 @@ fn ewkb_roundtrip_polygon_with_hole_xyz() {
     assert_eq!(back.extra_coords, extra);
 }
 
-
 #[test]
 fn write_wkb_with_opts_be_roundtrip_point() {
     let g = Geometry::Point(Point::new(1.0, 2.0));
@@ -458,7 +457,6 @@ fn write_wkb_with_opts_mixed_endian_explicit() {
     assert_ne!(le_wkb, be_wkb, "LE and BE output should differ");
 }
 
-
 #[test]
 fn read_wkb_from_reader() {
     let g = Geometry::Point(Point::new(1.0, 2.0));
@@ -554,7 +552,6 @@ fn mixed_byte_order_multipolygon() {
         panic!("expected MultiPolygon");
     }
 }
-
 
 /// Every strict prefix of a valid WKB buffer must fail cleanly (no panics, no silent
 /// truncation acceptance).

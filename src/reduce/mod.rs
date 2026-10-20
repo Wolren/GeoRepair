@@ -11,7 +11,6 @@ use crate::core::MakeValidConfig;
 use crate::make_valid::MakeValid;
 use crate::validation::GeoValidation;
 
-
 /// Controls how coordinates are rounded to a precision grid.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum RoundingMode {
@@ -83,7 +82,6 @@ impl PrecisionModel {
         Self::new(1e-4)
     }
 }
-
 
 /// Reduces geometry precision with topology preservation.
 /// 1. Snap all coordinates to the precision grid
@@ -227,7 +225,6 @@ impl GeometryPrecisionReducer {
         }
     }
 }
-
 
 /// Try to reduce precision at progressively coarser grids until success. Starts at
 /// `1e-10` and degrades by factor 100 each step until `1e-4`.

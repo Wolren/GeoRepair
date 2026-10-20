@@ -381,7 +381,6 @@ fn infer_type_unknown_fails() {
     assert!(matches!(err, WktError::ParseError { .. }));
 }
 
-
 #[test]
 fn special_values_strtod_semantics() {
     // GEOS parses numbers via strtod: nan/inf/infinity, any case, signed.

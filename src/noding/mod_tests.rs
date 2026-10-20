@@ -1,7 +1,5 @@
-
 use super::*;
 use alloc::vec::Vec;
-
 
 #[test]
 fn test_remove_consecutive_duplicates_empty() {
@@ -51,7 +49,6 @@ fn test_remove_consecutive_duplicates_interleaved() {
     );
 }
 
-
 #[test]
 fn test_edges_intersect_crossing() {
     let e1 = Line::new(Coord { x: 0.0, y: 0.0 }, Coord { x: 1.0, y: 1.0 });
@@ -94,7 +91,6 @@ fn test_edges_intersect_non_adjacent_same_line() {
     assert!(!edges_intersect(&e1, &e2, 1e-12));
 }
 
-
 #[test]
 fn test_check_self_intersections_none() {
     let edges = vec![
@@ -129,7 +125,6 @@ fn test_check_self_intersections_single() {
     assert!(!check_self_intersections(&edges));
 }
 
-
 #[test]
 fn test_orient2d_generic_ccw() {
     let result = orient2d_generic(
@@ -159,7 +154,6 @@ fn test_orient2d_generic_collinear() {
     );
     assert_eq!(result, 0.0);
 }
-
 
 #[test]
 fn test_intersection_param_crossing() {
@@ -193,7 +187,6 @@ fn test_intersection_param_endpoint_touching() {
     assert!((pt.y - 0.0f64).abs() < 1e-12f64);
 }
 
-
 #[test]
 fn test_split_edges_no_intersections() {
     let edges = vec![
@@ -214,7 +207,6 @@ fn test_split_edges_crossing() {
     let result = split_edges_at_intersections(&edges);
     assert!(result.len() >= 3);
 }
-
 
 #[test]
 fn test_interpolate_midpoint() {
@@ -240,7 +232,6 @@ fn test_interpolate_end() {
     assert!((pt.y - 10.0f64).abs() < 1e-12f64);
 }
 
-
 #[test]
 fn test_dist2_identical() {
     assert_eq!(
@@ -258,7 +249,6 @@ fn test_dist2_unit() {
 fn test_dist2_diagonal() {
     assert!((dist2(Coord { x: 0.0, y: 0.0 }, Coord { x: 3.0, y: 4.0 }) - 25.0f64).abs() < 1e-12f64);
 }
-
 
 #[test]
 fn test_reconnect_edges_single_chain() {
@@ -309,7 +299,6 @@ fn test_reconnect_edges_reversed_order() {
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].0.len(), 3);
 }
-
 
 #[test]
 fn test_node_line_string_no_self_intersection() {

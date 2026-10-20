@@ -12,7 +12,6 @@ use geo_repair::validation::GeoValidation;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 use wkt::TryFromWkt;
 
-
 fn assert_valid(g: &Geometry<f64>) {
     assert!(
         g.validate().valid,

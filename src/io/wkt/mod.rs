@@ -100,7 +100,6 @@ impl fmt::Display for WktError {
 #[cfg(feature = "std")]
 impl std::error::Error for WktError {}
 
-
 mod read;
 #[cfg(test)]
 mod tests;

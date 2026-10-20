@@ -170,10 +170,12 @@ pub(crate) fn collapse_sub_ulp_vertices(
                 break;
             }
         }
-        if run_len > 1 && i > 0 && snap_clean {
-            if let Some(last) = cleaned.last_mut() {
-                *last = best;
-            }
+        if run_len > 1
+            && i > 0
+            && snap_clean
+            && let Some(last) = cleaned.last_mut()
+        {
+            *last = best;
         }
         i = j;
     }

@@ -33,7 +33,6 @@ use geo_repair::validation::{GeoValidation, GeometryValidationError};
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 use proptest::prelude::*;
 
-
 /// Assert geometry is valid per OGC Simple Features.
 /// Accepts empty GeometryCollection as valid (graceful degradation).
 /// Accepts NotSimple for LineString/MultiLineString (OGC allows self-intersecting curves).
@@ -262,7 +261,6 @@ fn cfg_all_methods() -> Vec<MakeValidConfig> {
 fn cfg_auto() -> MakeValidConfig {
     MakeValidConfig::default()
 }
-
 
 fn coord_range(range: std::ops::RangeInclusive<f64>) -> impl Strategy<Value = Coord<f64>> {
     (range.clone(), range).prop_map(|(x, y)| Coord { x, y })
@@ -2220,7 +2218,6 @@ proptest! {
     }
 }
 
-
 // ITERATION 9: Arithmetic extreme stress - mixed fp categories, large coordinate ratio stress, fp-special-value combinatorial stress
 
 proptest! {
@@ -2272,7 +2269,6 @@ proptest! {
         }
     }
 }
-
 
 #[cfg(test)]
 mod diag_all_methods_fail {

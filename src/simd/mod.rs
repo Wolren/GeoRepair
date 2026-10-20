@@ -11,7 +11,6 @@ use geo::{Coord, GeoFloat};
 
 use crate::orient::orient2d as orient2d_robust;
 
-
 #[cfg(not(feature = "simd-portable"))]
 fn scalar_orient2d_batch<T: GeoFloat>(
     pa: &[Coord<T>; 4],

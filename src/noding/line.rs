@@ -797,7 +797,6 @@ impl<'a> LineNoder<'a> {
         Some(chains)
     }
 
-
     fn family_pass(&mut self) {
         let mut buckets: FxHashMap<(u64, u64), Vec<u32>> = FxHashMap::default();
         for i in 0..self.n {
@@ -923,7 +922,6 @@ impl<'a> LineNoder<'a> {
         }
     }
 
-
     fn adjacent_pass(&mut self) {
         let eps = self.eps;
         for i in 0..self.n - 1 {
@@ -963,7 +961,6 @@ impl<'a> LineNoder<'a> {
             });
         }
     }
-
 
     fn sweep_pass(&mut self) -> Option<()> {
         let mut sweep_ids: Vec<u32> = Vec::new();

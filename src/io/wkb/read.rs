@@ -8,7 +8,6 @@ use std::io::Read;
 /// Each nesting level consumes at least 9 bytes of input (byte order + type + count).
 const MAX_WKB_NESTING: usize = 256;
 
-
 /// If the input contains EWKB Z/M dimension flags or an SRID, the extra data is
 /// silently read and discarded.
 pub fn read_wkb(buf: &[u8]) -> Result<Geometry<f64>, WkbError> {
@@ -221,7 +220,6 @@ fn read_f64(buf: &[u8], pos: &mut usize, le: bool) -> Result<f64, WkbError> {
     })
 }
 
-
 #[inline]
 fn read_coords_batch(
     buf: &[u8],
@@ -335,7 +333,6 @@ fn read_polygon_inner(
     }
     Ok(Polygon::new(exterior, holes))
 }
-
 
 pub fn read_wkb_concat(buf: &[u8]) -> Result<Vec<Geometry<f64>>, WkbError> {
     let mut offset = 0;

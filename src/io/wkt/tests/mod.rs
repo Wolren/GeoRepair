@@ -266,5 +266,4 @@ fn roundtrip_all_types_vs_wkt_crate() {
     }
 }
 
-
 mod double;

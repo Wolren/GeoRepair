@@ -286,7 +286,6 @@ fn make_multilinestring(parts: &[Vec<(f64, f64)>]) -> Geometry<f64> {
     Geometry::MultiLineString(MultiLineString::new(lines))
 }
 
-
 fn make_starburst(spikes: usize, r: f64) -> Geometry<f64> {
     let mut coords = Vec::with_capacity(spikes * 2 + 1);
     for i in 0..spikes {

@@ -8,7 +8,11 @@ use alloc::vec::Vec;
 use geo::Geometry;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-/// Free the returned GeoRepairBatchResult with super::geo_repair_free_batch_result.
+/// # Safety
+///
+/// `inputs` must point to `count` readable [`GeoRepairWkbBuffer`] entries, each
+/// holding a valid WKB pointer of its stated length. Free the result with
+/// [`super::geo_repair_free_batch_result`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn geo_repair_make_valid_batch(
     inputs: *const GeoRepairWkbBuffer,
@@ -70,4 +74,3 @@ pub unsafe extern "C" fn geo_repair_make_valid_batch(
         ),
     }
 }
-

@@ -47,7 +47,6 @@ fn assert_not_empty(g: &Geometry<f64>) {
     );
 }
 
-
 #[test]
 fn test_config_auto_keep_false() {
     let result = make_bowtie().make_valid_with_config(&cfg(PolyMethod::Auto, false));
@@ -109,7 +108,6 @@ fn make_bowtie() -> Polygon<f64> {
     )
 }
 
-
 #[test]
 fn test_point_both_nan() {
     let p = Point::new(f64::NAN, f64::NAN);
@@ -133,7 +131,6 @@ fn test_point_zero() {
     let p = Point::new(0.0, 0.0);
     assert!(!matches!(p.make_valid(), Geometry::GeometryCollection(_)));
 }
-
 
 #[test]
 fn test_line_nan_end() {
@@ -317,7 +314,6 @@ fn test_linestring_valid_across_configs() {
     }
 }
 
-
 #[test]
 fn test_linestring_all_nan() {
     let ls = LineString::new(vec![
@@ -413,7 +409,6 @@ fn test_linestring_self_intersecting() {
     }
 }
 
-
 #[test]
 fn test_multipoint_empty() {
     let mp = MultiPoint::<f64>::new(Vec::new());
@@ -464,7 +459,6 @@ fn test_multipoint_all_nan_inf() {
         geo_repair::write_wkt(&result)
     );
 }
-
 
 #[test]
 fn test_multilinestring_empty() {
@@ -518,7 +512,6 @@ fn test_multilinestring_self_intersecting_component() {
     }
 }
 
-
 #[test]
 fn test_rect_nan_min() {
     let r = Rect::new(Point::new(f64::NAN, 0.0), Point::new(10.0, 10.0));
@@ -548,7 +541,6 @@ fn test_rect_reversed() {
     let r = Rect::new(Point::new(10.0, 10.0), Point::new(0.0, 0.0));
     assert_not_empty(&r.make_valid());
 }
-
 
 #[test]
 fn test_triangle_infinity_vertex() {
@@ -590,7 +582,6 @@ fn test_triangle_keep_collapsed_degenerate() {
     // Collinear triangle can't be fixed even with keep_collapsed
     assert_valid(&result);
 }
-
 
 #[test]
 fn test_geometry_dispatch_rect() {
@@ -637,7 +628,6 @@ fn test_geometry_dispatch_multilinestring() {
     let result = g.make_valid();
     assert_valid(&result);
 }
-
 
 #[test]
 fn test_geometrycollection_includes_rect() {
@@ -714,7 +704,6 @@ fn test_geometrycollection_over_deep_nesting_is_repaired() {
 
     assert_valid(&out.make_valid());
 }
-
 
 #[test]
 fn test_polygon_empty_exterior() {
@@ -829,7 +818,6 @@ fn test_polygon_negative_extreme_coordinates() {
     assert_not_empty(&result);
 }
 
-
 #[test]
 fn test_multipolygon_empty() {
     let mp = MultiPolygon::<f64>::new(Vec::new());
@@ -865,7 +853,6 @@ fn test_multipolygon_with_multipolygon_result() {
     assert_valid(&result);
     assert_not_empty(&result);
 }
-
 
 #[test]
 fn test_config_default_fill_rule() {

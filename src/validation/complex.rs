@@ -36,7 +36,6 @@ impl GeoValidation for Polygon<f64> {
             }
         }
 
-
         if self.interiors().is_empty() {
             if errors.is_empty() {
                 return ValidationResult::valid();

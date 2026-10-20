@@ -37,9 +37,9 @@ use std::time::Instant;
 
 use geo::{Coord, Geometry, Polygon};
 use geo_repair::GeoValidation;
-use geo_repair::dd::{dd_call_count, reset_dd_count};
 #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
 use geo_repair::arrange::validate_polygon;
+use geo_repair::dd::{dd_call_count, reset_dd_count};
 use geo_repair::io::load_bin;
 use geo_repair::orient::orient2d;
 #[cfg(feature = "parallel")]

@@ -558,7 +558,6 @@ fn winding_number(ring: &[Coord<f64>], pt: Coord<f64>) -> i32 {
     wn
 }
 
-
 #[cfg(test)]
 #[path = "fix_ring_graph_tests.rs"]
 mod tests;

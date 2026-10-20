@@ -513,10 +513,8 @@ pub fn has_no_intersections_small(lines: &[Line<f64>]) -> bool {
         let li = &lines[i];
         let ri = ring_of[i] as usize;
         for j in (i + 1)..n {
-            if ri == ring_of[j] as usize {
-                if j == i + 1 || j + 1 == i {
-                    continue;
-                }
+            if ri == ring_of[j] as usize && (j == i + 1 || j + 1 == i) {
+                continue;
             }
             let lj = &lines[j];
             if segments_properly_cross(li, lj) {

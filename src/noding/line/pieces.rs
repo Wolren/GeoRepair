@@ -74,7 +74,6 @@ impl<'a> super::LineNoder<'a> {
             .unwrap_or(p)
     }
 
-
     pub(super) fn cluster_and_split(&mut self) {
         let n_anchors = self.coords.len();
         let total = n_anchors + self.nodes.len();
@@ -185,7 +184,6 @@ impl<'a> super::LineNoder<'a> {
                 .insert((pt_.x.to_bits(), pt_.y.to_bits()), canon[r]);
         }
     }
-
 
     /// Piece construction for the pure-collinear fast path: identical to `build_pieces`
     /// but endpoints are used as-is (the 1-D split points are the other members'

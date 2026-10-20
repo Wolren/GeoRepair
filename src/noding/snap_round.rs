@@ -106,7 +106,6 @@ impl rstar::RTreeObject for HpEntry {
     }
 }
 
-
 /// Direction quadrant (0-3) for a segment vector.
 #[cfg(feature = "rstar")]
 fn quadrant(dx: f64, dy: f64) -> u8 {

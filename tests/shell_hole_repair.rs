@@ -263,7 +263,6 @@ fn test_shell_collapse_nan_keep_collapsed() {
     assert_valid_ogc(&result);
 }
 
-
 #[test]
 fn test_shell_backtrack_collapse() {
     let g = geom_from_wkt(
@@ -289,7 +288,6 @@ fn test_shell_backtrack_collapse_keep_collapsed() {
     assert_valid_ogc(&result);
     assert_not_empty(&result);
 }
-
 
 #[test]
 fn test_hole_backtrack_collapse() {

@@ -208,9 +208,7 @@ pub(crate) fn resolve_nesting(
     let mut subtract = Vec::new();
     let mut island_indices = Vec::new();
     for (i, &d) in depth.iter().enumerate() {
-        if d == 0 {
-            subtract.push(i);
-        } else if d % 2 == 1 {
+        if d == 0 || d % 2 == 1 {
             subtract.push(i);
         } else {
             island_indices.push(i);

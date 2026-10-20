@@ -309,7 +309,6 @@ fn write_geometry(geom: &Geometry<f64>, buf: &mut Vec<u8>, le: bool) {
     }
 }
 
-
 fn type_code_with_flags(type_code: u32, dims: EwkbDims, has_srid: bool) -> u32 {
     let mut flags = type_code;
     if dims.has_z {
@@ -545,7 +544,6 @@ fn write_geometry_ewkb(
         }
     }
 }
-
 
 /// Read the byte size of the next WKB geometry from `buf` without fully parsing it.
 pub fn estimate_wkb_size(buf: &[u8]) -> Result<usize, WkbError> {

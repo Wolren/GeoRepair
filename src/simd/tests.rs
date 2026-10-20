@@ -4,7 +4,6 @@
 use super::*;
 use alloc::vec::Vec;
 
-
 #[cfg(test)]
 mod platform_tests {
     use super::*;
@@ -314,7 +313,6 @@ mod platform_tests {
         );
     }
 }
-
 
 #[cfg(all(
     not(feature = "simd-portable"),

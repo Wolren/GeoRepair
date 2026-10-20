@@ -24,7 +24,6 @@ pub struct NodingValidator {
     violations: Vec<NodingViolation>,
 }
 
-
 #[cfg(feature = "rstar")]
 fn quadrant(dx: f64, dy: f64) -> u8 {
     if dx > 0.0 {
@@ -132,7 +131,6 @@ fn sub_chain(edges: &[Line<f64>], start: usize, end: usize) -> ValMonoChain {
         max_y,
     }
 }
-
 
 fn check_crossing_violation(
     edges: &[Line<f64>],

@@ -179,7 +179,6 @@ impl<T: GeoFloat> MakeValid for Triangle<T> {
     }
 }
 
-
 #[cfg(any(feature = "arrange", feature = "structure"))]
 impl MakeValid for Polygon<f64> {
     type Scalar = f64;
@@ -688,7 +687,6 @@ impl<T: NodingFloat> MakeValid for Geometry<T> {
         }
     }
 }
-
 
 #[cfg(feature = "arrange")]
 pub(super) fn arrange_or_empty(poly: &Polygon<f64>, config: &MakeValidConfig) -> Geometry<f64> {

@@ -12,7 +12,6 @@ pub fn write_wkt_to(geom: &Geometry<f64>, writer: &mut impl Write) -> io::Result
     writer.write_all(s.as_bytes())
 }
 
-
 /// Serialize a `Geometry<f64>` to WKT string.
 pub fn write_wkt(geom: &Geometry<f64>) -> String {
     let mut s = String::new();
@@ -215,4 +214,3 @@ fn write_geom(s: &mut String, geom: &Geometry<f64>) {
         }
     }
 }
-

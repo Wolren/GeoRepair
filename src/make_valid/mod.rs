@@ -59,7 +59,6 @@ pub(crate) fn empty_geom<T: CoordNum>() -> Geometry<T> {
     Geometry::GeometryCollection(GeometryCollection(Vec::new()))
 }
 
-
 impl<T: GeoFloat> MakeValid for Point<T> {
     type Scalar = T;
 
@@ -74,7 +73,6 @@ impl<T: GeoFloat> MakeValid for Point<T> {
         }
     }
 }
-
 
 impl<T: GeoFloat> MakeValid for MultiPoint<T> {
     type Scalar = T;
@@ -109,7 +107,6 @@ impl<T: GeoFloat> MakeValid for MultiPoint<T> {
     }
 }
 
-
 impl<T: GeoFloat> MakeValid for Line<T> {
     type Scalar = T;
 
@@ -130,7 +127,6 @@ impl<T: GeoFloat> MakeValid for Line<T> {
         }
     }
 }
-
 
 impl<T: NodingFloat> MakeValid for LineString<T> {
     type Scalar = T;
@@ -360,7 +356,6 @@ fn keep_conflicting_runs(runs: &[Vec<Coord<f64>>]) -> Option<Vec<usize>> {
     }
 }
 
-
 impl<T: NodingFloat> MakeValid for MultiLineString<T> {
     type Scalar = T;
 
@@ -421,7 +416,6 @@ impl<T: NodingFloat> MakeValid for MultiLineString<T> {
     }
 }
 
-
 impl<T: GeoFloat> MakeValid for Rect<T> {
     type Scalar = T;
 
@@ -446,7 +440,6 @@ impl<T: GeoFloat> MakeValid for Rect<T> {
         }
     }
 }
-
 
 #[cfg(any(feature = "arrange", feature = "structure"))]
 mod multipolygon;
@@ -531,7 +524,6 @@ impl<T: NodingFloat> MakeValid for GeometryCollection<T> {
     }
 }
 
-
 ///
 /// # Methods
 /// - [`validate_and_fix`](ValidateAndFix::validate_and_fix): validate first, fix if
@@ -582,7 +574,6 @@ pub trait ValidateAndFix: MakeValid<Scalar = f64> + GeoValidation<Scalar = f64> 
         }
     }
 }
-
 
 impl ValidateAndFix for Point<f64> {}
 

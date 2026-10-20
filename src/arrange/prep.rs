@@ -315,7 +315,6 @@ fn project_param(line: &Line<f64>, pt: Coord<f64>) -> f64 {
 mod tests {
     use super::*;
 
-
     #[test]
     fn test_odd_even_filter_empty() {
         let mut lines = Vec::new();
@@ -362,7 +361,6 @@ mod tests {
                 || (lines[0].start.x == lines[0].end.x && lines[0].start.y < lines[0].end.y)
         );
     }
-
 
     #[test]
     fn test_segment_intersection_proper_crossing() {
@@ -466,7 +464,6 @@ mod tests {
         assert!(result.is_none());
     }
 
-
     #[test]
     fn test_on_segment_midpoint() {
         assert!(on_segment(
@@ -517,7 +514,6 @@ mod tests {
         ));
     }
 
-
     #[test]
     fn test_coord_greater_x() {
         assert!(coord_greater(
@@ -549,7 +545,6 @@ mod tests {
             Coord { x: 1.0, y: 1.0 },
         ));
     }
-
 
     #[test]
     fn test_project_param_midpoint() {
@@ -585,7 +580,6 @@ mod tests {
         let t = project_param(&line, Coord { x: 1.0, y: 1.0 });
         assert!((t - 0.5).abs() < 1e-12);
     }
-
 
     #[test]
     fn test_snap_or_push_new() {
@@ -630,7 +624,6 @@ mod tests {
         assert_eq!(result, Coord { x: 0.01, y: 0.01 });
         assert_eq!(grid.len(), 1);
     }
-
 
     #[test]
     fn test_prepare_lines_empty() {

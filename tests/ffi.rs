@@ -25,7 +25,6 @@ use geo_repair::validation::GeoValidation;
 use std::ffi::{CStr, CString};
 use std::ptr;
 
-
 fn square() -> Geometry<f64> {
     read_wkt("POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))").unwrap()
 }
@@ -59,7 +58,6 @@ fn is_valid_wkb_bytes(wkb: &[u8]) -> bool {
     read_wkb(wkb).map(|g| g.is_valid()).unwrap_or(false)
 }
 
-
 #[test]
 fn version_matches_crate() {
     let v = unsafe { CStr::from_ptr(geo_repair_version()) }
@@ -69,7 +67,6 @@ fn version_matches_crate() {
     assert_eq!(v, env!("CARGO_PKG_VERSION"));
     assert!(v.split('.').count() == 3, "semver shape: {v}");
 }
-
 
 #[test]
 fn is_valid_ok_and_invalid() {
@@ -89,7 +86,6 @@ fn is_valid_garbage_returns_zero_without_panic() {
         assert_eq!(geo_repair_is_valid(ptr::null(), 0), 0);
     }
 }
-
 
 #[test]
 fn make_valid_repairs_bowtie() {
@@ -156,7 +152,6 @@ fn free_result_is_double_free_safe() {
     }
 }
 
-
 #[test]
 fn validate_valid_geometry() {
     let sq = square_wkb();
@@ -203,7 +198,6 @@ fn validate_reason_is_validate() {
     }
 }
 
-
 #[test]
 fn validate_and_fix_invalid_reports_reasons_and_repairs() {
     let bt = bowtie_wkb();
@@ -238,7 +232,6 @@ fn validate_and_fix_with_config() {
     assert!(is_valid_wkb_bytes(&out));
     unsafe { geo_repair_free_result(&mut res) };
 }
-
 
 #[test]
 fn wkt_make_valid_roundtrip() {
@@ -323,7 +316,6 @@ fn free_string_result_is_double_free_safe() {
         geo_repair_free_string_result(ptr::null_mut());
     }
 }
-
 
 #[test]
 fn batch_sequential_and_parallel_agree() {

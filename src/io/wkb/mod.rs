@@ -127,7 +127,6 @@ impl Default for WriteOptions {
     }
 }
 
-
 const WKB_POINT: u32 = 1;
 const WKB_LINESTRING: u32 = 2;
 const WKB_POLYGON: u32 = 3;
@@ -139,7 +138,6 @@ const WKB_GEOMETRYCOLLECTION: u32 = 7;
 const WKB_Z_FLAG: u32 = 0x80000000;
 const WKB_M_FLAG: u32 = 0x40000000;
 const WKB_SRID_FLAG: u32 = 0x20000000;
-
 
 mod read;
 #[cfg(test)]

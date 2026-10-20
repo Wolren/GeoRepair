@@ -4,7 +4,6 @@ use alloc::vec::Vec;
 use core::mem;
 use geo::{Coord, GeoFloat, Line};
 
-
 mod private {
     use geo::{Coord, GeoFloat};
 

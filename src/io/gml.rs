@@ -46,7 +46,6 @@ pub fn save_gml(path: &str, geoms: &[Geometry<f64>]) -> Result<(), String> {
     Ok(())
 }
 
-
 /// Local (namespace-stripped) element name from a QName.
 fn local<'a>(n: quick_xml::name::QName<'a>) -> &'a [u8] {
     let b: &'a [u8] = n.0.as_bytes();
@@ -323,7 +322,6 @@ fn coords_from_flat(nums: &[f64], ctx: &[u8], dim: usize) -> Result<Vec<Coord<f6
         .map(|c| Coord { x: c[0], y: c[1] })
         .collect())
 }
-
 
 fn write_geometry(
     out: &mut String,

@@ -411,15 +411,16 @@ fn multipolygon_no_cross_component_intersection() {
                         let (min_jx, max_jx, min_jy, max_jy) = bbox_coords(ext_j);
                         let overlap_x = min_ix <= max_jx && min_jx <= max_ix;
                         let overlap_y = min_iy <= max_jy && min_jy <= max_iy;
-                        if overlap_x && overlap_y {
-                            if let Some(first) = ext_i.first() {
-                                let in_j = point_in_ring_exclusive(*first, ext_j);
-                                assert!(
-                                    !in_j,
-                                    "MultiPolygon[{}] shell vertex inside component {}: {:?}",
-                                    i, j, first
-                                );
-                            }
+                        if overlap_x
+                            && overlap_y
+                            && let Some(first) = ext_i.first()
+                        {
+                            let in_j = point_in_ring_exclusive(*first, ext_j);
+                            assert!(
+                                !in_j,
+                                "MultiPolygon[{}] shell vertex inside component {}: {:?}",
+                                i, j, first
+                            );
                         }
                     }
                 }

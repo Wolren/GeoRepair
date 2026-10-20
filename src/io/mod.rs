@@ -85,7 +85,6 @@ pub use wkt::{WktError, infer_wkt_type, read_wkt, write_wkt};
 #[cfg(feature = "std")]
 pub use wkt::{read_wkt_from, write_wkt_to};
 
-
 #[cfg(feature = "std")]
 fn extension(path: &str) -> &str {
     std::path::Path::new(path)
@@ -274,14 +273,12 @@ pub fn diagnose_file(path: &str) -> Result<Vec<ValidationResult>, String> {
     Ok(geoms.iter().map(validate).collect())
 }
 
-
 #[cfg(feature = "std")]
 fn load_wkt(path: &str) -> Result<Vec<Geometry<f64>>, String> {
     let text = fs::read_to_string(path).map_err(|e| format!("cannot read {path}: {e}"))?;
     let geom = read_wkt(&text).map_err(|e| e.to_string())?;
     Ok(vec![geom])
 }
-
 
 /// Compute the signed area of a polygon ring using the shoelace formula.
 pub fn signed_area(ring: &[Coord<f64>]) -> f64 {

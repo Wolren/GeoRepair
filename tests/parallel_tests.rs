@@ -32,7 +32,6 @@ fn cfg_auto() -> MakeValidConfig {
     MakeValidConfig::default()
 }
 
-
 #[test]
 fn test_par_fix_multi_point_valid() {
     let mp = MultiPoint::new(vec![Point::new(1.0, 2.0), Point::new(3.0, 4.0)]);
@@ -68,7 +67,6 @@ fn test_par_fix_multi_point_all_invalid() {
     assert!(result.is_valid());
 }
 
-
 #[test]
 fn test_par_fix_multi_line_string_valid() {
     let mls = MultiLineString::new(vec![LineString::new(vec![
@@ -97,7 +95,6 @@ fn test_par_fix_multi_line_string_mixed() {
     assert_valid(&result);
     assert_not_empty(&result);
 }
-
 
 #[test]
 fn test_par_fix_multi_polygon_valid() {
@@ -169,7 +166,6 @@ fn test_par_fix_multi_polygon_overlapping() {
     assert_not_empty(&result);
 }
 
-
 #[test]
 fn test_par_fix_collection_valid() {
     let gc = GeometryCollection(vec![
@@ -212,7 +208,6 @@ fn test_par_fix_collection_mixed() {
     assert_not_empty(&result);
 }
 
-
 #[test]
 fn test_par_fix_collection_bowtie() {
     let gc = GeometryCollection(vec![Geometry::Polygon(Polygon::new(
@@ -229,7 +224,6 @@ fn test_par_fix_collection_bowtie() {
     assert_valid(&result);
     assert_not_empty(&result);
 }
-
 
 #[test]
 fn test_par_equals_serial_multipoint() {

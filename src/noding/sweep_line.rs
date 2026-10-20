@@ -7,7 +7,6 @@ use geo::Line;
 
 use crate::orient::orient2d;
 
-
 #[derive(Debug, Clone, PartialEq)]
 enum EventKind {
     Left,
@@ -23,7 +22,6 @@ struct Event {
     edge: usize,
     other: usize,
 }
-
 
 struct ActiveSet<'a> {
     edges: &'a [Line<f64>],
@@ -100,7 +98,6 @@ impl<'a> ActiveSet<'a> {
     }
 }
 
-
 fn edges_cross(e1: &Line<f64>, e2: &Line<f64>, _eps: f64) -> bool {
     if e1.start == e2.start || e1.start == e2.end || e1.end == e2.start || e1.end == e2.end {
         return false;
@@ -141,7 +138,6 @@ fn edge_intersection_xy(e1: &Line<f64>, e2: &Line<f64>) -> Option<(f64, f64)> {
     }
 }
 
-
 fn event_cmp(a: &Event, b: &Event) -> core::cmp::Ordering {
     a.x.partial_cmp(&b.x)
         .unwrap_or(core::cmp::Ordering::Equal)
@@ -169,7 +165,6 @@ fn pair_key(i: usize, j: usize) -> u64 {
         (j as u64) << 32 | i as u64
     }
 }
-
 
 pub(crate) fn find_intersecting_pairs(edges: &[Line<f64>], eps: f64) -> Vec<(usize, usize)> {
     let n = edges.len();

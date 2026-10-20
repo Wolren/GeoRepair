@@ -295,7 +295,6 @@ fn cgal_backtracking_simple11() {
     assert_valid_ogc(&result);
 }
 
-
 #[test]
 fn cgal_hole_connection_complex() {
     // pgn_holes1.dat: Complex outer boundary with 4 holes, each 3-4 vertices
@@ -469,7 +468,6 @@ fn cgal_holes_connected_via_bridges_pgn3() {
         assert_not_empty(&result);
     }
 }
-
 
 // Input: 4 crossing 1x1 squares at (0,1), (1,0), (1,2), (2,1)
 // CGAL ref: MULTIPOLYGON with 4 components

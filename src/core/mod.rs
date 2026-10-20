@@ -6,7 +6,6 @@ use thiserror::Error;
 
 use crate::crs::Crs;
 
-
 /// Default geometric epsilon for robust equality / zero checks.
 pub(crate) const EPS: f64 = 1e-12;
 
@@ -74,7 +73,6 @@ impl Default for Tuning {
     }
 }
 
-
 /// Controls which polygon repair strategy to use, whether collapsed geometries should
 /// be kept, and crs-aware tolerance settings.
 ///
@@ -138,7 +136,6 @@ pub enum PolyMethod {
     /// cdt-based repair (handles any topology, slower).
     Arrange,
 }
-
 
 ///
 /// # Feature gating
