@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-01
+
 ### Added
 
 - `batch` module: `fix_polygon_batch`, `fix_polygon_batch_owned` and
@@ -27,8 +29,10 @@
   longer inherits a rayon pool or a bundled SQLite build. The previous default
   set is one name: `full`. A consumer that relied on either feature being on
   by default adds `features = ["parallel"]` or `features = ["io-gpkg"]`.
+  The Python wheel build, the FFI builds and the GEOS bench features now name
+  `parallel` themselves.
 
-### Changed
+### Performance
 
 - `LineString` repair nodes a self-intersecting line in one pass. The old
   path sorted every coordinate by x three times (revisit guard, eps-class
@@ -61,9 +65,27 @@
   11 us, so the remainder is the cost of proving validity. At 100 vertices
   5.1 us to 2.1 us, against GEOS 2.9 us. Parallel batch ratio for
   `arrange valid 1000v`: 0.42x to 1.0x.
-- `segments_collinear_overlap` now tests the parametric overlap before the
-  two robust orientation calls, which only decides when the fast
-  determinant is exactly zero.
+- `segments_collinear_overlap` tests the parametric overlap before the two
+  robust orientation calls, which only decide when the fast determinant is
+  exactly zero.
+- The fast gate takes the accumulator dispatch once before the per-vertex
+  walk instead of probing three option fields per vertex. Parallel batch, best
+  of three runs, GEOS measured in the same runs: a valid 5000-vertex polygon
+  12.5 us to 10.6 us (GEOS 10.4, ratio 0.78x to 0.98x) and a valid
+  10000-vertex polygon 24.2 us to 21.5 us (GEOS 17.3, ratio 0.71x to 0.80x).
+  No predicate changed, only the per-vertex probe is gone.
+- The small-ring pair loop skips a segment pair whose bounds cannot meet,
+  expanded by the ring eps for a same-ring pair and by zero for a cross-ring
+  pair. A proper crossing needs the closed bounds to meet, so no test below
+  can fire on a skipped pair. On the 1,579,030-polygon dataset the full pass
+  goes from 4.13 s to 3.39 s (GEOS 3.06 s in the same run, ratio 0.86x to
+  0.90x).
+- The duplicate-ring check hashes the shell once instead of once per hole, and
+  the fingerprint steps two cursors instead of taking an integer division per
+  coordinate. Hash values and their order are unchanged. On the
+  1,579,030-polygon dataset the full pass goes from 3.39 s to 2.10 s (GEOS
+  3.25 s in the same run, ratio 0.83x to 1.55x). That row was the crate's
+  worst real-world result before the change.
 
 All notable changes to this project are documented in this file.
 
