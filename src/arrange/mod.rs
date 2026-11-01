@@ -406,6 +406,73 @@ pub(crate) fn ring_guards(ring: &[geo::Coord<f64>]) -> (bool, f64) {
     (sub_ulp, min_abs)
 }
 
+/// Strict convexity of a closed ring, which is enough to prove it simple.
+///
+/// Every vertex must turn the same way and the edge direction must complete exactly one
+/// revolution. Consistent turns alone are not enough: a star polygon turns left at every
+/// vertex and still crosses itself, but it wraps the direction twice, so the wrap count
+/// is what separates a convex ring from a self-intersecting one. Collinear vertices fail
+/// the strict turn test and take the general path.
+///
+/// One pass, no allocation. Returns the min-x vertex index, tie broken by min-y with
+/// strict `<` over the interior range `[1..n)`, which is the index
+/// [`ring_is_plausible`] records, so the caller can re-wind without a second scan.
+/// Returns `None` for anything it cannot prove, including non-finite coordinates and
+/// sub-ULP edges, so the caller falls back to the validator.
+pub(crate) fn convex_ring(ring: &[geo::Coord<f64>]) -> Option<usize> {
+    let n = ring.len();
+    if n < 4 || ring[0] != ring[n - 1] {
+        return None;
+    }
+    let m = n - 1;
+    let mut extremal = 0usize;
+    let (mut ext_x, mut ext_y) = (ring[0].x, ring[0].y);
+    let mut sign = 0i32;
+    let mut up = 0u32;
+    let mut down = 0u32;
+    let mut prev_dy_pos = ring[0].y > ring[m - 1].y;
+    for i in 0..m {
+        let a = ring[i];
+        let b = ring[(i + 1) % m];
+        if !a.x.is_finite() || !a.y.is_finite() {
+            return None;
+        }
+        if edge_is_sub_ulp(a, b) {
+            return None;
+        }
+        if i >= 1 && (a.x < ext_x || (a.x == ext_x && a.y < ext_y)) {
+            ext_x = a.x;
+            ext_y = a.y;
+            extremal = i;
+        }
+        let turn = crate::orient::orient2d(ring[(i + m - 1) % m], a, b);
+        if !turn.is_finite() || turn == 0.0 {
+            return None;
+        }
+        let s = if turn > 0.0 { 1 } else { -1 };
+        if sign == 0 {
+            sign = s;
+        } else if sign != s {
+            return None;
+        }
+        let dy_pos = b.y > a.y;
+        if dy_pos && !prev_dy_pos {
+            up += 1;
+        } else if !dy_pos && prev_dy_pos {
+            down += 1;
+        }
+        prev_dy_pos = dy_pos;
+    }
+    // A ring that turns consistently has a total turning of a whole number of
+    // revolutions, and the edge direction crosses each axis once per revolution. One
+    // revolution in both directions means the turning is exactly one turn, which makes
+    // the ring convex and therefore simple.
+    if up != 1 || down != 1 {
+        return None;
+    }
+    Some(extremal)
+}
+
 pub fn has_sub_ulp_edge(poly: &Polygon<f64>, _scale_hint: Option<f64>) -> bool {
     fn ring_has_sub_ulp(ring: &[geo::Coord<f64>]) -> bool {
         let n = ring.len();
@@ -612,4 +679,178 @@ pub(crate) fn fix_from_lines(lines: Vec<geo::Line<f64>>) -> Option<MultiPolygon<
 
 fn empty() -> Geometry<f64> {
     Geometry::GeometryCollection(GeometryCollection(Vec::new()))
+}
+
+#[cfg(test)]
+mod convex_tests {
+    use super::convex_ring;
+    use crate::validation::GeometryValidationError;
+    use geo::Coord;
+
+    struct Rng(u64);
+
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            let mut x = self.0;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            self.0 = x;
+            x
+        }
+
+        fn unit(&mut self) -> f64 {
+            (self.next() >> 11) as f64 / (1u64 << 53) as f64
+        }
+    }
+
+    fn closed(mut coords: Vec<Coord<f64>>) -> Vec<Coord<f64>> {
+        if let Some(first) = coords.first().copied() {
+            coords.push(first);
+        }
+        coords
+    }
+
+    fn circle(n: usize, r: f64) -> Vec<Coord<f64>> {
+        let mut coords = Vec::with_capacity(n);
+        for i in 0..n {
+            let a = 2.0 * core::f64::consts::PI * i as f64 / n as f64;
+            coords.push(Coord {
+                x: r * a.cos() + 7.0,
+                y: r * a.sin() - 3.0,
+            });
+        }
+        closed(coords)
+    }
+
+    #[test]
+    fn accepts_convex_both_windings() {
+        let ccw = circle(200, 5.0);
+        assert!(convex_ring(&ccw).is_some());
+        let mut cw = ccw.clone();
+        cw.reverse();
+        assert!(convex_ring(&cw).is_some());
+    }
+
+    #[test]
+    fn accepts_a_triangle() {
+        let t = closed(vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 4.0, y: 0.0 },
+            Coord { x: 0.0, y: 3.0 },
+        ]);
+        assert!(convex_ring(&t).is_some());
+    }
+
+    #[test]
+    fn rejects_a_bowtie() {
+        let b = closed(vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 10.0, y: 10.0 },
+            Coord { x: 10.0, y: 0.0 },
+            Coord { x: 0.0, y: 10.0 },
+        ]);
+        assert!(convex_ring(&b).is_none());
+    }
+
+    #[test]
+    fn rejects_a_star_polygon() {
+        // A pentagram turns left at every vertex, so the turn test alone accepts it.
+        // It wraps the edge direction twice, which is what the wrap count rejects.
+        let mut c = Vec::new();
+        for k in 0..5 {
+            let a = core::f64::consts::FRAC_PI_2 + 4.0 * core::f64::consts::PI * k as f64 / 5.0;
+            c.push(Coord {
+                x: a.cos(),
+                y: a.sin(),
+            });
+        }
+        let c = closed(c);
+        assert!(convex_ring(&c).is_none());
+    }
+
+    #[test]
+    fn rejects_a_collinear_vertex() {
+        let mut c = circle(50, 5.0);
+        let mid = Coord {
+            x: (c[10].x + c[11].x) / 2.0,
+            y: (c[10].y + c[11].y) / 2.0,
+        };
+        c.insert(11, mid);
+        assert!(convex_ring(&c).is_none());
+    }
+
+    #[test]
+    fn rejects_non_finite_and_open_rings() {
+        let mut c = circle(40, 5.0);
+        c[7].x = f64::NAN;
+        assert!(convex_ring(&c).is_none());
+
+        let mut open = circle(40, 5.0);
+        open.pop();
+        assert!(convex_ring(&open).is_none());
+
+        let mut dup = circle(40, 5.0);
+        dup[9] = dup[8];
+        assert!(convex_ring(&dup).is_none());
+    }
+
+    /// Anything the test accepts must be a valid ring. `check_ring_validity` is the
+    /// validator the gate exists to skip, so a disagreement here would ship invalid
+    /// geometry.
+    #[test]
+    fn accepted_rings_are_valid() {
+        let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
+        let mut accepted = 0usize;
+        for case in 0..3000 {
+            let n = 4 + (rng.next() % 30) as usize;
+            let coords = match case % 3 {
+                // Points on a circle in angular order: always convex.
+                0 => {
+                    let mut angles: Vec<f64> = (0..n)
+                        .map(|_| rng.unit() * core::f64::consts::TAU)
+                        .collect();
+                    angles.sort_by(|a, b| a.partial_cmp(b).expect("finite"));
+                    closed(
+                        angles
+                            .into_iter()
+                            .map(|a| Coord {
+                                x: 10.0 * a.cos(),
+                                y: 10.0 * a.sin(),
+                            })
+                            .collect(),
+                    )
+                }
+                // A circle point pulled inside the hull: still star shaped, not convex.
+                1 => {
+                    let mut c = circle(n, 10.0);
+                    if n > 4 {
+                        let k = 1 + (rng.next() as usize) % (n - 2);
+                        c[k].x *= 0.5;
+                        c[k].y *= 0.5;
+                    }
+                    c
+                }
+                // Random points in random order: usually not simple.
+                _ => closed(
+                    (0..n)
+                        .map(|_| Coord {
+                            x: rng.unit() * 20.0 - 10.0,
+                            y: rng.unit() * 20.0 - 10.0,
+                        })
+                        .collect(),
+                ),
+            };
+            if convex_ring(&coords).is_some() {
+                accepted += 1;
+                let errs = crate::validation::check_ring_validity(&coords, true);
+                assert!(
+                    errs.iter()
+                        .all(|e| matches!(e, GeometryValidationError::WrongOrientation)),
+                    "convex test accepted an invalid ring: {errs:?}"
+                );
+            }
+        }
+        assert!(accepted > 200, "too few accepted rings: {accepted}");
+    }
 }

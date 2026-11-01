@@ -4,6 +4,19 @@
 
 ### Changed
 
+- A strictly convex ring with no holes returns from `make_valid` without the
+  monotone chain index, the exterior pre-scan and the validator.
+  `arrange::convex_ring` proves the ring simple in one pass: every vertex
+  turns the same way and the edge direction completes exactly one
+  revolution. The second condition is what makes it sound. A star polygon
+  turns left at every vertex and still crosses itself, but it wraps the
+  direction twice. The same pass proves the coordinates finite and the ring
+  non-degenerate, which is what the pre-scan and the validator were run for,
+  so both are skipped. Serial ratio to GEOS 3.14.1 `make_valid`: 1000
+  vertices 0.83x to 1.24x, 5000 vertices 0.68x to 1.01x, 10000 vertices
+  0.59x to 0.96x. Collinear vertices, sub-ULP edges, holes, non-finite
+  coordinates and rings at or below `SMALL_RING_LINES` take the existing
+  path unchanged.
 - `LineString` repair nodes a self-intersecting line in one pass. The old
   path sorted every coordinate by x three times (revisit guard, eps-class
   guard, eps-class guard with nodes), built an R-tree in the validator only
