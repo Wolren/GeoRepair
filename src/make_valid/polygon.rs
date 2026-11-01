@@ -184,24 +184,6 @@ impl MakeValid for Polygon<f64> {
     type Scalar = f64;
 
     fn make_valid_with_config(&self, config: &MakeValidConfig) -> Geometry<f64> {
-        // A strictly convex ring with no holes is valid and non-degenerate, and the test
-        // proves both in one pass over the coordinates. That makes the exterior pre-scan
-        // below (same coordinates, same facts) and the validator both redundant, so take
-        // the answer here. Small rings keep the existing path.
-        #[cfg(any(feature = "arrange", feature = "structure"))]
-        if !config.keep_collapsed
-            && self.interiors().is_empty()
-            && self.exterior().0.len() > crate::core::SMALL_RING_LINES
-            && let Some(extremal) = crate::arrange::convex_ring(&self.exterior().0)
-        {
-            let (g, ok) = enforce_ogc_winding_with_extrema(
-                Geometry::Polygon(self.clone()),
-                Some(&[extremal]),
-            );
-            if ok {
-                return preserve_valid_input(g, config, self);
-            }
-        }
         // The exterior pre-scan fuses bbox extremes with the NaN check
         if !config.keep_collapsed && self.exterior().0.len() >= 4 {
             let coords = &self.exterior().0;
