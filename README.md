@@ -65,8 +65,8 @@ we win. Methodology: `docs/BENCHMARKS.md`. Regenerate:
 | valid polygon 100v | 0.408 | 0.578 | 1.4x |
 | valid polygon 500v | 1.4 | 1.7 | 1.2x |
 | valid polygon 1000v | 2.4 | 2.7 | 1.1x |
-| valid polygon 5000v | 12.5 | 9.7 | 0.78x |
-| valid polygon 10000v | 24.2 | 17.2 | 0.71x |
+| valid polygon 5000v | 11.1 | 8.4 | 0.76x |
+| valid polygon 10000v | 21.4 | 17.4 | 0.81x |
 | invalid bowtie 4v | 0.661 | 19.9 | 30x |
 | invalid bowtie 50v | 7.7 | 65.8 | 8.5x |
 | invalid bowtie 100v | 25.1 | 118 | 4.7x |
