@@ -529,6 +529,14 @@ pub(crate) fn ring_is_plausible(ring: &geo::LineString<f64>, acc: &mut GateAccum
 
 /// The shared windows loop of [`ring_is_plausible`].
 fn plausible_body(coords: &[geo::Coord<f64>], n: usize, acc: &mut GateAccum) -> bool {
+    // The gate's own use is lines plus chains with no bbox. The generic loop below
+    // re-probes three Options and dispatches a four-way match on every vertex for that
+    // case, so take it once, before the loop, and run a straight body.
+    if acc.bbox.is_none()
+        && let (Some(lines), Some(chains)) = (acc.lines.as_deref_mut(), acc.chains.as_deref_mut())
+    {
+        return walk_lines_chains(coords, n, acc.extremal.as_deref_mut(), lines, chains);
+    }
     // Extremal recording (min-x, tie min-y, strict <, candidate 0, interior range
     // [1.n)): matches min_x_vertex in util.rs exactly
     let track_ext = acc.extremal.is_some();
@@ -569,6 +577,44 @@ fn plausible_body(coords: &[geo::Coord<f64>], n: usize, acc: &mut GateAccum) -> 
         return false;
     }
     if track_ext && let Some(v) = acc.extremal.as_deref_mut() {
+        v.push(ext_idx);
+    }
+    true
+}
+
+/// [`plausible_body`] for the gate's own accumulator set: lines plus chains, no bbox.
+/// Same checks, no per-vertex option dispatch.
+#[inline]
+fn walk_lines_chains(
+    coords: &[geo::Coord<f64>],
+    n: usize,
+    extremal: Option<&mut Vec<usize>>,
+    lines: &mut Vec<geo::Line<f64>>,
+    chains: &mut prep_intersect::ChainSink,
+) -> bool {
+    let track_ext = extremal.is_some();
+    let mut ext_min_x = coords[0].x;
+    let mut ext_min_y = coords[0].y;
+    let mut ext_idx = 0usize;
+    for (i, w) in coords.windows(2).enumerate() {
+        if w[0] == w[1] || !w[0].x.is_finite() || !w[0].y.is_finite() {
+            return false;
+        }
+        if track_ext && i >= 1 {
+            let c = w[0];
+            if c.x < ext_min_x || (c.x == ext_min_x && c.y < ext_min_y) {
+                ext_min_x = c.x;
+                ext_min_y = c.y;
+                ext_idx = i;
+            }
+        }
+        lines.push(geo::Line::new(w[0], w[1]));
+        chains.push_line(w[0].x, w[0].y, w[1].x, w[1].y);
+    }
+    if n <= 32 && crate::validation::ring::first_pinch_dup(&coords[..n]).is_some() {
+        return false;
+    }
+    if track_ext && let Some(v) = extremal {
         v.push(ext_idx);
     }
     true
