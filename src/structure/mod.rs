@@ -54,6 +54,138 @@ pub(crate) enum FixOutcome {
     Unconsumed(Polygon<f64>),
 }
 
+/// It accepts exactly what the exit validator accepts, because the Fast path skips
+/// that validator (2026-08-07).
+#[cfg(feature = "arrange")]
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+pub(crate) fn fast_path_check(
+    poly: &Polygon<f64>,
+    _ext_scale: Option<f64>,
+    tuning: &crate::core::Tuning,
+    min_abs: &mut f64,
+    max_abs: &mut f64,
+    extremal: &mut Vec<usize>,
+) -> bool {
+    let total_verts: usize =
+        poly.exterior().0.len() + poly.interiors().iter().map(|h| h.0.len()).sum::<usize>();
+    if total_verts == 0 || poly.exterior().0.len() < 4 {
+        return false;
+    }
+    // extreme-span gate (crash-65111cd0 guard, 2026-08-09) does not
+    let mut bbox = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+    let (mut sub_ulp, ext_min_abs) = crate::arrange::ring_guards(&poly.exterior().0);
+    *min_abs = (*min_abs).min(ext_min_abs);
+    for hole in poly.interiors() {
+        let (hole_sub_ulp, hole_min_abs) = crate::arrange::ring_guards(&hole.0);
+        sub_ulp |= hole_sub_ulp;
+        *min_abs = (*min_abs).min(hole_min_abs);
+    }
+    if sub_ulp {
+        return false;
+    }
+    let collect_lines = total_verts > tuning.small_ring_lines;
+    // Vec::new pays three or four reallocations over a 10000-vertex ring (measured
+    // 2026-09-25: 5.7 us of growth alone).
+    let mut lines: Vec<Line<f64>> = if collect_lines {
+        Vec::with_capacity(total_verts)
+    } else {
+        Vec::new()
+    };
+    // walk (one pass instead of walk + build_mono_chains).
+    let fused_chains =
+        total_verts > tuning.small_ring_lines && total_verts <= tuning.fast_path_max_verts;
+    let mut sink = crate::arrange::prep_intersect::ChainSink::default();
+    let mut acc = crate::arrange::GateAccum {
+        lines: collect_lines.then_some(&mut lines),
+        chains: fused_chains.then_some(&mut sink),
+        // push_line measured slower (interleaved A/B 2026-09-25: 3/3 rounds, 260.1
+        // vs 247.1 us median at 10000v).
+        bbox: (!fused_chains).then_some(&mut bbox),
+        extremal: Some(extremal),
+    };
+    if !crate::arrange::ring_is_plausible(poly.exterior(), &mut acc) {
+        return false;
+    }
+    for hole in poly.interiors() {
+        if !crate::arrange::ring_is_plausible(hole, &mut acc) {
+            return false;
+        }
+    }
+    let fused = if fused_chains {
+        Some(sink.finish())
+    } else {
+        None
+    };
+    // rule (correct for mixed magnitudes - a 5e-305-thick sliver is valid at its
+    // own scale)
+    let envelope = fused.as_ref().map_or(bbox, |(_, b)| *b);
+    *max_abs = envelope
+        .0
+        .abs()
+        .max(envelope.1.abs())
+        .max(envelope.2.abs())
+        .max(envelope.3.abs());
+    if (envelope.1 - envelope.0).abs() < f64::EPSILON
+        || (envelope.3 - envelope.2).abs() < f64::EPSILON
+    {
+        return false;
+    }
+    let interiors: Vec<&[geo::Coord<f64>]> = poly.interiors().iter().map(|h| &h.0[..]).collect();
+    if crate::validation::has_duplicate_rings(&interiors, poly.exterior().0.as_slice()) {
+        return false;
+    }
+    if total_verts <= tuning.fast_path_max_verts {
+        // SmallVec: ~95.6% of the real-world dataset has <= 32 vertices
+        if total_verts <= tuning.small_ring_lines {
+            let lines: SmallVec<[Line<f64>; crate::core::SMALL_RING_LINES]> =
+                poly.lines_iter().collect();
+            !lines.is_empty()
+                && crate::arrange::prep::has_no_intersections_nan_ok_tuned(&lines, tuning)
+                && crate::validation::holes::check_holes_valid(
+                    poly.exterior().0.as_slice(),
+                    poly.interiors(),
+                )
+                .is_empty()
+        } else {
+            match fused {
+                Some((chains, global_bbox)) => {
+                    !lines.is_empty()
+                        && crate::arrange::prep::has_no_intersections_from_chains(
+                            &lines,
+                            &chains,
+                            global_bbox,
+                            tuning,
+                        )
+                        && crate::validation::holes::check_holes_valid(
+                            poly.exterior().0.as_slice(),
+                            poly.interiors(),
+                        )
+                        .is_empty()
+                }
+                None => false,
+            }
+        }
+    } else {
+        // that is ~11ms per giant ring
+        use crate::validation::GeometryValidationError;
+        if crate::validation::check_ring_validity(poly.exterior().0.as_slice(), true)
+            .iter()
+            .any(|e| !matches!(e, GeometryValidationError::WrongOrientation))
+        {
+            return false;
+        }
+        for hole in poly.interiors() {
+            if crate::validation::check_ring_validity(&hole.0, false)
+                .iter()
+                .any(|e| !matches!(e, GeometryValidationError::WrongOrientation))
+            {
+                return false;
+            }
+        }
+        crate::arrange::holes_are_valid_inclusive(poly)
+    }
+}
+
 /// About 99.85% of real-world polygons are already valid. This is a zero-copy
 /// passthrough that matches the geos shared-geometry return. ext_scale is the caller
 /// precomputed exterior bbox scale, the max spread floored at 1.0.
@@ -82,139 +214,6 @@ pub(crate) fn fix_polygon_owned(
         }
     }
     PROFILE_FP_NS.fetch_add(_t_fp.ns(), Ordering::Relaxed);
-
-    /// It accepts exactly what the exit validator accepts, because the Fast path skips
-    /// that validator (2026-08-07).
-    #[cfg(feature = "arrange")]
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
-    fn fast_path_check(
-        poly: &Polygon<f64>,
-        _ext_scale: Option<f64>,
-        tuning: &crate::core::Tuning,
-        min_abs: &mut f64,
-        max_abs: &mut f64,
-        extremal: &mut Vec<usize>,
-    ) -> bool {
-        let total_verts: usize =
-            poly.exterior().0.len() + poly.interiors().iter().map(|h| h.0.len()).sum::<usize>();
-        if total_verts == 0 || poly.exterior().0.len() < 4 {
-            return false;
-        }
-        // extreme-span gate (crash-65111cd0 guard, 2026-08-09) does not
-        let mut bbox = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
-        let (mut sub_ulp, ext_min_abs) = crate::arrange::ring_guards(&poly.exterior().0);
-        *min_abs = (*min_abs).min(ext_min_abs);
-        for hole in poly.interiors() {
-            let (hole_sub_ulp, hole_min_abs) = crate::arrange::ring_guards(&hole.0);
-            sub_ulp |= hole_sub_ulp;
-            *min_abs = (*min_abs).min(hole_min_abs);
-        }
-        if sub_ulp {
-            return false;
-        }
-        let collect_lines = total_verts > tuning.small_ring_lines;
-        // Vec::new pays three or four reallocations over a 10000-vertex ring (measured
-        // 2026-09-25: 5.7 us of growth alone).
-        let mut lines: Vec<Line<f64>> = if collect_lines {
-            Vec::with_capacity(total_verts)
-        } else {
-            Vec::new()
-        };
-        // walk (one pass instead of walk + build_mono_chains).
-        let fused_chains =
-            total_verts > tuning.small_ring_lines && total_verts <= tuning.fast_path_max_verts;
-        let mut sink = crate::arrange::prep_intersect::ChainSink::default();
-        let mut acc = crate::arrange::GateAccum {
-            lines: collect_lines.then_some(&mut lines),
-            chains: fused_chains.then_some(&mut sink),
-            // push_line measured slower (interleaved A/B 2026-09-25: 3/3 rounds, 260.1
-            // vs 247.1 us median at 10000v).
-            bbox: (!fused_chains).then_some(&mut bbox),
-            extremal: Some(extremal),
-        };
-        if !crate::arrange::ring_is_plausible(poly.exterior(), &mut acc) {
-            return false;
-        }
-        for hole in poly.interiors() {
-            if !crate::arrange::ring_is_plausible(hole, &mut acc) {
-                return false;
-            }
-        }
-        let fused = if fused_chains {
-            Some(sink.finish())
-        } else {
-            None
-        };
-        // rule (correct for mixed magnitudes - a 5e-305-thick sliver is valid at its
-        // own scale)
-        let envelope = fused.as_ref().map_or(bbox, |(_, b)| *b);
-        *max_abs = envelope
-            .0
-            .abs()
-            .max(envelope.1.abs())
-            .max(envelope.2.abs())
-            .max(envelope.3.abs());
-        if (envelope.1 - envelope.0).abs() < f64::EPSILON
-            || (envelope.3 - envelope.2).abs() < f64::EPSILON
-        {
-            return false;
-        }
-        let interiors: Vec<&[geo::Coord<f64>]> =
-            poly.interiors().iter().map(|h| &h.0[..]).collect();
-        if crate::validation::has_duplicate_rings(&interiors, poly.exterior().0.as_slice()) {
-            return false;
-        }
-        if total_verts <= tuning.fast_path_max_verts {
-            // SmallVec: ~95.6% of the real-world dataset has <= 32 vertices
-            if total_verts <= tuning.small_ring_lines {
-                let lines: SmallVec<[Line<f64>; crate::core::SMALL_RING_LINES]> =
-                    poly.lines_iter().collect();
-                !lines.is_empty()
-                    && crate::arrange::prep::has_no_intersections_nan_ok_tuned(&lines, tuning)
-                    && crate::validation::holes::check_holes_valid(
-                        poly.exterior().0.as_slice(),
-                        poly.interiors(),
-                    )
-                    .is_empty()
-            } else {
-                match fused {
-                    Some((chains, global_bbox)) => {
-                        !lines.is_empty()
-                            && crate::arrange::prep::has_no_intersections_from_chains(
-                                &lines,
-                                &chains,
-                                global_bbox,
-                                tuning,
-                            )
-                            && crate::validation::holes::check_holes_valid(
-                                poly.exterior().0.as_slice(),
-                                poly.interiors(),
-                            )
-                            .is_empty()
-                    }
-                    None => false,
-                }
-            }
-        } else {
-            // that is ~11ms per giant ring
-            use crate::validation::GeometryValidationError;
-            if crate::validation::check_ring_validity(poly.exterior().0.as_slice(), true)
-                .iter()
-                .any(|e| !matches!(e, GeometryValidationError::WrongOrientation))
-            {
-                return false;
-            }
-            for hole in poly.interiors() {
-                if crate::validation::check_ring_validity(&hole.0, false)
-                    .iter()
-                    .any(|e| !matches!(e, GeometryValidationError::WrongOrientation))
-                {
-                    return false;
-                }
-            }
-            crate::arrange::holes_are_valid_inclusive(poly)
-        }
-    }
 
     if crate::make_valid::snap_cannot_represent(&poly) {
         if let Some(outcome) = crate::make_valid::precondition::precondition_fix(&poly, config) {

@@ -327,23 +327,73 @@ pub(crate) fn collapse_degenerate(poly: &Polygon<f64>) -> Option<Geometry<f64>> 
     }
 }
 
-/// Gated arrange → precision-reduction → empty chain.
+/// The structure fast gate as a yes/no question. A polygon the gate accepts is valid
+/// and needs no repair; above the small-ring threshold the gate costs a fraction of
+/// the validator sweep, so callers that only need the verdict ask here instead of
+/// paying for the repair path.
+///
+/// Returns the gate's extremal indices on acceptance, so the caller can re-wind
+/// without re-scanning the ring for them.
 #[cfg(any(feature = "arrange", feature = "structure"))]
-fn arrange_chain(poly: &Polygon<f64>, config: &MakeValidConfig) -> Geometry<f64> {
+fn fast_gate_accepts(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Vec<usize>> {
+    // Below the small-ring threshold the gate runs its quadratic pair path, which
+    // costs more than the validator sweep it would replace. Measured on a regular
+    // ring: 32 vertices 7.1 us against 1.6 us, 64 vertices 1.8 us against 5.2 us.
+    let total_verts =
+        poly.exterior().0.len() + poly.interiors().iter().map(|h| h.0.len()).sum::<usize>();
+    if total_verts <= config.tuning.small_ring_lines {
+        return None;
+    }
+    let mut min_abs = f64::INFINITY;
+    let mut max_abs = 0.0f64;
+    let mut extremal: Vec<usize> = Vec::new();
+    if !crate::structure::fast_path_check(
+        poly,
+        None,
+        &config.tuning,
+        &mut min_abs,
+        &mut max_abs,
+        &mut extremal,
+    ) {
+        return None;
+    }
+    // Extreme-magnitude rings sit in the exact-orient zero zone, where the gate's
+    // verdict is not trusted and the validator decides.
+    if fast_gate_needs_full_validation(min_abs, max_abs)
+        && !is_valid_with_geo(&Geometry::Polygon(poly.clone()))
+    {
+        return None;
+    }
+    Some(extremal)
+}
+
+/// Gated arrange -> precision-reduction -> empty chain.
+///
+/// The second value is the certification: true when the result is the input, re-wound
+/// and known valid, so the caller can skip `strip_degenerate`.
+#[cfg(any(feature = "arrange", feature = "structure"))]
+fn arrange_chain(poly: &Polygon<f64>, config: &MakeValidConfig) -> (Geometry<f64>, bool) {
+    if let Some(extremal) = fast_gate_accepts(poly, config) {
+        let (g, ok) =
+            enforce_ogc_winding_with_extrema(Geometry::Polygon(poly.clone()), Some(&extremal));
+        if ok {
+            return (g, true);
+        }
+    }
     if is_valid_with_geo(&Geometry::Polygon(poly.clone())) {
-        return enforce_ogc_winding(Geometry::Polygon(poly.clone())).0;
+        return (enforce_ogc_winding(Geometry::Polygon(poly.clone())).0, true);
     }
     let arranged = enforce_ogc_winding(arrange_or_empty(poly, config)).0;
     if is_valid_with_geo(&arranged) {
-        arranged
+        (arranged, false)
     } else {
         warn!("arrange output invalid, retrying with precision reduction");
         let fb = enforce_ogc_winding(reduce_fallback(poly, config)).0;
         if is_valid_with_geo(&fb) {
-            fb
+            (fb, false)
         } else {
             warn!("repair failed all paths, returning empty");
-            empty_geom::<f64>()
+            (empty_geom::<f64>(), false)
         }
     }
 }
@@ -363,7 +413,7 @@ pub(super) fn make_valid_impl(
         "make_valid_impl requires NaN-free input"
     );
     let (result, certified) = match config.poly_method {
-        PolyMethod::Arrange => (arrange_chain(poly, config), false),
+        PolyMethod::Arrange => arrange_chain(poly, config),
         PolyMethod::Structure => {
             let st = structure_fix_owned(poly.clone(), config, None);
             match st {
@@ -384,7 +434,7 @@ pub(super) fn make_valid_impl(
                                 "Structure mode: fast-path extreme-magnitude output invalid, \
                                  retrying with CDT arrange"
                             );
-                            (arrange_chain(poly, config), false)
+                            arrange_chain(poly, config)
                         } else {
                             (g_norm, true)
                         }
@@ -392,7 +442,7 @@ pub(super) fn make_valid_impl(
                         warn!(
                             "Structure mode: fast-path orientation ambiguous, retrying with CDT arrange"
                         );
-                        (arrange_chain(poly, config), false)
+                        arrange_chain(poly, config)
                     }
                 }
                 crate::structure::FixOutcome::Repaired(g) => {
@@ -402,12 +452,12 @@ pub(super) fn make_valid_impl(
                         (g_norm, false)
                     } else {
                         warn!("Structure mode: fix output invalid, retrying with CDT arrange");
-                        (arrange_chain(poly, config), false)
+                        arrange_chain(poly, config)
                     }
                 }
                 crate::structure::FixOutcome::Unconsumed(p) => {
                     warn!("Structure mode: fix failed, retrying with CDT arrange");
-                    (arrange_chain(&p, config), false)
+                    arrange_chain(&p, config)
                 }
             }
         }
@@ -423,7 +473,7 @@ pub(super) fn make_valid_impl(
                             warn!(
                                 "Auto mode: fast-path extreme-magnitude output invalid,                                  falling back to CDT arrange"
                             );
-                            (arrange_chain(poly, config), false)
+                            arrange_chain(poly, config)
                         } else {
                             (g_norm, true)
                         }
@@ -431,7 +481,7 @@ pub(super) fn make_valid_impl(
                         warn!(
                             "Auto mode: fast-path orientation ambiguous, falling back to CDT arrange"
                         );
-                        (arrange_chain(poly, config), false)
+                        arrange_chain(poly, config)
                     }
                 }
                 crate::structure::FixOutcome::Repaired(r) => {
@@ -440,12 +490,12 @@ pub(super) fn make_valid_impl(
                         (r_norm, false)
                     } else {
                         warn!("Auto mode: structure_fix invalid, falling back to CDT arrange");
-                        (arrange_chain(poly, config), false)
+                        arrange_chain(poly, config)
                     }
                 }
                 crate::structure::FixOutcome::Unconsumed(p) => {
                     warn!("Auto mode: structure_fix failed, falling back to CDT arrange");
-                    (arrange_chain(&p, config), false)
+                    arrange_chain(&p, config)
                 }
             }
         }
@@ -472,7 +522,7 @@ pub(super) fn make_valid_impl_owned(
         "make_valid_impl_owned requires NaN-free input"
     );
     let (result, verified) = match config.poly_method {
-        PolyMethod::Arrange => (arrange_chain(&poly, config), false),
+        PolyMethod::Arrange => arrange_chain(&poly, config),
         PolyMethod::Structure => {
             #[cfg(feature = "structure")]
             {
@@ -488,14 +538,14 @@ pub(super) fn make_valid_impl_owned(
                             "Structure mode: fast-path orientation ambiguous, retrying with CDT arrange"
                         );
                         if let Geometry::Polygon(p) = g {
-                            return (arrange_chain(&p, config), false);
+                            return arrange_chain(&p, config);
                         }
                         return (g, false);
                     }
                     crate::structure::FixOutcome::Repaired(g) => (g, false),
                     crate::structure::FixOutcome::Unconsumed(p) => {
                         warn!("Structure mode: fix failed, retrying with CDT arrange");
-                        (arrange_chain(&p, config), false)
+                        arrange_chain(&p, config)
                     }
                 }
             }
@@ -504,7 +554,7 @@ pub(super) fn make_valid_impl_owned(
                 warn!(
                     "PolyMethod::Structure selected but 'structure' feature is not enabled. Enable the 'structure' feature in Cargo.toml to use Structure mode."
                 );
-                (arrange_chain(&poly, config), false)
+                arrange_chain(&poly, config)
             }
         }
         PolyMethod::Auto => {

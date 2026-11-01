@@ -180,12 +180,12 @@ we win. Methodology: `docs/BENCHMARKS.md`. Regenerate:
 | sliver 100v | 1.3 | 2.5 | 1.9x |
 | sliver 500v | 7.3 | 17.6 | 2.4x |
 | sliver 1000v | 14.0 | 27.4 | 2.0x |
-| arrange valid 4v | 0.062 | 0.259 | 4.2x |
-| arrange valid 10v | 0.122 | 0.34 | 2.8x |
-| arrange valid 50v | 0.707 | 0.433 | 0.61x |
-| arrange valid 100v | 0.906 | 0.842 | 0.93x |
-| arrange valid 500v | 4.2 | 3.4 | 0.81x |
-| arrange valid 1000v | 9.4 | 4.0 | 0.42x |
+| arrange valid 4v | 0.059 | 0.275 | 4.6x |
+| arrange valid 10v | 0.102 | 0.353 | 3.4x |
+| arrange valid 50v | 0.426 | 0.484 | 1.1x |
+| arrange valid 100v | 0.498 | 0.719 | 1.4x |
+| arrange valid 500v | 1.9 | 2.0 | 1.1x |
+| arrange valid 1000v | 3.5 | 3.6 | 1.0x |
 | arrange bowtie 4v | 0.981 | 16.3 | 17x |
 | arrange bowtie 100v | 23.1 | 116 | 5.0x |
 | arrange star 10sp | 2.7 | 14.7 | 5.5x |

@@ -22,6 +22,19 @@
   0.88x, `self-int ls 500v` 0.21x to 0.92x, `self-int ls 100v` 0.73x to
   1.7x. `BENCH_SERIAL=1` fills the serial column of a GEOS-enabled bench
   run.
+- `PolyMethod::Arrange` no longer runs the validator sweep on a polygon that
+  needs no repair. It asks the structure fast gate first, which accepts
+  exactly what the exit validator accepts for a fraction of the cost, and a
+  gate-accepted result is certified so the caller skips `strip_degenerate`.
+  The gate was a nested function inside `fix_polygon_owned`; it is now
+  module level and shared by both methods. It is consulted only above
+  `small_ring_lines`, because below that it runs its quadratic pair path and
+  costs more than the sweep it replaces (32 vertices: 7.1 us against 1.6 us;
+  64 vertices: 1.8 us against 5.2 us). Serial on a valid 1000-vertex
+  polygon: 47 us to 16 us. GEOS 3.14.1 `make_valid` returns a clone in
+  11 us, so the remainder is the cost of proving validity. At 100 vertices
+  5.1 us to 2.1 us, against GEOS 2.9 us. Parallel batch ratio for
+  `arrange valid 1000v`: 0.42x to 1.0x.
 - `segments_collinear_overlap` now tests the parametric overlap before the
   two robust orientation calls, which only decides when the fast
   determinant is exactly zero.
