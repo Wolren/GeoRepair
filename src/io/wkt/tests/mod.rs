@@ -4,7 +4,7 @@
 #[cfg(test)]
 use super::*;
 use crate::io::{load, save};
-use geo::{Coord, Geometry, LineString, Polygon};
+use geo::{Coord, Geometry, LineString, MultiPolygon, Polygon};
 use std::time::Instant;
 
 #[test]
@@ -264,6 +264,74 @@ fn roundtrip_all_types_vs_wkt_crate() {
         let theirs_reparsed: Geometry<f64> = wkt::TryFromWkt::try_from_wkt_str(&their_out).unwrap();
         assert_eq!(ours_reparsed, theirs_reparsed, "output mismatch for {wkt}");
     }
+}
+
+/// OGC WKT has no EMPTY inside a ring list, so a hole with no coordinates is dropped
+/// rather than written as `((...), EMPTY)`, which a strict parser rejects.
+#[test]
+fn polygon_with_empty_hole_drops_the_ring() {
+    let shell = LineString::new(vec![
+        Coord { x: 0.0, y: 0.0 },
+        Coord { x: 10.0, y: 0.0 },
+        Coord { x: 10.0, y: 10.0 },
+        Coord { x: 0.0, y: 10.0 },
+        Coord { x: 0.0, y: 0.0 },
+    ]);
+    let poly = Polygon::new(shell, vec![LineString::new(Vec::new())]);
+    let wkt = write_wkt(&Geometry::Polygon(poly));
+    assert_eq!(
+        wkt,
+        "POLYGON ((0.0 0.0, 10.0 0.0, 10.0 10.0, 0.0 10.0, 0.0 0.0))"
+    );
+    assert!(!wkt.contains("EMPTY"), "{wkt}");
+    assert!(read_wkt(&wkt).is_ok(), "{wkt}");
+    // A second parser: the `wkt` crate reads the same text and agrees on the geometry.
+    let theirs: Geometry<f64> = wkt::TryFromWkt::try_from_wkt_str(&wkt).unwrap();
+    assert_eq!(theirs, read_wkt(&wkt).unwrap(), "{wkt}");
+}
+
+/// A hole needs a shell: an empty exterior makes the whole polygon EMPTY, whatever the
+/// interiors hold.
+#[test]
+fn polygon_with_empty_shell_is_empty() {
+    let hole = LineString::new(vec![
+        Coord { x: 2.0, y: 2.0 },
+        Coord { x: 3.0, y: 2.0 },
+        Coord { x: 3.0, y: 3.0 },
+        Coord { x: 2.0, y: 2.0 },
+    ]);
+    let poly = Polygon::new(LineString::new(Vec::new()), vec![hole]);
+    assert_eq!(write_wkt(&Geometry::Polygon(poly)), "POLYGON EMPTY");
+}
+
+/// A part with no shell leaves the collection for the same reason, and a collection of
+/// such parts is EMPTY.
+#[test]
+fn multipolygon_skips_empty_parts() {
+    let square = Polygon::new(
+        LineString::new(vec![
+            Coord { x: 0.0, y: 0.0 },
+            Coord { x: 1.0, y: 0.0 },
+            Coord { x: 1.0, y: 1.0 },
+            Coord { x: 0.0, y: 1.0 },
+            Coord { x: 0.0, y: 0.0 },
+        ]),
+        Vec::new(),
+    );
+    let empty = Polygon::new(LineString::new(Vec::new()), Vec::new());
+
+    let mixed = write_wkt(&Geometry::MultiPolygon(MultiPolygon::new(vec![
+        square,
+        empty.clone(),
+    ])));
+    assert_eq!(
+        mixed,
+        "MULTIPOLYGON (((0.0 0.0, 1.0 0.0, 1.0 1.0, 0.0 1.0, 0.0 0.0)))"
+    );
+    assert!(read_wkt(&mixed).is_ok(), "{mixed}");
+
+    let only_empty = write_wkt(&Geometry::MultiPolygon(MultiPolygon::new(vec![empty])));
+    assert_eq!(only_empty, "MULTIPOLYGON EMPTY");
 }
 
 mod double;

@@ -44,23 +44,19 @@ fn write_linestring(s: &mut String, ls: &LineString<f64>) {
     write_coord_list(s, &ls.0);
 }
 
+/// Writes `((exterior), (hole), ...)`. A ring with no coordinates is dropped: OGC WKT has
+/// no EMPTY inside a ring list, so `((...), EMPTY)` is unreadable to a strict parser.
 fn write_polygon_rings(s: &mut String, poly: &Polygon<f64>) {
     s.push_str("((");
-    if poly.exterior().0.is_empty() {
-        s.push_str("EMPTY");
-    } else {
-        write_coord_list(s, &poly.exterior().0);
-    }
+    write_coord_list(s, &poly.exterior().0);
     s.push(')');
     for h in poly.interiors() {
-        s.push_str(", ");
         if h.0.is_empty() {
-            s.push_str("EMPTY");
-        } else {
-            s.push('(');
-            write_coord_list(s, &h.0);
-            s.push(')');
+            continue;
         }
+        s.push_str(", (");
+        write_coord_list(s, &h.0);
+        s.push(')');
     }
     s.push(')');
 }
@@ -86,7 +82,9 @@ fn write_geom(s: &mut String, geom: &Geometry<f64>) {
             }
         }
         Geometry::Polygon(poly) => {
-            if poly.exterior().0.is_empty() && poly.interiors().is_empty() {
+            // An empty shell has no writable ring whatever the holes say, and a polygon
+            // whose shell is a ring of one point is still a shell.
+            if poly.exterior().0.is_empty() {
                 s.push_str("POLYGON EMPTY");
             } else {
                 s.push_str("POLYGON ");
@@ -124,14 +122,22 @@ fn write_geom(s: &mut String, geom: &Geometry<f64>) {
             }
         }
         Geometry::MultiPolygon(mp) => {
-            if mp.0.is_empty() {
+            // A part with no shell cannot be written as a ring list either, so it leaves
+            // the collection, exactly as an empty hole leaves its polygon.
+            let has_ring = mp.0.iter().any(|p| !p.exterior().0.is_empty());
+            if !has_ring {
                 s.push_str("MULTIPOLYGON EMPTY");
             } else {
                 s.push_str("MULTIPOLYGON (");
-                for (i, poly) in mp.0.iter().enumerate() {
-                    if i > 0 {
+                let mut first = true;
+                for poly in &mp.0 {
+                    if poly.exterior().0.is_empty() {
+                        continue;
+                    }
+                    if !first {
                         s.push_str(", ");
                     }
+                    first = false;
                     write_polygon_rings(s, poly);
                 }
                 s.push(')');

@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- The WKT writer no longer writes `EMPTY` inside a ring list. A polygon whose hole held
+  no coordinates went out as `POLYGON ((...), EMPTY)`, and a multipolygon part with no
+  shell went out as `MULTIPOLYGON (((EMPTY)), ...)`. OGC WKT has no EMPTY below the
+  geometry level, and a strict parser rejects both: RustGIS returns `expected Open`. An
+  empty ring is now dropped, an empty shell makes its polygon `POLYGON EMPTY`, and an
+  empty part leaves its multipolygon, which becomes `MULTIPOLYGON EMPTY` when no part is
+  writable. Checked with the RustGIS parser: the failing case now reads as a plain
+  polygon.
+
+
 ## [0.15.0] - 2026-11-01
 
 ### Added
