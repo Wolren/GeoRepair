@@ -36,7 +36,7 @@ Documentation = "https://docs.rs/geo-repair"
 Changelog = "https://github.com/Wolren/GeoRepair/blob/master/CHANGELOG.md"
 
 [tool.maturin]
-features = ["python"]
+features = ["python", "parallel"]
 module-name = "geo_repair"
 bindings = "pyo3"
 # Ship typing stubs + the typed marker from python/geo_repair/ so type

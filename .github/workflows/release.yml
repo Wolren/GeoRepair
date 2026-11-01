@@ -136,7 +136,7 @@ jobs:
         with:
           toolchain: stable
       - name: Build shared + static libs
-        run: cargo build --release --features ffi
+        run: cargo build --release --features ffi,parallel
       - name: Compile + run C harness (Linux/macOS)
         if: runner.os != 'Windows'
         run: |

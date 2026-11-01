@@ -65,4 +65,30 @@ impl ValidationResult {
                 .join("; ")
         }
     }
+
+    /// Error count per class, in [`ValidationClass::ALL`] order, zero included.
+    pub fn class_counts(&self) -> [(ValidationClass, usize); 6] {
+        let mut counts = [0usize; 6];
+        for error in &self.errors {
+            counts[error.class().index()] += 1;
+        }
+        let mut out = [(ValidationClass::Coordinates, 0usize); 6];
+        for (slot, class) in out.iter_mut().zip(ValidationClass::ALL) {
+            *slot = (class, counts[class.index()]);
+        }
+        out
+    }
+
+    /// Distinct violation codes present, each with its count, in first-seen order.
+    pub fn code_counts(&self) -> Vec<(&'static str, usize)> {
+        let mut out: Vec<(&'static str, usize)> = Vec::new();
+        for error in &self.errors {
+            let code = error.code();
+            match out.iter_mut().find(|(c, _)| *c == code) {
+                Some((_, n)) => *n += 1,
+                None => out.push((code, 1)),
+            }
+        }
+        out
+    }
 }

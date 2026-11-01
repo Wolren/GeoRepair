@@ -2,6 +2,32 @@
 
 ## [Unreleased]
 
+### Added
+
+- `batch` module: `fix_polygon_batch`, `fix_polygon_batch_owned` and
+  `fix_polygon_batch_chunked` compile with and without the `parallel`
+  feature. With it on they run on the rayon pool; with it off they run a
+  serial loop with the same order and the same results, so a host that
+  forbids threads keeps the same call site.
+- `output` module: `OutputPolicy` (`KeepAll`, `TopDimension`, `ArealOnly`),
+  `apply_policy` and `make_valid_with_policy`. The pass flattens collection
+  nesting and returns one homogeneous geometry, so a host whose geometry enum
+  has no collection type can store the result. `OutputReport` counts kept and
+  dropped parts. `KeepAll` is the default and returns the engine output
+  untouched.
+- Error classes: `GeometryValidationError::code()` (stable snake_case key),
+  `label()` (short display name) and `class()` (one of six `ValidationClass`
+  values), plus `ValidationResult::class_counts()` and `code_counts()`.
+  `Display` text is unchanged.
+
+### Changed
+
+- Default features are `std`, `arrange`, `structure`, `validate` and
+  `mimalloc`. `parallel` and `io-gpkg` are now opt-in, so a host crate no
+  longer inherits a rayon pool or a bundled SQLite build. The previous default
+  set is one name: `full`. A consumer that relied on either feature being on
+  by default adds `features = ["parallel"]` or `features = ["io-gpkg"]`.
+
 ### Changed
 
 - `LineString` repair nodes a self-intersecting line in one pass. The old

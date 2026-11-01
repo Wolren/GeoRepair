@@ -29,8 +29,9 @@ pip install geo-repair
 ```
 
 Wheels are `cp38-abi3` (one wheel per platform serves Python 3.8+). The
-`parallel` feature is always enabled in published wheels; the wheel also
-ships typing stubs (`geo_repair/__init__.pyi` + `py.typed`).
+wheel build enables `python` and `parallel` (`pyproject.toml`), so the
+`par_*` batch functions are present; the wheel also ships typing stubs
+(`geo_repair/__init__.pyi` + `py.typed`).
 
 ### Quickstart
 
@@ -105,10 +106,11 @@ copied next to the script must be rebuilt from the same release tag.
 ### Build
 
 ```bash
-cargo build --release --features ffi
+cargo build --release --features ffi,parallel
 ```
 
-Produces `target/release/geo_repair.{dll,so,dylib}` (shared) and
+`parallel` is optional: without it the `parallel` argument of the batch
+calls runs a serial loop. Produces `target/release/geo_repair.{dll,so,dylib}` (shared) and
 `libgeo_repair.a` (static) plus `libgeo_repair.rlib` (Rust). Ship
 `include/geo_repair.h` with the binary artifact.
 

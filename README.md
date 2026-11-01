@@ -221,8 +221,8 @@ we win. Methodology: `docs/BENCHMARKS.md`. Regenerate:
    auto-vectorized scalar (point_in_ring 8.4x, is_ring_ccw 2.8x), and
    `-C target-cpu=native` regresses the full pass ~25%.
 8. **`proj` requires native PROJ and is mutually exclusive with `io-gpkg`**
-   (sqlite3 link conflict); `io-gpkg` is a default feature, so `proj` users
-   build with `--no-default-features --features proj,...`.
+   (sqlite3 link conflict). `io-gpkg` is opt-in, so a `proj` build enables
+   `proj` and leaves `io-gpkg` off.
 
 ## Integration with the geo ecosystem
 
@@ -231,6 +231,23 @@ validates or repairs any `GeometryTrait` source (geo, geoarrow, geozero,
 `wkb`) in one call, and a `GeoRepairValidation` adapter that exposes our
 validator through geo's own `Validation` trait. Details and examples:
 [`docs/INTEROP.md`](docs/INTEROP.md).
+
+## Embedding surface
+
+Three pieces exist for a host application: a batch entry that builds with or
+without the thread pool, an opt-in output policy, and error classes.
+
+- `batch::{fix_polygon_batch, fix_polygon_batch_owned, fix_polygon_batch_chunked}`
+  run on rayon when `parallel` is enabled, and on a serial loop when it is not.
+- `output::{OutputPolicy, apply_policy, make_valid_with_policy}` reduce a result
+  to one homogeneous geometry for a host that has no collection type.
+  `OutputReport` counts the parts kept and dropped.
+- `GeometryValidationError::code()` gives a stable key, `label()` a short name,
+  and `class()` one of six `ValidationClass` values.
+  `ValidationResult::class_counts()` totals them per class.
+
+The default build carries no thread pool and no bundled SQLite. Enable
+`parallel` and `io-gpkg`, or the `full` set, when the host wants them.
 
 ## Python bindings
 
@@ -252,7 +269,7 @@ Examples and full API reference: `docs/BINDINGS.md`.
 
 The `ffi` feature exposes a panic-safe C API over WKB and WKT, single
 geometries and parallel batches. Build with
-`cargo build --release --features ffi`; the output is
+`cargo build --release --features ffi,parallel`; the output is
 `target/release/geo_repair.{dll,so,dylib}` plus `libgeo_repair.a` and
 the `include/geo_repair.h` header.
 
@@ -271,11 +288,12 @@ macOS are attached to every GitHub release. Full API reference:
 |---------|-------------|---------|
 | `arrange` | CDT-based polygon repair (requires `spade`) | yes |
 | `structure` | Structure-based fast path repair | yes |
-| `parallel` | Rayon parallel processing (non-WASM) | yes |
+| `parallel` | Rayon parallel processing (non-WASM); the `batch` entries fall back to a serial loop without it | no |
 | `simd` | No-op on stable (kernels compiled unconditionally, LLVM auto-vectorized; hand-written AVX2 measured slower, kept only for the nightly `simd-portable` path) | no |
 | `validate` | OGC validation predicates | yes |
 | `rstar` | R-tree index used by noding (enabled transitively by `arrange`/`structure`/`validate`) | yes (transitive) |
 | `mimalloc` | Use mimalloc global allocator | yes |
+| `full` | The desktop set: default plus `parallel` and `io-gpkg` | no |
 | `std` | Standard library + file I/O. Disable for no_std builds. | yes |
 | `simd-portable` | Portable SIMD via `core::simd` (nightly only) | no |
 | `memmap` | Memory-mapped binary file loading | no |
@@ -291,7 +309,7 @@ macOS are attached to every GitHub release. Full API reference:
 | `io-geojson` | No-op (GeoJSON backend removed, kept for CI compatibility) | no |
 | `io-csv` | CSV format backend | no |
 | `io-gml` | GML/XML format backend | no |
-| `io-gpkg` | GeoPackage format backend (default; gated out on wasm32) | yes |
+| `io-gpkg` | GeoPackage format backend (gated out on wasm32) | no |
 | `io-all` | All opt-in backends except gpkg | no |
 | `io-all-native` | All opt-in backends including gpkg | no |
 | `hotpath` | Dev-only: `hotpath::measure` instrumentation on hot paths | no |

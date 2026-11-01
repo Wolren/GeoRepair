@@ -26,7 +26,13 @@ all-features = false
 features = ["std", "arrange", "structure", "parallel", "simd", "validate", "mimalloc", "io-all", "io-gpkg", "serde", "geo-traits"]
 
 [features]
-default = ["std", "arrange", "structure", "parallel", "validate", "mimalloc", "io-gpkg"]
+# Lean default: repair and validation only. `parallel` and `io-gpkg` are opt-in so a
+# host crate does not inherit a rayon pool or a bundled SQLite build.
+default = ["std", "arrange", "structure", "validate", "mimalloc"]
+
+# The old default set, kept as one name for consumers that want the thread pool and
+# the GeoPackage backend without listing features.
+full = ["std", "arrange", "structure", "validate", "mimalloc", "parallel", "io-gpkg"]
 
 # no_std support: disable `std` feature to build without file I/O,
 # alloc-only. WKB parsing, geometry validation, and repair work
@@ -52,8 +58,8 @@ simd = []
 simd-portable = []
 
 # Built-in WKB parser is always available — no extra deps needed
-bench-geos = ["geos/static", "std"]
-bench-geos-system = ["dep:geos", "std"]
+bench-geos = ["geos/static", "std", "parallel"]
+bench-geos-system = ["dep:geos", "std", "parallel"]
 bench-gdal-system = ["std"]
 
 python = ["dep:pyo3", "geo/serde", "std"]
@@ -162,6 +168,11 @@ crate-type = ["cdylib", "staticlib", "lib"]
 name = "geo-repair-cli"
 path = "src/main.rs"
 required-features = ["std"]
+
+[[example]]
+name = "speed_probe"
+# Imports `geo_repair::parallel`, which only exists with the feature on.
+required-features = ["parallel"]
 
 [[bench]]
 name = "bench"

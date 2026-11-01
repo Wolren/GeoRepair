@@ -138,6 +138,47 @@
 //! cover a subset, and geo carries ring/index payloads that geo_repair's errors do not
 //! record.
 //!
+//! ## Batch repair, output policy, and error codes
+//!
+//! `batch` gives one call site for a single polygon and for a whole layer. With
+//! `parallel` enabled the work runs on the rayon pool; without it the same functions
+//! run a serial loop.
+//!
+//! ```rust
+//! # use geo::{LineString, Polygon};
+//! # let bowtie = Polygon::new(LineString::from(vec![(0.0, 0.0), (10.0, 10.0), (0.0, 10.0), (10.0, 0.0), (0.0, 0.0)]), vec![]);
+//! use geo_repair::{MakeValidConfig, batch::fix_polygon_batch};
+//!
+//! let fixed = fix_polygon_batch(&[&bowtie], &MakeValidConfig::default());
+//! assert_eq!(fixed.len(), 1);
+//! ```
+//!
+//! `output` reduces a result to a shape a host without a collection type can store.
+//! The policy is opt-in, so the default repair output does not change.
+//!
+//! ```rust
+//! # use geo::{LineString, Polygon};
+//! # let bowtie = Polygon::new(LineString::from(vec![(0.0, 0.0), (10.0, 10.0), (0.0, 10.0), (10.0, 0.0), (0.0, 0.0)]), vec![]);
+//! use geo_repair::MakeValid;
+//! use geo_repair::output::{apply_policy, OutputPolicy};
+//!
+//! let (out, report) = apply_policy(bowtie.make_valid(), OutputPolicy::ArealOnly);
+//! assert!(report.dropped_parts == 0);
+//! ```
+//!
+//! Each violation carries a stable machine code, a short label, and a class.
+//!
+//! ```rust
+//! # use geo::{Geometry, Point};
+//! # let geometry = Geometry::Point(Point::new(0.0, 0.0));
+//! use geo_repair::validate;
+//!
+//! let result = validate(&geometry);
+//! for (class, count) in result.class_counts() {
+//!     println!("{}: {count}", class.label());
+//! }
+//! ```
+//!
 //! ## WKB I/O (built-in, no dependencies)
 //!
 //! ```rust
@@ -177,19 +218,20 @@
 //! | `std` | Standard library + file I/O. Disable for no_std builds. | yes |
 //! | `arrange` | CDT-based polygon repair (requires `spade`) | yes |
 //! | `structure` | Structure-based fast-path repair | yes |
-//! | `parallel` | Rayon parallel processing (non-WASM) | yes |
+//! | `parallel` | Rayon parallel processing (non-WASM); batch entries fall back to a serial loop without it | no |
 //! | `simd` | No-op on stable (kernels compiled unconditionally, LLVM auto-vectorized; hand-written AVX2 measured slower, kept only for the nightly `simd-portable` path) | no |
 //! | `simd-portable` | Portable SIMD via `core::simd` (nightly) | no |
 //! | `validate` | OGC validation predicates | yes |
 //! | `memmap` | Memory-mapped binary file loading | no* |
 //! | `wasm` | WASM browser fetch (synchronous XHR, `wasm::fetch_geometry`) | wasm32 only |
 //! | `mimalloc` | Use mimalloc global allocator | yes |
+//! | `full` | The desktop set: default plus `parallel` and `io-gpkg` | no |
 //! | `io-shp` | Shapefile format backend | no |
 //! | `io-wkb` | No-op (WKB is always compiled in) | — |
 //! | `io-wkt` | No-op (WKT is always compiled in) | — |
 //! | `io-csv` | CSV format backend | no |
 //! | `io-gml` | GML/XML format backend | no |
-//! | `io-gpkg` | GeoPackage format backend (default; not on wasm32) | yes |
+//! | `io-gpkg` | GeoPackage format backend (not on wasm32) | no |
 //! | `io-all` | All opt-in backends except gpkg | no |
 //! | `io-all-native` | All opt-in backends including gpkg | no |
 //! | `ffi` | C-compatible FFI bindings | no |
@@ -399,6 +441,9 @@ const _: () = {
     );
 };
 
+/// Batch repair entries that build with or without the `parallel` feature.
+#[cfg(any(feature = "arrange", feature = "structure"))]
+pub mod batch;
 /// Core configuration types for geometry repair.
 pub mod core;
 /// Coordinate reference system (crs) handling and transformation.
@@ -413,6 +458,8 @@ pub mod io;
 pub mod make_valid;
 /// Ring orientation utilities (CW/ccw winding).
 pub mod orient;
+/// Output policy: reduce a repaired geometry to a shape the host can store.
+pub mod output;
 /// Coordinate snapping to a precision grid.
 pub mod snap;
 pub(crate) mod util;
@@ -479,12 +526,14 @@ pub use make_valid::MakeValid;
 /// Combines validation and repair in a single step, returning errors for violations
 /// that could not be automatically repaired.
 pub use make_valid::ValidateAndFix;
+/// Output policy types and the reduction pass.
+pub use output::{OutputPolicy, OutputReport, apply_policy};
 /// Coordinate snapping functions.
 pub use snap::{DEFAULT_GRID, snap_coord, snap_coord_default, snap_line, snap_lines};
 /// OGC validation predicates and result types.
 pub use validation::{
-    GeoRepairValidation, GeoValidation, GeometryValidationError, ValidationResult, is_valid,
-    map_geo_invalid, validate, validate_reason,
+    GeoRepairValidation, GeoValidation, GeometryValidationError, ValidationClass, ValidationResult,
+    is_valid, map_geo_invalid, validate, validate_reason,
 };
 
 #[cfg(all(feature = "mimalloc", not(target_arch = "wasm32")))]
