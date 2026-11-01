@@ -45,30 +45,23 @@ struct Seg {
     y1: u32,
 }
 
-/// True when the line runs monotonically in x or in y, which rules out a
-/// self-intersection: non-adjacent segments then occupy disjoint ranges on that
-/// axis and adjacent segments share a single vertex. A closed line is never
-/// strictly monotone, so this cannot hide a closure contact.
-fn monotone(coords: &[Coord<f64>]) -> bool {
+/// True when every step on one axis moves more than eps, which rules out a
+/// self-intersection: non-adjacent segments then sit more than eps apart on that axis,
+/// so no pair below can meet. The eps bound is not decoration: a monotone comparison
+/// that accepts sub-eps steps calls a line simple while the eps gate rejects it (wkb
+/// smoke seed crash-1299f6ac, denormal y steps).
+fn monotone(coords: &[Coord<f64>], eps: f64) -> bool {
     if coords.len() < 3 {
         return true;
     }
     let (mut inc_x, mut dec_x) = (true, true);
     let (mut inc_y, mut dec_y) = (true, true);
     for w in coords.windows(2) {
-        let (p, q) = (w[0], w[1]);
-        if q.x <= p.x {
-            inc_x = false;
-        }
-        if q.x >= p.x {
-            dec_x = false;
-        }
-        if q.y <= p.y {
-            inc_y = false;
-        }
-        if q.y >= p.y {
-            dec_y = false;
-        }
+        let (dx, dy) = (w[1].x - w[0].x, w[1].y - w[0].y);
+        inc_x &= dx > eps;
+        dec_x &= dx < -eps;
+        inc_y &= dy > eps;
+        dec_y &= dy < -eps;
         if !(inc_x || dec_x || inc_y || dec_y) {
             return false;
         }
@@ -82,13 +75,8 @@ pub(crate) fn node_fast(coords: &[Coord<f64>]) -> Fast {
     if n < 2 {
         return Fast::Simple;
     }
-    // A line that is strictly monotone in x or in y cannot self-intersect: non-adjacent
-    // segments then occupy disjoint ranges on that axis, and adjacent segments share a
-    // single vertex. A closed line is never strictly monotone, so this cannot hide a
-    // closure contact.
-    if monotone(coords) {
-        return Fast::Simple;
-    }
+    // The bbox is needed before the monotone shortcut: `monotone` compares exactly, so it
+    // cannot see a pair of vertices that the eps gate below treats as one point.
     let (mut min_x, mut max_x) = (f64::MAX, f64::MIN);
     let (mut min_y, mut max_y) = (f64::MAX, f64::MIN);
     for c in coords {
@@ -106,7 +94,9 @@ pub(crate) fn node_fast(coords: &[Coord<f64>]) -> Fast {
 
     // Two vertices two apart within eps are an eps class the chain assembly cannot
     // separate. This guard needs only the coordinates, and it fires early on a retraced
-    // curve, so it runs before anything is allocated.
+    // curve. It runs before the monotone shortcut: a line can be strictly monotone in one
+    // axis and still return within eps of an earlier vertex (denormal steps, wkb smoke
+    // seed crash-1299f6ac), and the monotone exit would report that as simple.
     for i in 0..n - 1 {
         let p = coords[i];
         let q = coords[i + 2];
@@ -120,6 +110,13 @@ pub(crate) fn node_fast(coords: &[Coord<f64>]) -> Fast {
         if (p.x - q.x).abs() <= eps && (p.y - q.y).abs() <= eps {
             return Fast::Unsupported;
         }
+    }
+    // A line that is strictly monotone in x or in y cannot self-intersect: non-adjacent
+    // segments then occupy disjoint ranges on that axis, and adjacent segments share a
+    // single vertex. A closed line is never strictly monotone, so this cannot hide a
+    // closure contact.
+    if monotone(coords, eps) {
+        return Fast::Simple;
     }
     // Grid layout first: every segment's cell range is needed by the counting pass, the
     // filling pass and the query, so it is computed once, here.

@@ -453,7 +453,7 @@ fn dedup_consecutive(cs: &[Coord<f64>]) -> Vec<Coord<f64>> {
 /// Random line shapes that exercise every branch of the lean path.
 fn random_line(rng: &mut Rng) -> Vec<Coord<f64>> {
     let n = 3 + rng.below(48);
-    let kind = rng.below(6);
+    let kind = rng.below(7);
     let mut cs: Vec<Coord<f64>> = Vec::with_capacity(n + 1);
     match kind {
         0 => {
@@ -505,6 +505,17 @@ fn random_line(rng: &mut Rng) -> Vec<Coord<f64>> {
                 cs.push(c(i as f64, y));
             }
             cs.push(c(rng.f(-5.0, 5.0), rng.f(-5.0, 5.0)));
+        }
+        5 => {
+            // monotone on one axis with sub-eps steps on the other: the eps gates see an
+            // overlap that an exact monotone comparison misses (wkb smoke seed 1299f6ac)
+            let jitter = 1e-15;
+            for i in 0..n {
+                cs.push(c(i as f64, rng.f(-jitter, jitter)));
+            }
+            if rng.below(2) == 0 {
+                cs.push(c(rng.f(-1.0, 1.0), rng.f(-jitter, jitter)));
+            }
         }
         _ => {
             // near-coincident perturbations
@@ -564,4 +575,44 @@ fn node_fast_matches_general_noder() {
     }
     assert!(counts[0] > 1000, "too few simple verdicts: {counts:?}");
     assert!(counts[1] > 1000, "too few noded verdicts: {counts:?}");
+}
+
+/// The monotone exit must not fire on sub-eps steps: y here rises by denormal amounts, so
+/// the line is monotone to an exact comparison while its last vertex returns within eps of
+/// the first (wkb smoke seed crash-1299f6ac).
+#[test]
+fn monotone_exit_skips_sub_eps_steps() {
+    use crate::noding::line::{Fast, node_fast};
+    let denormal = [
+        (0.0, 0.0),
+        (2.000000005529728, 1e-322),
+        (3.48092189549943e-310, 3.484317088765e-310),
+    ];
+    let cs = coords(&denormal);
+    assert!(
+        !matches!(node_fast(&cs), Fast::Simple),
+        "sub-eps monotone line reported simple: {cs:?}"
+    );
+    assert_mls_valid(&node_ok(&denormal));
+
+    // Same class at a normal scale: every y step is under eps while x moves 20 units.
+    let swing_pairs = [(0.0, 0.0), (10.0, 1e-13), (20.0, 2e-13), (0.0, 3e-13)];
+    let swing = coords(&swing_pairs);
+    assert!(
+        !matches!(node_fast(&swing), Fast::Simple),
+        "sub-eps swing reported simple: {swing:?}"
+    );
+    assert_mls_valid(&node_ok(&swing_pairs));
+}
+
+/// The shortcut itself must survive: a line that moves more than eps per step on one axis
+/// takes the fast exit, which is the whole cost of a valid line.
+#[test]
+fn monotone_exit_fires_above_eps() {
+    use crate::noding::line::{Fast, node_fast};
+    let cs = coords(&[(0.0, 0.0), (10.0, 1.0), (20.0, 2.0)]);
+    assert!(
+        matches!(node_fast(&cs), Fast::Simple),
+        "monotone line must take the fast exit"
+    );
 }

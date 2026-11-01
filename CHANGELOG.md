@@ -32,6 +32,16 @@
   The Python wheel build, the FFI builds and the GEOS bench features now name
   `parallel` themselves.
 
+### Fixed
+
+- The one-pass line noder no longer calls a line simple when its steps on the monotone
+  axis are below the eps gate. The exit compared exactly, so a line whose last vertex
+  returned within eps of the first while y rose by denormal amounts passed through
+  unchanged and failed its own validation (CI fuzz smoke seed crash-1299f6ac). The exit
+  now requires every step on that axis to exceed eps, and a sub-eps step falls through to
+  the general noder, which nodes the sliver. The seed is committed to
+  `fuzz/corpus/wkb_repair/line_monotone_eps_return.bin`.
+
 ### Performance
 
 - `LineString` repair nodes a self-intersecting line in one pass. The old
