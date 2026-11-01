@@ -493,12 +493,22 @@ pub fn has_no_intersections_small(lines: &[Line<f64>]) -> bool {
     let mut max_x = [f64::MIN; crate::core::SMALL_RING_LINES];
     let mut min_y = [f64::MAX; crate::core::SMALL_RING_LINES];
     let mut max_y = [f64::MIN; crate::core::SMALL_RING_LINES];
+    // Per-segment bounds. The pair loop below is quadratic with no broad phase, so on a
+    // compact parcel almost every pair is far apart and only the bbox test can tell.
+    let mut seg_min_x = [f64::MAX; crate::core::SMALL_RING_LINES];
+    let mut seg_max_x = [f64::MIN; crate::core::SMALL_RING_LINES];
+    let mut seg_min_y = [f64::MAX; crate::core::SMALL_RING_LINES];
+    let mut seg_max_y = [f64::MIN; crate::core::SMALL_RING_LINES];
     for (i, l) in lines.iter().enumerate() {
         let r = ring_of[i] as usize;
         min_x[r] = min_x[r].min(l.start.x.min(l.end.x));
         max_x[r] = max_x[r].max(l.start.x.max(l.end.x));
         min_y[r] = min_y[r].min(l.start.y.min(l.end.y));
         max_y[r] = max_y[r].max(l.start.y.max(l.end.y));
+        seg_min_x[i] = l.start.x.min(l.end.x);
+        seg_max_x[i] = l.start.x.max(l.end.x);
+        seg_min_y[i] = l.start.y.min(l.end.y);
+        seg_max_y[i] = l.start.y.max(l.end.y);
     }
     let mut eps_by_ring = [0.0f64; crate::core::SMALL_RING_LINES];
     for r in 0..nrings as usize {
@@ -513,7 +523,19 @@ pub fn has_no_intersections_small(lines: &[Line<f64>]) -> bool {
         let li = &lines[i];
         let ri = ring_of[i] as usize;
         for j in (i + 1)..n {
-            if ri == ring_of[j] as usize && (j == i + 1 || j + 1 == i) {
+            let same_ring = ri == ring_of[j] as usize;
+            if same_ring && (j == i + 1 || j + 1 == i) {
+                continue;
+            }
+            // Disjoint eps-expanded bounds rule out every test below: a proper crossing
+            // needs the closed bounds to meet, and an eps-collinear overlap, T-junction
+            // or shared vertex within eps puts the point inside both bounds.
+            let eps = if same_ring { eps_by_ring[ri] } else { 0.0 };
+            if seg_max_x[i] < seg_min_x[j] - eps
+                || seg_max_x[j] < seg_min_x[i] - eps
+                || seg_max_y[i] < seg_min_y[j] - eps
+                || seg_max_y[j] < seg_min_y[i] - eps
+            {
                 continue;
             }
             let lj = &lines[j];
@@ -523,8 +545,7 @@ pub fn has_no_intersections_small(lines: &[Line<f64>]) -> bool {
             // (proper crossing + eps-collinear overlap + vertex-on-edge T-junction)
             // with the ring's own eps - identical to check_ring_validity's sweep
             // (2026-08-07).
-            if ri == ring_of[j] as usize {
-                let eps = eps_by_ring[ri];
+            if same_ring {
                 let mut ambiguous = false;
                 if crate::validation::edges::lean_pair_intersects(
                     li.start,
@@ -724,6 +745,7 @@ pub(crate) fn has_no_intersections_from_chains(
 /// Floor of 128 chains: below that the grid is small and cheap regardless of shape
 /// (measured: star poly 100v, 92 chains - the sweep's setup cost more than the 10x10
 /// grid it replaced). `frac` is the Tuning threshold (default 0.8).
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn nc_is_spiky(chains: &[MonoChain], tuning: &crate::core::Tuning) -> bool {
     if chains.len() < 128 || chains.len() > tuning.spiky_max_chains {
         return false;
