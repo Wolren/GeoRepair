@@ -88,9 +88,14 @@ pub(crate) fn has_duplicate_rings(interiors: &[&[Coord<f64>]], shell: &[Coord<f6
             }
         }
     }
+    if interiors.is_empty() {
+        return false;
+    }
+    // The shell fingerprint does not depend on the hole, so compute it once instead of
+    // once per hole.
+    let shell_fp = ring_dup_fingerprint(shell);
     for h in interiors {
-        if ring_dup_fingerprint(h) == ring_dup_fingerprint(shell) && is_rotated_duplicate(h, shell)
-        {
+        if ring_dup_fingerprint(h) == shell_fp && is_rotated_duplicate(h, shell) {
             return true;
         }
     }

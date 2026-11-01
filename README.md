@@ -48,7 +48,7 @@ concurrently via Rayon, geometries built via CoordSeq direct construction
 | Dataset | GeoRepair | GEOS | Ratio |
 |---------|----------:|-----:|------:|
 | Validation (1.58M) | **2.1 s** (1.3 µs/poly) | 3.0 s (1.9 µs/poly) | **1.4x** |
-| Full pass (1.58M) | 3.4 s (2.1 µs/poly) | **3.1 s** (1.9 µs/poly) | 0.90x |
+| Full pass (1.58M) | **2.1 s** (1.3 µs/poly) | 3.2 s (2.1 µs/poly) | **1.5x** |
 
 ### Synthetic benchmarks
 

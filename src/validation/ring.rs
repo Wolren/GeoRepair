@@ -337,21 +337,31 @@ pub(crate) fn ring_dup_fingerprint(ring: &[Coord<f64>]) -> (usize, u64) {
     };
     let mut h_fwd = 0u64;
     let mut h_rev = 0u64;
-    for i in 0..n {
-        let c = ring[(min_idx + i) % n];
+    // Forward from the minimum vertex, backward from the same one. A modulo per access
+    // cost two integer divisions per coordinate, and this runs over every hole of every
+    // polygon on the fast path.
+    let mut j = min_idx;
+    let mut k = min_idx;
+    for _ in 0..n {
+        let c = ring[j];
         h_fwd = h_fwd
             .wrapping_mul(6364136223846793005)
             .wrapping_add(c.x.to_bits());
         h_fwd = h_fwd
             .wrapping_mul(6364136223846793005)
             .wrapping_add(c.y.to_bits());
-        let d = ring[(min_idx + n - i) % n];
+        let d = ring[k];
         h_rev = h_rev
             .wrapping_mul(6364136223846793005)
             .wrapping_add(d.x.to_bits());
         h_rev = h_rev
             .wrapping_mul(6364136223846793005)
             .wrapping_add(d.y.to_bits());
+        j += 1;
+        if j == n {
+            j = 0;
+        }
+        k = if k == 0 { n - 1 } else { k - 1 };
     }
     (ring.len(), h_fwd ^ h_rev)
 }
