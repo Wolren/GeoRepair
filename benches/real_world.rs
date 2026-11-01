@@ -280,6 +280,13 @@ fn load_polys(path: &str) -> Vec<Polygon<f64>> {
     }
 }
 
+#[cfg_attr(
+    feature = "hotpath",
+    hotpath::main(
+        format = "json-pretty",
+        output_path = "target/profiling/real_world_hotpath_report.json"
+    )
+)]
 fn main() {
     let path = env::var("BENCH_FILE")
         .ok()
