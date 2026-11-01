@@ -597,6 +597,20 @@ pub(super) fn make_valid_impl_owned(
 /// Zero-copy for the ~99.85% of real-world polygons that are already valid.
 #[cfg(any(feature = "arrange", feature = "structure"))]
 pub fn make_valid_owned(poly: Polygon<f64>, config: &MakeValidConfig) -> Geometry<f64> {
+    // Same convex shortcut as the borrowed path. The batch APIs come through here, so
+    // without this the parallel numbers do not move.
+    #[cfg(any(feature = "arrange", feature = "structure"))]
+    if !config.keep_collapsed
+        && poly.interiors().is_empty()
+        && poly.exterior().0.len() > crate::core::SMALL_RING_LINES
+        && let Some(extremal) = crate::arrange::convex_ring(&poly.exterior().0)
+    {
+        let (g, ok) =
+            enforce_ogc_winding_with_extrema(Geometry::Polygon(poly.clone()), Some(&[extremal]));
+        if ok {
+            return preserve_valid_input(g, config, &poly);
+        }
+    }
     if !config.keep_collapsed && poly.exterior().0.len() >= 4 {
         let (min_x, max_x, min_y, max_y, mut has_nan) = scan_exterior_bbox_nan(&poly.exterior().0);
         if exterior_is_locally_degenerate(min_x, max_x, min_y, max_y) {

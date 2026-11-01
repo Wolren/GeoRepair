@@ -61,12 +61,12 @@ we win. Methodology: `docs/BENCHMARKS.md`. Regenerate:
 |-----------|----------:|-----:|------:|
 | valid polygon 4v | 0.051 | 0.237 | 4.7x |
 | valid polygon 10v | 0.137 | 0.319 | 2.3x |
-| valid polygon 50v | 0.245 | 0.415 | 1.7x |
-| valid polygon 100v | 0.408 | 0.578 | 1.4x |
-| valid polygon 500v | 1.4 | 1.7 | 1.2x |
-| valid polygon 1000v | 2.4 | 2.7 | 1.1x |
-| valid polygon 5000v | 12.5 | 9.7 | 0.78x |
-| valid polygon 10000v | 24.2 | 17.2 | 0.71x |
+| valid polygon 50v | 0.14 | 0.43 | 3.1x |
+| valid polygon 100v | 0.263 | 0.554 | 2.1x |
+| valid polygon 500v | 0.882 | 1.4 | 1.6x |
+| valid polygon 1000v | 1.6 | 2.3 | 1.5x |
+| valid polygon 5000v | 8.7 | 9.3 | 1.1x |
+| valid polygon 10000v | 16.8 | 16.9 | 1.0x |
 | invalid bowtie 4v | 0.661 | 19.9 | 30x |
 | invalid bowtie 50v | 7.7 | 65.8 | 8.5x |
 | invalid bowtie 100v | 25.1 | 118 | 4.7x |
@@ -182,10 +182,10 @@ we win. Methodology: `docs/BENCHMARKS.md`. Regenerate:
 | sliver 1000v | 14.0 | 27.4 | 2.0x |
 | arrange valid 4v | 0.059 | 0.275 | 4.6x |
 | arrange valid 10v | 0.102 | 0.353 | 3.4x |
-| arrange valid 50v | 0.426 | 0.484 | 1.1x |
-| arrange valid 100v | 0.498 | 0.719 | 1.4x |
-| arrange valid 500v | 1.9 | 2.0 | 1.1x |
-| arrange valid 1000v | 3.5 | 3.6 | 1.0x |
+| arrange valid 50v | 0.171 | 0.471 | 2.8x |
+| arrange valid 100v | 0.282 | 0.55 | 2.0x |
+| arrange valid 500v | 1.1 | 1.7 | 1.5x |
+| arrange valid 1000v | 2.3 | 3.5 | 1.6x |
 | arrange bowtie 4v | 0.981 | 16.3 | 17x |
 | arrange bowtie 100v | 23.1 | 116 | 5.0x |
 | arrange star 10sp | 2.7 | 14.7 | 5.5x |
