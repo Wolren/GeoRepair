@@ -155,41 +155,50 @@ impl<T: NodingFloat> MakeValid for LineString<T> {
             return Geometry::Point(Point(deduped[0]));
         }
         if deduped.len() >= 3 {
-            let fd: Vec<Coord<f64>> = deduped
-                .iter()
-                .map(|c| Coord {
-                    x: c.x.to_f64().unwrap_or(f64::NAN),
-                    y: c.y.to_f64().unwrap_or(f64::NAN),
-                })
-                .collect();
-            if check_linestring_self_intersection(&fd) {
-                let runs = match crate::noding::line::node_line(&fd) {
-                    Some(runs) => runs,
-                    None => {
-                        // (fuzz 52812: fallback part 0 = NotSimple, part 1 fine).
-                        let runs: Vec<Vec<Coord<f64>>> = simple_subline(&fd)
-                            .into_iter()
-                            .filter(|r| {
-                                r.len() >= 2
-                                    && !r.windows(2).any(|w| w[0] == w[1])
-                                    && !check_linestring_self_intersection(r)
-                            })
-                            .collect();
-                        match keep_conflicting_runs(&runs) {
-                            Some(kept) => kept.into_iter().map(|i| runs[i].clone()).collect(),
-                            None => runs,
-                        }
+            let fd = T::as_f64(&deduped);
+            match crate::noding::line::node_fast(&fd) {
+                crate::noding::line::Fast::Simple => {}
+                crate::noding::line::Fast::Noded(runs) => {
+                    return noded_runs_to_geometry::<T>(&runs);
+                }
+                crate::noding::line::Fast::Unsupported => {
+                    if check_linestring_self_intersection(&fd) {
+                        let runs = match crate::noding::line::node_line(&fd) {
+                            Some(runs) => runs,
+                            None => {
+                                // (fuzz 52812: fallback part 0 = NotSimple, part 1 fine).
+                                let runs: Vec<Vec<Coord<f64>>> = simple_subline(&fd)
+                                    .into_iter()
+                                    .filter(|r| {
+                                        r.len() >= 2
+                                            && !r.windows(2).any(|w| w[0] == w[1])
+                                            && !check_linestring_self_intersection(r)
+                                    })
+                                    .collect();
+                                match keep_conflicting_runs(&runs) {
+                                    Some(kept) => {
+                                        kept.into_iter().map(|i| runs[i].clone()).collect()
+                                    }
+                                    None => runs,
+                                }
+                            }
+                        };
+                        return noded_runs_to_geometry::<T>(&runs);
                     }
-                };
-                let out: Vec<LineString<T>> = runs.iter().map(|r| run_to_line::<T>(r)).collect();
-                return match out.len() {
-                    0 => empty_geom(),
-                    1 => Geometry::LineString(out.into_iter().next().expect("len==1 verified")),
-                    _ => Geometry::MultiLineString(MultiLineString::new(out)),
-                };
+                }
             }
         }
         Geometry::LineString(LineString::new(deduped))
+    }
+}
+
+/// Map noded coordinate runs to the output geometry.
+fn noded_runs_to_geometry<T: NodingFloat>(runs: &[Vec<Coord<f64>>]) -> Geometry<T> {
+    let out: Vec<LineString<T>> = runs.iter().map(|r| run_to_line::<T>(r)).collect();
+    match out.len() {
+        0 => empty_geom(),
+        1 => Geometry::LineString(out.into_iter().next().expect("len==1 verified")),
+        _ => Geometry::MultiLineString(MultiLineString::new(out)),
     }
 }
 

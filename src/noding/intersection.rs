@@ -5,23 +5,46 @@ use core::mem;
 use geo::{Coord, GeoFloat, Line};
 
 mod private {
+    use alloc::borrow::Cow;
     use geo::{Coord, GeoFloat};
 
     /// Trait for numeric types usable in noding algorithms.
     pub trait NodingFloat: GeoFloat {
         /// Deterministic hash from coordinate bits for HashMap keys.
         fn coord_hash_key(c: &Coord<Self>) -> u64;
+
+        /// The coordinates as f64, borrowed when `Self` is already f64.
+        ///
+        /// The noders work in f64 and `make_valid` runs one on every line, so the
+        /// conversion showed up on the valid-line path where nothing else is paid.
+        fn as_f64(coords: &[Coord<Self>]) -> Cow<'_, [Coord<f64>]>;
     }
 
     impl NodingFloat for f64 {
         fn coord_hash_key(c: &Coord<f64>) -> u64 {
             c.x.to_bits() ^ c.y.to_bits().rotate_left(32)
         }
+
+        fn as_f64(coords: &[Coord<f64>]) -> Cow<'_, [Coord<f64>]> {
+            Cow::Borrowed(coords)
+        }
     }
 
     impl NodingFloat for f32 {
         fn coord_hash_key(c: &Coord<f32>) -> u64 {
             (c.x.to_bits() as u64) ^ (c.y.to_bits() as u64).rotate_left(32)
+        }
+
+        fn as_f64(coords: &[Coord<f32>]) -> Cow<'_, [Coord<f64>]> {
+            Cow::Owned(
+                coords
+                    .iter()
+                    .map(|c| Coord {
+                        x: c.x as f64,
+                        y: c.y as f64,
+                    })
+                    .collect(),
+            )
         }
     }
 }

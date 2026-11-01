@@ -418,3 +418,150 @@ fn crossing_only_simple_line_parity() {
     assert!(fast.is_some(), "simple line must take the fast path");
     assert_eq!(fast, general_chains(&cs));
 }
+
+// --- node_fast differential -------------------------------------------------
+
+struct Rng(u64);
+
+impl Rng {
+    fn next(&mut self) -> u64 {
+        let mut x = self.0;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.0 = x;
+        x
+    }
+    fn f(&mut self, lo: f64, hi: f64) -> f64 {
+        lo + (self.next() >> 11) as f64 / (1u64 << 53) as f64 * (hi - lo)
+    }
+    fn below(&mut self, n: usize) -> usize {
+        (self.next() % n as u64) as usize
+    }
+}
+
+fn dedup_consecutive(cs: &[Coord<f64>]) -> Vec<Coord<f64>> {
+    let mut out: Vec<Coord<f64>> = Vec::with_capacity(cs.len());
+    for &c in cs {
+        if out.last() != Some(&c) {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Random line shapes that exercise every branch of the lean path.
+fn random_line(rng: &mut Rng) -> Vec<Coord<f64>> {
+    let n = 3 + rng.below(48);
+    let kind = rng.below(6);
+    let mut cs: Vec<Coord<f64>> = Vec::with_capacity(n + 1);
+    match kind {
+        0 => {
+            // integer-lattice walk: exact revisits and shared endpoints
+            let mut x = rng.below(8) as f64;
+            let mut y = rng.below(8) as f64;
+            for _ in 0..n {
+                cs.push(c(x, y));
+                x += rng.below(5) as f64 - 2.0;
+                y += rng.below(5) as f64 - 2.0;
+            }
+            cs.push(c(x, y));
+        }
+        1 => {
+            // continuous random walk
+            let mut x = 0.0;
+            let mut y = 0.0;
+            for _ in 0..n {
+                cs.push(c(x, y));
+                x += rng.f(-3.0, 3.0);
+                y += rng.f(-3.0, 3.0);
+            }
+            cs.push(c(x, y));
+        }
+        2 => {
+            // closed ring
+            let cx = rng.f(-10.0, 10.0);
+            let cy = rng.f(-10.0, 10.0);
+            for i in 0..n {
+                let t = i as f64 / n as f64 * core::f64::consts::TAU;
+                let r = rng.f(1.0, 20.0);
+                cs.push(c(cx + r * t.cos(), cy + r * t.sin()));
+            }
+            cs.push(cs[0]);
+        }
+        3 => {
+            // star: every segment from one anchor
+            let cx = rng.f(-5.0, 5.0);
+            let cy = rng.f(-5.0, 5.0);
+            for _ in 0..n {
+                cs.push(c(cx, cy));
+                cs.push(c(cx + rng.f(-10.0, 10.0), cy + rng.f(-10.0, 10.0)));
+            }
+        }
+        4 => {
+            // collinear run with a kink
+            let y = rng.f(-2.0, 2.0);
+            for i in 0..n {
+                cs.push(c(i as f64, y));
+            }
+            cs.push(c(rng.f(-5.0, 5.0), rng.f(-5.0, 5.0)));
+        }
+        _ => {
+            // near-coincident perturbations
+            let mut x = 0.0;
+            let mut y = 0.0;
+            for _ in 0..n {
+                cs.push(c(x, y));
+                x += rng.f(-2.0, 2.0);
+                y += rng.f(-2.0, 2.0);
+            }
+            cs.push(c(x, y));
+            if cs.len() > 4 {
+                let k = rng.below(cs.len() - 2);
+                let j = k + 2 + rng.below(cs.len() - k - 2);
+                cs[j] = c(cs[k].x + 1e-13, cs[k].y);
+            }
+        }
+    }
+    if kind == 4 && rng.below(2) == 0 {
+        for v in cs.iter_mut() {
+            v.x *= 1e9;
+            v.y *= 1e9;
+        }
+    }
+    dedup_consecutive(&cs)
+}
+
+#[test]
+fn node_fast_matches_general_noder() {
+    use crate::noding::line::{Fast, node_fast};
+    let mut rng = Rng(0x2026_1031_5eed_1234);
+    let mut counts = [0usize; 3];
+    for _ in 0..20000 {
+        let cs = random_line(&mut rng);
+        if cs.len() < 3 {
+            continue;
+        }
+        let old = node_line(&cs);
+        match node_fast(&cs) {
+            Fast::Simple => {
+                counts[0] += 1;
+                assert!(
+                    !check_linestring_self_intersection(&cs),
+                    "node_fast called a non-simple line simple: {cs:?}"
+                );
+            }
+            Fast::Noded(chains) => {
+                counts[1] += 1;
+                assert!(!chains.is_empty(), "no chains: {cs:?}");
+                assert_chains_valid(&chains);
+                if let Some(old) = &old {
+                    assert_eq!(&chains, old, "lean/general outputs differ: {cs:?}");
+                }
+            }
+            Fast::Unsupported => counts[2] += 1,
+        }
+    }
+    assert!(counts[0] > 1000, "too few simple verdicts: {counts:?}");
+    assert!(counts[1] > 1000, "too few noded verdicts: {counts:?}");
+}

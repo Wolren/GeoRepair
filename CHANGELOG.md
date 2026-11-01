@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `LineString` repair nodes a self-intersecting line in one pass. The old
+  path sorted every coordinate by x three times (revisit guard, eps-class
+  guard, eps-class guard with nodes), built an R-tree in the validator only
+  to decide whether noding was needed, then built a separate segment grid
+  in the noder. `noding::line::fast` carries the near-coincidence guard on
+  the candidate pairs instead of a second sort, computes each segment's
+  grid cell range once for the counting pass, the filling pass and the
+  query, and returns the simplicity verdict itself, so `make_valid` no
+  longer runs the validator first. A line strictly monotone in x or in y
+  is recognised as simple in one linear pass, which is the whole cost for a
+  valid line. `NodingFloat::as_f64` borrows the coordinates when the input
+  is already f64, so that pass no longer copies the array first.
+  Measured serial: 1000-vertex figure-8 235 us to 49 us (GEOS 3.14.1
+  `unary_union` in the same run: 31 us); valid 1000-vertex line 15.8 us to
+  3.4 us (GEOS 3.7 us). Parallel batch ratio: `self-int ls 1000v` 0.22x to
+  0.88x, `self-int ls 500v` 0.21x to 0.92x, `self-int ls 100v` 0.73x to
+  1.7x. `BENCH_SERIAL=1` fills the serial column of a GEOS-enabled bench
+  run.
+- `segments_collinear_overlap` now tests the parametric overlap before the
+  two robust orientation calls, which only decides when the fast
+  determinant is exactly zero.
+
 All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),

@@ -337,13 +337,9 @@ pub(crate) fn segments_collinear_overlap(
     if f1.abs() > eps + margin1 && f2.abs() > eps + margin2 {
         return false;
     }
-    let o1 = crate::orient::orient2d(a1, a2, b1);
-    let o2 = crate::orient::orient2d(a1, a2, b2);
-    if o1.abs() > eps || o2.abs() > eps {
-        return false;
-    }
-    let dx = a2.x - a1.x;
-    let dy = a2.y - a1.y;
+    // The parametric overlap is a necessary condition for a collinear overlap, so the
+    // projection test runs first: adjacent segments that merely share an endpoint (the
+    // subdivided-line case) then skip the two robust orientation calls.
     let len2 = dx * dx + dy * dy;
     if len2 <= eps {
         return false;
@@ -352,7 +348,15 @@ pub(crate) fn segments_collinear_overlap(
     let t2 = ((b2.x - a1.x) * dx + (b2.y - a1.y) * dy) / len2;
     let lo = 0.0f64.max(t1.min(t2));
     let hi = 1.0f64.min(t1.max(t2));
-    hi - lo > eps
+    if hi - lo <= eps {
+        return false;
+    }
+    let o1 = crate::orient::orient2d(a1, a2, b1);
+    let o2 = crate::orient::orient2d(a1, a2, b2);
+    if o1.abs() > eps || o2.abs() > eps {
+        return false;
+    }
+    true
 }
 
 /// Bbox containment with epsilon (endpoints included).

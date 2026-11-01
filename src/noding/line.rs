@@ -14,6 +14,7 @@ use crate::validation::impls::segments_collinear_overlap;
 use crate::validation::sweep::{SegGrid, radix_sort_keys_tls, sortable_u64};
 
 mod classify;
+mod fast;
 mod pieces;
 const NO_FAMILY: u32 = u32::MAX;
 const NO_SEG: u32 = u32::MAX;
@@ -103,6 +104,8 @@ pub(crate) struct LineNoder<'a> {
     /// `sweep_pass` and consumed by `test_family_pair`.
     family_members: FxHashMap<u32, Vec<u32>>,
 }
+
+pub(crate) use self::fast::{Fast, node_fast};
 
 /// Node a non-simple line into simple chains.
 pub(crate) fn node_line(coords: &[Coord<f64>]) -> Option<Vec<Vec<Coord<f64>>>> {

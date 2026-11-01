@@ -104,9 +104,15 @@ fn polygon_to_geos(poly: &Polygon<f64>) -> Option<geos::Geometry> {
 #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
 fn run_geos_batch(geoms: &[geos::Geometry]) -> f64 {
     let t0 = Instant::now();
-    geoms.par_iter().for_each(|gg| {
-        let _ = gg.make_valid();
-    });
+    if std::env::var_os("BENCH_SERIAL").is_some() {
+        for gg in geoms {
+            let _ = gg.make_valid();
+        }
+    } else {
+        geoms.par_iter().for_each(|gg| {
+            let _ = gg.make_valid();
+        });
+    }
     t0.elapsed().as_secs_f64()
 }
 
@@ -119,9 +125,15 @@ fn run_geos_batch(geoms: &[geos::Geometry]) -> f64 {
 #[cfg(any(feature = "bench-geos", feature = "bench-geos-system"))]
 fn run_geos_noding_batch(geoms: &[geos::Geometry]) -> f64 {
     let t0 = Instant::now();
-    geoms.par_iter().for_each(|gg| {
-        let _ = gg.unary_union();
-    });
+    if std::env::var_os("BENCH_SERIAL").is_some() {
+        for gg in geoms {
+            let _ = gg.unary_union();
+        }
+    } else {
+        geoms.par_iter().for_each(|gg| {
+            let _ = gg.unary_union();
+        });
+    }
     t0.elapsed().as_secs_f64()
 }
 
@@ -232,7 +244,6 @@ fn run_par(_polys: &[Polygon<f64>], _cfg: &MakeValidConfig) -> f64 {
     0.0
 }
 
-#[cfg(not(any(feature = "bench-geos", feature = "bench-geos-system")))]
 fn run_line_ser(items: &[Geometry<f64>], cfg: &MakeValidConfig) -> f64 {
     let t0 = Instant::now();
     for g in items {
@@ -730,6 +741,8 @@ fn bench_line(label: &str, g: &Geometry<f64>, batch: usize, cfg: &MakeValidConfi
         } else {
             run_geos_noding_batch(&geos_geoms)
         };
+        let ser_us = std::env::var_os("BENCH_SERIAL")
+            .map(|_| run_line_ser(&items, cfg) * 1_000_000.0 / batch as f64);
         eprintln!(
             "  {:<20} {:>10.3} {:>10.3} µs",
             label,
@@ -738,7 +751,7 @@ fn bench_line(label: &str, g: &Geometry<f64>, batch: usize, cfg: &MakeValidConfi
         );
         gate_emit(
             label,
-            None,
+            ser_us,
             par * 1_000_000.0 / batch as f64,
             Some(geos * 1_000_000.0 / batch as f64),
         );
@@ -757,6 +770,10 @@ fn bench_line(label: &str, g: &Geometry<f64>, batch: usize, cfg: &MakeValidConfi
 /// empty = all) keeps the gate run short; BENCH_JSON (path) appends one
 /// JSON row per measured case so scripts/bench_gate.py can compare against
 /// a committed baseline.
+///
+/// BENCH_SERIAL also runs the GEOS reference on one thread and fills the
+/// serial column, which a GEOS-enabled run otherwise leaves empty because
+/// the serial pass costs a second full run.
 fn gate_filtered(label: &str) -> bool {
     match std::env::var("BENCH_SUBSET") {
         Ok(sub) => {
@@ -801,6 +818,8 @@ fn bench_polygons(label: &str, polys: &[Polygon<f64>], batch: usize, cfg: &MakeV
     {
         let geos_geoms: Vec<geos::Geometry> = polys.iter().filter_map(polygon_to_geos).collect();
         let geos = run_geos_batch(&geos_geoms);
+        let ser_us = std::env::var_os("BENCH_SERIAL")
+            .map(|_| run_ser(polys, cfg) * 1_000_000.0 / batch as f64);
         eprintln!(
             "  {:<20} {:>10.3} {:>10.3} µs",
             label,
@@ -809,7 +828,7 @@ fn bench_polygons(label: &str, polys: &[Polygon<f64>], batch: usize, cfg: &MakeV
         );
         gate_emit(
             label,
-            None,
+            ser_us,
             par * 1_000_000.0 / batch as f64,
             Some(geos * 1_000_000.0 / batch as f64),
         );
