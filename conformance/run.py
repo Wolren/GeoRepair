@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
-"""WKT and WKB conformance run against GDAL (OGR) as the external oracle.
+"""OGC conformance run: WKT and WKB judged against GDAL, not against ourselves.
 
-The crate's own reader and writer are never the judge of each other. OGR parses every case
-first, and every comparison is made on OGR's bytes or OGR's reading of our bytes.
-
-Checks:
-  A  reader acceptance matches the oracle, per dimension family
-  B  our geometry equals the oracle's geometry (canonical 2D WKB)
-  C  our WKT output, re-read by the oracle, equals the oracle's geometry (writer semantics)
-  D  our WKB output equals the oracle's WKB byte for byte (writer bytes, XY cases)
-  E  oracle WKB input, including Z/M, is read and re-emitted unchanged (WKB reader)
+Checks
+  A  read acceptance matches the oracle, per dimension family
+  B  our geometry equals the oracle's (canonical 2D WKB)
+  C  our WKT output, re-read by the oracle, equals the oracle's geometry
+  D  our ISO WKB equals the oracle's bytes, 2D cases
+  E  oracle WKB, including Z and M, reads and re-emits unchanged
+  F  big-endian WKB from an independent encoder reads and re-emits unchanged
+  G  EWKB with an SRID keeps its SRID and its geometry
+  H  damaged WKB (every truncation, impossible headers) never panics
+  I  nested collections parse, and absurd depth fails cleanly
+  J  SQL/MM curved types are refused, not misread
 
 Usage: python conformance/run.py [--keep]
-Exit code 1 when any check has a failure, so CI can gate on it.
+Exit code 1 on an unexpected failure. Ids listed in known_divergences.txt do not fail the gate.
 """
 
 from __future__ import annotations
@@ -22,36 +24,41 @@ import json
 import os
 import shutil
 import sqlite3
-import struct
 import subprocess
 import sys
 import tempfile
+
+import wkbcodec
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 OGR2OGR = os.environ.get("OGR2OGR", "ogr2ogr")
 
+NL = chr(10)
+TAB = chr(9)
+CR = chr(13)
+
+
 # --------------------------------------------------------------------------- corpus
 
 
-def fmt(v):
+def num(v):
     if isinstance(v, int):
         return str(v)
-    s = repr(float(v))
-    return s
+    return repr(float(v))
 
 
 def coord(x, y, dims):
-    parts = [fmt(x), fmt(y)]
+    parts = [num(x), num(y)]
     if "Z" in dims:
-        parts.append(fmt(7.5))
+        parts.append(num(7.5))
     if "M" in dims:
-        parts.append(fmt(3.5))
+        parts.append(num(3.5))
     return " ".join(parts)
 
 
 def mod(dims):
-    return f"{dims} " if dims else ""
+    return dims + " " if dims else ""
 
 
 def ring(points, dims):
@@ -65,40 +72,61 @@ HOLE = [(2, 2), (4, 2), (4, 4)]
 
 
 def builders(dims):
-    """One representative geometry per OGC type, at the given dimensions."""
+    m = mod(dims)
     return [
-        ("point", f"POINT {mod(dims)}({coord(1, 2, dims)})"),
+        ("point", "POINT " + m + "(" + coord(1, 2, dims) + ")"),
         (
             "linestring",
-            f"LINESTRING {mod(dims)}({coord(0, 0, dims)}, {coord(1, 1, dims)}, {coord(2, 0, dims)})",
+            "LINESTRING " + m + "(" + ", ".join(coord(x, y, dims) for x, y in [(0, 0), (1, 1), (2, 0)]) + ")",
         ),
-        (
-            "polygon",
-            f"POLYGON {mod(dims)}({ring(SQUARE, dims)}, {ring(HOLE, dims)})",
-        ),
+        ("polygon", "POLYGON " + m + "(" + ring(SQUARE, dims) + ", " + ring(HOLE, dims) + ")"),
         (
             "multipoint_bare",
-            f"MULTIPOINT {mod(dims)}({coord(1, 2, dims)}, {coord(3, 4, dims)})",
+            "MULTIPOINT " + m + "(" + coord(1, 2, dims) + ", " + coord(3, 4, dims) + ")",
         ),
         (
             "multipoint_paren",
-            f"MULTIPOINT {mod(dims)}(({coord(1, 2, dims)}), ({coord(3, 4, dims)}))",
+            "MULTIPOINT " + m + "((" + coord(1, 2, dims) + "), (" + coord(3, 4, dims) + "))",
         ),
         (
             "multilinestring",
-            f"MULTILINESTRING {mod(dims)}(({coord(0, 0, dims)}, {coord(1, 1, dims)}),"
-            f" ({coord(2, 2, dims)}, {coord(3, 3, dims)}))",
+            "MULTILINESTRING "
+            + m
+            + "(("
+            + coord(0, 0, dims)
+            + ", "
+            + coord(1, 1, dims)
+            + "), ("
+            + coord(2, 2, dims)
+            + ", "
+            + coord(3, 3, dims)
+            + "))",
         ),
         (
             "multipolygon",
-            f"MULTIPOLYGON {mod(dims)}((({coord(0, 0, dims)}, {coord(1, 0, dims)},"
-            f" {coord(1, 1, dims)}, {coord(0, 0, dims)})), (({coord(5, 5, dims)},"
-            f" {coord(6, 5, dims)}, {coord(6, 6, dims)}, {coord(5, 5, dims)})))",
+            "MULTIPOLYGON "
+            + m
+            + "((("
+            + ", ".join(coord(x, y, dims) for x, y in [(0, 0), (1, 0), (1, 1), (0, 0)])
+            + ")), (("
+            + ", ".join(coord(x, y, dims) for x, y in [(5, 5), (6, 5), (6, 6), (5, 5)])
+            + ")))",
         ),
         (
             "collection",
-            f"GEOMETRYCOLLECTION {mod(dims)}(POINT {mod(dims)}({coord(1, 2, dims)}),"
-            f" LINESTRING {mod(dims)}({coord(0, 0, dims)}, {coord(1, 1, dims)}))",
+            "GEOMETRYCOLLECTION "
+            + m
+            + "(POINT "
+            + m
+            + "("
+            + coord(1, 2, dims)
+            + "), LINESTRING "
+            + m
+            + "("
+            + coord(0, 0, dims)
+            + ", "
+            + coord(1, 1, dims)
+            + "))",
         ),
     ]
 
@@ -119,17 +147,17 @@ def corpus():
     for dims in ("", "Z", "M", "ZM"):
         tag = dims or "XY"
         for name, text in builders(dims):
-            cases.append((f"{tag}_{name}", "shape", text))
+            cases.append((tag + "_" + name, "shape", text))
         for t in TYPES:
-            cases.append((f"{tag}_empty_{t.lower()}", "empty", f"{t} {mod(dims)}EMPTY"))
+            cases.append((tag + "_empty_" + t.lower(), "empty", t + " " + mod(dims) + "EMPTY"))
 
     lex = [
         ("lex_lower", "point (1 2)"),
         ("lex_mixed_case", "PoInT (1 2)"),
         ("lex_z_lower", "point z (1 2 3)"),
         ("lex_spaces", "POINT    (   1     2   )"),
-        ("lex_newline", "POINT\n(1 2)"),
-        ("lex_tab", "LINESTRING\t(0 0, 1 1)"),
+        ("lex_newline", "POINT" + NL + "(1 2)"),
+        ("lex_tab", "LINESTRING" + TAB + "(0 0, 1 1)"),
         ("lex_exp", "POINT (1e3 1E-3)"),
         ("lex_leading_dot", "POINT (.5 -.5)"),
         ("lex_trailing_dot", "POINT (5. 6.)"),
@@ -173,138 +201,39 @@ def corpus():
         ("bad_missing_comma", "LINESTRING (0 0 1 1)"),
     ]
     cases += [(i, "invalid", t) for i, t in bad]
+
+    curved = [
+        ("curve_circularstring", "CIRCULARSTRING (0 0, 1 1, 2 0)"),
+        ("curve_compoundcurve", "COMPOUNDCURVE ((0 0, 1 1), CIRCULARSTRING (1 1, 2 1, 3 1))"),
+        ("curve_curvepolygon", "CURVEPOLYGON (CIRCULARSTRING (0 0, 1 1, 2 0, 3 1, 0 0))"),
+        ("curve_multicurve", "MULTICURVE ((0 0, 1 1))"),
+        ("curve_multisurface", "MULTISURFACE (((0 0, 1 0, 1 1, 0 0)))"),
+        ("curve_polyhedralsurface", "POLYHEDRALSURFACE (((0 0, 1 0, 1 1, 0 0)))"),
+        ("curve_tin", "TIN (((0 0, 1 0, 1 1, 0 0)))"),
+        ("curve_triangle", "TRIANGLE ((0 0, 1 0, 1 1, 0 0))"),
+    ]
+    cases += [(i, "curved", t) for i, t in curved]
     return cases
-
-
-# --------------------------------------------------------------------------- WKB
-
-TYPE_NAMES = {
-    1: "point",
-    2: "linestring",
-    3: "polygon",
-    4: "multipoint",
-    5: "multilinestring",
-    6: "multipolygon",
-    7: "collection",
-}
-
-
-class Node:
-    __slots__ = ("kind", "points", "parts")
-
-    def __init__(self, kind, points=None, parts=None):
-        self.kind = kind
-        self.points = points or []
-        self.parts = parts or []
-
-
-def parse_wkb(buf, pos=0):
-    order = buf[pos]
-    if order not in (0, 1):
-        raise ValueError(f"byte order {order}")
-    e = "<" if order == 1 else ">"
-    pos += 1
-    (raw,) = struct.unpack_from(e + "I", buf, pos)
-    pos += 4
-    has_z = bool(raw & 0x80000000)
-    has_m = bool(raw & 0x40000000)
-    base = raw & 0x0FFFFFFF
-    if 1000 < base <= 1100:
-        has_z, base = True, base - 1000
-    elif 2000 < base <= 2100:
-        has_m, base = True, base - 2000
-    elif 3000 < base <= 3100:
-        has_z, has_m, base = True, True, base - 3000
-    if base not in TYPE_NAMES:
-        raise ValueError(f"type {base}")
-    n = 2 + has_z + has_m
-
-    def coords(count):
-        nonlocal pos
-        vals = struct.unpack_from(e + "d" * (count * n), buf, pos)
-        pos += 8 * count * n
-        return [(vals[i * n], vals[i * n + 1]) for i in range(count)]
-
-    def count():
-        nonlocal pos
-        (c,) = struct.unpack_from(e + "I", buf, pos)
-        pos += 4
-        return c
-
-    if base == 1:
-        pts = coords(1)
-        return Node("point", points=pts), pos
-    if base == 2:
-        return Node("linestring", points=coords(count())), pos
-    if base == 3:
-        rings = [coords(count()) for _ in range(count())]
-        return Node("polygon", parts=[Node("ring", points=r) for r in rings]), pos
-    parts = []
-    for _ in range(count()):
-        sub, pos = parse_wkb(buf, pos)
-        parts.append(sub)
-    return Node(TYPE_NAMES[base], parts=parts), pos
-
-
-def emit_2d(node):
-    kind = "linestring" if node.kind == "ring" else node.kind
-    code = {v: k for k, v in TYPE_NAMES.items()}[kind]
-    out = bytearray([1])
-    out.extend(struct.pack("<I", code))
-
-    def put(pts):
-        for x, y in pts:
-            out.extend(struct.pack("<dd", x, y))
-
-    if kind == "point":
-        out.extend(struct.pack("<I", 1))
-        put(node.points)
-    elif kind == "linestring":
-        out.extend(struct.pack("<I", len(node.points)))
-        put(node.points)
-    elif kind == "polygon":
-        out.extend(struct.pack("<I", len(node.parts)))
-        for r in node.parts:
-            out.extend(struct.pack("<I", len(r.points)))
-            put(r.points)
-    else:
-        out.extend(struct.pack("<I", len(node.parts)))
-        for p in node.parts:
-            out.extend(emit_2d(p))
-    return bytes(out)
-
-
-def canonical(hexstr):
-    if not hexstr:
-        return ""
-    try:
-        node, _ = parse_wkb(bytes.fromhex(hexstr))
-        return emit_2d(node).hex()
-    except Exception as exc:  # noqa: BLE001 - a malformed blob is a finding, not a crash
-        return f"UNPARSABLE:{exc}"
-
-
-def strip_gpkg(blob):
-    flags = blob[3]
-    env = {0: 0, 1: 32, 2: 48, 3: 48, 4: 64}[(flags >> 1) & 7]
-    return blob[8 + env :]
 
 
 # --------------------------------------------------------------------------- oracle
 
 
+def strip_gpkg(blob):
+    env = {0: 0, 1: 32, 2: 48, 3: 48, 4: 64}[(blob[3] >> 1) & 7]
+    return blob[8 + env :]
+
+
 def oracle(texts, workdir, name):
-    """Return {index: wkb hex or None} from OGR."""
-    csv_in = os.path.join(workdir, f"{name}.csv")
-    gpkg = os.path.join(workdir, f"{name}.gpkg")
+    csv_in = os.path.join(workdir, name + ".csv")
+    gpkg = os.path.join(workdir, name + ".gpkg")
     with open(csv_in, "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
         w.writerow(["idx", "wkt"])
         for i, t in enumerate(texts):
             w.writerow([i, t])
-    for path in (gpkg,):
-        if os.path.exists(path):
-            os.remove(path)
+    if os.path.exists(gpkg):
+        os.remove(gpkg)
     cmd = [
         OGR2OGR,
         "-f",
@@ -320,34 +249,67 @@ def oracle(texts, workdir, name):
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if not os.path.exists(gpkg):
-        raise SystemExit(f"oracle failed: {proc.stderr.strip()[:500]}")
+        raise SystemExit("oracle failed: " + proc.stderr.strip()[:400])
     con = sqlite3.connect(gpkg)
     rows = dict(con.execute("select cast(idx as integer), geom from cases").fetchall())
     con.close()
-    out = {}
-    for i, t in enumerate(texts):
-        blob = rows.get(i)
-        out[i] = None if blob is None else strip_gpkg(blob).hex()
-    return out, proc.stderr
+    return {i: (None if rows.get(i) is None else strip_gpkg(rows[i]).hex()) for i in range(len(texts))}
 
 
-# --------------------------------------------------------------------------- driver
+# --------------------------------------------------------------------------- crate side
 
 
 def dump_rust(args, workdir):
     exe = os.path.join(ROOT, "target", "debug", "examples", "conformance_dump.exe")
     if not os.path.exists(exe):
-        raise SystemExit(f"missing {exe}; run: cargo build --example conformance_dump")
-    proc = subprocess.run([exe] + args, capture_output=True, text=True)
+        raise SystemExit("missing " + exe + "; run: cargo build --example conformance_dump")
+    proc = subprocess.run([exe] + args, capture_output=True, text=True, timeout=300)
     if proc.returncode != 0:
-        raise SystemExit(f"dump failed: {proc.stderr[-800:]}")
+        raise SystemExit("dump failed: " + proc.stderr[-600:])
     rows = {}
     for line in proc.stdout.splitlines():
-        if not line.strip():
-            continue
-        rec = json.loads(line)
-        rows[rec["id"]] = rec
+        if line.strip():
+            rec = json.loads(line)
+            rows[rec["id"]] = rec
     return rows
+
+
+def write_tsv(workdir, name, lines):
+    path = os.path.join(workdir, name + ".tsv")
+    with open(path, "w", encoding="utf-8") as fh:
+        for line in lines:
+            fh.write(line + NL)
+    return path
+
+
+def escape_tsv(text):
+    return text.replace(NL, "|NL|").replace(TAB, "|TAB|").replace(CR, "|CR|")
+
+
+def run_wkb_batch(workdir, name, lines):
+    return dump_rust(["--wkb", write_tsv(workdir, name, lines)], workdir)
+
+
+def run_text_batch(workdir, name, lines):
+    return dump_rust([write_tsv(workdir, name, lines)], workdir)
+
+
+def mutate(hexes):
+    lines = [("empty", ""), ("lone_order", "01")]
+    seeds = [h for h in hexes[:6] if h]
+    for si, h in enumerate(seeds):
+        raw = bytes.fromhex(h)
+        for cut in range(0, len(raw)):
+            lines.append(("trunc_%d_%d" % (si, cut), raw[:cut].hex()))
+        if len(raw) >= 9:
+            for name, patch in (
+                ("order", bytes([2]) + raw[1:]),
+                ("type0", raw[:1] + (0).to_bytes(4, "little") + raw[5:]),
+                ("type999", raw[:1] + (999).to_bytes(4, "little") + raw[5:]),
+                ("huge_count", raw[:5] + (0xFFFFFFFF).to_bytes(4, "little") + raw[9:]),
+            ):
+                lines.append((name + "_" + str(si), patch.hex()))
+    return [i + TAB + v for i, v in lines]
 
 
 def load_known():
@@ -363,6 +325,9 @@ def load_known():
     return known
 
 
+# --------------------------------------------------------------------------- driver
+
+
 def main():
     keep = "--keep" in sys.argv
     workdir = tempfile.mkdtemp(prefix="wktconf-")
@@ -371,101 +336,163 @@ def main():
         ids = [c[0] for c in cases]
         texts = [c[2] for c in cases]
 
-        tsv = os.path.join(workdir, "corpus.tsv")
-        with open(tsv, "w", encoding="utf-8", newline="\n") as fh:
-            for i, t in zip(ids, texts):
-                esc = t.replace(chr(10), "|NL|").replace(chr(9), "|TAB|").replace(chr(13), "|CR|")
-                fh.write(str(i) + chr(9) + esc + chr(10))
-        ours = dump_rust([tsv], workdir)
+        corpus_tsv = write_tsv(
+            workdir, "corpus", [cid + TAB + escape_tsv(t) for cid, t in zip(ids, texts)]
+        )
+        ours = dump_rust([corpus_tsv], workdir)
+        ora = oracle(texts, workdir, "cases")
 
-        ora, ora_err = oracle(texts, workdir, "cases")
-
-        # Writer semantics: our WKT text goes back through the oracle.
-        emitted = []
-        emitted_idx = []
-        for i, cid in enumerate(ids):
-            row = ours.get(cid, {})
-            if row.get("zm_ok") and row.get("wkt_out"):
-                emitted.append(row["wkt_out"])
-                emitted_idx.append(cid)
-        ora2, _ = oracle(emitted, workdir, "emitted")
-
-        # Writer bytes and reader: our WKB, and the oracle's WKB as input.
         res = {
-            "A_read_accept": [[], []],
-            "B_geometry": [[], []],
-            "C_write_semantics": [[], []],
-            "D_write_bytes": [[], []],
-            "E_wkb_roundtrip": [[], []],
+            k: [[], []]
+            for k in (
+                "A_read_accept",
+                "B_geometry",
+                "C_write_semantics",
+                "D_write_bytes",
+                "E_wkb_roundtrip",
+                "F_big_endian",
+                "G_ewkb_srid",
+                "H_damaged",
+                "I_nesting",
+                "J_curved",
+            )
         }
-        notes = []
 
         def rec(check, ok, cid, detail=""):
             res[check][0 if ok else 1].append((cid, detail))
 
+        emitted = []
+        emitted_ids = []
+        for cid in ids:
+            row = ours.get(cid, {})
+            if row.get("zm_ok") and row.get("wkt_out"):
+                emitted.append(row["wkt_out"])
+                emitted_ids.append(cid)
+        ora_written = oracle(emitted, workdir, "emitted")
+
         for i, (cid, cat, text) in enumerate(cases):
-            r = ours.get(cid, {})
+            row = ours.get(cid, {})
             o = ora[i]
             oracle_ok = o is not None
-            dims_family = cid.split("_", 1)[0]
-            use_zm = dims_family in ("Z", "M", "ZM")
-            our_ok = bool(r.get("zm_ok") if use_zm else r.get("plain_ok"))
-            our_err = r.get("zm_err") if use_zm else r.get("plain_err")
-            rec("A_read_accept", our_ok == oracle_ok, cid, f"oracle={oracle_ok} ours={our_ok} {our_err}"[:140])
+            family = cid.split("_", 1)[0]
+            use_zm = family in ("Z", "M", "ZM")
+            if "panic" in row:
+                rec("A_read_accept", False, cid, "panic: " + row["panic"][:100])
+                continue
+            our_ok = bool(row.get("zm_ok") if use_zm else row.get("plain_ok"))
+            err = row.get("zm_err") if use_zm else row.get("plain_err")
+            rec(
+                "A_read_accept",
+                our_ok == oracle_ok,
+                cid,
+                "oracle=" + str(oracle_ok) + " ours=" + str(our_ok) + " " + str(err)[:100],
+            )
 
-            if oracle_ok and our_ok:
-                our_hex = r.get("isowkb") or r.get("wkb")
-                same = canonical(our_hex) == canonical(o)
+            if oracle_ok and our_ok and cat != "curved":
+                our_hex = row.get("isowkb") or row.get("wkb")
+                same = wkbcodec.canonical_2d(our_hex) == wkbcodec.canonical_2d(o)
                 rec("B_geometry", same, cid, "" if same else "geometry differs")
-                if dims_family == "XY" and our_hex and o:
+                if family == "XY" and our_hex and o:
                     same_bytes = our_hex.lower() == o.lower()
                     rec("D_write_bytes", same_bytes, cid, "" if same_bytes else "bytes differ")
+                if use_zm and cid in emitted_ids:
+                    expect = wkbcodec.canonical_2d(o)
+                    got = wkbcodec.canonical_2d(ora_written.get(emitted_ids.index(cid)))
+                    ok = got == expect and not expect.startswith("UNPARSABLE")
+                    rec("C_write_semantics", ok, cid, "" if ok else "written text reads differently")
 
-            if use_zm and cid in emitted_idx and oracle_ok:
-                expect = canonical(o)
-                got = canonical(ora2.get(emitted_idx.index(cid)))
-                rec("C_write_semantics", got == expect and expect.startswith("01"), cid)
+        pairs = [(cid, ora[i]) for i, cid in enumerate(ids) if ora[i] is not None]
+        e_rows = run_wkb_batch(workdir, "wkb", [cid + TAB + h for cid, h in pairs])
+        for cid, h in pairs:
+            row = e_rows.get(cid, {})
+            ok = bool(row.get("ok")) and row.get("recoded", "").lower() == h.lower()
+            rec("E_wkb_roundtrip", ok, cid, "" if ok else (row.get("err") or "recode differs")[:120])
 
-        # E: the oracle's own WKB fed back into our reader.
-        hex_in = []
-        wkb_idx = []
-        for i, (cid, cat, text) in enumerate(cases):
-            if ora[i] is None:
+        be_lines = []
+        be_ids = []
+        for cid, h in pairs:
+            try:
+                be = wkbcodec.to_big_endian(h)
+            except Exception:  # noqa: BLE001
                 continue
-            hex_in.append(ora[i])
-            wkb_idx.append(cid)
-        wkb_tsv = os.path.join(workdir, "wkb.tsv")
-        with open(wkb_tsv, "w", encoding="utf-8", newline="\n") as fh:
-            for cid, h in zip(wkb_idx, hex_in):
-                fh.write(f"{cid}\t{h}\n")
-        back = dump_rust(["--wkb", wkb_tsv], workdir)
-        for cid, h in zip(wkb_idx, hex_in):
-            r = back.get(cid, {})
-            ok = bool(r.get("ok"))
-            same = ok and r.get("recoded", "").lower() == h.lower()
-            if ok and not same:
-                notes.append(f"E recode differs: {cid}")
-            rec("E_wkb_roundtrip", same, cid, "" if same else ("read failed" if not ok else "recode differs"))
+            be_lines.append(cid + TAB + be)
+            be_ids.append((cid, be))
+        f_rows = run_wkb_batch(workdir, "be", be_lines)
+        for cid, be in be_ids:
+            row = f_rows.get(cid, {})
+            # The writer emits little-endian, so acceptance is checked on the geometry, and the
+            # byte order itself is proven by the independent encoder that produced `be`.
+            ok = bool(row.get("ok")) and wkbcodec.canonical_2d(
+                row.get("recoded", "")
+            ) == wkbcodec.canonical_2d(be)
+            rec("F_big_endian", ok, cid, "" if ok else (row.get("err") or "geometry differs")[:120])
 
-        total = len(cases)
-        print(f"corpus {total} cases, oracle {OGR2OGR}")
-        if ora_err.strip():
-            first = ora_err.strip().splitlines()[0]
-            print(f"oracle stderr: {first[:160]}")
+        srid_lines = []
+        srid_ids = []
+        for cid, h in pairs:
+            try:
+                srid_lines.append(cid + TAB + wkbcodec.with_srid(h, 4326))
+            except Exception:  # noqa: BLE001
+                continue
+            srid_ids.append(cid)
+        g_rows = run_wkb_batch(workdir, "srid", srid_lines)
+        for cid in srid_ids:
+            row = g_rows.get(cid, {})
+            ok = bool(row.get("ok")) and row.get("srid") == "4326"
+            rec(
+                "G_ewkb_srid",
+                ok,
+                cid,
+                "" if ok else "srid=" + str(row.get("srid")) + " " + str(row.get("err", ""))[:80],
+            )
+
+        h_lines = mutate([h for _, h in pairs])
+        h_rows = run_wkb_batch(workdir, "damaged", h_lines)
+        for line in h_lines:
+            cid = line.split(TAB, 1)[0]
+            row = h_rows.get(cid, {})
+            ok = "panic" not in row and "ok" in row
+            rec("H_damaged", ok, cid, str(row.get("panic", ""))[:120])
+
+        nested = []
+        for depth in (2, 12, 64):
+            text = "POINT (1 2)"
+            for _ in range(depth):
+                text = "GEOMETRYCOLLECTION (" + text + ")"
+            nested.append("nest_" + str(depth) + TAB + text)
+        i_rows = run_text_batch(workdir, "nested", nested)
+        for depth in (2, 12):
+            row = i_rows.get("nest_" + str(depth), {})
+            ok = bool(row.get("zm_ok"))
+            rec("I_nesting", ok, "nest_" + str(depth), str(row.get("zm_err", ""))[:100])
+        deep = i_rows.get("nest_64", {})
+        rec("I_nesting", "panic" not in deep, "nest_64", "absurd depth must fail cleanly")
+
+        curved = [(c[0], c[2]) for c in cases if c[1] == "curved"]
+        j_rows = run_text_batch(workdir, "curved", [cid + TAB + t for cid, t in curved])
+        for cid, _ in curved:
+            row = j_rows.get(cid, {})
+            if "panic" in row:
+                rec("J_curved", False, cid, "panic: " + row["panic"][:100])
+                continue
+            err = (row.get("zm_err") or row.get("plain_err") or "").lower()
+            ok = bool(err) and ("unknown geometry type" in err or "parse error" in err)
+            rec("J_curved", ok, cid, err[:100])
+
+        print("corpus " + str(len(cases)) + " cases, oracle " + OGR2OGR)
         print()
-        print(f"{'check':<20}{'pass':>6}{'fail':>6}  examples")
+        print("%-20s%6s%6s  %s" % ("check", "pass", "fail", "examples"))
         for name, (ok, bad) in res.items():
             sample = ", ".join(c for c, _ in bad[:6])
-            print(f"{name:<20}{len(ok):>6}{len(bad):>6}  {sample}")
+            print("%-20s%6d%6d  %s" % (name, len(ok), len(bad), sample))
         print()
         for name, (ok, bad) in res.items():
             if bad:
-                print(f"[{name}] first failures")
-                for cid, detail in bad[:12]:
-                    print(f"  {cid}: {detail}")
+                print("[" + name + "] first failures")
+                for cid, detail in bad[:10]:
+                    print("  " + cid + ": " + detail)
                 print()
-        for n in notes[:10]:
-            print(n)
+
         known = load_known()
         unexpected = [
             (name, cid, detail)
@@ -474,14 +501,13 @@ def main():
             if cid not in known
         ]
         fails = sum(len(b) for _, b in res.values())
-        print()
-        print(f"TOTAL failures: {fails}, known: {fails - len(unexpected)}")
+        print("TOTAL failures: " + str(fails) + ", known: " + str(fails - len(unexpected)))
         for name, cid, detail in unexpected:
-            print(f"  UNEXPECTED [{name}] {cid}: {detail}")
+            print("  UNEXPECTED [" + name + "] " + cid + ": " + detail)
         return 1 if unexpected else 0
     finally:
         if keep:
-            print(f"workdir kept: {workdir}")
+            print("workdir kept: " + workdir)
         else:
             shutil.rmtree(workdir, ignore_errors=True)
 

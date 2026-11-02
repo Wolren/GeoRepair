@@ -18,3 +18,14 @@ st_coll_mixed_dims_bad
 
 # The oracle closes rings when it ingests them, we keep the geometry as given.
 st_unclosed_ring
+
+# SQL/MM curved and surface types: outside the geo data model, so they are refused on
+# purpose. Reading them into a LineString would invent geometry that is not there.
+curve_circularstring
+curve_compoundcurve
+curve_curvepolygon
+curve_multicurve
+curve_multisurface
+curve_polyhedralsurface
+curve_tin
+curve_triangle

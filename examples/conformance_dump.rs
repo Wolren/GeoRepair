@@ -120,9 +120,10 @@ fn wkt_case(text: &str) -> String {
 }
 
 fn wkb_case(text: &str) -> String {
-    let (ok, err, dims, recoded) = match from_hex(text).map(|b| read_ewkb(&b)) {
+    let (ok, err, dims, recoded, srid) = match from_hex(text).map(|b| read_ewkb(&b)) {
         Some(Ok(g)) => {
             let tag = dims_tag(g.dims);
+            let srid = g.srid;
             let g = EwkbGeometry {
                 geometry: g.geometry,
                 srid: g.srid,
@@ -130,13 +131,31 @@ fn wkb_case(text: &str) -> String {
                 extra_coords: g.extra_coords,
             };
             let back = write_wkb_iso(&g);
-            (true, String::new(), tag, hex(&back))
+            (
+                true,
+                String::new(),
+                tag,
+                hex(&back),
+                srid.map(|v| v.to_string()).unwrap_or_default(),
+            )
         }
-        Some(Err(e)) => (false, e.to_string(), String::new(), String::new()),
-        None => (false, "bad hex".to_string(), String::new(), String::new()),
+        Some(Err(e)) => (
+            false,
+            e.to_string(),
+            String::new(),
+            String::new(),
+            String::new(),
+        ),
+        None => (
+            false,
+            "bad hex".to_string(),
+            String::new(),
+            String::new(),
+            String::new(),
+        ),
     };
     format!(
-        "\"ok\":{ok},\"err\":\"{}\",\"dims\":\"{dims}\",\"recoded\":\"{recoded}\"",
+        "\"ok\":{ok},\"err\":\"{}\",\"dims\":\"{dims}\",\"recoded\":\"{recoded}\",\"srid\":\"{srid}\"",
         esc(&err)
     )
 }
