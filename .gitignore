@@ -31,3 +31,6 @@ CLAUDE.md
 .cursorrules
 .hermes/
 .commentkit.toml
+# The conformance harness is the OGC gate, not a local script.
+!conformance/
+!conformance/*.py

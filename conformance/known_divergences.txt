@@ -1,0 +1,20 @@
+# Case ids that fail a check for a stated reason, so the gate only reports new gaps.
+# One id per line, the comment says which side is wrong.
+
+# Oracle is lenient where the spec is not, and we reject: correct behaviour for us.
+bad_arity_high
+bad_z_two_ord
+bad_z_four_ord
+bad_zm_three_ord
+bad_trailing_junk
+bad_missing_comma
+
+# We accept input the OGC grammar does not define, on purpose, so damaged corpora survive.
+st_inf
+lex_plus
+
+# The zm path rejects a collection whose members disagree on dimensions, by contract.
+st_coll_mixed_dims_bad
+
+# The oracle closes rings when it ingests them, we keep the geometry as given.
+st_unclosed_ring

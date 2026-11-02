@@ -122,4 +122,6 @@ pub use read::read_wkb_from;
 pub use read::{read_ewkb, read_wkb, read_wkb_concat};
 #[cfg(feature = "std")]
 pub use write::write_wkb_to;
-pub use write::{estimate_wkb_size, write_ewkb, write_wkb, write_wkb_with_opts};
+pub use write::{
+    Encoding, estimate_wkb_size, write_ewkb, write_wkb, write_wkb_iso, write_wkb_with_opts,
+};

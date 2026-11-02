@@ -4,6 +4,24 @@
 
 ### Added
 
+- `write_wkb_iso` and `Encoding`: ISO 13249 type codes (1001 for XYZ, 2001 for XYM, 3001 for
+  XYZM) as an explicit output form. `write_ewkb` keeps the PostGIS EWKB flags and its SRID
+  field, so the two consumers each get the shape they read.
+- `conformance/` harness plus a CI job: 99 WKT cases judged against GDAL, five checks over
+  acceptance, geometry, writer semantics, writer bytes and WKB round trip.
+
+### Fixed
+
+- The WKB reader now reads ISO type codes, not only the EWKB high bits. Standard OGC WKB with
+  Z or M used to fail with `UnexpectedGeometryType`; all 55 dimension cases now read.
+- `write_wkb` panicked on `MULTIPOLYGON (((...)), EMPTY)`: the size estimate counted a ring
+  count for an empty part that the writer does not emit.
+- `write_ewkb` panicked on any empty geometry with Z or M, `POINT Z EMPTY` included, because
+  an empty point is one coordinate with no extra ordinates. It now writes NaN for those.
+
+
+### Added
+
 - WKT Z/M support. `read_wkt_zm` returns `WktGeometry { geometry, dims, extra_coords }`,
   with the extra ordinates in flat coordinate order: z then m, exterior before holes,
   members in document order. That is the same layout `EwkbGeometry` uses, and

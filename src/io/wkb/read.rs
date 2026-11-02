@@ -56,10 +56,29 @@ pub(crate) fn read_geometry_inner(
     }
     let le = read_byte_order(buf, pos)?;
     let raw_type = read_u32(buf, pos, le)?;
-    let has_z = (raw_type & WKB_Z_FLAG) != 0;
-    let has_m = (raw_type & WKB_M_FLAG) != 0;
+    let mut has_z = (raw_type & WKB_Z_FLAG) != 0;
+    let mut has_m = (raw_type & WKB_M_FLAG) != 0;
     let has_srid = (raw_type & WKB_SRID_FLAG) != 0;
-    let type_code = raw_type & 0xff;
+    // ISO 13249 puts the dimensions in the type code (1001 XYZ, 2001 XYM, 3001 XYZM) where
+    // EWKB uses the three high bits; real files carry either form, so both are read.
+    let mut type_code = raw_type & !(WKB_Z_FLAG | WKB_M_FLAG | WKB_SRID_FLAG);
+    if type_code >= 1000 {
+        match type_code / 1000 {
+            1 => has_z = true,
+            2 => has_m = true,
+            3 => {
+                has_z = true;
+                has_m = true;
+            }
+            _ => {
+                return Err(WkbError::UnexpectedGeometryType {
+                    expected: "OGC geometry type",
+                    code: type_code,
+                });
+            }
+        }
+        type_code %= 1000;
+    }
 
     let srid = if has_srid {
         Some(read_u32(buf, pos, le)? as i32)

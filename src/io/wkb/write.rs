@@ -54,7 +54,10 @@ pub fn write_ewkb(geom: &EwkbGeometry) -> Vec<u8> {
         geom.srid,
         &geom.extra_coords,
         &mut extra_offset,
-        true,
+        Codec {
+            le: true,
+            enc: Encoding::Ewkb,
+        },
     );
     debug_assert_eq!(buf.len(), size, "EWKB size mismatch");
     debug_assert_eq!(
@@ -62,6 +65,30 @@ pub fn write_ewkb(geom: &EwkbGeometry) -> Vec<u8> {
         geom.extra_coords.len(),
         "EWKB writer did not consume all extra coords"
     );
+    buf
+}
+
+/// Encode a geometry as ISO 13249 WKB: the OGC type codes for Z and M, and no SRID field.
+///
+/// Use this for interchange with anything that follows OGC or ISO rather than PostGIS EWKB.
+/// The SRID of `geom` is dropped, because ISO WKB has no field for it.
+pub fn write_wkb_iso(geom: &EwkbGeometry) -> Vec<u8> {
+    let size = ewkb_size(&geom.geometry, geom.dims, false);
+    let mut buf = Vec::with_capacity(size);
+    let mut extra_offset = 0;
+    write_geometry_ewkb(
+        &mut buf,
+        &geom.geometry,
+        geom.dims,
+        None,
+        &geom.extra_coords,
+        &mut extra_offset,
+        Codec {
+            le: true,
+            enc: Encoding::Iso,
+        },
+    );
+    debug_assert_eq!(buf.len(), size, "ISO WKB size mismatch");
     buf
 }
 
@@ -108,6 +135,10 @@ fn ewkb_size(geom: &Geometry<f64>, dims: EwkbDims, has_srid: bool) -> usize {
             let mut sz = header + 4;
             for poly in &mp.0 {
                 sz += 5 + 4;
+                // An empty part writes the ring count only, which the Polygon arm also does.
+                if poly.exterior().0.is_empty() && poly.interiors().is_empty() {
+                    continue;
+                }
                 sz += 4 + poly.exterior().0.len() * coord_bytes;
                 for h in poly.interiors() {
                     sz += 4 + h.0.len() * coord_bytes;
@@ -309,18 +340,47 @@ fn write_geometry(geom: &Geometry<f64>, buf: &mut Vec<u8>, le: bool) {
     }
 }
 
-fn type_code_with_flags(type_code: u32, dims: EwkbDims, has_srid: bool) -> u32 {
-    let mut flags = type_code;
-    if dims.has_z {
-        flags |= WKB_Z_FLAG;
+/// How the writer states Z and M in the type code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Encoding {
+    /// ISO 13249 type codes: 1001 for XYZ, 2001 for XYM, 3001 for XYZM. OGC files use this.
+    Iso,
+    /// PostGIS EWKB: the three high bits as flags, which leaves room for an SRID field.
+    Ewkb,
+}
+
+/// Byte order and type-code form, bundled so the geometry walk keeps its argument count down.
+#[derive(Debug, Clone, Copy)]
+struct Codec {
+    le: bool,
+    enc: Encoding,
+}
+
+fn type_code(base: u32, dims: EwkbDims, has_srid: bool, enc: Encoding) -> u32 {
+    match enc {
+        Encoding::Iso => {
+            let dim = match (dims.has_z, dims.has_m) {
+                (true, true) => 3000,
+                (true, false) => 1000,
+                (false, true) => 2000,
+                (false, false) => 0,
+            };
+            base + dim
+        }
+        Encoding::Ewkb => {
+            let mut flags = base;
+            if dims.has_z {
+                flags |= WKB_Z_FLAG;
+            }
+            if dims.has_m {
+                flags |= WKB_M_FLAG;
+            }
+            if has_srid {
+                flags |= WKB_SRID_FLAG;
+            }
+            flags
+        }
     }
-    if dims.has_m {
-        flags |= WKB_M_FLAG;
-    }
-    if has_srid {
-        flags |= WKB_SRID_FLAG;
-    }
-    flags
 }
 
 fn write_coord_ewkb(
@@ -333,13 +393,25 @@ fn write_coord_ewkb(
 ) {
     write_f64(buf, c.x, le);
     write_f64(buf, c.y, le);
+    // An empty point is a NaN pair and carries no extra ordinates, so it writes NaN for
+    // each dimension and consumes nothing.
+    let empty = c.x.is_nan() && c.y.is_nan();
+    let mut next = |buf: &mut Vec<u8>| {
+        let v = if empty {
+            f64::NAN
+        } else {
+            extra.get(*offset).copied().unwrap_or(f64::NAN)
+        };
+        if !empty {
+            *offset += 1;
+        }
+        write_f64(buf, v, le);
+    };
     if dims.has_z {
-        write_f64(buf, extra[*offset], le);
-        *offset += 1;
+        next(buf);
     }
     if dims.has_m {
-        write_f64(buf, extra[*offset], le);
-        *offset += 1;
+        next(buf);
     }
 }
 
@@ -395,14 +467,16 @@ fn write_geometry_ewkb(
     srid: Option<i32>,
     extra: &[f64],
     offset: &mut usize,
-    le: bool,
+    codec: Codec,
 ) {
     use geo::Geometry::*;
+    let le = codec.le;
+    let enc = codec.enc;
     buf.push(if le { 1 } else { 0 }); // byte order
 
     match geom {
         Point(p) => {
-            let tc = type_code_with_flags(WKB_POINT, dims, srid.is_some());
+            let tc = type_code(WKB_POINT, dims, srid.is_some(), enc);
             write_u32(buf, tc, le);
             if let Some(srid) = srid {
                 write_u32(buf, srid as u32, le);
@@ -410,7 +484,7 @@ fn write_geometry_ewkb(
             write_point_ewkb(buf, p, dims, extra, offset, le);
         }
         LineString(ls) => {
-            let tc = type_code_with_flags(WKB_LINESTRING, dims, srid.is_some());
+            let tc = type_code(WKB_LINESTRING, dims, srid.is_some(), enc);
             write_u32(buf, tc, le);
             if let Some(srid) = srid {
                 write_u32(buf, srid as u32, le);
@@ -418,7 +492,7 @@ fn write_geometry_ewkb(
             write_linestring_ewkb(buf, ls, dims, extra, offset, le);
         }
         Polygon(poly) => {
-            let tc = type_code_with_flags(WKB_POLYGON, dims, srid.is_some());
+            let tc = type_code(WKB_POLYGON, dims, srid.is_some(), enc);
             write_u32(buf, tc, le);
             if let Some(srid) = srid {
                 write_u32(buf, srid as u32, le);
@@ -426,18 +500,26 @@ fn write_geometry_ewkb(
             write_polygon_ewkb(buf, poly, dims, extra, offset, le);
         }
         MultiPoint(mp) => {
-            let tc = type_code_with_flags(WKB_MULTIPOINT, dims, srid.is_some());
+            let tc = type_code(WKB_MULTIPOINT, dims, srid.is_some(), enc);
             write_u32(buf, tc, le);
             if let Some(srid) = srid {
                 write_u32(buf, srid as u32, le);
             }
             write_u32(buf, mp.0.len() as u32, le);
             for p in &mp.0 {
-                write_geometry_ewkb(buf, &Geometry::Point(*p), dims, None, extra, offset, le);
+                write_geometry_ewkb(
+                    buf,
+                    &Geometry::Point(*p),
+                    dims,
+                    None,
+                    extra,
+                    offset,
+                    Codec { le, enc },
+                );
             }
         }
         MultiLineString(mls) => {
-            let tc = type_code_with_flags(WKB_MULTILINESTRING, dims, srid.is_some());
+            let tc = type_code(WKB_MULTILINESTRING, dims, srid.is_some(), enc);
             write_u32(buf, tc, le);
             if let Some(srid) = srid {
                 write_u32(buf, srid as u32, le);
@@ -451,12 +533,12 @@ fn write_geometry_ewkb(
                     None,
                     extra,
                     offset,
-                    le,
+                    Codec { le, enc },
                 );
             }
         }
         MultiPolygon(mp) => {
-            let tc = type_code_with_flags(WKB_MULTIPOLYGON, dims, srid.is_some());
+            let tc = type_code(WKB_MULTIPOLYGON, dims, srid.is_some(), enc);
             write_u32(buf, tc, le);
             if let Some(srid) = srid {
                 write_u32(buf, srid as u32, le);
@@ -470,23 +552,23 @@ fn write_geometry_ewkb(
                     None,
                     extra,
                     offset,
-                    le,
+                    Codec { le, enc },
                 );
             }
         }
         GeometryCollection(gc) => {
-            let tc = type_code_with_flags(WKB_GEOMETRYCOLLECTION, dims, srid.is_some());
+            let tc = type_code(WKB_GEOMETRYCOLLECTION, dims, srid.is_some(), enc);
             write_u32(buf, tc, le);
             if let Some(srid) = srid {
                 write_u32(buf, srid as u32, le);
             }
             write_u32(buf, gc.0.len() as u32, le);
             for g in &gc.0 {
-                write_geometry_ewkb(buf, g, dims, None, extra, offset, le);
+                write_geometry_ewkb(buf, g, dims, None, extra, offset, Codec { le, enc });
             }
         }
         Line(l) => {
-            let tc = type_code_with_flags(WKB_LINESTRING, dims, srid.is_some());
+            let tc = type_code(WKB_LINESTRING, dims, srid.is_some(), enc);
             write_u32(buf, tc, le);
             if let Some(srid) = srid {
                 write_u32(buf, srid as u32, le);
@@ -496,7 +578,7 @@ fn write_geometry_ewkb(
             write_coord_ewkb(buf, &l.end, dims, extra, offset, le);
         }
         Rect(r) => {
-            let tc = type_code_with_flags(WKB_POLYGON, dims, srid.is_some());
+            let tc = type_code(WKB_POLYGON, dims, srid.is_some(), enc);
             write_u32(buf, tc, le);
             if let Some(srid) = srid {
                 write_u32(buf, srid as u32, le);
@@ -530,7 +612,7 @@ fn write_geometry_ewkb(
             }
         }
         Triangle(t) => {
-            let tc = type_code_with_flags(WKB_POLYGON, dims, srid.is_some());
+            let tc = type_code(WKB_POLYGON, dims, srid.is_some(), enc);
             write_u32(buf, tc, le);
             if let Some(srid) = srid {
                 write_u32(buf, srid as u32, le);

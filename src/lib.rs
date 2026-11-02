@@ -516,9 +516,9 @@ pub use crs::Crs;
 /// A feature combining geometry with optional attributes and crs.
 pub use feature::Feature;
 pub use io::{
-    Dims, Endianness, EwkbDims, EwkbGeometry, WkbError, WktError, WktGeometry, WriteOptions,
-    infer_wkt_type, read_ewkb, read_wkb, read_wkb_concat, read_wkt, read_wkt_zm, write_ewkb,
-    write_wkb, write_wkb_with_opts, write_wkt, write_wkt_zm,
+    Dims, Encoding, Endianness, EwkbDims, EwkbGeometry, WkbError, WktError, WktGeometry,
+    WriteOptions, infer_wkt_type, read_ewkb, read_wkb, read_wkb_concat, read_wkt, read_wkt_zm,
+    write_ewkb, write_wkb, write_wkb_iso, write_wkb_with_opts, write_wkt, write_wkt_zm,
 };
 #[cfg(feature = "std")]
 pub use io::{

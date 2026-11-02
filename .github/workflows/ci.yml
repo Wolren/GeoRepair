@@ -119,6 +119,19 @@ jobs:
         env:
           PROPTEST_CASES: 1000
 
+  # OGC conformance against GDAL, an implementation we do not own. Every comparison is made
+  # on OGR's bytes or OGR's reading of our bytes, so the crate cannot mark its own homework.
+  conformance:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # stable
+        with:
+          toolchain: stable
+      - run: sudo apt-get update && sudo apt-get install -y gdal-bin
+      - run: cargo build --locked --example conformance_dump
+      - run: python3 conformance/run.py
+
   test-serde:
     runs-on: ubuntu-24.04
     steps:

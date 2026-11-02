@@ -79,8 +79,9 @@ pub use binary::{load_bin, load_bin_stream, write_bin};
 pub use dims::Dims;
 /// Read/write OGC WKB geometry format.
 pub use wkb::{
-    Endianness, EwkbDims, EwkbGeometry, WkbError, WriteOptions, estimate_wkb_size, read_ewkb,
-    read_wkb, read_wkb_concat, write_ewkb, write_wkb, write_wkb_with_opts,
+    Encoding, Endianness, EwkbDims, EwkbGeometry, WkbError, WriteOptions, estimate_wkb_size,
+    read_ewkb, read_wkb, read_wkb_concat, write_ewkb, write_wkb, write_wkb_iso,
+    write_wkb_with_opts,
 };
 #[cfg(feature = "std")]
 pub use wkb::{read_wkb_from, write_wkb_to};
