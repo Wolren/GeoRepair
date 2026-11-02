@@ -280,9 +280,9 @@ fn read_wkt_from_invalid_fails() {
 }
 
 #[test]
-fn read_wkt_from_z_rejected() {
-    let err = read_wkt_from(&b"POINT Z (1 2 3)"[..]).unwrap_err();
-    assert!(matches!(err, WktError::UnsupportedDimension { .. }));
+fn read_wkt_from_reads_z() {
+    let geom = read_wkt_from(&b"POINT Z (1 2 3)"[..]).unwrap();
+    assert_eq!(geom, Geometry::Point(Point::new(1.0, 2.0)));
 }
 
 #[test]
@@ -364,15 +364,15 @@ fn infer_type_whitespace_fails() {
 }
 
 #[test]
-fn infer_type_z_rejected() {
-    let err = infer_wkt_type("POINT Z (1 2 3)").unwrap_err();
-    assert!(matches!(err, WktError::UnsupportedDimension { .. }));
+fn infer_type_z_reports_three_ordinates() {
+    let (name, dims) = infer_wkt_type("POINT Z (1 2 3)").unwrap();
+    assert_eq!((name, dims), ("POINT", 3));
 }
 
 #[test]
-fn infer_type_zm_rejected() {
-    let err = infer_wkt_type("POINT ZM (1 2 3 4)").unwrap_err();
-    assert!(matches!(err, WktError::UnsupportedDimension { .. }));
+fn infer_type_zm_reports_four_ordinates() {
+    let (name, dims) = infer_wkt_type("POINT ZM (1 2 3 4)").unwrap();
+    assert_eq!((name, dims), ("POINT", 4));
 }
 
 #[test]
@@ -493,7 +493,7 @@ fn malformed_wkt_rejected() {
         "POINT (EMPTY)",                   // EMPTY is a token, not a coordinate
         "LINESTRING ()",                   // empty coordinate list without EMPTY keyword
         "POINT (1)",                       // missing y
-        "POINT (1 2 3)",                   // undeclared Z is rejected (2D only)
+        "POINT (1 2 3)",                   // no modifier: ordinates are not inferred
         "POINT (1 2, 3 4)",                // extra coordinate
         "POINT 1 2",                       // missing parens
         "POINT (1 2))",                    // unbalanced
@@ -501,7 +501,6 @@ fn malformed_wkt_rejected() {
         "POINT (1 2) POINT (3 4)",         // trailing geometry
         "",                                // empty input
         "   ",                             // whitespace only
-        "POINT Z (1 2 3)",                 // Z modifier
         "POINT (1 2",                      // truncated
         "GEOMETRYCOLLECTION (POINT (1 2)", // unbalanced collection
         "MULTIPOINT ()",                   // empty parens without EMPTY keyword

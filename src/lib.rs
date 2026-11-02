@@ -342,7 +342,8 @@
 //! use geo_repair::{
 //!     diagnose_file, load, load_bin, read_wkb, read_wkb_concat, read_wkb_from,
 //!     read_ewkb, write_ewkb, EwkbGeometry, EwkbDims,
-//!     read_wkt, read_wkt_from, write_wkt, write_wkt_to, infer_wkt_type,
+//!     read_wkt, read_wkt_from, read_wkt_zm, write_wkt, write_wkt_to, write_wkt_zm,
+//!     infer_wkt_type,
 //!     write_wkb, write_wkb_to, write_wkb_with_opts, Endianness, WriteOptions,
 //!     repair_file, save, MakeValidConfig,
 //! };
@@ -381,6 +382,10 @@
 //! let geom = read_wkt(&wkt).unwrap();
 //! write_wkt_to(&geom, &mut std::io::stdout()).unwrap();
 //! let geom = read_wkt_from(wkt.as_bytes()).unwrap();
+//!
+//! // Z/M survives the WKT path when asked for
+//! let zm = read_wkt_zm("POINT Z (1 2 3)").unwrap();
+//! assert_eq!(write_wkt_zm(&zm), "POINT Z (1.0 2.0 3.0)");
 //!
 //! // Peek at WKT type without parsing
 //! let (type_name, _dims) = infer_wkt_type("POLYGON ((0 0, 1 0, 1 1, 0 1, 0 0))").unwrap();
@@ -511,14 +516,14 @@ pub use crs::Crs;
 /// A feature combining geometry with optional attributes and crs.
 pub use feature::Feature;
 pub use io::{
-    Endianness, EwkbDims, EwkbGeometry, WkbError, WktError, WriteOptions, infer_wkt_type,
-    read_ewkb, read_wkb, read_wkb_concat, read_wkt, write_ewkb, write_wkb, write_wkb_with_opts,
-    write_wkt,
+    Dims, Endianness, EwkbDims, EwkbGeometry, WkbError, WktError, WktGeometry, WriteOptions,
+    infer_wkt_type, read_ewkb, read_wkb, read_wkb_concat, read_wkt, read_wkt_zm, write_ewkb,
+    write_wkb, write_wkb_with_opts, write_wkt, write_wkt_zm,
 };
 #[cfg(feature = "std")]
 pub use io::{
-    diagnose_file, load, load_bin, load_bin_stream, read_wkb_from, read_wkt_from, repair_file,
-    save, write_wkb_to, write_wkt_to,
+    diagnose_file, load, load_bin, load_bin_stream, read_wkb_from, read_wkt_from, read_wkt_zm_from,
+    repair_file, save, write_wkb_to, write_wkt_to, write_wkt_zm_to,
 };
 /// Trait for repairing invalid geometries.
 pub use make_valid::MakeValid;

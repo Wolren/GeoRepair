@@ -1,7 +1,6 @@
 //! WKT parser: single-pass tokenizer + reader.
 
 use alloc::string::String;
-use alloc::string::ToString;
 use alloc::vec::Vec;
 /// Each level consumes at least ~14 bytes of input. The cap never rejects real data
 /// while bounding recursion (stack overflow is an uncatchable abort).
@@ -14,9 +13,27 @@ use std::io::Read;
 pub(crate) struct Parser<'a> {
     s: &'a [u8],
     i: usize,
+    /// Extra ordinates in flat coordinate order, kept only when the caller asks.
+    extra: Vec<f64>,
+    keep_extra: bool,
+    /// Dimension of the outer geometry; nested members compare against it.
+    root_dims: Option<Dims>,
+    /// Position and dimension of the first member that disagrees with `root_dims`.
+    mixed: Option<(usize, Dims)>,
 }
 
 impl<'a> Parser<'a> {
+    fn new(s: &'a [u8], keep_extra: bool) -> Self {
+        Parser {
+            s,
+            i: 0,
+            extra: Vec::new(),
+            keep_extra,
+            root_dims: None,
+            mixed: None,
+        }
+    }
+
     fn peek(&self) -> u8 {
         self.s[self.i]
     }
@@ -45,7 +62,7 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    fn peek_keyword(&mut self) -> Result<(Keyword, u32), WktError> {
+    fn peek_keyword(&mut self) -> Result<(Keyword, Dims, bool), WktError> {
         self.skip_ws();
         let start = self.i;
         while self.i < self.s.len()
@@ -54,7 +71,7 @@ impl<'a> Parser<'a> {
             self.i += 1;
         }
         let kw = &self.s[start..self.i];
-        let dims = self.read_dims()?;
+        let (dims, explicit) = self.read_dims();
         let kw_upper: Vec<u8> = kw.iter().map(|b| b.to_ascii_uppercase()).collect();
         let kw = kw_upper.as_slice();
         let kw = match kw {
@@ -73,26 +90,28 @@ impl<'a> Parser<'a> {
                 )));
             }
         };
-        Ok((kw, dims))
+        Ok((kw, dims, explicit))
     }
 
-    fn read_dims(&mut self) -> Result<u32, WktError> {
+    /// Reads the optional Z, M or ZM modifier that follows a geometry keyword.
+    fn read_dims(&mut self) -> (Dims, bool) {
         self.skip_ws();
-        if self.i + 1 < self.s.len() && &self.s[self.i..self.i + 2] == b"ZM" {
-            let modif = String::from_utf8_lossy(&self.s[self.i..self.i + 2]).to_string();
-            return Err(WktError::UnsupportedDimension {
-                pos: self.i,
-                modifier: modif,
-            });
-        } else if self.i < self.s.len() && (self.s[self.i] == b'Z' || self.s[self.i] == b'M') {
-            let modif = String::from_utf8_lossy(&self.s[self.i..self.i + 1]).to_string();
-            return Err(WktError::UnsupportedDimension {
-                pos: self.i,
-                modifier: modif,
-            });
+        let s = self.s;
+        let rest = &s[self.i..];
+        if rest.len() >= 2 && rest[..2].eq_ignore_ascii_case(b"ZM") {
+            self.i += 2;
+            (Dims::XYZM, true)
+        } else if !rest.is_empty() && rest[..1].eq_ignore_ascii_case(b"Z") {
+            self.i += 1;
+            (Dims::XYZ, true)
+        } else if !rest.is_empty() && rest[..1].eq_ignore_ascii_case(b"M") {
+            self.i += 1;
+            (Dims::XYM, true)
+        } else {
+            (Dims::XY, false)
         }
-        Ok(2)
     }
+
     fn read_f64(&mut self) -> Result<f64, WktError> {
         self.skip_ws();
         let start = self.i;
@@ -162,13 +181,26 @@ impl<'a> Parser<'a> {
         fast_float2::parse::<f64, _>(&self.s[start..self.i])
             .map_err(|_| self.err("expected number"))
     }
-    fn read_coord(&mut self, _dims: u32) -> Result<Coord<f64>, WktError> {
+
+    fn read_coord(&mut self, dims: Dims) -> Result<Coord<f64>, WktError> {
         let x = self.read_f64()?;
         let y = self.read_f64()?;
+        if dims.has_z {
+            let z = self.read_f64()?;
+            if self.keep_extra {
+                self.extra.push(z);
+            }
+        }
+        if dims.has_m {
+            let m = self.read_f64()?;
+            if self.keep_extra {
+                self.extra.push(m);
+            }
+        }
         Ok(Coord { x, y })
     }
 
-    fn read_coord_list(&mut self, dims: u32) -> Result<Vec<Coord<f64>>, WktError> {
+    fn read_coord_list(&mut self, dims: Dims) -> Result<Vec<Coord<f64>>, WktError> {
         self.skip_ws();
         let mut coords = Vec::new();
         coords.push(self.read_coord(dims)?);
@@ -189,7 +221,7 @@ impl<'a> Parser<'a> {
         Ok(coords)
     }
 
-    fn parse_point(&mut self, dims: u32) -> Result<Geometry<f64>, WktError> {
+    fn parse_point(&mut self, dims: Dims) -> Result<Geometry<f64>, WktError> {
         self.skip_ws();
         if self.i < self.s.len() && (self.peek() == b'E' || self.peek() == b'e') {
             let rest = &self.s[self.i..];
@@ -207,7 +239,7 @@ impl<'a> Parser<'a> {
         Ok(Geometry::Point(Point(c)))
     }
 
-    fn parse_linestring(&mut self, dims: u32) -> Result<Geometry<f64>, WktError> {
+    fn parse_linestring(&mut self, dims: Dims) -> Result<Geometry<f64>, WktError> {
         self.skip_ws();
         if self.i < self.s.len() && (self.s[self.i] == b'E' || self.s[self.i] == b'e') {
             let rest = &self.s[self.i..];
@@ -222,7 +254,7 @@ impl<'a> Parser<'a> {
         Ok(Geometry::LineString(LineString::new(coords)))
     }
 
-    fn parse_polygon(&mut self, dims: u32) -> Result<Geometry<f64>, WktError> {
+    fn parse_polygon(&mut self, dims: Dims) -> Result<Geometry<f64>, WktError> {
         self.skip_ws();
         if self.i < self.s.len() && (self.s[self.i] == b'E' || self.s[self.i] == b'e') {
             let rest = &self.s[self.i..];
@@ -299,7 +331,7 @@ impl<'a> Parser<'a> {
         Ok(Geometry::Polygon(Polygon::new(exterior, rings)))
     }
 
-    fn parse_multipoint(&mut self, dims: u32) -> Result<Geometry<f64>, WktError> {
+    fn parse_multipoint(&mut self, dims: Dims) -> Result<Geometry<f64>, WktError> {
         self.skip_ws();
         if self.i < self.s.len() && (self.s[self.i] == b'E' || self.s[self.i] == b'e') {
             let rest = &self.s[self.i..];
@@ -352,7 +384,7 @@ impl<'a> Parser<'a> {
         Ok(Geometry::MultiPoint(MultiPoint(points)))
     }
 
-    fn parse_multilinestring(&mut self, dims: u32) -> Result<Geometry<f64>, WktError> {
+    fn parse_multilinestring(&mut self, dims: Dims) -> Result<Geometry<f64>, WktError> {
         self.skip_ws();
         if self.i < self.s.len() && (self.s[self.i] == b'E' || self.s[self.i] == b'e') {
             let rest = &self.s[self.i..];
@@ -400,7 +432,7 @@ impl<'a> Parser<'a> {
         Ok(Geometry::MultiLineString(MultiLineString(lines)))
     }
 
-    fn parse_multipolygon(&mut self, dims: u32) -> Result<Geometry<f64>, WktError> {
+    fn parse_multipolygon(&mut self, dims: Dims) -> Result<Geometry<f64>, WktError> {
         self.skip_ws();
         if self.i < self.s.len() && (self.s[self.i] == b'E' || self.s[self.i] == b'e') {
             let rest = &self.s[self.i..];
@@ -501,7 +533,11 @@ impl<'a> Parser<'a> {
         Ok(Geometry::MultiPolygon(MultiPolygon(polys)))
     }
 
-    fn parse_geometrycollection(&mut self, depth: usize) -> Result<Geometry<f64>, WktError> {
+    fn parse_geometrycollection(
+        &mut self,
+        depth: usize,
+        dims: Dims,
+    ) -> Result<Geometry<f64>, WktError> {
         self.skip_ws();
         if self.i < self.s.len() && (self.s[self.i] == b'E' || self.s[self.i] == b'e') {
             let rest = &self.s[self.i..];
@@ -538,7 +574,7 @@ impl<'a> Parser<'a> {
                     continue;
                 }
             }
-            geoms.push(self.parse_any(depth + 1)?);
+            geoms.push(self.parse_any(depth + 1, dims)?);
             saw_any = true;
         }
         self.expect(b')')?;
@@ -548,13 +584,26 @@ impl<'a> Parser<'a> {
         Ok(Geometry::GeometryCollection(GeometryCollection(geoms)))
     }
 
-    fn parse_any(&mut self, depth: usize) -> Result<Geometry<f64>, WktError> {
+    fn parse_any(&mut self, depth: usize, inherited: Dims) -> Result<Geometry<f64>, WktError> {
         // A crafted document can nest arbitrarily deep and overflow the stack
         // (uncatchable abort).
         if depth > MAX_WKT_NESTING {
             return Err(self.err("geometry nesting exceeds limit"));
         }
-        let (kw, dims) = self.peek_keyword()?;
+        self.skip_ws();
+        let header_pos = self.i;
+        let (kw, header_dims, explicit) = self.peek_keyword()?;
+        // A member without a modifier inherits the collection dimension, as GEOS does.
+        let dims = if explicit { header_dims } else { inherited };
+        if self.keep_extra {
+            match self.root_dims {
+                None => self.root_dims = Some(dims),
+                Some(root) if root != dims && self.mixed.is_none() => {
+                    self.mixed = Some((header_pos, dims));
+                }
+                Some(_) => {}
+            }
+        }
         match kw {
             Keyword::Point => self.parse_point(dims),
             Keyword::LineString => self.parse_linestring(dims),
@@ -562,7 +611,7 @@ impl<'a> Parser<'a> {
             Keyword::MultiPoint => self.parse_multipoint(dims),
             Keyword::MultiLineString => self.parse_multilinestring(dims),
             Keyword::MultiPolygon => self.parse_multipolygon(dims),
-            Keyword::GeometryCollection => self.parse_geometrycollection(depth),
+            Keyword::GeometryCollection => self.parse_geometrycollection(depth, dims),
         }
     }
 }
@@ -577,22 +626,26 @@ pub(crate) enum Keyword {
     GeometryCollection,
 }
 
-/// Parse a WKT string into a `Geometry<f64>`.
-pub fn read_wkt(input: &str) -> Result<Geometry<f64>, WktError> {
-    let mut p = Parser {
-        s: input.as_bytes(),
-        i: 0,
-    };
+fn parse_document(s: &[u8], keep_extra: bool) -> Result<(Parser<'_>, Geometry<f64>), WktError> {
+    let mut p = Parser::new(s, keep_extra);
     p.skip_ws();
     if p.i >= p.s.len() {
         return Err(WktError::EmptyInput);
     }
-    let geom = p.parse_any(0)?;
+    let geometry = p.parse_any(0, Dims::XY)?;
     p.skip_ws();
     if p.i < p.s.len() {
         return Err(WktError::TrailingCharacters { pos: p.i });
     }
-    Ok(geom)
+    Ok((p, geometry))
+}
+
+/// Parse a WKT string into a `Geometry<f64>`.
+///
+/// Z, M and ZM modifiers are read and their ordinates dropped, because `geo::Coord`
+/// holds x and y only. Use [`read_wkt_zm`] to keep them.
+pub fn read_wkt(input: &str) -> Result<Geometry<f64>, WktError> {
+    parse_document(input.as_bytes(), false).map(|(_, geometry)| geometry)
 }
 
 /// Read a WKT geometry from any `io::Read` source.
@@ -603,12 +656,39 @@ pub fn read_wkt_from(mut reader: impl Read) -> Result<Geometry<f64>, WktError> {
     read_wkt(&s)
 }
 
-/// Peek at the beginning of a WKT string to determine the geometry type name and
-/// dimension (always 2 for GeoRepair, since Z/M/ZM are rejected).
+/// Parse WKT and keep its dimension modifier and extra ordinates.
+///
+/// A collection whose members carry different modifiers returns
+/// [`WktError::MixedDimensions`], because one `dims` value describes the whole geometry.
+pub fn read_wkt_zm(input: &str) -> Result<WktGeometry, WktError> {
+    let (p, geometry) = parse_document(input.as_bytes(), true)?;
+    if let Some((pos, found)) = p.mixed {
+        return Err(WktError::MixedDimensions {
+            pos,
+            outer: modifier(p.root_dims.unwrap_or(Dims::XY)).unwrap_or("XY"),
+            found: modifier(found).unwrap_or("XY"),
+        });
+    }
+    Ok(WktGeometry {
+        geometry,
+        dims: p.root_dims.unwrap_or(Dims::XY),
+        extra_coords: p.extra,
+    })
+}
+
+/// Read a WKT geometry with its modifier from any `io::Read` source.
+#[cfg(feature = "std")]
+pub fn read_wkt_zm_from(mut reader: impl Read) -> Result<WktGeometry, WktError> {
+    let mut s = String::new();
+    reader.read_to_string(&mut s).map_err(WktError::IoError)?;
+    read_wkt_zm(&s)
+}
+
+/// Peek at the beginning of a WKT string to determine the geometry type name and the
+/// number of ordinates per coordinate (2 for XY, 3 for Z or M, 4 for ZM).
 ///
 /// # Errors
-/// Returns [`WktError::UnknownGeometryType`] if the keyword is not recognized,
-/// [`WktError::UnsupportedDimension`] for Z/M/ZM modifiers, and
+/// Returns [`WktError::ParseError`] if the keyword is not recognized, and
 /// [`WktError::EmptyInput`] for empty/whitespace-only strings.
 ///
 /// # Example
@@ -621,15 +701,12 @@ pub fn read_wkt_from(mut reader: impl Read) -> Result<Geometry<f64>, WktError> {
 /// ```
 pub fn infer_wkt_type(input: &str) -> Result<(&'static str, u32), WktError> {
     use super::read::{Keyword::*, Parser};
-    let mut p = Parser {
-        s: input.as_bytes(),
-        i: 0,
-    };
+    let mut p = Parser::new(input.as_bytes(), false);
     p.skip_ws();
     if p.i >= p.s.len() {
         return Err(WktError::EmptyInput);
     }
-    let (kw, dims) = p.peek_keyword()?;
+    let (kw, dims, _) = p.peek_keyword()?;
     let name = match kw {
         Point => "POINT",
         LineString => "LINESTRING",
@@ -639,5 +716,5 @@ pub fn infer_wkt_type(input: &str) -> Result<(&'static str, u32), WktError> {
         MultiPolygon => "MULTIPOLYGON",
         GeometryCollection => "GEOMETRYCOLLECTION",
     };
-    Ok((name, dims))
+    Ok((name, dims.coord_count() as u32))
 }

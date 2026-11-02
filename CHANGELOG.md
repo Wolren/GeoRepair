@@ -2,6 +2,32 @@
 
 ## [Unreleased]
 
+### Added
+
+- WKT Z/M support. `read_wkt_zm` returns `WktGeometry { geometry, dims, extra_coords }`,
+  with the extra ordinates in flat coordinate order: z then m, exterior before holes,
+  members in document order. That is the same layout `EwkbGeometry` uses, and
+  `write_wkt_zm` writes the modifier back, so Z and M survive a WKT round trip.
+  `read_wkt_zm_from`, `write_wkt_zm_to` and `WktGeometry` complete the surface.
+- `Dims` is now the one dimension type behind both codecs, and `EwkbDims` names the same
+  type, so a `WktGeometry` converts to an `EwkbGeometry` with no mapping.
+
+### Changed
+
+- `read_wkt` accepts `POINT Z (1 2 3)`, `POINT M (...)` and `POINT ZM (...)` on every
+  geometry type, keeps x and y, and drops the extra ordinates. OGR and QGIS write the
+  modifier for any Z-enabled layer, so the crate now reads files GEOS reads. A member
+  without a modifier inherits its collection dimension, as GEOS does. `infer_wkt_type`
+  reports 3 or 4 ordinates for a dimmed geometry.
+- `read_ewkb` keeps the M flag instead of reporting every 3-ordinate geometry as XYZ. An
+  M geometry read and written back used to come out as Z.
+
+### Removed
+
+- `WktError::UnsupportedDimension`. The parser no longer rejects a dimension modifier;
+  `read_wkt_zm` reports `WktError::MixedDimensions` when a collection member disagrees
+  with the document dimension.
+
 ### Fixed
 
 - The WKT writer no longer writes `EMPTY` inside a ring list. A polygon whose hole held

@@ -32,6 +32,12 @@ Two strategies, chosen by geometry type:
 WKB and WKT reading and writing, plus a custom binary batch format, are
 built in with no extra dependencies.
 
+WKT keeps Z and M when you ask for it: `read_wkt_zm` returns the geometry, its
+`Dims` and the extra ordinates in flat coordinate order (the same layout as
+`read_ewkb`), and `write_wkt_zm` writes the modifier back. `read_wkt` reads the
+same files and returns x/y, so a Z-enabled layer from OGR or QGIS loads without
+error.
+
 Everything is evaluated against a huge ported test sets from GEOS, CGAL and own fuzz tests. 
 The result should always come as valid per GEOS, but the strategy differences might make the output slightly differ.
 
@@ -223,6 +229,9 @@ we win. Methodology: `docs/BENCHMARKS.md`. Regenerate:
 8. **`proj` requires native PROJ and is mutually exclusive with `io-gpkg`**
    (sqlite3 link conflict). `io-gpkg` is opt-in, so a `proj` build enables
    `proj` and leaves `io-gpkg` off.
+9. **WKT reads a dimension modifier, it does not infer one from the ordinate
+   count:** `POINT Z (1 2 3)` parses, `POINT (1 2 3)` stays an error, where GEOS
+   infers Z from the third ordinate.
 
 ## Integration with the geo ecosystem
 

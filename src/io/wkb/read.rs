@@ -35,12 +35,7 @@ pub fn read_wkb_from(mut reader: impl Read) -> Result<Geometry<f64>, WkbError> {
 pub fn read_ewkb(buf: &[u8]) -> Result<EwkbGeometry, WkbError> {
     let mut pos = 0;
     let mut extra_coords = Vec::new();
-    let (geometry, srid, raw_dims, _) = read_geometry_inner(buf, &mut pos, &mut extra_coords, 0)?;
-    let dims = match raw_dims {
-        4 => EwkbDims::XYZM,
-        3 => EwkbDims::XYZ,
-        _ => EwkbDims::XY,
-    };
+    let (geometry, srid, dims, _) = read_geometry_inner(buf, &mut pos, &mut extra_coords, 0)?;
     Ok(EwkbGeometry {
         geometry,
         srid,
@@ -55,7 +50,7 @@ pub(crate) fn read_geometry_inner(
     pos: &mut usize,
     extra_coords: &mut Vec<f64>,
     depth: usize,
-) -> Result<(Geometry<f64>, Option<i32>, u8, u32), WkbError> {
+) -> Result<(Geometry<f64>, Option<i32>, EwkbDims, u32), WkbError> {
     if depth > MAX_WKB_NESTING {
         return Err(WkbError::UnexpectedEof);
     }
@@ -72,22 +67,17 @@ pub(crate) fn read_geometry_inner(
         None
     };
 
-    let dims: u8 = if has_z && has_m {
-        4
-    } else if has_z || has_m {
-        3
-    } else {
-        2
-    };
+    let dims = EwkbDims { has_z, has_m };
 
     let geom = match type_code {
-        WKB_POINT => read_point_inner(buf, pos, le, dims as u32, extra_coords).map(Geometry::Point),
+        WKB_POINT => read_point_inner(buf, pos, le, dims.coord_count() as u32, extra_coords)
+            .map(Geometry::Point),
         WKB_LINESTRING => {
-            read_linestring_inner(buf, pos, le, dims as u32, extra_coords).map(Geometry::LineString)
+            read_linestring_inner(buf, pos, le, dims.coord_count() as u32, extra_coords)
+                .map(Geometry::LineString)
         }
-        WKB_POLYGON => {
-            read_polygon_inner(buf, pos, le, dims as u32, extra_coords).map(Geometry::Polygon)
-        }
+        WKB_POLYGON => read_polygon_inner(buf, pos, le, dims.coord_count() as u32, extra_coords)
+            .map(Geometry::Polygon),
         WKB_MULTIPOINT => {
             let n = read_bounded_count(buf, pos, le, 5)?;
             let mut points = Vec::with_capacity(n);

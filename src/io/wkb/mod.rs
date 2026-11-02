@@ -65,36 +65,8 @@ impl fmt::Display for WkbError {
 #[cfg(feature = "std")]
 impl std::error::Error for WkbError {}
 
-/// Dimension flags for EWKB extended dimensions (Z/M).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct EwkbDims {
-    pub has_z: bool,
-    pub has_m: bool,
-}
-
-impl EwkbDims {
-    pub const XY: EwkbDims = EwkbDims {
-        has_z: false,
-        has_m: false,
-    };
-    pub const XYZ: EwkbDims = EwkbDims {
-        has_z: true,
-        has_m: false,
-    };
-    pub const XYM: EwkbDims = EwkbDims {
-        has_z: false,
-        has_m: true,
-    };
-    pub const XYZM: EwkbDims = EwkbDims {
-        has_z: true,
-        has_m: true,
-    };
-
-    /// Number of coordinate values per point (2 for XY, 3 for xyz/xym, 4 for xyzm).
-    pub fn coord_count(self) -> u8 {
-        (self.has_z as u8) + (self.has_m as u8) + 2
-    }
-}
+/// Dimension flags for EWKB extended dimensions (Z/M). Same type as [`Dims`](crate::io::Dims).
+pub use crate::io::dims::Dims as EwkbDims;
 
 /// EWKB geometry that keeps SRID and Z/M dimension data.
 #[derive(Debug, Clone)]

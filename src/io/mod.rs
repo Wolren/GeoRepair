@@ -55,6 +55,8 @@ pub mod binary;
 /// csv with WKT in the first column (`io-csv`).
 #[cfg(feature = "io-csv")]
 pub mod csv_io;
+/// Coordinate dimension flags shared by the WKT and WKB codecs.
+pub mod dims;
 /// OGC gml 3.2 geometry subset (`.gml`) (`io-gml`).
 #[cfg(feature = "io-gml")]
 pub mod gml;
@@ -73,6 +75,8 @@ pub mod wkt;
 /// Load polygons from a custom binary file.
 #[cfg(feature = "std")]
 pub use binary::{load_bin, load_bin_stream, write_bin};
+/// Coordinate dimension flags for the WKT and WKB codecs.
+pub use dims::Dims;
 /// Read/write OGC WKB geometry format.
 pub use wkb::{
     Endianness, EwkbDims, EwkbGeometry, WkbError, WriteOptions, estimate_wkb_size, read_ewkb,
@@ -81,9 +85,11 @@ pub use wkb::{
 #[cfg(feature = "std")]
 pub use wkb::{read_wkb_from, write_wkb_to};
 /// Read/write OGC WKT text format.
-pub use wkt::{WktError, infer_wkt_type, read_wkt, write_wkt};
+pub use wkt::{
+    WktError, WktGeometry, infer_wkt_type, read_wkt, read_wkt_zm, write_wkt, write_wkt_zm,
+};
 #[cfg(feature = "std")]
-pub use wkt::{read_wkt_from, write_wkt_to};
+pub use wkt::{read_wkt_from, read_wkt_zm_from, write_wkt_to, write_wkt_zm_to};
 
 #[cfg(feature = "std")]
 fn extension(path: &str) -> &str {

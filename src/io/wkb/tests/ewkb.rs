@@ -138,6 +138,23 @@ fn ewkb_read_with_zm() {
 }
 
 #[test]
+fn ewkb_read_with_m() {
+    let mut wkb = Vec::new();
+    wkb.push(1);
+    let type_with_m = 1u32 | WKB_M_FLAG;
+    wkb.extend_from_slice(&type_with_m.to_le_bytes());
+    wkb.extend_from_slice(&1.0f64.to_le_bytes());
+    wkb.extend_from_slice(&2.0f64.to_le_bytes());
+    wkb.extend_from_slice(&3.0f64.to_le_bytes());
+
+    let ewkb = read_ewkb(&wkb).unwrap();
+    assert_eq!(ewkb.geometry, make_test_geom());
+    assert_eq!(ewkb.srid, None);
+    assert_eq!(ewkb.dims, EwkbDims::XYM);
+    assert_eq!(ewkb.extra_coords, vec![3.0]);
+}
+
+#[test]
 fn ewkb_write_read_roundtrip_xy() {
     let ewkb = EwkbGeometry {
         geometry: make_test_geom(),
@@ -166,6 +183,21 @@ fn ewkb_write_read_roundtrip_xyz() {
     assert_eq!(back.geometry, ewkb.geometry);
     assert_eq!(back.dims, EwkbDims::XYZ);
     assert_eq!(back.extra_coords, vec![99.0]);
+}
+
+#[test]
+fn ewkb_write_read_roundtrip_xym() {
+    let ewkb = EwkbGeometry {
+        geometry: make_test_geom(),
+        srid: None,
+        dims: EwkbDims::XYM,
+        extra_coords: vec![42.0],
+    };
+    let bytes = write_ewkb(&ewkb);
+    let back = read_ewkb(&bytes).unwrap();
+    assert_eq!(back.geometry, ewkb.geometry);
+    assert_eq!(back.dims, EwkbDims::XYM);
+    assert_eq!(back.extra_coords, vec![42.0]);
 }
 
 #[test]

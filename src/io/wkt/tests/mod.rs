@@ -4,7 +4,7 @@
 #[cfg(test)]
 use super::*;
 use crate::io::{load, save};
-use geo::{Coord, Geometry, LineString, MultiPolygon, Polygon};
+use geo::{Coord, Geometry, LineString, MultiPolygon, Point, Polygon};
 use std::time::Instant;
 
 #[test]
@@ -130,27 +130,15 @@ fn geometrycollection_empty() {
 }
 
 #[test]
-fn z_modifier_rejected() {
-    let err = read_wkt("POINT Z (1 2 3)").unwrap_err();
-    assert!(matches!(err, WktError::UnsupportedDimension { .. }));
-    let msg = err.to_string();
-    assert!(msg.contains("Z"), "{msg}");
+fn z_modifier_reads_as_xy() {
+    let geom = read_wkt("POINT Z (1 2 3)").unwrap();
+    assert_eq!(geom, Geometry::Point(Point::new(1.0, 2.0)));
 }
 
 #[test]
-fn zm_modifier_rejected() {
-    let err = read_wkt("POINT ZM (1 2 3 4)").unwrap_err();
-    assert!(matches!(err, WktError::UnsupportedDimension { .. }));
-    let msg = err.to_string();
-    assert!(msg.contains("ZM"), "{msg}");
-}
-
-#[test]
-fn m_modifier_rejected() {
-    let err = read_wkt("POINT M (1 2 3)").unwrap_err();
-    assert!(matches!(err, WktError::UnsupportedDimension { .. }));
-    let msg = err.to_string();
-    assert!(msg.contains("M"), "{msg}");
+fn m_modifier_reads_as_xy() {
+    let geom = read_wkt("POINT M (1 2 3)").unwrap();
+    assert_eq!(geom, Geometry::Point(Point::new(1.0, 2.0)));
 }
 
 #[test]
@@ -335,3 +323,4 @@ fn multipolygon_skips_empty_parts() {
 }
 
 mod double;
+mod zm;
