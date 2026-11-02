@@ -226,3 +226,197 @@ pub fn make_valid_with_policy(
 ) -> (Geometry<f64>, OutputReport) {
     apply_policy(geometry.make_valid_with_config(config), policy)
 }
+
+/// Drop what a closed host format cannot carry: non-finite coordinates, empty members, open rings.
+///
+/// Returns `None` when nothing usable survives. Every rule drops, none repairs: a ring is closed
+/// only because an open ring cannot be written, and no coordinate is moved.
+pub fn sanitize<T: GeoFloat>(geometry: &Geometry<T>) -> Option<Geometry<T>> {
+    match geometry {
+        Geometry::Point(p) => finite_point(p).map(Geometry::Point),
+        Geometry::MultiPoint(mp) => {
+            let pts: Vec<Point<T>> = mp.0.iter().filter_map(finite_point).collect();
+            if pts.is_empty() {
+                None
+            } else {
+                Some(Geometry::MultiPoint(MultiPoint::new(pts)))
+            }
+        }
+        Geometry::Line(l) => {
+            if finite_pair(l.start, l.end) {
+                Some(Geometry::Line(*l))
+            } else {
+                None
+            }
+        }
+        Geometry::LineString(ls) => sanitize_line(ls).map(Geometry::LineString),
+        Geometry::MultiLineString(mls) => {
+            let lines: Vec<LineString<T>> = mls.0.iter().filter_map(sanitize_line).collect();
+            if lines.is_empty() {
+                None
+            } else {
+                Some(Geometry::MultiLineString(MultiLineString::new(lines)))
+            }
+        }
+        Geometry::Polygon(p) => sanitize_polygon(p).map(Geometry::Polygon),
+        Geometry::MultiPolygon(mp) => {
+            let polys: Vec<Polygon<T>> = mp.0.iter().filter_map(sanitize_polygon).collect();
+            if polys.is_empty() {
+                None
+            } else {
+                Some(Geometry::MultiPolygon(MultiPolygon::new(polys)))
+            }
+        }
+        Geometry::Rect(r) => sanitize_polygon(&r.to_polygon()).map(Geometry::Polygon),
+        Geometry::Triangle(t) => {
+            let rings = sanitize_ring(&t.to_polygon().exterior().0);
+            rings.map(|r| Geometry::Polygon(Polygon::new(LineString::new(r), vec![])))
+        }
+        Geometry::GeometryCollection(gc) => {
+            let parts: Vec<Geometry<T>> = gc.0.iter().filter_map(sanitize).collect();
+            // The type is preserved: unwrapping a single survivor would make the output shape
+            // depend on the data. Flattening is `apply_policy`'s job, not this pass.
+            if parts.is_empty() {
+                None
+            } else {
+                Some(Geometry::GeometryCollection(
+                    geo::GeometryCollection::new_from(parts),
+                ))
+            }
+        }
+    }
+}
+
+fn finite_coord<T: GeoFloat>(c: geo::Coord<T>) -> bool {
+    c.x.is_finite() && c.y.is_finite()
+}
+
+fn finite_point<T: GeoFloat>(p: &Point<T>) -> Option<Point<T>> {
+    if finite_coord(p.0) { Some(*p) } else { None }
+}
+
+fn finite_pair<T: GeoFloat>(a: geo::Coord<T>, b: geo::Coord<T>) -> bool {
+    finite_coord(a) && finite_coord(b)
+}
+
+fn sanitize_line<T: GeoFloat>(ls: &LineString<T>) -> Option<LineString<T>> {
+    if ls.0.len() < 2 || !ls.0.iter().all(|c| finite_coord(*c)) {
+        return None;
+    }
+    Some(ls.clone())
+}
+
+fn sanitize_ring<T: GeoFloat>(ring: &[geo::Coord<T>]) -> Option<Vec<geo::Coord<T>>> {
+    if ring.len() < 3 || !ring.iter().all(|c| finite_coord(*c)) {
+        return None;
+    }
+    let mut out = ring.to_vec();
+    if out[0] != out[out.len() - 1] {
+        out.push(out[0]);
+    }
+    if out.len() < 4 {
+        return None;
+    }
+    Some(out)
+}
+
+fn sanitize_polygon<T: GeoFloat>(p: &Polygon<T>) -> Option<Polygon<T>> {
+    let exterior = sanitize_ring(&p.exterior().0)?;
+    let mut holes = Vec::with_capacity(p.interiors().len());
+    for h in p.interiors() {
+        if let Some(r) = sanitize_ring(&h.0) {
+            holes.push(LineString::new(r));
+        }
+    }
+    Some(Polygon::new(LineString::new(exterior), holes))
+}
+
+#[cfg(test)]
+mod sanitize_tests {
+    use super::sanitize;
+    use geo::{Geometry, LineString, MultiPoint, Point, Polygon};
+
+    fn ring(coords: &[(f64, f64)]) -> LineString<f64> {
+        LineString::from(coords.to_vec())
+    }
+
+    #[test]
+    fn a_non_finite_point_is_dropped() {
+        let g = Geometry::Point(Point::new(f64::NAN, 2.0));
+        assert!(sanitize(&g).is_none());
+        let g = Geometry::Point(Point::new(f64::INFINITY, 2.0));
+        assert!(sanitize(&g).is_none());
+    }
+
+    #[test]
+    fn a_multipoint_keeps_only_finite_members() {
+        let g = Geometry::MultiPoint(MultiPoint::new(vec![
+            Point::new(f64::NAN, f64::NAN),
+            Point::new(1.0, 2.0),
+        ]));
+        match sanitize(&g).expect("one member survives") {
+            Geometry::MultiPoint(mp) => assert_eq!(mp.0.len(), 1),
+            other => panic!("type changed to {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_open_ring_is_closed_and_not_moved() {
+        let poly = Polygon::new(ring(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]), vec![]);
+        match sanitize(&Geometry::Polygon(poly)).expect("a triangle ring survives") {
+            Geometry::Polygon(p) => {
+                let c = &p.exterior().0;
+                assert_eq!(c.len(), 4);
+                assert_eq!(c[0], c[3]);
+            }
+            other => panic!("type changed to {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_ring_with_two_coordinates_is_dropped() {
+        let poly = Polygon::new(ring(&[(0.0, 0.0), (1.0, 1.0)]), vec![]);
+        assert!(sanitize(&Geometry::Polygon(poly)).is_none());
+    }
+
+    #[test]
+    fn an_empty_hole_is_dropped() {
+        let poly = Polygon::new(
+            ring(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 0.0)]),
+            vec![ring(&[])],
+        );
+        match sanitize(&Geometry::Polygon(poly)).expect("the shell survives") {
+            Geometry::Polygon(p) => assert!(p.interiors().is_empty()),
+            other => panic!("type changed to {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_non_finite_ring_drops_the_polygon() {
+        let poly = Polygon::new(
+            ring(&[(0.0, 0.0), (f64::NAN, 0.0), (10.0, 10.0), (0.0, 0.0)]),
+            vec![],
+        );
+        assert!(sanitize(&Geometry::Polygon(poly)).is_none());
+    }
+
+    #[test]
+    fn a_collection_keeps_its_type_and_drops_dead_members() {
+        use geo::GeometryCollection;
+        let gc = GeometryCollection::new_from(vec![
+            Geometry::Point(Point::new(f64::NAN, 0.0)),
+            Geometry::Point(Point::new(1.0, 1.0)),
+        ]);
+        match sanitize(&Geometry::GeometryCollection(gc)).expect("one member survives") {
+            Geometry::GeometryCollection(gc) => assert_eq!(gc.0.len(), 1),
+            other => panic!("type changed to {other:?}"),
+        }
+    }
+
+    #[test]
+    fn everything_dead_gives_none() {
+        use geo::GeometryCollection;
+        let gc = GeometryCollection::new_from(vec![Geometry::Point(Point::new(f64::NAN, 0.0))]);
+        assert!(sanitize(&Geometry::GeometryCollection(gc)).is_none());
+    }
+}

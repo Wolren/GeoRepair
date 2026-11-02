@@ -35,6 +35,14 @@ not a gate.
 | H damaged input | 458 truncations and broken headers never panic | every byte cut of six seeds |
 | I nesting | collections nest, absurd depth fails cleanly | depth 2, 12, 64 |
 | J curved types | SQL/MM types are refused, not misread | 8 curved and surface forms |
+| K RustGIS consumer | RustGIS reads what we deliver and sees the same shape | needs `RUSTGIS_DIR` |
+
+Check K is the consumer check. `RUSTGIS_DIR=/path/to/RustGIS python3 conformance/run.py` builds
+a probe against that checkout's own `parse_wkt` and compares the shape it reports, coordinate
+for coordinate, with the oracle's bytes. Coordinates are compared as raw f64 bit patterns, so
+no formatting difference can hide a disagreement. Cases RustGIS cannot represent (a
+`GEOMETRYCOLLECTION`, or an EMPTY, which it parses to no geometry) are skipped by name and
+counted, never silently passed.
 
 Check E is what proves ISO 13249 type codes (1001, 2001, 3001) are read, not only the PostGIS
 EWKB high-bit flags. Check D is what proves we emit the ISO codes back.
@@ -56,11 +64,25 @@ and precision round trips for values that need more than 17 significant digits.
 
 ## Rings and validity
 
-The writers serialize the geometry they are given. An unclosed ring is written unclosed, which
-is what GEOS does, and `POLYGON ((...), EMPTY)` is written with the empty ring dropped, because
-WKT has no EMPTY inside a ring list. Validity is the job of the validator and `make_valid`, not
-of the writer. OGR closes rings when it ingests them, so for that one case the byte comparisons are skipped:
-they would compare our geometry with a normalised copy of it, which proves nothing.
+The reader closes a ring. Four coordinates in give five out, first point repeated, which is
+measured on `st_unclosed_ring`. The writer drops a ring that has no coordinates, because WKT
+has no EMPTY inside a ring list. Nothing else is moved: coordinates are never snapped, merged
+or reordered. Validity beyond closure is the validator's job and `make_valid`'s job.
+
+OGR keeps both an unclosed ring and an empty ring as given, so those two cases are compared by
+geometry only, never by bytes.
+
+## Delivery to a closed 2D host
+
+Our raw output is OGC-shaped, and a host with no empties and no NaN cannot always read it.
+`output::sanitize` is the delivery pass: it drops non-finite coordinates, drops empty members,
+closes open rings, and returns `None` when nothing usable survives. It never moves a
+coordinate and it never changes the geometry type. `apply_policy` runs first to reduce a
+collection to one dimension, then `sanitize`.
+
+Four cases in the corpus are unreadable by RustGIS before that pass and readable after it:
+`st_mpoint_empty`, `st_nan`, `st_inf`, `st_ninf`. The run prints them by name. This is why K
+measures the delivered text and not the raw text.
 
 ## House rule
 

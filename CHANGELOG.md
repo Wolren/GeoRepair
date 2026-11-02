@@ -3,6 +3,9 @@
 ## [Unreleased]
 
 ### Added
+- `output::sanitize` drops non-finite coordinates, empty members and open rings, so output is
+  readable by a host with no empties and no NaN, such as RustGIS. It never moves a coordinate,
+  and it keeps the geometry type.
 
 - `write_wkb_iso` and `Encoding`: ISO 13249 type codes (1001 for XYZ, 2001 for XYM, 3001 for
   XYZM) as an explicit output form. `write_ewkb` keeps the PostGIS EWKB flags and its SRID

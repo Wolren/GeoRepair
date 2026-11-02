@@ -532,7 +532,7 @@ pub use make_valid::MakeValid;
 /// that could not be automatically repaired.
 pub use make_valid::ValidateAndFix;
 /// Output policy types and the reduction pass.
-pub use output::{OutputPolicy, OutputReport, apply_policy};
+pub use output::{OutputPolicy, OutputReport, apply_policy, sanitize};
 /// Coordinate snapping functions.
 pub use snap::{DEFAULT_GRID, snap_coord, snap_coord_default, snap_line, snap_lines};
 /// OGC validation predicates and result types.

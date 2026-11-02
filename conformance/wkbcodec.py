@@ -109,6 +109,135 @@ def parse(buf, pos=0, depth=0):
     return Node(TYPE_NAMES[base], dims, parts=parts, srid=srid), pos
 
 
+def _finite(pt):
+    return pt[0] == pt[0] and pt[1] == pt[1] and abs(pt[0]) != float("inf") and abs(pt[1]) != float("inf")
+
+
+def _ring(pts):
+    """Close the ring and drop it when it cannot be a ring. Matches output::sanitize."""
+    pts = [p for p in pts if _finite(p)]
+    if len(pts) < 3:
+        return None
+    if pts[0] != pts[-1]:
+        pts = pts + [pts[0]]
+    if len(pts) < 4:
+        return None
+    return pts
+
+
+def _line(pts):
+    pts = [p for p in pts if _finite(p)]
+    if len(pts) < 2 or len(pts) != len(pts):
+        return None
+    return pts
+
+
+def _part(part):
+    """A polygon part: rings, exterior first, holes that survive."""
+    if not part.parts:
+        return None
+    rings = [_ring(r.points) for r in part.parts]
+    rings = [r for r in rings if r]
+    return rings or None
+
+
+def _san_part(part):
+    rings = [_ring(r) for r in part]
+    rings = [r for r in rings if r]
+    return rings or None
+
+
+def _norm(node, classify_only=False):
+    """Normalise a parsed node to (kind, data), the shape a closed 2D host can hold.
+
+    `classify_only` keeps non-finite coordinates, so the caller can decide a type before
+    sanitizing, which is the order apply_policy and sanitize run in.
+    """
+    kind = node.kind
+    if kind == "point":
+        pts = list(node.points) if classify_only else [p for p in node.points if _finite(p)]
+        return ("point", pts) if pts else None
+    if kind == "multipoint":
+        pts = [p.points[0] for p in node.parts if p.points]
+        if not classify_only:
+            pts = [p for p in pts if _finite(p)]
+        return ("multipoint", pts) if pts else None
+    if kind in ("linestring", "multilinestring"):
+        if kind == "linestring":
+            one = _line(node.points)
+            return ("line", [one]) if one else None
+        lines = [_line(p.points) for p in node.parts]
+        lines = [l for l in lines if l]
+        return ("line", lines) if lines else None
+    if kind in ("polygon", "multipolygon"):
+        if kind == "polygon":
+            one = _part(node)
+            return ("polygon", [one]) if one else None
+        parts = [_part(p) for p in node.parts]
+        parts = [x for x in parts if x]
+        return ("polygon", parts) if parts else None
+    if kind == "collection":
+        # apply_policy runs before sanitize, so the shape is chosen from the raw members and
+        # only then filtered. A dead member still counts when the output type is decided.
+        raw_points = []
+        raw_lines = []
+        raw_polys = []
+        for p in node.parts:
+            sub = _norm(p, classify_only=True)
+            if sub is None:
+                continue
+            k, d = sub
+            if k == "point":
+                raw_points.extend(d)
+            elif k == "multipoint":
+                raw_points.extend(d)
+            elif k == "line":
+                raw_lines.extend(d)
+            else:
+                raw_polys.extend(d)
+        if raw_polys:
+            parts = [x for x in (_san_part(p) for p in raw_polys) if x]
+            return ("polygon", parts) if parts else None
+        if raw_lines:
+            lines = [x for x in (m for m in raw_lines) if x]
+            return ("line", lines) if lines else None
+        if not raw_points:
+            return None
+        kind_out = "point" if len(raw_points) == 1 else "multipoint"
+        pts = [p for p in raw_points if _finite(p)]
+        if not pts:
+            return None
+        return (kind_out, pts)
+    return None
+
+
+def rustgis_shape(hexstr):
+    """The shape a closed 2D host sees, or None when nothing survives.
+
+    Mirrors output::sanitize and apply_policy(TopDimension) on the oracle's bytes, so the
+    comparison is against the reference implementation, not against our writer.
+    """
+    node, _ = parse(bytes.fromhex(hexstr))
+
+    def b(v):
+        return format(int.from_bytes(struct.pack("<d", v), "little"), "016x")
+
+    def pt(p):
+        return b(p[0]) + "," + b(p[1])
+
+    norm = _norm(node)
+    if norm is None:
+        return None
+    kind, data = norm
+    if kind == "point":
+        return "P:" + pt(data[0])
+    if kind == "multipoint":
+        return "MP:" + ";".join(pt(p) for p in data)
+    if kind == "line":
+        return "L:" + ";".join(" ".join(pt(p) for p in line) for line in data)
+    return "PG:" + ";".join("|".join(" ".join(pt(p) for p in ring) for ring in part) for part in data)
+
+
 def from_hex(h):
     return parse(bytes.fromhex(h))
 

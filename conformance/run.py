@@ -312,6 +312,49 @@ def mutate(hexes):
     return [i + TAB + v for i, v in lines]
 
 
+def build_probe(workdir):
+    """Build the RustGIS probe when RUSTGIS_DIR points at a checkout. Returns the exe or None."""
+    root = os.environ.get("RUSTGIS_DIR")
+    if not root:
+        return None
+    src = os.path.join(HERE, "rustgis_probe")
+    tmp = os.path.join(workdir, "probe")
+    shutil.copytree(src, tmp)
+    manifest = os.path.join(tmp, "Cargo.toml")
+    with open(os.path.join(tmp, "Cargo.toml.in"), encoding="utf-8") as fh:
+        text = fh.read().replace("@RUSTGIS_DIR@", root.replace(os.sep, "/"))
+    with open(manifest, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    target = os.path.join(ROOT, "target", "rustgis-probe")
+    env = dict(os.environ, CARGO_TARGET_DIR=target)
+    proc = subprocess.run(
+        ["cargo", "build", "--quiet", "--manifest-path", manifest],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        print("rustgis probe build failed, check K skipped: " + proc.stderr[-400:])
+        return None
+    for name in ("rustgis-probe.exe", "rustgis-probe"):
+        path = os.path.join(target, "debug", name)
+        if os.path.exists(path):
+            return path
+    return None
+
+
+def run_probe(exe, lines):
+    proc = subprocess.run(
+        [exe], input="".join(line + NL for line in lines), capture_output=True, text=True, timeout=300
+    )
+    rows = {}
+    for line in proc.stdout.splitlines():
+        parts = line.split(TAB)
+        if len(parts) >= 3:
+            rows[parts[0]] = (parts[1], parts[2] if len(parts) > 2 else "")
+    return rows
+
+
 def expectation(cid, cat):
     """What the specification requires of this case: ("accept" or "reject", oracle_normalizes)."""
     if cat in ("invalid", "curved"):
@@ -372,6 +415,7 @@ def main():
                 "H_damaged",
                 "I_nesting",
                 "J_curved",
+                "K_rustgis",
             )
         }
 
@@ -506,6 +550,49 @@ def main():
             ok = bool(err) and ("unknown geometry type" in err or "parse error" in err)
             rec("J_curved", ok, cid, err[:100])
 
+        # K: the consumer. RustGIS reads what a closed 2D host receives from us.
+        probe = build_probe(workdir)
+        skipped_k = []
+        raw_rejected = []
+        if probe is None:
+            print("check K skipped: set RUSTGIS_DIR to a RustGIS checkout")
+        else:
+            k_lines = []
+            k_raw = []
+            k_ids = []
+            for cid in ids:
+                row = ours.get(cid, {})
+                text = row.get("wkt_delivery") or ""
+                raw = row.get("wkt_out") or ""
+                if not row.get("zm_ok"):
+                    continue
+                if raw:
+                    k_raw.append(cid + TAB + raw)
+                k_lines.append(cid + TAB + text)
+                k_ids.append(cid)
+            k_rows = run_probe(probe, k_lines)
+            raw_rows = run_probe(probe, k_raw)
+            for cid in k_ids:
+                if raw_rows.get(cid, ("",))[0] in ("err", "panic"):
+                    raw_rejected.append(cid)
+                i = ids.index(cid)
+                if ora[i] is None:
+                    continue
+                expected = wkbcodec.rustgis_shape(ora[i])
+                if expected is None:
+                    skipped_k.append(cid + " (nothing survives sanitize)")
+                    continue
+                status, payload = k_rows.get(cid, ("missing", ""))
+                if status == "err":
+                    rec("K_rustgis", False, cid, "rustgis error: " + payload[:100])
+                elif status == "none":
+                    rec("K_rustgis", False, cid, "rustgis returned no geometry")
+                elif status == "panic":
+                    rec("K_rustgis", False, cid, "rustgis panicked")
+                else:
+                    ok = status == "ok" and payload == expected
+                    rec("K_rustgis", ok, cid, "" if ok else "shape differs")
+
         print("corpus " + str(len(cases)) + " cases, oracle " + OGR2OGR)
         print()
         print("%-20s%6s%6s  %s" % ("check", "pass", "fail", "examples"))
@@ -522,6 +609,20 @@ def main():
 
         fails = sum(len(b) for _, b in res.values())
         print("TOTAL failures: " + str(fails))
+        if raw_rejected:
+            print(
+                "raw output, before apply_policy and sanitize, is unreadable by RustGIS in "
+                + str(len(raw_rejected))
+                + " cases: "
+                + ", ".join(raw_rejected[:8])
+            )
+        if skipped_k:
+            print(
+                "check K skips "
+                + str(len(skipped_k))
+                + " cases RustGIS cannot represent: "
+                + ", ".join(skipped_k[:6])
+            )
         if oracle_lenient:
             print(
                 "OGR accepts "

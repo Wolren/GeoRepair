@@ -1,0 +1,10 @@
+[package]
+name = "rustgis-probe"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+rustgis-data = { path = "@RUSTGIS_DIR@/crates/data" }
+rustgis-geom = { path = "@RUSTGIS_DIR@/crates/geom" }
+
+[workspace]

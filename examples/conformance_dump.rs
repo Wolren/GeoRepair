@@ -13,7 +13,8 @@ use std::sync::Mutex;
 use geo_repair::io::wkb::{
     EwkbDims, EwkbGeometry, read_ewkb, write_ewkb, write_wkb, write_wkb_iso,
 };
-use geo_repair::io::wkt::{read_wkt, read_wkt_zm, write_wkt_zm};
+use geo_repair::io::wkt::{read_wkt, read_wkt_zm, write_wkt, write_wkt_zm};
+use geo_repair::output::{OutputPolicy, apply_policy, sanitize};
 
 static LAST_PANIC: Mutex<String> = Mutex::new(String::new());
 
@@ -68,9 +69,17 @@ fn from_hex(s: &str) -> Option<Vec<u8>> {
 }
 
 fn wkt_case(text: &str) -> String {
-    let (plain_ok, plain_err, wkb_hex) = match read_wkt(text) {
-        Ok(g) => (true, String::new(), hex(&write_wkb(&g))),
-        Err(e) => (false, e.to_string(), String::new()),
+    let (plain_ok, plain_err, wkb_hex, delivery) = match read_wkt(text) {
+        Ok(g) => {
+            // What a closed 2D host receives: reduced to one dimension, then sanitized.
+            let (reduced, _) = apply_policy(g.clone(), OutputPolicy::TopDimension);
+            let text_out = match sanitize(&reduced) {
+                Some(s) => write_wkt(&s),
+                None => String::new(),
+            };
+            (true, String::new(), hex(&write_wkb(&g)), text_out)
+        }
+        Err(e) => (false, e.to_string(), String::new(), String::new()),
     };
 
     let (zm_ok, zm_err, dims, wkt_out, ewkb_hex, iso_hex, ewkb_err) = match read_wkt_zm(text) {
@@ -111,10 +120,11 @@ fn wkt_case(text: &str) -> String {
     };
 
     format!(
-        "\"plain_ok\":{plain_ok},\"plain_err\":\"{}\",\"zm_ok\":{zm_ok},\"zm_err\":\"{}\",\"dims\":\"{dims}\",\"wkt_out\":\"{}\",\"wkb\":\"{wkb_hex}\",\"ewkb\":\"{ewkb_hex}\",\"isowkb\":\"{iso_hex}\",\"ewkb_err\":\"{}\"",
+        "\"plain_ok\":{plain_ok},\"plain_err\":\"{}\",\"zm_ok\":{zm_ok},\"zm_err\":\"{}\",\"dims\":\"{dims}\",\"wkt_out\":\"{}\",\"wkt_delivery\":\"{}\",\"wkb\":\"{wkb_hex}\",\"ewkb\":\"{ewkb_hex}\",\"isowkb\":\"{iso_hex}\",\"ewkb_err\":\"{}\"",
         esc(&plain_err),
         esc(&zm_err),
         esc(&wkt_out),
+        esc(&delivery),
         esc(&ewkb_err)
     )
 }
