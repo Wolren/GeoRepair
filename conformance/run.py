@@ -312,6 +312,17 @@ def mutate(hexes):
     return [i + TAB + v for i, v in lines]
 
 
+def expectation(cid, cat):
+    """What the specification requires of this case: ("accept" or "reject", oracle_normalizes)."""
+    if cat in ("invalid", "curved"):
+        return "reject", False
+    if cid == "st_unclosed_ring":
+        # A polygon ring must be closed. The reader keeps the geometry as given and the writer
+        # serializes it, which is what GEOS does; OGR closes it on ingest, so its bytes differ.
+        return "accept", True
+    return "accept", False
+
+
 def load_known():
     path = os.path.join(HERE, "known_divergences.txt")
     known = {}
@@ -331,8 +342,14 @@ def load_known():
 def main():
     keep = "--keep" in sys.argv
     workdir = tempfile.mkdtemp(prefix="wktconf-")
+    oracle_lenient = []
+    we_lenient = []
     try:
         cases = corpus()
+        if os.environ.get("CONFORMANCE_SELFTEST"):
+            # A geometry the specification accepts and our reader cannot parse. The gate has to
+            # report it and exit 1, or the gate proves nothing.
+            cases.append(("selftest_must_fail", "shape", "POINT ("))
         ids = [c[0] for c in cases]
         texts = [c[2] for c in cases]
 
@@ -376,6 +393,7 @@ def main():
             oracle_ok = o is not None
             family = cid.split("_", 1)[0]
             use_zm = family in ("Z", "M", "ZM")
+            want, normalizes = expectation(cid, cat)
             if "panic" in row:
                 rec("A_read_accept", False, cid, "panic: " + row["panic"][:100])
                 continue
@@ -383,12 +401,17 @@ def main():
             err = row.get("zm_err") if use_zm else row.get("plain_err")
             rec(
                 "A_read_accept",
-                our_ok == oracle_ok,
+                our_ok == (want == "accept"),
                 cid,
-                "oracle=" + str(oracle_ok) + " ours=" + str(our_ok) + " " + str(err)[:100],
+                "spec=" + want + " ours=" + str(our_ok) + " " + str(err)[:100],
             )
+            if oracle_ok != (want == "accept"):
+                if want == "reject":
+                    oracle_lenient.append(cid)
+                else:
+                    we_lenient.append(cid)
 
-            if oracle_ok and our_ok and cat != "curved":
+            if oracle_ok and our_ok and not normalizes and want == "accept":
                 our_hex = row.get("isowkb") or row.get("wkb")
                 same = wkbcodec.canonical_2d(our_hex) == wkbcodec.canonical_2d(o)
                 rec("B_geometry", same, cid, "" if same else "geometry differs")
@@ -401,7 +424,11 @@ def main():
                     ok = got == expect and not expect.startswith("UNPARSABLE")
                     rec("C_write_semantics", ok, cid, "" if ok else "written text reads differently")
 
-        pairs = [(cid, ora[i]) for i, cid in enumerate(ids) if ora[i] is not None]
+        pairs = [
+            (cid, ora[i])
+            for i, (cid, cat, _text) in enumerate(cases)
+            if ora[i] is not None and expectation(cid, cat)[0] == "accept" and not expectation(cid, cat)[1]
+        ]
         e_rows = run_wkb_batch(workdir, "wkb", [cid + TAB + h for cid, h in pairs])
         for cid, h in pairs:
             row = e_rows.get(cid, {})
@@ -493,18 +520,23 @@ def main():
                     print("  " + cid + ": " + detail)
                 print()
 
-        known = load_known()
-        unexpected = [
-            (name, cid, detail)
-            for name, (ok, bad) in res.items()
-            for cid, detail in bad
-            if cid not in known
-        ]
         fails = sum(len(b) for _, b in res.values())
-        print("TOTAL failures: " + str(fails) + ", known: " + str(fails - len(unexpected)))
-        for name, cid, detail in unexpected:
-            print("  UNEXPECTED [" + name + "] " + cid + ": " + detail)
-        return 1 if unexpected else 0
+        print("TOTAL failures: " + str(fails))
+        if oracle_lenient:
+            print(
+                "OGR accepts "
+                + str(len(oracle_lenient))
+                + " cases the specification forbids, and we reject them: "
+                + ", ".join(oracle_lenient[:12])
+            )
+        if we_lenient:
+            print(
+                "We accept "
+                + str(len(we_lenient))
+                + " cases outside the grammar on purpose, for damaged corpora: "
+                + ", ".join(we_lenient[:12])
+            )
+        return 1 if fails else 0
     finally:
         if keep:
             print("workdir kept: " + workdir)

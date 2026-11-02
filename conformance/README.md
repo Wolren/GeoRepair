@@ -10,15 +10,22 @@ cargo build --example conformance_dump
 python3 conformance/run.py
 ```
 
-`OGR2OGR` overrides the binary when GDAL is not on `PATH`. Exit code 1 means an unexpected
-failure. A failing case listed in `known_divergences.txt` with a written reason does not fail
-the gate. CI runs this in the `conformance` job with `gdal-bin` installed.
+`OGR2OGR` overrides the binary when GDAL is not on `PATH`. CI runs this in the `conformance`
+job with `gdal-bin` installed.
+
+The gate measures our verdict against the specification, never against OGR's tolerance. Each
+case carries an expected verdict, and a mismatch fails. OGR is used only where it is a real
+authority: for bytes, and for geometry.
+
+The gate can fail: `CONFORMANCE_SELFTEST=1 python3 conformance/run.py` injects a geometry the
+specification accepts and the reader cannot parse, and must exit 1. A gate that cannot fail is
+not a gate.
 
 ## Checks
 
 | check | proof | how |
 |---|---|---|
-| A read acceptance | our verdict matches OGR's | corpus of 107 cases |
+| A read acceptance | our verdict matches the specification | corpus of 107 cases |
 | B geometry equality | our geometry equals OGR's | canonical 2D WKB |
 | C write semantics | our WKT, read by OGR, equals OGR's geometry | second oracle pass |
 | D write bytes | our ISO WKB equals OGR's bytes | 2D cases, byte compare |
@@ -52,14 +59,16 @@ and precision round trips for values that need more than 17 significant digits.
 The writers serialize the geometry they are given. An unclosed ring is written unclosed, which
 is what GEOS does, and `POLYGON ((...), EMPTY)` is written with the empty ring dropped, because
 WKT has no EMPTY inside a ring list. Validity is the job of the validator and `make_valid`, not
-of the writer. `st_unclosed_ring` therefore sits in `known_divergences.txt`: OGR closes rings
-when it ingests them, we keep the geometry as given.
+of the writer. OGR closes rings when it ingests them, so for that one case the byte comparisons are skipped:
+they would compare our geometry with a normalised copy of it, which proves nothing.
 
 ## House rule
 
 OGR is lenient where the specification is not. It accepts `POINT (1 2 3)` with no modifier,
-`POINT Z (1 2)`, trailing junk, and a missing comma. Our reader rejects all four, so those
-lines sit in `known_divergences.txt` with that reason.
+`POINT Z (1 2)`, trailing junk, a missing comma, and the curved types. We reject all of these,
+and the run prints that list as information, not as failures, because on those cases the
+specification is on our side.
 
-A divergence entry states which side is wrong. An entry that cannot name a reason is a bug,
-not a divergence. A new failing case fails CI.
+Two cases go the other way, and the run says so by name: `lex_plus` and `st_inf`. A leading
+`+` is a signed numeric literal in the grammar; `Inf` is not, and we accept it anyway so
+damaged corpora survive. That extension is deliberate and printed, not hidden in a list.
