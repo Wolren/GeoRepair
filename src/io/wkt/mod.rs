@@ -145,9 +145,9 @@ mod read;
 mod tests;
 mod write;
 
-pub use read::{infer_wkt_type, read_wkt, read_wkt_zm};
+pub use read::{infer_wkt_type, read_ewkt, read_wkt, read_wkt_zm};
 #[cfg(feature = "std")]
 pub use read::{read_wkt_from, read_wkt_zm_from};
-pub use write::{write_wkt, write_wkt_zm};
+pub use write::{write_ewkt, write_wkt, write_wkt_zm};
 #[cfg(feature = "std")]
 pub use write::{write_wkt_to, write_wkt_zm_to};

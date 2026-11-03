@@ -1,7 +1,8 @@
 use geo::{
     Coord, Geometry, GeometryCollection, LineString, MultiPoint, MultiPolygon, Point, Polygon, Rect,
 };
-use geo_repair::host::{host_clean, to_host};
+use geo_repair::host::{HostOptions, host_clean, to_host, to_host_ewkt, to_host_with, to_host_wkb};
+use geo_repair::validation::GeoValidation;
 
 fn ring(coords: &[(f64, f64)]) -> LineString<f64> {
     LineString::from(coords.to_vec())
@@ -191,4 +192,66 @@ fn every_generated_shape_obeys_the_host_contract() {
         seen_none < 500,
         "every generated shape was empty, the test proves nothing"
     );
+}
+
+fn bowtie() -> Polygon<f64> {
+    Polygon::new(
+        ring(&[(0.0, 0.0), (1.0, 1.0), (1.0, 0.0), (0.0, 1.0), (0.0, 0.0)]),
+        vec![],
+    )
+}
+
+#[test]
+fn reduce_alone_leaves_a_self_intersection_alone() {
+    let (out, report) = to_host_with(&Geometry::Polygon(bowtie()), HostOptions::REDUCE);
+    assert_eq!(report.repaired, 0);
+    match out.expect("still a polygon") {
+        Geometry::Polygon(p) => assert!(!p.is_valid(), "the bowtie must stay broken"),
+        other => panic!("expected a polygon, got {other:?}"),
+    }
+}
+
+#[test]
+fn repair_mode_returns_valid_parts() {
+    let (out, report) = to_host_with(&Geometry::Polygon(bowtie()), HostOptions::REPAIR);
+    assert_eq!(report.repaired, 1);
+    let out = out.expect("repair keeps the area");
+    assert_eq!(host_clean(&out), Ok(()));
+    match out {
+        Geometry::Polygon(p) => assert!(p.is_valid()),
+        Geometry::MultiPolygon(mp) => {
+            assert!(mp.0.len() >= 2, "a bowtie breaks into two lobes");
+            assert!(mp.0.iter().all(|p| p.is_valid()));
+        }
+        other => panic!("expected polygonal output, got {other:?}"),
+    }
+}
+
+#[test]
+fn repair_mode_does_not_touch_a_valid_polygon() {
+    let square = square();
+    let (out, report) = to_host_with(&Geometry::Polygon(square.clone()), HostOptions::REPAIR);
+    assert_eq!(report.repaired, 0);
+    assert_eq!(out, Some(Geometry::Polygon(square)));
+}
+
+#[test]
+fn a_host_can_be_fed_bytes_and_get_repair() {
+    let bytes = geo_repair::io::wkb::write_wkb(&Geometry::Polygon(bowtie()));
+    let (out, report) = to_host_wkb(&bytes, HostOptions::REPAIR).expect("bytes read");
+    assert_eq!(report.repaired, 1);
+    let out = out.expect("repair keeps the area");
+    assert_eq!(host_clean(&out), Ok(()));
+    let valid = match &out {
+        Geometry::Polygon(p) => p.is_valid(),
+        Geometry::MultiPolygon(mp) => mp.0.iter().all(|p| p.is_valid()),
+        _ => false,
+    };
+    assert!(valid, "delivered geometry is still invalid");
+}
+
+#[test]
+fn a_host_can_be_fed_ewkt_and_get_a_srid_free_shape() {
+    let (out, _) = to_host_ewkt("SRID=4326;POINT (1 2)", HostOptions::REDUCE).expect("ewkt read");
+    assert_eq!(out, Some(Geometry::Point(Point::new(1.0, 2.0))));
 }

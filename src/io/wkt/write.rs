@@ -309,3 +309,11 @@ fn write_geom(s: &mut String, geom: &Geometry<f64>, dims: Dims, extra: &[f64], o
         }
     }
 }
+
+/// Serialize EWKT, the PostGIS form with a SRID prefix. `None` writes plain WKT.
+pub fn write_ewkt(wkt: &WktGeometry, srid: Option<u32>) -> String {
+    match srid {
+        Some(s) => alloc::format!("SRID={s};{}", write_wkt_zm(wkt)),
+        None => write_wkt_zm(wkt),
+    }
+}

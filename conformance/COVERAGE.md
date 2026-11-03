@@ -1,7 +1,7 @@
 # Coverage register
 
 What the readers, writers and the delivery adapter handle, and what they refuse. Every row names
-its evidence: a conformance check (`A` to `L`, see `README.md`), a unit test, or a probe against
+its evidence: a conformance check (`A` to `M`, see `README.md`), a unit test, or a probe against
 GDAL 3.9.2. A row without evidence does not belong here.
 
 Specification basis: OGC 06-103r4 (WKT 1.2.1) and ISO 13249-3 (WKB). PostGIS EWKB is listed
@@ -28,7 +28,7 @@ the divergence is named below.
 | Collection whose members disagree on dimension | Refused | `st_coll_mixed_dims_bad` |
 | Curved and surface types (`CIRCULARSTRING` ... `POLYHEDRALSURFACE`) | Refused | J 8 cases |
 | Three ordinates with no modifier | Refused | `bad_arity_high` |
-| `SRID=<n>;` prefix (EWKT) | Not supported | probe; GDAL refuses it too |
+| `SRID=<n>;` prefix (EWKT) | Accepted by `read_ewkt`, SRID returned, outside OGC | 6 unit tests |
 | Nesting depth | 12 deep accepted, depth 64 refused cleanly | I |
 
 Two of these are declared leniencies: we accept `lex_plus` and `st_inf`, GDAL rejects both.
@@ -78,7 +78,11 @@ dimension. A refusal never invents a coordinate, which is the reason for the cho
 | Closes an open ring, moves no coordinate | Guaranteed | unit test |
 | Type chosen from survivors | Guaranteed | `the_type_follows_the_survivors` |
 | Idempotent | Guaranteed | 500 generated shapes |
-| Output accepted by RustGIS and the georust `wkt` crate | Verified | K 56, L 56 |
+| Output accepted by RustGIS and the georust `wkt` crate | Verified | K 58, L 58 |
+| Repair of invalid polygons on request | Guaranteed | `HostOptions::REPAIR`, 5 tests |
+| Repaired output valid per GEOS | Verified | M 59 delivered geometries, 2 repaired |
+| Repair does not touch a valid polygon | Guaranteed | test `repair_mode_does_not_touch_a_valid_polygon` |
+| Bytes in, host shape out (`to_host_wkb`, `to_host_ewkt`) | Guaranteed | 2 tests |
 
 ## Measured cost
 
@@ -96,8 +100,11 @@ coordinates (774 MB). Reading that GeoPackage with our own WKB reader takes 0.87
 | WKT write | 1 675 ns | 5 568 ns | 3.32x |
 | WKT round trip | 10 037 ns | 32 885 ns | 3.28x |
 
-`cargo bench --bench host_adapter` on the same corpus: 117 ns per polygon for `to_host`, against
-55 ns for a bare clone and 170 ns for the older `apply_policy` then `sanitize` chain.
+`cargo bench --bench host_adapter` on the same corpus: `to_host` costs 142 ns per polygon in the
+last clean run (117 to 142 across runs), against 66 ns for a bare clone and 186 ns for the older
+`apply_policy` then `sanitize` chain. `HostOptions::REPAIR` costs 7 640 ns per polygon on the
+densest 50 000, 54 times a plain reduce: validity checking dominates, and no coordinate moves
+unless the check fails.
 
 These are single-machine numbers with no allocator isolation. They compare implementations, and
 they do not claim a limit on what any of them could reach.

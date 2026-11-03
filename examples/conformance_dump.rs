@@ -10,7 +10,7 @@ use std::io::{self, BufRead, Write};
 use std::panic;
 use std::sync::Mutex;
 
-use geo_repair::host::to_host;
+use geo_repair::host::{HostOptions, to_host, to_host_with};
 use geo_repair::io::wkb::{
     EwkbDims, EwkbGeometry, read_ewkb, write_ewkb, write_wkb, write_wkb_iso,
 };
@@ -68,6 +68,13 @@ fn from_hex(s: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
+fn repaired_wkt(g: &geo::Geometry<f64>) -> String {
+    match to_host_with(g, HostOptions::REPAIR).0 {
+        Some(s) => write_wkt(&s),
+        None => String::new(),
+    }
+}
+
 fn wkt_case(text: &str) -> String {
     let (plain_ok, plain_err, wkb_hex, delivery) = match read_wkt(text) {
         Ok(g) => {
@@ -81,49 +88,54 @@ fn wkt_case(text: &str) -> String {
         Err(e) => (false, e.to_string(), String::new(), String::new()),
     };
 
-    let (zm_ok, zm_err, dims, wkt_out, ewkb_hex, iso_hex, ewkb_err) = match read_wkt_zm(text) {
-        Ok(w) => {
-            let d = w.dims;
-            let text_out = write_wkt_zm(&w);
-            let ewkb_dims = EwkbDims {
-                has_z: d.has_z,
-                has_m: d.has_m,
-            };
-            {
-                let g = EwkbGeometry {
-                    geometry: w.geometry,
-                    srid: None,
-                    dims: ewkb_dims,
-                    extra_coords: w.extra_coords,
+    let (zm_ok, zm_err, dims, wkt_out, ewkb_hex, iso_hex, ewkb_err, repaired) =
+        match read_wkt_zm(text) {
+            Ok(w) => {
+                let d = w.dims;
+                let text_out = write_wkt_zm(&w);
+                let repaired = repaired_wkt(&w.geometry);
+                let ewkb_dims = EwkbDims {
+                    has_z: d.has_z,
+                    has_m: d.has_m,
                 };
-                (
-                    true,
-                    String::new(),
-                    dims_tag(ewkb_dims),
-                    text_out,
-                    hex(&write_ewkb(&g)),
-                    hex(&write_wkb_iso(&g)),
-                    String::new(),
-                )
+                {
+                    let g = EwkbGeometry {
+                        geometry: w.geometry,
+                        srid: None,
+                        dims: ewkb_dims,
+                        extra_coords: w.extra_coords,
+                    };
+                    (
+                        true,
+                        String::new(),
+                        dims_tag(ewkb_dims),
+                        text_out,
+                        hex(&write_ewkb(&g)),
+                        hex(&write_wkb_iso(&g)),
+                        String::new(),
+                        repaired,
+                    )
+                }
             }
-        }
-        Err(e) => (
-            false,
-            e.to_string(),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-        ),
-    };
+            Err(e) => (
+                false,
+                e.to_string(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+            ),
+        };
 
     format!(
-        "\"plain_ok\":{plain_ok},\"plain_err\":\"{}\",\"zm_ok\":{zm_ok},\"zm_err\":\"{}\",\"dims\":\"{dims}\",\"wkt_out\":\"{}\",\"wkt_delivery\":\"{}\",\"wkb\":\"{wkb_hex}\",\"ewkb\":\"{ewkb_hex}\",\"isowkb\":\"{iso_hex}\",\"ewkb_err\":\"{}\"",
+        "\"plain_ok\":{plain_ok},\"plain_err\":\"{}\",\"zm_ok\":{zm_ok},\"zm_err\":\"{}\",\"dims\":\"{dims}\",\"wkt_out\":\"{}\",\"wkt_delivery\":\"{}\",\"wkt_repaired\":\"{}\",\"wkb\":\"{wkb_hex}\",\"ewkb\":\"{ewkb_hex}\",\"isowkb\":\"{iso_hex}\",\"ewkb_err\":\"{}\"",
         esc(&plain_err),
         esc(&zm_err),
         esc(&wkt_out),
         esc(&delivery),
+        esc(&repaired),
         esc(&ewkb_err)
     )
 }

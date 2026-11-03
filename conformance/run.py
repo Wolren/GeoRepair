@@ -26,6 +26,13 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+
+try:
+    import shapely
+    from shapely import wkt as shapely_wkt
+except ImportError:  # the GEOS checks need it; main() fails loudly instead of skipping
+    shapely = None
+    shapely_wkt = None
 import tempfile
 
 import wkbcodec
@@ -198,6 +205,8 @@ def corpus():
         ("st_nan", "POINT (NaN 2)"),
         ("st_inf", "POINT (Inf 2)"),
         ("st_ninf", "POINT (-Inf -Inf)"),
+        ("st_bowtie", "POLYGON ((0 0, 1 1, 1 0, 0 1, 0 0))"),
+        ("st_hole_outside", "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (20 20, 21 20, 21 21, 20 20))"),
     ]
     cases += [(i, "structural", t) for i, t in struct]
 
@@ -455,6 +464,7 @@ def main():
                 "J_curved",
                 "K_rustgis",
                 "L_georust",
+                "M_geos_valid",
             )
         }
 
@@ -771,6 +781,52 @@ def main():
                             shown = "different geometry"
                         print("  " + cid + ": " + shown)
                     print()
+
+        # M: GEOS judges validity, and the repair pass must be shown to have changed something.
+        if shapely is None:
+            rec(
+                "M_geos_valid",
+                False,
+                "geos_binding_missing",
+                "install shapely, the validity oracle",
+            )
+        else:
+            repaired_ids = []
+            for cid in ids:
+                row = ours.get(cid, {})
+                text_rep = row.get("wkt_repaired") or ""
+                if not text_rep:
+                    continue
+                try:
+                    g = shapely_wkt.loads(text_rep)
+                except Exception as exc:
+                    rec("M_geos_valid", False, cid, "GEOS cannot read our output: " + str(exc)[:80])
+                    continue
+                ok = bool(shapely.is_valid(g))
+                rec("M_geos_valid", ok, cid, "" if ok else shapely.is_valid_reason(g)[:90])
+                raw = row.get("wkt_delivery") or ""
+                if not raw:
+                    continue
+                try:
+                    raw_g = shapely_wkt.loads(raw)
+                except Exception:
+                    continue
+                if ok and not shapely.is_valid(raw_g):
+                    repaired_ids.append(cid)
+            if not repaired_ids:
+                rec(
+                    "M_geos_valid",
+                    False,
+                    "repair_never_exercised",
+                    "no case was invalid before repair and valid after it",
+                )
+            else:
+                print(
+                    "check M: repair turned "
+                    + str(len(repaired_ids))
+                    + " GEOS-invalid deliveries into valid ones: "
+                    + ", ".join(repaired_ids)
+                )
 
         print("corpus " + str(len(cases)) + " cases, oracle " + OGR2OGR)
         print()

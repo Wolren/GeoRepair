@@ -3,13 +3,19 @@
 //! `to_host` flattens collections, drops what a host cannot store, and chooses the type from what
 //! survives. A host wants the data, not the shape of the input, so a collection whose only live
 //! member is a point becomes a point and not a single-member multipoint.
+//!
+//! `to_host_with` adds repair. A producer such as RustGIS hands over bytes it could not validate;
+//! this crate repairs them and returns a shape the host can store, counting what it changed.
 
 use alloc::vec::Vec;
 use geo::{
     GeoFloat, Geometry, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon,
 };
 
-/// What the adapter dropped on the way to the host model.
+use crate::make_valid::MakeValid;
+use crate::validation::GeoValidation;
+
+/// What the adapter dropped or rebuilt on the way to the host model.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct HostReport {
     /// Collection levels flattened away.
@@ -18,6 +24,24 @@ pub struct HostReport {
     pub dropped_nonfinite: usize,
     /// Parts dropped because they cannot form a shape once closed.
     pub dropped_degenerate: usize,
+    /// Parts rebuilt by `make_valid` because they failed validity.
+    pub repaired: usize,
+    /// Parts dropped because repair produced nothing storable.
+    pub dropped_unrepairable: usize,
+}
+
+/// How far the delivery pass goes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HostOptions {
+    /// Rebuild invalid polygons with `make_valid` before delivery.
+    pub repair: bool,
+}
+
+impl HostOptions {
+    /// Flatten and filter only. No geometry changes shape.
+    pub const REDUCE: Self = Self { repair: false };
+    /// Flatten, filter, then repair every polygon that fails validity.
+    pub const REPAIR: Self = Self { repair: true };
 }
 
 /// Reduce a geometry to the closed host model: one of six types, finite, no empties, closed rings.
@@ -30,58 +54,29 @@ pub fn to_host<T: GeoFloat>(geometry: &Geometry<T>) -> (Option<Geometry<T>>, Hos
 /// As [`to_host`], taking ownership so a clean geometry costs one move and no copy.
 pub fn to_host_owned<T: GeoFloat>(geometry: Geometry<T>) -> (Option<Geometry<T>>, HostReport) {
     let mut report = HostReport::default();
-    let mut parts = Parts {
-        polys: Vec::new(),
-        lines: Vec::new(),
-        points: Vec::new(),
-    };
-    gather(geometry, &mut parts, &mut report);
+    let parts = reduce(geometry, &mut report);
+    (assemble(parts), report)
+}
 
-    let mut polys: Vec<Polygon<T>> = Vec::with_capacity(parts.polys.len());
-    for p in parts.polys {
-        if let Some(c) = clean_polygon(p, &mut report) {
-            polys.push(c);
-        }
-    }
-    let mut lines: Vec<LineString<T>> = Vec::with_capacity(parts.lines.len());
-    for l in parts.lines {
-        if let Some(c) = clean_line(l, &mut report) {
-            lines.push(c);
-        }
-    }
-    let mut points: Vec<Point<T>> = Vec::with_capacity(parts.points.len());
-    for p in parts.points {
-        if finite(p.0.x) && finite(p.0.y) {
-            points.push(p);
-        } else {
-            report.dropped_nonfinite += 1;
-        }
-    }
+/// Deliver to a closed host, optionally repairing what fails validity.
+pub fn to_host_with(
+    geometry: &Geometry<f64>,
+    options: HostOptions,
+) -> (Option<Geometry<f64>>, HostReport) {
+    to_host_with_owned(geometry.clone(), options)
+}
 
-    let out = if !polys.is_empty() {
-        if polys.len() == 1 {
-            Geometry::Polygon(polys.pop().expect("length checked"))
-        } else {
-            Geometry::MultiPolygon(MultiPolygon::new(polys))
-        }
-    } else if !lines.is_empty() {
-        if lines.len() == 1 {
-            Geometry::LineString(lines.pop().expect("length checked"))
-        } else {
-            Geometry::MultiLineString(MultiLineString::new(lines))
-        }
-    } else if !points.is_empty() {
-        if points.len() == 1 {
-            Geometry::Point(points.pop().expect("length checked"))
-        } else {
-            Geometry::MultiPoint(MultiPoint::new(points))
-        }
-    } else {
-        return (None, report);
-    };
-
-    debug_assert_eq!(host_clean(&out), Ok(()));
-    (Some(out), report)
+/// As [`to_host_with`], taking ownership of the input.
+pub fn to_host_with_owned(
+    geometry: Geometry<f64>,
+    options: HostOptions,
+) -> (Option<Geometry<f64>>, HostReport) {
+    let mut report = HostReport::default();
+    let mut parts = reduce(geometry, &mut report);
+    if options.repair {
+        parts.polys = repair_polygons(parts.polys, &mut report);
+    }
+    (assemble(parts), report)
 }
 
 /// The invariants a host may rely on, checkable by the host itself.
@@ -133,11 +128,93 @@ pub fn host_clean<T: GeoFloat>(g: &Geometry<T>) -> Result<(), &'static str> {
 fn finite<T: GeoFloat>(v: T) -> bool {
     v.is_finite()
 }
+/// Read WKB or EWKB bytes, then deliver to a closed host, repairing when asked.
+///
+/// The path a producer takes when it hands over bytes: the reader keeps SRID and Z/M beside the
+/// geometry, and delivery drops them because the host model is 2D.
+pub fn to_host_wkb(
+    bytes: &[u8],
+    options: HostOptions,
+) -> Result<(Option<Geometry<f64>>, HostReport), crate::io::wkb::WkbError> {
+    let read = crate::io::wkb::read_ewkb(bytes)?;
+    Ok(to_host_with_owned(read.geometry, options))
+}
+
+/// Read PostGIS EWKT, then deliver to a closed host, repairing when asked.
+pub fn to_host_ewkt(
+    text: &str,
+    options: HostOptions,
+) -> Result<(Option<Geometry<f64>>, HostReport), crate::io::wkt::WktError> {
+    let (_, read) = crate::io::wkt::read_ewkt(text)?;
+    Ok(to_host_with_owned(read.geometry, options))
+}
 
 struct Parts<T: GeoFloat> {
     polys: Vec<Polygon<T>>,
     lines: Vec<LineString<T>>,
     points: Vec<Point<T>>,
+}
+
+fn reduce<T: GeoFloat>(geometry: Geometry<T>, report: &mut HostReport) -> Parts<T> {
+    let mut raw = Parts {
+        polys: Vec::new(),
+        lines: Vec::new(),
+        points: Vec::new(),
+    };
+    gather(geometry, &mut raw, report);
+
+    let mut kept = Vec::with_capacity(raw.polys.len());
+    for p in raw.polys {
+        if let Some(c) = clean_polygon(p, report) {
+            kept.push(c);
+        }
+    }
+    let mut lines = Vec::with_capacity(raw.lines.len());
+    for l in raw.lines {
+        if let Some(c) = clean_line(l, report) {
+            lines.push(c);
+        }
+    }
+    let mut points = Vec::with_capacity(raw.points.len());
+    for p in raw.points {
+        if finite(p.0.x) && finite(p.0.y) {
+            points.push(p);
+        } else {
+            report.dropped_nonfinite += 1;
+        }
+    }
+    Parts {
+        polys: kept,
+        lines,
+        points,
+    }
+}
+
+fn assemble<T: GeoFloat>(parts: Parts<T>) -> Option<Geometry<T>> {
+    let Parts {
+        mut polys,
+        mut lines,
+        mut points,
+    } = parts;
+    if !polys.is_empty() {
+        if polys.len() == 1 {
+            return Some(Geometry::Polygon(polys.pop().expect("length checked")));
+        }
+        return Some(Geometry::MultiPolygon(MultiPolygon::new(polys)));
+    }
+    if !lines.is_empty() {
+        if lines.len() == 1 {
+            return Some(Geometry::LineString(lines.pop().expect("length checked")));
+        }
+        return Some(Geometry::MultiLineString(MultiLineString::new(lines)));
+    }
+    if !points.is_empty() {
+        if points.len() == 1 {
+            return Some(Geometry::Point(points.pop().expect("length checked")));
+        }
+        return Some(Geometry::MultiPoint(MultiPoint::new(points)));
+    }
+    None
 }
 
 fn gather<T: GeoFloat>(g: Geometry<T>, parts: &mut Parts<T>, report: &mut HostReport) {
@@ -159,6 +236,48 @@ fn gather<T: GeoFloat>(g: Geometry<T>, parts: &mut Parts<T>, report: &mut HostRe
                 gather(part, parts, report);
             }
         }
+    }
+}
+
+fn repair_polygons(polys: Vec<Polygon<f64>>, report: &mut HostReport) -> Vec<Polygon<f64>> {
+    let mut out: Vec<Polygon<f64>> = Vec::with_capacity(polys.len());
+    for p in polys {
+        if p.is_valid() {
+            out.push(p);
+            continue;
+        }
+        report.repaired += 1;
+        match p.make_valid() {
+            Geometry::Polygon(q) => keep_repaired(q, &mut out, report),
+            Geometry::MultiPolygon(mp) => {
+                for q in mp.0 {
+                    keep_repaired(q, &mut out, report);
+                }
+            }
+            Geometry::GeometryCollection(gc) => {
+                for g in gc.0 {
+                    match g {
+                        Geometry::Polygon(q) => keep_repaired(q, &mut out, report),
+                        Geometry::MultiPolygon(mp) => {
+                            for q in mp.0 {
+                                keep_repaired(q, &mut out, report);
+                            }
+                        }
+                        _ => report.dropped_unrepairable += 1,
+                    }
+                }
+            }
+            _ => report.dropped_unrepairable += 1,
+        }
+    }
+    out
+}
+
+/// Repair can emit a part the host still cannot store, so the finite and ring rules run again.
+fn keep_repaired(p: Polygon<f64>, out: &mut Vec<Polygon<f64>>, report: &mut HostReport) {
+    match clean_polygon(p, report) {
+        Some(c) => out.push(c),
+        None => report.dropped_unrepairable += 1,
     }
 }
 

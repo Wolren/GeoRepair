@@ -129,6 +129,8 @@ jobs:
         with:
           toolchain: stable
       - run: sudo apt-get update && sudo apt-get install -y gdal-bin
+      # shapely brings GEOS: check M judges validity of what we hand a host, not our own verdict.
+      - run: python3 -m pip install --upgrade pip shapely
       - run: cargo build --locked --example conformance_dump
       - run: python3 conformance/run.py
 

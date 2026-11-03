@@ -518,7 +518,10 @@ pub use crs::Crs;
 /// A feature combining geometry with optional attributes and crs.
 pub use feature::Feature;
 /// Output policy types and the reduction pass.
-pub use host::{HostReport, host_clean, to_host, to_host_owned};
+pub use host::{
+    HostOptions, HostReport, host_clean, to_host, to_host_ewkt, to_host_owned, to_host_with,
+    to_host_with_owned, to_host_wkb,
+};
 pub use io::{
     Dims, Encoding, Endianness, EwkbDims, EwkbGeometry, WkbError, WktError, WktGeometry,
     WriteOptions, infer_wkt_type, read_ewkb, read_wkb, read_wkb_concat, read_wkt, read_wkt_zm,

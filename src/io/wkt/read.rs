@@ -186,9 +186,7 @@ impl<'a> Parser<'a> {
             }
         }
 
-        // an Eisel-Lemire implementation (correctly rounded, ~2x faster than std's
-        // float parsing - measured 2026-08-04: float parsing is ~88% of WKT) Note: hex
-        // floats ("0x1p3") are rejected - WKT has no hex form and GEOS never emits one.
+        // fast-float2 is Eisel-Lemire: 2x std, float parsing is 88% of WKT; hex floats refused.
         fast_float2::parse::<f64, _>(&self.s[start..self.i])
             .map_err(|_| self.err("expected number"))
     }
@@ -754,4 +752,92 @@ fn split_compact_modifier(kw: &[u8]) -> Option<(&[u8], Dims)> {
         }
     }
     None
+}
+
+/// Parse PostGIS EWKT: an optional `SRID=<n>;` prefix in front of WKT.
+///
+/// The prefix is outside the OGC grammar and GDAL refuses it, so only this entry point accepts
+/// it. The geometry goes through [`read_wkt_zm`], so Z and M survive. Error positions count from
+/// the start of `input`, prefix included.
+pub fn read_ewkt(input: &str) -> Result<(Option<u32>, WktGeometry), WktError> {
+    let bytes = input.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if bytes.len() < i + 4 || !bytes[i..i + 4].eq_ignore_ascii_case(b"SRID") {
+        return Ok((None, read_wkt_zm(input)?));
+    }
+    i += 4;
+    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i >= bytes.len() || bytes[i] != b'=' {
+        return Err(WktError::ParseError {
+            pos: i,
+            message: "expected '=' after SRID".into(),
+        });
+    }
+    i += 1;
+    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    let first_digit = i;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+    if i == first_digit {
+        return Err(WktError::ParseError {
+            pos: i,
+            message: "expected a SRID number".into(),
+        });
+    }
+    let srid = match core::str::from_utf8(&bytes[first_digit..i])
+        .ok()
+        .and_then(|t| t.parse::<u32>().ok())
+    {
+        Some(v) => v,
+        None => {
+            return Err(WktError::ParseError {
+                pos: first_digit,
+                message: "SRID does not fit in u32".into(),
+            });
+        }
+    };
+    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i >= bytes.len() || bytes[i] != b';' {
+        return Err(WktError::ParseError {
+            pos: i,
+            message: "expected ';' after SRID".into(),
+        });
+    }
+    i += 1;
+    let geometry = read_wkt_zm(&input[i..]).map_err(|e| offset_error(e, i))?;
+    Ok((Some(srid), geometry))
+}
+
+fn offset_error(e: WktError, by: usize) -> WktError {
+    match e {
+        WktError::ParseError { pos, message } => WktError::ParseError {
+            pos: pos + by,
+            message,
+        },
+        WktError::InvalidNumber { pos, value } => WktError::InvalidNumber {
+            pos: pos + by,
+            value,
+        },
+        WktError::UnknownGeometryType { pos, type_name } => WktError::UnknownGeometryType {
+            pos: pos + by,
+            type_name,
+        },
+        WktError::TrailingCharacters { pos } => WktError::TrailingCharacters { pos: pos + by },
+        WktError::MixedDimensions { pos, outer, found } => WktError::MixedDimensions {
+            pos: pos + by,
+            outer,
+            found,
+        },
+        other => other,
+    }
 }

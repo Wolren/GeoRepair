@@ -3,6 +3,16 @@
 ## [Unreleased]
 
 ### Added
+- `read_ewkt` and `write_ewkt` handle the PostGIS EWKT dialect: an optional `SRID=<n>;` prefix,
+  case-insensitive, with the SRID returned beside the geometry. GDAL refuses that prefix, so it
+  stays out of `read_wkt`.
+- `host::HostOptions` adds a repair stage. `HostOptions::REPAIR` runs `make_valid` on every polygon
+  that fails validity, after the finite filter and before the type is chosen, and reports
+  `repaired` and `dropped_unrepairable`.
+- `host::to_host_wkb` and `host::to_host_ewkt` take bytes or text from a producer, then repair and
+  deliver in one call: the path where another tool hands over geometry we can fix.
+- Conformance check M judges the delivered text with GEOS through shapely, and fails when no case
+  was invalid before repair and valid after it.
 - `host::to_host_owned` takes the geometry by value. The borrowing form clones once and calls it,
   so a clean polygon costs one move instead of a second copy: 117 ns against 167 ns per polygon
   on 1.58M real polygons.

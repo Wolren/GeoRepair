@@ -362,3 +362,57 @@ fn the_plain_reader_still_drops_the_z_of_a_compact_form() {
         read_wkt("POINT (1 2)").expect("plain parse")
     );
 }
+
+#[test]
+fn ewkt_reads_the_srid_prefix() {
+    let (srid, g) = read_ewkt("SRID=4326;POINT (1 2)").expect("ewkt parses");
+    assert_eq!(srid, Some(4326));
+    assert_eq!(g.geometry, read_wkt("POINT (1 2)").expect("plain parses"));
+    assert_eq!(g.dims, Dims::XY);
+}
+
+#[test]
+fn ewkt_is_optional_and_case_insensitive() {
+    assert_eq!(read_ewkt("POINT (1 2)").expect("plain parses").0, None);
+    let (srid, _) = read_ewkt("srid = 3857 ; POINT (1 2)").expect("lenient spacing");
+    assert_eq!(srid, Some(3857));
+}
+
+#[test]
+fn ewkt_keeps_z_and_m() {
+    let (_, g) = read_ewkt("SRID=4326;POINTZM (1 2 3 4)").expect("zm ewkt");
+    assert_eq!(g.dims, Dims::XYZM);
+    assert_eq!(g.extra_coords, vec![3.0, 4.0]);
+}
+
+#[test]
+fn ewkt_writes_what_it_reads() {
+    let (srid, g) = read_ewkt("SRID=4326;LINESTRING Z (0 0 1, 1 1 2)").expect("ewkt");
+    let text = write_ewkt(&g, srid);
+    assert!(text.starts_with("SRID=4326;LINESTRING Z"), "{text}");
+    let (again, g2) = read_ewkt(&text).expect("round trip");
+    assert_eq!(again, srid);
+    assert_eq!(g2.geometry, g.geometry);
+    assert_eq!(g2.extra_coords, g.extra_coords);
+}
+
+#[test]
+fn ewkt_refuses_a_broken_prefix() {
+    for bad in [
+        "SRID=;POINT (1 2)",
+        "SRID=4326 POINT (1 2)",
+        "SRID=abc;POINT (1 2)",
+        "SRID=5000000000;POINT (1 2)",
+    ] {
+        assert!(read_ewkt(bad).is_err(), "accepted {bad}");
+    }
+}
+
+#[test]
+fn ewkt_error_positions_count_the_prefix() {
+    let text = "SRID=4326;POINT (1 2) junk";
+    match read_ewkt(text) {
+        Err(WktError::TrailingCharacters { pos }) => assert!(pos > 10, "pos {pos}"),
+        other => panic!("expected trailing characters, got {other:?}"),
+    }
+}

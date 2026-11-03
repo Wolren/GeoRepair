@@ -7,7 +7,7 @@ use std::hint::black_box;
 use std::time::Instant;
 
 use geo::{Geometry, Polygon};
-use geo_repair::host::to_host;
+use geo_repair::host::{HostOptions, to_host, to_host_with};
 use geo_repair::output::{OutputPolicy, apply_policy, sanitize};
 
 const DATASET: &str = "benches/real_world/data_0.bin";
@@ -89,6 +89,15 @@ fn main() {
         black_box(acc);
     });
 
+    // Repair runs on a slice: a full-corpus repair costs minutes, and the rate is what matters.
+    let slice: Vec<&Geometry<f64>> = geoms.iter().take(50_000).collect();
+    let repair_s = best_of_three(|| {
+        for g in &slice {
+            black_box(to_host_with(g, HostOptions::REPAIR));
+        }
+    });
+    let repair_per = repair_s * 1e9 / slice.len() as f64;
+
     let per = |s: f64| s * 1e9 / n as f64;
     println!();
     println!(
@@ -108,6 +117,13 @@ fn main() {
             s / clone_s
         );
     }
+    println!();
+    println!(
+        "repair pass on {} polygons: {:.0} ns/geom ({:.1}x a plain reduce)",
+        slice.len(),
+        repair_per,
+        repair_per / per(adapter_s)
+    );
     println!();
     println!(
         "adapter kept {kept}/{n}, dropped {dropped_degenerate} degenerate parts, \
