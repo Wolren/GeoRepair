@@ -695,6 +695,40 @@ def main():
                 refused = sum(1 for _c, got, want in rows if got is None and want is not None)
                 columns[impl] = (len(rows), agree, differs, refused)
 
+            # WKB acceptance on the oracle's own bytes. RustGIS has no public WKB reader in
+            # crates/data, so its column is absent here and that is stated, not faked.
+            wkb_ids = [cid for cid in matrix_ids if ora[ids.index(cid)]]
+            hexes = [(cid, ora[ids.index(cid)]) for cid in wkb_ids]
+            if hexes:
+                wtsv = write_tsv(workdir, "wkbmatrix", [cid + TAB + h for cid, h in hexes])
+                our_wkb = dump_rust(["--wkb", wtsv], workdir)
+                geo_wkb = {}
+                if gexe:
+                    proc = subprocess.run(
+                        [gexe, "--wkb"],
+                        input="".join(cid + TAB + h + NL for cid, h in hexes),
+                        capture_output=True,
+                        text=True,
+                        timeout=300,
+                    )
+                    for line in proc.stdout.splitlines():
+                        parts = line.split(TAB)
+                        if len(parts) >= 2:
+                            geo_wkb[parts[0]] = parts[1]
+                ours_ok = sum(1 for cid, _h in hexes if our_wkb.get(cid, {}).get("ok"))
+                geo_ok = sum(1 for cid, _h in hexes if geo_wkb.get(cid) == "ok")
+                disagree = [
+                    cid
+                    for cid, _h in hexes
+                    if bool(our_wkb.get(cid, {}).get("ok")) != (geo_wkb.get(cid) == "ok")
+                ]
+                print("WKB acceptance on the oracle's bytes: GeoRepair "
+                      + str(ours_ok) + "/" + str(len(hexes))
+                      + ", georust wkb " + str(geo_ok) + "/" + str(len(hexes))
+                      + ", disagreements " + str(len(disagree)))
+                if disagree and "--matrix" in sys.argv:
+                    print("  " + ", ".join(disagree[:10]))
+
             print("same raw corpus text through each implementation, geometry vs the oracle:")
             print("%-14s%8s%8s%8s%9s" % ("impl", "cases", "agree", "differ", "refused"))
             for impl, (n, agree, differs, refused) in columns.items():

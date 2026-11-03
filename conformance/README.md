@@ -80,6 +80,28 @@ georust wkt        107      77       6        7
 GDAL               107      90       0        0
 ```
 
+WKB acceptance is measured separately, on the oracle's own bytes:
+
+```
+WKB acceptance: GeoRepair 90/98, georust wkb 95/98, disagreements 5
+```
+
+The five disagreements are curved types, and they are not a matter of strictness. The `wkb`
+crate 0.9.3 accepts four of them by reading them as a different geometry:
+
+| type code | what the bytes are | what `wkb` 0.9.3 returns |
+|---|---|---|
+| 9 | CompoundCurve | Point |
+| 10 | CurvePolygon | LineString |
+| 12 | MultiSurface | MultiPoint |
+| 15 | PolyhedralSurface | GeometryCollection |
+| 17 | Triangle | Point |
+
+Codes 8, 11 and 16 are rejected with a clear error. Codes 9, 10, 12, 15 and 17 are silently
+mapped to a base type, so a caller receives geometry that was never in the input and no error.
+Our reader rejects all eight. Acceptance counts alone hide this, which is why the matrix names
+the cases.
+
 What the differences are, named:
 
 - GeoRepair: one coordinate set differs (`st_unclosed_ring`, we close the ring and GDAL keeps
