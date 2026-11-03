@@ -28,7 +28,7 @@ not a gate.
 | A read acceptance | our verdict matches the specification | corpus of 107 cases |
 | B geometry equality | our geometry equals OGR's | canonical 2D WKB |
 | C write semantics | our WKT, read by OGR, equals OGR's geometry | second oracle pass |
-| D write bytes | our ISO WKB equals OGR's bytes | 2D cases, byte compare |
+| D write bytes | our ISO WKB equals OGR's bytes | 82 cases, XY to ZM |
 | E WKB round trip | OGR's bytes read and re-emit unchanged | all dimensions |
 | F big-endian | big-endian bytes read and kept | encoder independent of the crate |
 | G EWKB SRID | an EWKB SRID survives the read | SRID 4326 on every readable case |
@@ -46,7 +46,9 @@ no formatting difference can hide a disagreement. Cases RustGIS cannot represent
 counted, never silently passed.
 
 Check E is what proves ISO 13249 type codes (1001, 2001, 3001) are read, not only the PostGIS
-EWKB high-bit flags. Check D is what proves we emit the ISO codes back.
+EWKB high-bit flags. Check D is what proves we emit the ISO codes back, and it runs on every dimension, so the
+ISO codes 1001, 2001 and 3001 are compared against OGR byte for byte, empty geometries
+included.
 
 ## Comparison matrix
 
@@ -106,6 +108,11 @@ What the differences are, named:
 
 - GeoRepair: one coordinate set differs (`st_unclosed_ring`, we close the ring and GDAL keeps
   it open), and six refusals of input GDAL tolerates because the input is invalid.
+- GeoRepair refuses a collection that mixes dimension modifiers,
+  `GEOMETRYCOLLECTION (POINT Z (1 2 3), POINT (4 5))`, with an error naming the position.
+  GDAL promotes the whole collection to XYZ and fills a zero. We refuse because promotion
+  invents a coordinate the input never carried. This is the one case check D cannot compare,
+  and the run names it.
 - georust `wkt`: `POINT EMPTY` becomes an empty MultiPoint, so four cases differ by type; two
   cases are refused (`MULTIPOINT (EMPTY, ...)`, NaN); the six lenient acceptances above are
   refused too.

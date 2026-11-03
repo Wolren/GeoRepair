@@ -423,6 +423,7 @@ def main():
         ours = dump_rust([corpus_tsv], workdir)
         ora = oracle(texts, workdir, "cases")
 
+        no_iso = []
         res = {
             k: [[], []]
             for k in (
@@ -481,9 +482,12 @@ def main():
                 our_hex = row.get("isowkb") or row.get("wkb")
                 same = wkbcodec.canonical_2d(our_hex) == wkbcodec.canonical_2d(o)
                 rec("B_geometry", same, cid, "" if same else "geometry differs")
-                if family == "XY" and our_hex and o:
-                    same_bytes = our_hex.lower() == o.lower()
+                iso = (row.get("isowkb") or "").lower()
+                if iso and o:
+                    same_bytes = iso == o.lower()
                     rec("D_write_bytes", same_bytes, cid, "" if same_bytes else "bytes differ")
+                else:
+                    no_iso.append(cid)
                 if use_zm and cid in emitted_ids:
                     expect = wkbcodec.canonical_2d(o)
                     got = wkbcodec.canonical_2d(ora_written.get(emitted_ids.index(cid)))
@@ -774,6 +778,13 @@ def main():
                 + str(len(raw_rejected))
                 + " cases: "
                 + ", ".join(raw_rejected[:8])
+            )
+        if no_iso:
+            print(
+                "check D finds no ISO bytes to compare for "
+                + str(len(no_iso))
+                + " cases: "
+                + ", ".join(no_iso[:6])
             )
         if skipped_k:
             print(
