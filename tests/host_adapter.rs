@@ -331,3 +331,20 @@ fn repair_mode_fixes_overlapping_polygons() {
         "repaired multipolygon is still invalid: {out:?}"
     );
 }
+
+#[test]
+fn repair_mode_fixes_crossing_members_of_a_multi_line() {
+    // RustGIS stores every line as a vector of lines, so crossing members arrive as one shape.
+    let mls = geo::MultiLineString::new(vec![
+        LineString::from(vec![(0.0, 0.0), (2.0, 2.0)]),
+        LineString::from(vec![(2.0, 0.0), (0.0, 2.0)]),
+    ]);
+    let (raw, _) = to_host_with(&Geometry::MultiLineString(mls.clone()), HostOptions::REDUCE);
+    assert!(!is_valid_any(&raw.expect("lines survive reduce")));
+
+    let (out, report) = to_host_with(&Geometry::MultiLineString(mls), HostOptions::REPAIR);
+    assert_eq!(report.repaired, 1);
+    let out = out.expect("crossing lines keep length");
+    assert_eq!(host_clean(&out), Ok(()));
+    assert!(is_valid_any(&out), "crossing pair still invalid: {out:?}");
+}
