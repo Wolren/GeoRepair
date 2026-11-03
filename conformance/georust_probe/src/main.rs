@@ -65,6 +65,7 @@ fn shape(g: &Geometry<f64>) -> String {
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let wkb_mode = args.iter().any(|a| a == "--wkb");
+    let wkb_out = args.iter().any(|a| a == "--wkb-out");
     let wkt_out = args.iter().any(|a| a == "--wkt-out");
 
     for line in io::stdin().lock().lines() {
@@ -80,6 +81,13 @@ fn main() {
             let bytes: Option<Vec<u8>> = from_hex(payload);
             match bytes {
                 Some(b) => match wkb::reader::read_wkb(&b) {
+                    Ok(g) if wkb_out => {
+                        let mut out: Vec<u8> = Vec::new();
+                        match wkb::writer::write_geometry(&mut out, &g, &Default::default()) {
+                            Ok(()) => println!("{}\tok\t{}", id, to_hex(&out)),
+                            Err(e) => println!("{}\terr\t{}", id, e.to_string().replace('\t', " ")),
+                        }
+                    }
                     Ok(g) => println!("{}\tok\t{:?}", id, g.geometry_type()),
                     Err(e) => println!("{}\terr\t{}", id, e.to_string().replace('\t', " ")),
                 },
@@ -105,6 +113,10 @@ fn main() {
             Err(_) => println!("{}\tpanic\t", id),
         }
     }
+}
+
+fn to_hex(b: &[u8]) -> String {
+    b.iter().map(|x| format!("{:02x}", x)).collect()
 }
 
 fn from_hex(s: &str) -> Option<Vec<u8>> {
