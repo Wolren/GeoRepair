@@ -207,6 +207,12 @@ def corpus():
         ("st_ninf", "POINT (-Inf -Inf)"),
         ("st_bowtie", "POLYGON ((0 0, 1 1, 1 0, 0 1, 0 0))"),
         ("st_hole_outside", "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (20 20, 21 20, 21 21, 20 20))"),
+        ("st_self_crossing_line", "LINESTRING (0 0, 2 2, 2 0, 0 2)"),
+        ("st_dup_points", "MULTIPOINT (1 1, 1 1)"),
+        (
+            "st_overlap_polygons",
+            "MULTIPOLYGON (((0 0, 2 0, 2 2, 0 2, 0 0)), ((1 1, 3 1, 3 3, 1 3, 1 1)))",
+        ),
     ]
     cases += [(i, "structural", t) for i, t in struct]
 
@@ -802,8 +808,17 @@ def main():
                 except Exception as exc:
                     rec("M_geos_valid", False, cid, "GEOS cannot read our output: " + str(exc)[:80])
                     continue
-                ok = bool(shapely.is_valid(g))
-                rec("M_geos_valid", ok, cid, "" if ok else shapely.is_valid_reason(g)[:90])
+                # GEOS separates validity from simplicity: a self-crossing line is valid but
+                # not simple, so a host check needs both.
+                valid = bool(shapely.is_valid(g))
+                simple = bool(shapely.is_simple(g))
+                ok = valid and simple
+                detail = ""
+                if not valid:
+                    detail = shapely.is_valid_reason(g)[:90]
+                elif not simple:
+                    detail = "not simple per GEOS"
+                rec("M_geos_valid", ok, cid, detail)
                 raw = row.get("wkt_delivery") or ""
                 if not raw:
                     continue
@@ -811,7 +826,7 @@ def main():
                     raw_g = shapely_wkt.loads(raw)
                 except Exception:
                     continue
-                if ok and not shapely.is_valid(raw_g):
+                if ok and not (shapely.is_valid(raw_g) and shapely.is_simple(raw_g)):
                     repaired_ids.append(cid)
             if not repaired_ids:
                 rec(
@@ -824,7 +839,7 @@ def main():
                 print(
                     "check M: repair turned "
                     + str(len(repaired_ids))
-                    + " GEOS-invalid deliveries into valid ones: "
+                    + " deliveries GEOS called invalid or non-simple into valid, simple ones: "
                     + ", ".join(repaired_ids)
                 )
 

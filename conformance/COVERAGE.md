@@ -79,8 +79,9 @@ dimension. A refusal never invents a coordinate, which is the reason for the cho
 | Type chosen from survivors | Guaranteed | `the_type_follows_the_survivors` |
 | Idempotent | Guaranteed | 500 generated shapes |
 | Output accepted by RustGIS and the georust `wkt` crate | Verified | K 58, L 58 |
-| Repair of invalid polygons on request | Guaranteed | `HostOptions::REPAIR`, 5 tests |
-| Repaired output valid per GEOS | Verified | M 59 delivered geometries, 2 repaired |
+| Repair of invalid points, lines and polygons on request | Guaranteed | `HostOptions::REPAIR`, 8 tests |
+| Repair at collection level, so overlapping valid parts are fixed | Guaranteed | `repair_mode_fixes_overlapping_polygons`, M |
+| Repaired output valid and simple per GEOS | Verified | M 62 delivered geometries, 5 repaired |
 | Repair does not touch a valid polygon | Guaranteed | test `repair_mode_does_not_touch_a_valid_polygon` |
 | Bytes in, host shape out (`to_host_wkb`, `to_host_ewkt`) | Guaranteed | 2 tests |
 

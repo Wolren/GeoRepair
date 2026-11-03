@@ -255,3 +255,79 @@ fn a_host_can_be_fed_ewkt_and_get_a_srid_free_shape() {
     let (out, _) = to_host_ewkt("SRID=4326;POINT (1 2)", HostOptions::REDUCE).expect("ewkt read");
     assert_eq!(out, Some(Geometry::Point(Point::new(1.0, 2.0))));
 }
+
+fn is_valid_any(g: &Geometry<f64>) -> bool {
+    match g {
+        Geometry::Point(p) => p.is_valid(),
+        Geometry::MultiPoint(p) => p.is_valid(),
+        Geometry::LineString(p) => p.is_valid(),
+        Geometry::MultiLineString(p) => p.is_valid(),
+        Geometry::Polygon(p) => p.is_valid(),
+        Geometry::MultiPolygon(p) => p.is_valid(),
+        _ => false,
+    }
+}
+
+#[test]
+fn repair_mode_fixes_a_self_crossing_line() {
+    let line = LineString::from(vec![(0.0, 0.0), (2.0, 2.0), (2.0, 0.0), (0.0, 2.0)]);
+    let (raw, _) = to_host_with(&Geometry::LineString(line.clone()), HostOptions::REDUCE);
+    assert!(
+        !is_valid_any(&raw.expect("line survives reduce")),
+        "input must be broken"
+    );
+
+    let (out, report) = to_host_with(&Geometry::LineString(line), HostOptions::REPAIR);
+    assert_eq!(report.repaired, 1);
+    let out = out.expect("a crossing line still has length");
+    assert_eq!(host_clean(&out), Ok(()));
+    assert!(
+        is_valid_any(&out),
+        "repaired line is still invalid: {out:?}"
+    );
+    assert!(matches!(
+        out,
+        Geometry::LineString(_) | Geometry::MultiLineString(_)
+    ));
+}
+
+#[test]
+fn repair_mode_dedupes_repeated_points() {
+    let mp = MultiPoint::new(vec![Point::new(1.0, 1.0), Point::new(1.0, 1.0)]);
+    let (raw, _) = to_host_with(&Geometry::MultiPoint(mp.clone()), HostOptions::REDUCE);
+    assert!(!is_valid_any(&raw.expect("points survive reduce")));
+
+    let (out, report) = to_host_with(&Geometry::MultiPoint(mp), HostOptions::REPAIR);
+    assert_eq!(report.repaired, 1);
+    let out = out.expect("one point survives dedupe");
+    assert!(
+        is_valid_any(&out),
+        "repaired multipoint is still invalid: {out:?}"
+    );
+}
+
+#[test]
+fn repair_mode_fixes_overlapping_polygons() {
+    // Each square is valid on its own; the pair is not, so validity belongs to the collection.
+    let a = Polygon::new(
+        ring(&[(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0), (0.0, 0.0)]),
+        vec![],
+    );
+    let b = Polygon::new(
+        ring(&[(1.0, 1.0), (3.0, 1.0), (3.0, 3.0), (1.0, 3.0), (1.0, 1.0)]),
+        vec![],
+    );
+    let mp = MultiPolygon::new(vec![a.clone(), b.clone()]);
+    assert!(a.is_valid() && b.is_valid());
+    let (raw, _) = to_host_with(&Geometry::MultiPolygon(mp.clone()), HostOptions::REDUCE);
+    assert!(!is_valid_any(&raw.expect("both survive reduce")));
+
+    let (out, report) = to_host_with(&Geometry::MultiPolygon(mp), HostOptions::REPAIR);
+    assert_eq!(report.repaired, 1);
+    let out = out.expect("overlap keeps area");
+    assert_eq!(host_clean(&out), Ok(()));
+    assert!(
+        is_valid_any(&out),
+        "repaired multipolygon is still invalid: {out:?}"
+    );
+}

@@ -4,8 +4,10 @@
 //! survives. A host wants the data, not the shape of the input, so a collection whose only live
 //! member is a point becomes a point and not a single-member multipoint.
 //!
-//! `to_host_with` adds repair. A producer such as RustGIS hands over bytes it could not validate;
-//! this crate repairs them and returns a shape the host can store, counting what it changed.
+//! `to_host_with` adds repair. A producer such as RustGIS hands over geometry it could not
+//! validate; this crate repairs it and returns a shape the host can store, counting what changed.
+//! Repair runs on the whole multi geometry, not part by part: two valid polygons can still overlap,
+//! and an invalid MultiPolygon must become a set the host can accept.
 
 use alloc::vec::Vec;
 use geo::{
@@ -24,7 +26,7 @@ pub struct HostReport {
     pub dropped_nonfinite: usize,
     /// Parts dropped because they cannot form a shape once closed.
     pub dropped_degenerate: usize,
-    /// Parts rebuilt by `make_valid` because they failed validity.
+    /// Collections rebuilt by `make_valid` because they failed validity.
     pub repaired: usize,
     /// Parts dropped because repair produced nothing storable.
     pub dropped_unrepairable: usize,
@@ -33,14 +35,14 @@ pub struct HostReport {
 /// How far the delivery pass goes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct HostOptions {
-    /// Rebuild invalid polygons with `make_valid` before delivery.
+    /// Rebuild invalid point, line and polygon collections with `make_valid`.
     pub repair: bool,
 }
 
 impl HostOptions {
     /// Flatten and filter only. No geometry changes shape.
     pub const REDUCE: Self = Self { repair: false };
-    /// Flatten, filter, then repair every polygon that fails validity.
+    /// Flatten, filter, then repair every collection that fails validity.
     pub const REPAIR: Self = Self { repair: true };
 }
 
@@ -74,9 +76,32 @@ pub fn to_host_with_owned(
     let mut report = HostReport::default();
     let mut parts = reduce(geometry, &mut report);
     if options.repair {
+        parts.points = repair_points(parts.points, &mut report);
+        parts.lines = repair_lines(parts.lines, &mut report);
         parts.polys = repair_polygons(parts.polys, &mut report);
     }
     (assemble(parts), report)
+}
+
+/// Read WKB or EWKB bytes, then deliver to a closed host, repairing when asked.
+///
+/// The path a producer takes when it hands over bytes: the reader keeps SRID and Z/M beside the
+/// geometry, and delivery drops them because the host model is 2D.
+pub fn to_host_wkb(
+    bytes: &[u8],
+    options: HostOptions,
+) -> Result<(Option<Geometry<f64>>, HostReport), crate::io::wkb::WkbError> {
+    let read = crate::io::wkb::read_ewkb(bytes)?;
+    Ok(to_host_with_owned(read.geometry, options))
+}
+
+/// Read PostGIS EWKT, then deliver to a closed host, repairing when asked.
+pub fn to_host_ewkt(
+    text: &str,
+    options: HostOptions,
+) -> Result<(Option<Geometry<f64>>, HostReport), crate::io::wkt::WktError> {
+    let (_, read) = crate::io::wkt::read_ewkt(text)?;
+    Ok(to_host_with_owned(read.geometry, options))
 }
 
 /// The invariants a host may rely on, checkable by the host itself.
@@ -128,26 +153,6 @@ pub fn host_clean<T: GeoFloat>(g: &Geometry<T>) -> Result<(), &'static str> {
 fn finite<T: GeoFloat>(v: T) -> bool {
     v.is_finite()
 }
-/// Read WKB or EWKB bytes, then deliver to a closed host, repairing when asked.
-///
-/// The path a producer takes when it hands over bytes: the reader keeps SRID and Z/M beside the
-/// geometry, and delivery drops them because the host model is 2D.
-pub fn to_host_wkb(
-    bytes: &[u8],
-    options: HostOptions,
-) -> Result<(Option<Geometry<f64>>, HostReport), crate::io::wkb::WkbError> {
-    let read = crate::io::wkb::read_ewkb(bytes)?;
-    Ok(to_host_with_owned(read.geometry, options))
-}
-
-/// Read PostGIS EWKT, then deliver to a closed host, repairing when asked.
-pub fn to_host_ewkt(
-    text: &str,
-    options: HostOptions,
-) -> Result<(Option<Geometry<f64>>, HostReport), crate::io::wkt::WktError> {
-    let (_, read) = crate::io::wkt::read_ewkt(text)?;
-    Ok(to_host_with_owned(read.geometry, options))
-}
 
 struct Parts<T: GeoFloat> {
     polys: Vec<Polygon<T>>,
@@ -163,10 +168,10 @@ fn reduce<T: GeoFloat>(geometry: Geometry<T>, report: &mut HostReport) -> Parts<
     };
     gather(geometry, &mut raw, report);
 
-    let mut kept = Vec::with_capacity(raw.polys.len());
+    let mut polys = Vec::with_capacity(raw.polys.len());
     for p in raw.polys {
         if let Some(c) = clean_polygon(p, report) {
-            kept.push(c);
+            polys.push(c);
         }
     }
     let mut lines = Vec::with_capacity(raw.lines.len());
@@ -184,7 +189,7 @@ fn reduce<T: GeoFloat>(geometry: Geometry<T>, report: &mut HostReport) -> Parts<
         }
     }
     Parts {
-        polys: kept,
+        polys,
         lines,
         points,
     }
@@ -239,45 +244,131 @@ fn gather<T: GeoFloat>(g: Geometry<T>, parts: &mut Parts<T>, report: &mut HostRe
     }
 }
 
-fn repair_polygons(polys: Vec<Polygon<f64>>, report: &mut HostReport) -> Vec<Polygon<f64>> {
-    let mut out: Vec<Polygon<f64>> = Vec::with_capacity(polys.len());
-    for p in polys {
-        if p.is_valid() {
-            out.push(p);
-            continue;
-        }
-        report.repaired += 1;
-        match p.make_valid() {
-            Geometry::Polygon(q) => keep_repaired(q, &mut out, report),
-            Geometry::MultiPolygon(mp) => {
-                for q in mp.0 {
-                    keep_repaired(q, &mut out, report);
-                }
-            }
-            Geometry::GeometryCollection(gc) => {
-                for g in gc.0 {
-                    match g {
-                        Geometry::Polygon(q) => keep_repaired(q, &mut out, report),
-                        Geometry::MultiPolygon(mp) => {
-                            for q in mp.0 {
-                                keep_repaired(q, &mut out, report);
-                            }
-                        }
-                        _ => report.dropped_unrepairable += 1,
-                    }
-                }
-            }
-            _ => report.dropped_unrepairable += 1,
-        }
+/// Duplicate coordinates are the only way finite points fail validity, and make_valid dedupes.
+fn repair_points(points: Vec<Point<f64>>, report: &mut HostReport) -> Vec<Point<f64>> {
+    if points.len() < 2 {
+        return points;
     }
+    let geo = Geometry::MultiPoint(MultiPoint::new(points));
+    if geo.is_valid() {
+        return match geo {
+            Geometry::MultiPoint(mp) => mp.0,
+            _ => Vec::new(),
+        };
+    }
+    report.repaired += 1;
+    let mut out = Vec::new();
+    collect_points(geo.make_valid(), &mut out, report);
     out
 }
 
-/// Repair can emit a part the host still cannot store, so the finite and ring rules run again.
-fn keep_repaired(p: Polygon<f64>, out: &mut Vec<Polygon<f64>>, report: &mut HostReport) {
-    match clean_polygon(p, report) {
-        Some(c) => out.push(c),
-        None => report.dropped_unrepairable += 1,
+/// Members that cross each other make the delivered MultiLineString invalid, so repair the set.
+fn repair_lines(lines: Vec<LineString<f64>>, report: &mut HostReport) -> Vec<LineString<f64>> {
+    if lines.is_empty() {
+        return lines;
+    }
+    let geo = if lines.len() == 1 {
+        Geometry::LineString(lines.into_iter().next().expect("length checked"))
+    } else {
+        Geometry::MultiLineString(MultiLineString::new(lines))
+    };
+    if geo.is_valid() {
+        return match geo {
+            Geometry::LineString(l) => alloc::vec![l],
+            Geometry::MultiLineString(mls) => mls.0,
+            _ => Vec::new(),
+        };
+    }
+    report.repaired += 1;
+    let mut out = Vec::new();
+    collect_lines(geo.make_valid(), &mut out, report);
+    out
+}
+
+/// Two valid polygons can overlap, so validity belongs to the collection, not to each part.
+fn repair_polygons(polys: Vec<Polygon<f64>>, report: &mut HostReport) -> Vec<Polygon<f64>> {
+    if polys.is_empty() {
+        return polys;
+    }
+    let geo = if polys.len() == 1 {
+        Geometry::Polygon(polys.into_iter().next().expect("length checked"))
+    } else {
+        Geometry::MultiPolygon(MultiPolygon::new(polys))
+    };
+    if geo.is_valid() {
+        return match geo {
+            Geometry::Polygon(p) => alloc::vec![p],
+            Geometry::MultiPolygon(mp) => mp.0,
+            _ => Vec::new(),
+        };
+    }
+    report.repaired += 1;
+    let mut out = Vec::new();
+    collect_polys(geo.make_valid(), &mut out, report);
+    out
+}
+
+fn collect_points(g: Geometry<f64>, out: &mut Vec<Point<f64>>, report: &mut HostReport) {
+    match g {
+        Geometry::Point(p) => {
+            if finite(p.0.x) && finite(p.0.y) {
+                out.push(p);
+            } else {
+                report.dropped_unrepairable += 1;
+            }
+        }
+        Geometry::MultiPoint(mp) => {
+            for p in mp.0 {
+                collect_points(Geometry::Point(p), out, report);
+            }
+        }
+        Geometry::GeometryCollection(gc) => {
+            for part in gc.0 {
+                collect_points(part, out, report);
+            }
+        }
+        _ => report.dropped_unrepairable += 1,
+    }
+}
+
+fn collect_lines(g: Geometry<f64>, out: &mut Vec<LineString<f64>>, report: &mut HostReport) {
+    match g {
+        Geometry::LineString(l) => match clean_line(l, report) {
+            Some(c) => out.push(c),
+            None => report.dropped_unrepairable += 1,
+        },
+        Geometry::MultiLineString(mls) => {
+            for l in mls.0 {
+                collect_lines(Geometry::LineString(l), out, report);
+            }
+        }
+        Geometry::GeometryCollection(gc) => {
+            for part in gc.0 {
+                collect_lines(part, out, report);
+            }
+        }
+        _ => report.dropped_unrepairable += 1,
+    }
+}
+
+fn collect_polys(g: Geometry<f64>, out: &mut Vec<Polygon<f64>>, report: &mut HostReport) {
+    match g {
+        Geometry::Polygon(p) => match clean_polygon(p, report) {
+            Some(c) => out.push(c),
+            None => report.dropped_unrepairable += 1,
+        },
+        Geometry::MultiPolygon(mp) => {
+            for p in mp.0 {
+                collect_polys(Geometry::Polygon(p), out, report);
+            }
+        }
+        Geometry::GeometryCollection(gc) => {
+            for part in gc.0 {
+                collect_polys(part, out, report);
+            }
+        }
+        // A polygon that collapsed to lines or points carries no area; the host layer loses meaning.
+        _ => report.dropped_unrepairable += 1,
     }
 }
 
