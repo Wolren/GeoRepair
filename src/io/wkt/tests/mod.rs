@@ -324,3 +324,41 @@ fn multipolygon_skips_empty_parts() {
 
 mod double;
 mod zm;
+
+#[test]
+fn a_compact_dimension_modifier_matches_the_spaced_form() {
+    for (compact, spaced) in [
+        ("POINTZ (1 2 3)", "POINT Z (1 2 3)"),
+        ("POINTM (1 2 3)", "POINT M (1 2 3)"),
+        ("POINTZM (1 2 3 4)", "POINT ZM (1 2 3 4)"),
+        ("LINESTRINGZ (0 0 1, 1 1 2)", "LINESTRING Z (0 0 1, 1 1 2)"),
+    ] {
+        let a = read_wkt_zm(compact).expect("compact form parses");
+        let b = read_wkt_zm(spaced).expect("spaced form parses");
+        assert_eq!(a.geometry, b.geometry);
+        assert_eq!(a.dims, b.dims);
+        assert_eq!(a.extra_coords, b.extra_coords);
+    }
+}
+
+#[test]
+fn a_compact_modifier_works_on_nested_types() {
+    let g = read_wkt_zm("MULTIPOLYGONZM (((0 0 1 1, 1 0 2 2, 1 1 3 3, 0 0 1 1)))")
+        .expect("multipolygon zw");
+    assert_eq!(g.dims, Dims::XYZM);
+    assert_eq!(g.extra_coords.len(), 8);
+}
+
+#[test]
+fn two_dimension_modifiers_are_refused() {
+    assert!(read_wkt_zm("POINTZ Z (1 2 3)").is_err());
+    assert!(read_wkt_zm("POINT ZM Z (1 2 3 4)").is_err());
+}
+
+#[test]
+fn the_plain_reader_still_drops_the_z_of_a_compact_form() {
+    assert_eq!(
+        read_wkt("POINTZ (1 2 3)").expect("plain parse"),
+        read_wkt("POINT (1 2)").expect("plain parse")
+    );
+}

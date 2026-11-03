@@ -195,6 +195,10 @@ name = "io_cmp"
 harness = false
 
 [[bench]]
+name = "host_adapter"
+harness = false
+
+[[bench]]
 name = "crs_wkt"
 harness = false
 

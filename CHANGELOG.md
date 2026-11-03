@@ -3,6 +3,11 @@
 ## [Unreleased]
 
 ### Added
+- `host::to_host_owned` takes the geometry by value. The borrowing form clones once and calls it,
+  so a clean polygon costs one move instead of a second copy: 117 ns against 167 ns per polygon
+  on 1.58M real polygons.
+- `conformance/COVERAGE.md` is the register of every WKT and WKB surface: what is accepted, what is
+  refused, and which check or test proves it.
 - `host::to_host` reduces a geometry to a closed host model: point, line, polygon and their
   multi forms, finite, no empties, closed rings. It flattens collections, drops what cannot be
   stored, and picks the type from what survives. `HostReport` counts every drop and
@@ -18,6 +23,9 @@
   acceptance, geometry, writer semantics, writer bytes and WKB round trip.
 
 ### Fixed
+- The WKT reader accepts the dimension modifier welded to the type name (`POINTZ`, `POINTM`,
+  `POINTZM`, `MULTIPOLYGONZM`), the form PostGIS and GDAL both accept. A type given two
+  modifiers is still refused.
 
 - The WKB reader now reads ISO type codes, not only the EWKB high bits. Standard OGC WKB with
   Z or M used to fail with `UnexpectedGeometryType`; all 55 dimension cases now read.

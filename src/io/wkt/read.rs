@@ -71,9 +71,20 @@ impl<'a> Parser<'a> {
             self.i += 1;
         }
         let kw = &self.s[start..self.i];
-        let (dims, explicit) = self.read_dims();
+        let (mut dims, mut explicit) = self.read_dims();
         let kw_upper: Vec<u8> = kw.iter().map(|b| b.to_ascii_uppercase()).collect();
-        let kw = kw_upper.as_slice();
+        let full = kw_upper.as_slice();
+        let (kw, compact) = match split_compact_modifier(full) {
+            Some((base, d)) => (base, Some(d)),
+            None => (full, None),
+        };
+        if let Some(d) = compact {
+            if explicit {
+                return Err(self.err("a type takes one dimension modifier, not two"));
+            }
+            dims = d;
+            explicit = true;
+        }
         let kw = match kw {
             b"POINT" => Keyword::Point,
             b"LINESTRING" => Keyword::LineString,
@@ -717,4 +728,30 @@ pub fn infer_wkt_type(input: &str) -> Result<(&'static str, u32), WktError> {
         GeometryCollection => "GEOMETRYCOLLECTION",
     };
     Ok((name, dims.coord_count() as u32))
+}
+
+/// PostGIS and GDAL weld the modifier to the type name ("POINTZ"); the spaced form stays valid.
+fn split_compact_modifier(kw: &[u8]) -> Option<(&[u8], Dims)> {
+    const NAMES: [&[u8]; 8] = [
+        b"POINT",
+        b"LINESTRING",
+        b"LINEARRING",
+        b"POLYGON",
+        b"MULTIPOINT",
+        b"MULTILINESTRING",
+        b"MULTIPOLYGON",
+        b"GEOMETRYCOLLECTION",
+    ];
+    for name in NAMES {
+        if kw.len() > name.len() && kw.starts_with(name) {
+            let dims = match &kw[name.len()..] {
+                b"ZM" => Dims::XYZM,
+                b"Z" => Dims::XYZ,
+                b"M" => Dims::XYM,
+                _ => continue,
+            };
+            return Some((name, dims));
+        }
+    }
+    None
 }

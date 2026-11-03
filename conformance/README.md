@@ -3,6 +3,8 @@
 Judges this crate's WKT and WKB readers and writers against GDAL, an implementation we do not
 own. The crate never reads its own output to decide whether that output is correct.
 
+What each surface accepts, refuses and why: `COVERAGE.md`.
+
 ## Run
 
 ```

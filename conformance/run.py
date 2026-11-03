@@ -150,6 +150,22 @@ def corpus():
             cases.append((tag + "_" + name, "shape", text))
         for t in TYPES:
             cases.append((tag + "_empty_" + t.lower(), "empty", t + " " + mod(dims) + "EMPTY"))
+        if dims:
+            # PostGIS and GDAL both accept the modifier welded to the type name.
+            compact = {
+                "Z": "POINTZ (1 2 3)",
+                "M": "POINTM (1 2 3)",
+                "ZM": "POINTZM (1 2 3 4)",
+            }[dims]
+            cases.append((tag + "_compact_point", "shape", compact))
+            if dims == "ZM":
+                cases.append(
+                    (
+                        tag + "_compact_multipolygon",
+                        "shape",
+                        "MULTIPOLYGONZM (((0 0 1 1, 1 0 2 2, 1 1 3 3, 0 0 1 1)))",
+                    )
+                )
 
     lex = [
         ("lex_lower", "point (1 2)"),
