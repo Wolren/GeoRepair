@@ -343,6 +343,27 @@ def build_probe(workdir):
     return None
 
 
+def build_georust():
+    """Build the georust wkt and wkb probe. Returns the exe or None."""
+    src = os.path.join(HERE, "georust_probe")
+    target = os.path.join(ROOT, "target", "georust-probe")
+    env = dict(os.environ, CARGO_TARGET_DIR=target)
+    proc = subprocess.run(
+        ["cargo", "build", "--quiet", "--manifest-path", os.path.join(src, "Cargo.toml")],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        print("georust probe build failed, check L skipped: " + proc.stderr[-400:])
+        return None
+    for name in ("georust-probe.exe", "georust-probe"):
+        path = os.path.join(target, "debug", name)
+        if os.path.exists(path):
+            return path
+    return None
+
+
 def run_probe(exe, lines):
     proc = subprocess.run(
         [exe], input="".join(line + NL for line in lines), capture_output=True, text=True, timeout=300
@@ -416,6 +437,7 @@ def main():
                 "I_nesting",
                 "J_curved",
                 "K_rustgis",
+                "L_georust",
             )
         }
 
@@ -592,6 +614,109 @@ def main():
                 else:
                     ok = status == "ok" and payload == expected
                     rec("K_rustgis", ok, cid, "" if ok else "shape differs")
+
+        # L and the comparison matrix: the same delivered text through every implementation.
+        gexe = build_georust()
+        if gexe is None:
+            print("check L skipped: the georust probe did not build")
+        else:
+            subject = []
+            for cid in ids:
+                row = ours.get(cid, {})
+                if not row.get("zm_ok"):
+                    continue
+                text = row.get("wkt_delivery") or ""
+                if text:
+                    subject.append((cid, text))
+            g_rows = run_probe(gexe, [cid + TAB + text for cid, text in subject])
+            for cid, _text in subject:
+                i = ids.index(cid)
+                if ora[i] is None:
+                    continue
+                expected = wkbcodec.shape_of_hex(ora[i])
+                if expected is None:
+                    continue
+                status, payload = g_rows.get(cid, ("missing", ""))
+                if status == "ok" and payload == expected:
+                    rec("L_georust", True, cid)
+                elif status == "ok":
+                    rec("L_georust", False, cid, "shape differs")
+                else:
+                    rec("L_georust", False, cid, status + ": " + payload[:90])
+
+            # Comparison matrix: every implementation reads the SAME raw corpus text.
+            def flat(text):
+                return text.replace(NL, " ").replace(TAB, " ").replace(CR, " ")
+
+            def safe_plain(h):
+                # Curved geometries have no shared data model, so they are not comparable.
+                if not h:
+                    return None
+                try:
+                    return wkbcodec.plain_shape(h)
+                except Exception:  # noqa: BLE001
+                    return None
+
+            matrix_ids = [cid for cid in ids if ours.get(cid, {}).get("zm_ok") is not None]
+            r_rows = (
+                run_probe(probe, [cid + TAB + flat(texts[ids.index(cid)]) for cid in matrix_ids])
+                if probe
+                else {}
+            )
+            gg_rows = (
+                run_probe(gexe, [cid + TAB + flat(texts[ids.index(cid)]) for cid in matrix_ids])
+                if gexe
+                else {}
+            )
+
+            evidence = {"GeoRepair": [], "RustGIS": [], "georust wkt": [], "GDAL": []}
+            for cid in matrix_ids:
+                i = ids.index(cid)
+                oracle_shape = safe_plain(ora[i])
+                evidence["GDAL"].append((cid, oracle_shape, oracle_shape))
+                row = ours[cid]
+                mine = row.get("wkb") or ""
+                mine_shape = safe_plain(mine) if row.get("plain_ok") else None
+                evidence["GeoRepair"].append((cid, mine_shape, oracle_shape))
+                if probe:
+                    status, payload = r_rows.get(cid, ("missing", ""))
+                    evidence["RustGIS"].append((cid, payload if status == "ok" else None, oracle_shape))
+                if gexe:
+                    gstatus, gpayload = gg_rows.get(cid, ("missing", ""))
+                    evidence["georust wkt"].append((cid, gpayload if gstatus == "ok" else None, oracle_shape))
+
+            columns = {}
+            for impl, rows in evidence.items():
+                if not rows:
+                    continue
+                both = [(c, got, want) for c, got, want in rows if got is not None and want is not None]
+                agree = sum(1 for _c, got, want in both if got == want)
+                differs = sum(1 for _c, got, want in both if got != want)
+                refused = sum(1 for _c, got, want in rows if got is None and want is not None)
+                columns[impl] = (len(rows), agree, differs, refused)
+
+            print("same raw corpus text through each implementation, geometry vs the oracle:")
+            print("%-14s%8s%8s%8s%9s" % ("impl", "cases", "agree", "differ", "refused"))
+            for impl, (n, agree, differs, refused) in columns.items():
+                print("%-14s%8d%8d%8d%9d" % (impl, n, agree, differs, refused))
+            print()
+            if "--matrix" in sys.argv:
+                for impl, rows in evidence.items():
+                    bad = [(c, got, want) for c, got, want in rows if got != want]
+                    if not bad:
+                        continue
+                    print("[" + impl + "] disagrees on " + str(len(bad)) + " cases")
+                    for cid, got, want in bad[:15]:
+                        if got is None:
+                            shown = "refused"
+                        elif want is None:
+                            shown = "no shared model"
+                        elif got.split(":")[0] == want.split(":")[0]:
+                            shown = "same type, different coordinates"
+                        else:
+                            shown = "different geometry"
+                        print("  " + cid + ": " + shown)
+                    print()
 
         print("corpus " + str(len(cases)) + " cases, oracle " + OGR2OGR)
         print()

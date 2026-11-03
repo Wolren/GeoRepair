@@ -36,6 +36,7 @@ not a gate.
 | I nesting | collections nest, absurd depth fails cleanly | depth 2, 12, 64 |
 | J curved types | SQL/MM types are refused, not misread | 8 curved and surface forms |
 | K RustGIS consumer | RustGIS reads what we deliver and sees the same shape | needs `RUSTGIS_DIR` |
+| L georust consumer | the georust `wkt` crate reads our delivered text and agrees | same corpus |
 
 Check K is the consumer check. `RUSTGIS_DIR=/path/to/RustGIS python3 conformance/run.py` builds
 a probe against that checkout's own `parse_wkt` and compares the shape it reports, coordinate
@@ -46,6 +47,50 @@ counted, never silently passed.
 
 Check E is what proves ISO 13249 type codes (1001, 2001, 3001) are read, not only the PostGIS
 EWKB high-bit flags. Check D is what proves we emit the ISO codes back.
+
+## Comparison matrix
+
+The gate checks our own properties. The matrix answers a different question: given the same
+text, what does each implementation do? Run it with `--matrix`:
+
+```
+RUSTGIS_DIR=/path/to/RustGIS python3 conformance/run.py --matrix
+```
+
+Four columns read the raw corpus, so the measurements are like for like:
+
+| column | how it reads |
+|---|---|
+| GeoRepair | our reader, geometry normalised from our own WKB |
+| RustGIS | `conformance/rustgis_probe`, that checkout's `parse_wkt` |
+| georust wkt | `conformance/georust_probe`, the `wkt` crate with `geo-types` |
+| GDAL | `ogr2ogr`, the reference |
+
+Every row counts three outcomes against the oracle's geometry: agree, differ, refused. A case
+the oracle cannot express, such as a curved type, has no shared model and is left out of the
+agree and differ columns.
+
+Measured on 107 cases:
+
+```
+impl             cases   agree  differ  refused
+GeoRepair          107      83       1        6
+RustGIS            107      48       8       34
+georust wkt        107      77       6        7
+GDAL               107      90       0        0
+```
+
+What the differences are, named:
+
+- GeoRepair: one coordinate set differs (`st_unclosed_ring`, we close the ring and GDAL keeps
+  it open), and six refusals of input GDAL tolerates because the input is invalid.
+- georust `wkt`: `POINT EMPTY` becomes an empty MultiPoint, so four cases differ by type; two
+  cases are refused (`MULTIPOINT (EMPTY, ...)`, NaN); the six lenient acceptances above are
+  refused too.
+- RustGIS: a `GEOMETRYCOLLECTION` keeps only its first member, so eight collection cases
+  differ; every EMPTY and every NaN is refused, which is 34 cases.
+
+The matrix is information, not a gate. A check can only fail on something we control.
 
 ## Coverage contract
 

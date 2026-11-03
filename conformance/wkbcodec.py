@@ -211,13 +211,10 @@ def _norm(node, classify_only=False):
     return None
 
 
-def rustgis_shape(hexstr):
-    """The shape a closed 2D host sees, or None when nothing survives.
-
-    Mirrors output::sanitize and apply_policy(TopDimension) on the oracle's bytes, so the
-    comparison is against the reference implementation, not against our writer.
-    """
-    node, _ = parse(bytes.fromhex(hexstr))
+def _shape(norm):
+    """Render a normalised (kind, data) pair in the vocabulary every probe prints."""
+    if norm is None:
+        return None
 
     def b(v):
         return format(int.from_bytes(struct.pack("<d", v), "little"), "016x")
@@ -225,9 +222,6 @@ def rustgis_shape(hexstr):
     def pt(p):
         return b(p[0]) + "," + b(p[1])
 
-    norm = _norm(node)
-    if norm is None:
-        return None
     kind, data = norm
     if kind == "point":
         return "P:" + pt(data[0])
@@ -235,7 +229,61 @@ def rustgis_shape(hexstr):
         return "MP:" + ";".join(pt(p) for p in data)
     if kind == "line":
         return "L:" + ";".join(" ".join(pt(p) for p in line) for line in data)
-    return "PG:" + ";".join("|".join(" ".join(pt(p) for p in ring) for ring in part) for part in data)
+    if kind == "polygon":
+        return "PG:" + ";".join(
+            "|".join(" ".join(pt(p) for p in ring) for ring in part) for part in data
+        )
+    return None
+
+
+def shape_of_hex(hexstr):
+    """The sanitised, top-dimension shape of a WKB blob, or None when nothing survives."""
+    node, _ = parse(bytes.fromhex(hexstr))
+    return _shape(_norm(node))
+
+
+def _shape_plain(node):
+    """The geometry exactly as stored: no closing, no dropping, collections nested."""
+    def b(v):
+        return format(int.from_bytes(struct.pack("<d", v), "little"), "016x")
+
+    def pt(p):
+        return b(p[0]) + "," + b(p[1])
+
+    def pts(ps):
+        return " ".join(pt(p) for p in ps)
+
+    kind = node.kind
+    if kind == "point":
+        return "P:" + (pt(node.points[0]) if node.points else "")
+    if kind == "multipoint":
+        return "MP:" + ";".join(pt(p.points[0]) for p in node.parts)
+    if kind == "linestring":
+        return "L:" + pts(node.points)
+    if kind == "multilinestring":
+        return "L:" + ";".join(pts(p.points) for p in node.parts)
+    if kind == "polygon":
+        return "PG:" + "|".join(pts(r.points) for r in node.parts)
+    if kind == "multipolygon":
+        return "PG:" + ";".join("|".join(pts(r.points) for r in p.parts) for p in node.parts)
+    if kind == "collection":
+        return "GC:" + "&".join(_shape_plain(p) for p in node.parts)
+    return None
+
+
+def plain_shape(hexstr):
+    """The stored shape of a WKB blob, for comparing implementations on raw input."""
+    node, _ = parse(bytes.fromhex(hexstr))
+    return _shape_plain(node)
+
+
+def rustgis_shape(hexstr):
+    """The shape a closed 2D host sees, or None when nothing survives.
+
+    Mirrors output::sanitize and apply_policy(TopDimension) on the oracle's bytes, so the
+    comparison is against the reference implementation, not against our writer.
+    """
+    return shape_of_hex(hexstr)
 
 
 def from_hex(h):

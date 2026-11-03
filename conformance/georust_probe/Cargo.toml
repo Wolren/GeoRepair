@@ -1,0 +1,11 @@
+[package]
+name = "georust-probe"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+wkt = { version = "0.14", features = ["geo-types"] }
+wkb = "0.9.3"
+geo-types = "0.7"
+
+[workspace]
