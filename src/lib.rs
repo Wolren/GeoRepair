@@ -458,6 +458,8 @@ pub mod dd;
 /// Feature metadata associated with geometries.
 pub mod feature;
 /// Geometry I/O: WKB, binary format, and format-dispatch helpers.
+/// Adapter for a host with a closed geometry model.
+pub mod host;
 pub mod io;
 /// Geometry repair implementation via the [`MakeValid`] trait.
 pub mod make_valid;
@@ -515,6 +517,8 @@ pub use core::{MakeValidConfig, MakeValidError, PolyMethod, Tuning};
 pub use crs::Crs;
 /// A feature combining geometry with optional attributes and crs.
 pub use feature::Feature;
+/// Output policy types and the reduction pass.
+pub use host::{HostReport, host_clean, to_host};
 pub use io::{
     Dims, Encoding, Endianness, EwkbDims, EwkbGeometry, WkbError, WktError, WktGeometry,
     WriteOptions, infer_wkt_type, read_ewkb, read_wkb, read_wkb_concat, read_wkt, read_wkt_zm,
@@ -531,7 +535,6 @@ pub use make_valid::MakeValid;
 /// Combines validation and repair in a single step, returning errors for violations
 /// that could not be automatically repaired.
 pub use make_valid::ValidateAndFix;
-/// Output policy types and the reduction pass.
 pub use output::{OutputPolicy, OutputReport, apply_policy, sanitize};
 /// Coordinate snapping functions.
 pub use snap::{DEFAULT_GRID, snap_coord, snap_coord_default, snap_line, snap_lines};

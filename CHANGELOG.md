@@ -3,6 +3,10 @@
 ## [Unreleased]
 
 ### Added
+- `host::to_host` reduces a geometry to a closed host model: point, line, polygon and their
+  multi forms, finite, no empties, closed rings. It flattens collections, drops what cannot be
+  stored, and picks the type from what survives. `HostReport` counts every drop and
+  `host_clean` states the invariants.
 - `output::sanitize` drops non-finite coordinates, empty members and open rings, so output is
   readable by a host with no empties and no NaN, such as RustGIS. It never moves a coordinate,
   and it keeps the geometry type.

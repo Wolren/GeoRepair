@@ -10,11 +10,11 @@ use std::io::{self, BufRead, Write};
 use std::panic;
 use std::sync::Mutex;
 
+use geo_repair::host::to_host;
 use geo_repair::io::wkb::{
     EwkbDims, EwkbGeometry, read_ewkb, write_ewkb, write_wkb, write_wkb_iso,
 };
 use geo_repair::io::wkt::{read_wkt, read_wkt_zm, write_wkt, write_wkt_zm};
-use geo_repair::output::{OutputPolicy, apply_policy, sanitize};
 
 static LAST_PANIC: Mutex<String> = Mutex::new(String::new());
 
@@ -71,9 +71,8 @@ fn from_hex(s: &str) -> Option<Vec<u8>> {
 fn wkt_case(text: &str) -> String {
     let (plain_ok, plain_err, wkb_hex, delivery) = match read_wkt(text) {
         Ok(g) => {
-            // What a closed 2D host receives: reduced to one dimension, then sanitized.
-            let (reduced, _) = apply_policy(g.clone(), OutputPolicy::TopDimension);
-            let text_out = match sanitize(&reduced) {
+            // What a closed 2D host receives: the adapter flattens, filters and picks the type.
+            let text_out = match to_host(&g).0 {
                 Some(s) => write_wkt(&s),
                 None => String::new(),
             };

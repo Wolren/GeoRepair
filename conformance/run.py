@@ -606,7 +606,7 @@ def main():
                     continue
                 expected = wkbcodec.rustgis_shape(ora[i])
                 if expected is None:
-                    skipped_k.append(cid + " (nothing survives sanitize)")
+                    skipped_k.append(cid + " (nothing survives host::to_host)")
                     continue
                 status, payload = k_rows.get(cid, ("missing", ""))
                 if status == "err":
@@ -774,7 +774,7 @@ def main():
         print("TOTAL failures: " + str(fails))
         if raw_rejected:
             print(
-                "raw output, before apply_policy and sanitize, is unreadable by RustGIS in "
+                "raw output, before host::to_host, is unreadable by RustGIS in "
                 + str(len(raw_rejected))
                 + " cases: "
                 + ", ".join(raw_rejected[:8])

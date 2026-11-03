@@ -160,7 +160,11 @@ def _norm(node, classify_only=False):
     if kind == "multipoint":
         pts = [p.points[0] for p in node.parts if p.points]
         if not classify_only:
+            # to_host drops dead members before it picks the type, so one survivor is a Point.
             pts = [p for p in pts if _finite(p)]
+            if not pts:
+                return None
+            return ("point" if len(pts) == 1 else "multipoint", pts)
         return ("multipoint", pts) if pts else None
     if kind in ("linestring", "multilinestring"):
         if kind == "linestring":
@@ -203,11 +207,10 @@ def _norm(node, classify_only=False):
             return ("line", lines) if lines else None
         if not raw_points:
             return None
-        kind_out = "point" if len(raw_points) == 1 else "multipoint"
         pts = [p for p in raw_points if _finite(p)]
         if not pts:
             return None
-        return (kind_out, pts)
+        return ("point" if len(pts) == 1 else "multipoint", pts)
     return None
 
 
