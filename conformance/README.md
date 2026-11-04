@@ -27,7 +27,7 @@ not a gate.
 
 | check | proof | how |
 |---|---|---|
-| A read acceptance | our verdict matches the specification | corpus of 107 cases |
+| A read acceptance | our verdict matches the specification | corpus of 118 cases |
 | B geometry equality | our geometry equals OGR's | canonical 2D WKB |
 | C write semantics | our WKT, read by OGR, equals OGR's geometry | second oracle pass |
 | D write bytes | our ISO WKB equals OGR's bytes | 82 cases, XY to ZM |
@@ -39,11 +39,14 @@ not a gate.
 | J curved types | SQL/MM types are refused, not misread | 8 curved and surface forms |
 | K RustGIS consumer | RustGIS reads what we deliver and sees the same shape | needs `RUSTGIS_DIR` |
 | L georust consumer | the georust `wkt` crate reads our delivered text and agrees | same corpus |
-| M GEOS validity | what we hand a host is valid per GEOS, and repair is shown to act | needs `shapely` |
+| M GEOS validity | what we hand a host is valid and simple per GEOS, and repair is shown to act | needs `shapely` |
+| N repair measure | repair never loses area, length or points against GEOS, and leaves a clean shape alone | `shapely.make_valid`, names the wider fills |
 
 Check M is the validity check and needs shapely, which ships GEOS. It parses the repaired delivery
-with GEOS, requires `is_valid` on every case, and fails outright when no case was invalid before
-repair and valid after it, so the repair path cannot pass by being idle.
+with GEOS, requires `is_valid` and `is_simple` on every case, and fails outright when no case was
+invalid before repair and clean after it, so the repair path cannot pass by being idle. Every run
+also feeds the same judge a bowtie and a square: if the judge accepts either answer it is wrong,
+and the gate stops.
 
 Check K is the consumer check. `RUSTGIS_DIR=/path/to/RustGIS python3 conformance/run.py` builds
 a probe against that checkout's own `parse_wkt` and compares the shape it reports, coordinate

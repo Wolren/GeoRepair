@@ -54,13 +54,24 @@ fn wkt_ring_order_and_empty_rings() {
             "ring order lost for {text}"
         );
     }
+    // The writer drops empty rings, and a ring of one point cannot be closed. With no ring left
+    // the polygon is written as POLYGON EMPTY, so the structure does not round trip by design.
     let empty_shell = "POLYGON ((EMPTY), EMPTY, (4.243991582e-314 6.3659874475e-314), EMPTY)";
     let g = read_wkt(empty_shell).expect("parse empty-shell");
+    assert_eq!(write_wkt(&g), "POLYGON EMPTY", "empty shell is not empty");
     let g2 = read_wkt(&write_wkt(&g)).expect("reparse empty-shell");
     assert_eq!(
-        format!("{:?}", g),
         format!("{:?}", g2),
-        "empty-shell structure lost"
+        format!("{:?}", read_wkt("POLYGON EMPTY").expect("empty"))
+    );
+
+    // An empty hole is dropped and a real shell survives it.
+    let holed = "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), EMPTY)";
+    let g = read_wkt(holed).expect("parse holed");
+    assert_eq!(
+        write_wkt(&g),
+        "POLYGON ((0.0 0.0, 10.0 0.0, 10.0 10.0, 0.0 10.0, 0.0 0.0))",
+        "an empty hole must not cost the shell"
     );
 }
 

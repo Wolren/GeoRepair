@@ -16,7 +16,8 @@ exclude = ["tests/*.py", "*.py", ".history/",
     "benches/real_world/*.shx", "benches/real_world/*.dbf",
     "benches/real_world/*.prj", "benches/real_world/*.cpg",
     "benches/real_world/*.gpkg", "benches/real_world/*.qmd",
-    "benches/real_world/*.geojson"]
+    "benches/real_world/*.geojson",
+    "tests/geos_xml"]
 
 # docs.rs must not build all-features: simd-portable needs nightly and
 # bench-geos-system needs a system GEOS install. Document the library

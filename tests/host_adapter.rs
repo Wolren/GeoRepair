@@ -348,3 +348,19 @@ fn repair_mode_fixes_crossing_members_of_a_multi_line() {
     assert_eq!(host_clean(&out), Ok(()));
     assert!(is_valid_any(&out), "crossing pair still invalid: {out:?}");
 }
+
+#[test]
+fn repair_reports_a_polygon_it_cannot_fix() {
+    // A collinear ring has zero area, so make_valid has nothing to build.
+    let flat = Polygon::new(
+        ring(&[(0.0, 0.0), (1.0, 0.0), (2.0, 0.0), (0.0, 0.0)]),
+        vec![],
+    );
+    let g = Geometry::Polygon(flat);
+    let (out, report) = to_host_with(&g, HostOptions::REPAIR);
+    assert!(out.is_none(), "a zero area ring must not reach the host");
+    assert_eq!(
+        report.dropped_unrepairable, 1,
+        "the drop must be counted: {report:?}"
+    );
+}

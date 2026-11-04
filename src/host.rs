@@ -310,9 +310,18 @@ fn repair_lines(lines: Vec<LineString<f64>>, report: &mut HostReport) -> Vec<Lin
             _ => Vec::new(),
         };
     }
+    let before = match &geo {
+        Geometry::LineString(_) => 1,
+        Geometry::MultiLineString(mls) => mls.0.len(),
+        _ => 0,
+    };
     report.repaired += 1;
     let mut out = Vec::new();
     collect_lines(geo.make_valid(), &mut out, report);
+    // A split adds parts; only a lost part is a drop.
+    if out.len() < before {
+        report.dropped_unrepairable += before - out.len();
+    }
     out
 }
 
@@ -333,9 +342,18 @@ fn repair_polygons(polys: Vec<Polygon<f64>>, report: &mut HostReport) -> Vec<Pol
             _ => Vec::new(),
         };
     }
+    let before = match &geo {
+        Geometry::Polygon(_) => 1,
+        Geometry::MultiPolygon(mp) => mp.0.len(),
+        _ => 0,
+    };
     report.repaired += 1;
     let mut out = Vec::new();
     collect_polys(geo.make_valid(), &mut out, report);
+    // A part that make_valid consumed without producing a replacement is a drop.
+    if out.len() < before {
+        report.dropped_unrepairable += before - out.len();
+    }
     out
 }
 

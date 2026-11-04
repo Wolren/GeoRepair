@@ -82,6 +82,8 @@ dimension. A refusal never invents a coordinate, which is the reason for the cho
 | Repair of invalid points, lines and polygons on request | Guaranteed | `HostOptions::REPAIR`, 8 tests |
 | Polygon ring with one or two points | Refused | `WkbError::InvalidRing`, 11 of 135,494 fuzzed blobs |
 | Ring of three points | Accepted | GDAL round trips it, `st_degenerate_ring` |
+| Multipoint with duplicate coordinates | Deduplicated | GEOS 3.13.1 keeps both and calls the result not simple; M requires simple output |
+| A part `make_valid` consumes without a replacement | Counted | `dropped_unrepairable`, `repair_reports_a_polygon_it_cannot_fix` |
 | Repair never deletes what it cannot improve | Guaranteed | N, fallback in `to_host_with`, 6 adapter tests |
 | A geometry GEOS calls valid and simple is unchanged by repair | Verified | N, 64 cases |
 | Repaired output keeps area, length and point count against GEOS | Verified | N, 2 wider-fill cases named |

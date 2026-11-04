@@ -37,10 +37,17 @@
   covering acceptance, geometry, writer semantics, writer bytes, WKB round trip, repair, and
   repair measure.
 
+### Packaging
+- `tests/geos_xml` is out of the package: 210 files and 3.90 MiB compressed, against 385 files
+  and 9.3 MiB before, and against the 10 MB cap. The XML suite prints `NO TEST DIR` and passes
+  when the fixtures are absent.
+
 ### Fixed
 - The WKB reader refuses a polygon ring with one or two points as `WkbError::InvalidRing`. Such a
-  ring cannot be written as WKT, so the round trip silently changed the geometry; 11 of 135,494
+  ring is dropped by the WKT writer, so the round trip silently changed the geometry; 11 of 135,494
   fuzzed blobs hit this. A ring of three points stays readable, because GDAL round trips it.
+- `HostReport.dropped_unrepairable` counts a part that `make_valid` consumed without producing a
+  replacement. A zero area polygon used to vanish with the counter at zero.
 - `host` repair no longer deletes what it cannot improve. When `make_valid` returns nothing for a
   family that has area or length, the reduced geometry is kept unchanged and the repair count is
   corrected; a degenerate family is dropped and counted in `dropped_unrepairable`.

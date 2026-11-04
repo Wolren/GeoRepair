@@ -846,12 +846,18 @@ def main():
                     + ", ".join(repaired_ids)
                 )
 
-        # M must be able to fail. A judge that cannot reject a bowtie proves nothing.
-        if os.environ.get("CONFORMANCE_SELFTEST") and shapely is not None:
-            probe = shapely_wkt.loads("POLYGON ((0 0, 1 1, 1 0, 0 1, 0 0))")
-            if shapely.is_valid(probe) and shapely.is_simple(probe):
-                print("self test: the GEOS judge called a bowtie clean, so M proves nothing")
-                sys.exit(1)
+        # Every run proves the judge can reject: a bowtie is invalid, a square is clean.
+        if shapely is not None:
+            bow = shapely_wkt.loads("POLYGON ((0 0, 1 1, 1 0, 0 1, 0 0))")
+            sq = shapely_wkt.loads("POLYGON ((0 0, 1 0, 1 1, 0 1, 0 0))")
+            if shapely.is_valid(bow) or shapely.is_simple(bow):
+                print("check M: the GEOS judge accepted a bowtie, so M proves nothing")
+                sys.exit(2)
+            if not (shapely.is_valid(sq) and shapely.is_simple(sq)):
+                print("check M: the GEOS judge rejected a square, so M cannot pass")
+                sys.exit(2)
+            if os.environ.get("CONFORMANCE_SELFTEST"):
+                print("check M self test: the judge rejects a bowtie and accepts a square")
 
         # N: repair must not lose measure, and must leave a clean geometry alone.
         if shapely is not None:
