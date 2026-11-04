@@ -88,12 +88,19 @@ fn wkt_case(text: &str) -> String {
         Err(e) => (false, e.to_string(), String::new(), String::new()),
     };
 
+    // Repair judges the same geometry the delivery came from, so a ZM read failure
+    // cannot look like a repair that deleted the shape.
+    let repaired_plain = match read_wkt(text) {
+        Ok(g) => repaired_wkt(&g),
+        Err(_) => String::new(),
+    };
+
     let (zm_ok, zm_err, dims, wkt_out, ewkb_hex, iso_hex, ewkb_err, repaired) =
         match read_wkt_zm(text) {
             Ok(w) => {
                 let d = w.dims;
                 let text_out = write_wkt_zm(&w);
-                let repaired = repaired_wkt(&w.geometry);
+                let repaired = repaired_plain.clone();
                 let ewkb_dims = EwkbDims {
                     has_z: d.has_z,
                     has_m: d.has_m,
@@ -125,7 +132,7 @@ fn wkt_case(text: &str) -> String {
                 String::new(),
                 String::new(),
                 String::new(),
-                String::new(),
+                repaired_plain.clone(),
             ),
         };
 

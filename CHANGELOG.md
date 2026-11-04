@@ -11,11 +11,14 @@
   members are fixed too. It reports `repaired` and `dropped_unrepairable`.
 - `host::to_host_wkb` and `host::to_host_ewkt` take bytes or text from a producer, then repair and
   deliver in one call: the path where another tool hands over geometry we can fix.
+- Conformance check N compares repair against `shapely.make_valid`: area, length or point count
+  must not fall below GEOS, a geometry GEOS calls valid and simple must come back unchanged, and a
+  degenerate input may produce nothing. It names the cases where repair fills more than GEOS.
 - Conformance check M judges the delivered text with GEOS through shapely and requires both
   `is_valid` and `is_simple`, because GEOS calls a self-crossing line valid but not simple. It
   fails when no case was invalid or non-simple before repair and clean after it.
 - `host::to_host_owned` takes the geometry by value. The borrowing form clones once and calls it,
-  so a clean polygon costs one move instead of a second copy: 117 ns against 167 ns per polygon
+  so a clean polygon costs one move instead of a second copy: 128 ns against 166 ns per polygon
   on 1.58M real polygons.
 - `conformance/COVERAGE.md` is the register of every WKT and WKB surface: what is accepted, what is
   refused, and which check or test proves it.
@@ -30,10 +33,17 @@
 - `write_wkb_iso` and `Encoding`: ISO 13249 type codes (1001 for XYZ, 2001 for XYM, 3001 for
   XYZM) as an explicit output form. `write_ewkb` keeps the PostGIS EWKB flags and its SRID
   field, so the two consumers each get the shape they read.
-- `conformance/` harness plus a CI job: 99 WKT cases judged against GDAL, five checks over
-  acceptance, geometry, writer semantics, writer bytes and WKB round trip.
+- `conformance/` harness plus a CI job: 118 WKT cases judged against GDAL over fourteen checks
+  covering acceptance, geometry, writer semantics, writer bytes, WKB round trip, repair, and
+  repair measure.
 
 ### Fixed
+- The WKB reader refuses a polygon ring with one or two points as `WkbError::InvalidRing`. Such a
+  ring cannot be written as WKT, so the round trip silently changed the geometry; 11 of 135,494
+  fuzzed blobs hit this. A ring of three points stays readable, because GDAL round trips it.
+- `host` repair no longer deletes what it cannot improve. When `make_valid` returns nothing for a
+  family that has area or length, the reduced geometry is kept unchanged and the repair count is
+  corrected; a degenerate family is dropped and counted in `dropped_unrepairable`.
 - The WKT reader accepts the dimension modifier welded to the type name (`POINTZ`, `POINTM`,
   `POINTZM`, `MULTIPOLYGONZM`), the form PostGIS and GDAL both accept. A type given two
   modifiers is still refused.

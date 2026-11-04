@@ -324,6 +324,23 @@ fn read_linestring_inner(
     Ok(LineString::new(coords))
 }
 
+/// A ring needs four points to close; a shorter ring cannot round trip through WKT.
+fn read_ring(
+    buf: &[u8],
+    pos: &mut usize,
+    le: bool,
+    dims: u32,
+    extra_coords: &mut Vec<f64>,
+) -> Result<LineString<f64>, WkbError> {
+    let ring = read_linestring_inner(buf, pos, le, dims, extra_coords)?;
+    let n = ring.0.len();
+    // One or two points cannot be written back as WKT; GDAL round trips three, so keep it.
+    if n == 1 || n == 2 {
+        return Err(WkbError::InvalidRing { points: n });
+    }
+    Ok(ring)
+}
+
 fn read_polygon_inner(
     buf: &[u8],
     pos: &mut usize,
@@ -335,10 +352,10 @@ fn read_polygon_inner(
     if n_rings == 0 {
         return Ok(Polygon::new(LineString::new(vec![]), vec![]));
     }
-    let exterior = read_linestring_inner(buf, pos, le, dims, extra_coords)?;
+    let exterior = read_ring(buf, pos, le, dims, extra_coords)?;
     let mut holes = Vec::with_capacity(n_rings.saturating_sub(1));
     for _ in 1..n_rings {
-        holes.push(read_linestring_inner(buf, pos, le, dims, extra_coords)?);
+        holes.push(read_ring(buf, pos, le, dims, extra_coords)?);
     }
     Ok(Polygon::new(exterior, holes))
 }

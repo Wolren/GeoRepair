@@ -1,7 +1,7 @@
 # Coverage register
 
 What the readers, writers and the delivery adapter handle, and what they refuse. Every row names
-its evidence: a conformance check (`A` to `M`, see `README.md`), a unit test, or a probe against
+its evidence: a conformance check (`A` to `N`, see `README.md`), a unit test, or a probe against
 GDAL 3.9.2. A row without evidence does not belong here.
 
 Specification basis: OGC 06-103r4 (WKT 1.2.1) and ISO 13249-3 (WKB). PostGIS EWKB is listed
@@ -80,6 +80,11 @@ dimension. A refusal never invents a coordinate, which is the reason for the cho
 | Idempotent | Guaranteed | 500 generated shapes |
 | Output accepted by RustGIS and the georust `wkt` crate | Verified | K 58, L 58 |
 | Repair of invalid points, lines and polygons on request | Guaranteed | `HostOptions::REPAIR`, 8 tests |
+| Polygon ring with one or two points | Refused | `WkbError::InvalidRing`, 11 of 135,494 fuzzed blobs |
+| Ring of three points | Accepted | GDAL round trips it, `st_degenerate_ring` |
+| Repair never deletes what it cannot improve | Guaranteed | N, fallback in `to_host_with`, 6 adapter tests |
+| A geometry GEOS calls valid and simple is unchanged by repair | Verified | N, 64 cases |
+| Repaired output keeps area, length and point count against GEOS | Verified | N, 2 wider-fill cases named |
 | Repair at collection level, so overlapping valid parts are fixed | Guaranteed | `repair_mode_fixes_overlapping_polygons`, M |
 | Repaired output valid and simple per GEOS | Verified | M 62 delivered geometries, 5 repaired |
 | Repair does not touch a valid polygon | Guaranteed | test `repair_mode_does_not_touch_a_valid_polygon` |
@@ -113,8 +118,10 @@ they do not claim a limit on what any of them could reach.
 ## Not claimed
 
 - Z and M live beside the geometry in `WktGeometry::extra_coords`, not inside `Geometry`.
-- WKT carries no SRID. EWKT is refused. SRID lives in EWKB and is returned by the WKB reader.
+- WKT carries no SRID. EWKT is a separate entry point, `read_ewkt` and `write_ewkt`, because GDAL refuses the prefix.
 - No curved types, no TIN, no polyhedral surface. `geo` has no data model for them.
 - Validity beyond closure is not this crate's claim. `make_valid` and the validator own it.
 - No claim about digits beyond what `f64` holds. `ryu` writes the shortest exact round trip.
 - No claim of being the fastest implementation. The table compares two crates on one corpus.
+- `fill_rule` on `MakeValidConfig` is accepted and never read: repair assembles by the winding number, so a pentagram fills area 4.667 where GEOS fills 3.333.
+- Repair keeps the union of overlapping parts where GEOS removes one, so two squares give area 7 here and 6 there. Check N requires only that repair never loses area against GEOS.

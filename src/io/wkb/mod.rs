@@ -26,6 +26,10 @@ pub enum WkbError {
         consumed: usize,
         total: usize,
     },
+    /// A ring of one or two points cannot be written back as WKT.
+    InvalidRing {
+        points: usize,
+    },
     #[cfg(feature = "std")]
     IoError(std::io::Error),
 }
@@ -48,6 +52,12 @@ impl fmt::Display for WkbError {
                 write!(
                     f,
                     "unsupported WKB dimension: {actual_dims}D (only 2D is supported)"
+                )
+            }
+            WkbError::InvalidRing { points } => {
+                write!(
+                    f,
+                    "polygon ring has {points} points, a closed ring needs four"
                 )
             }
             WkbError::TrailingBytes { consumed, total } => {

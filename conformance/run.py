@@ -207,6 +207,8 @@ def corpus():
         ("st_ninf", "POINT (-Inf -Inf)"),
         ("st_bowtie", "POLYGON ((0 0, 1 1, 1 0, 0 1, 0 0))"),
         ("st_hole_outside", "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (20 20, 21 20, 21 21, 20 20))"),
+        ("st_pentagram", "POLYGON ((0 0, 2 3, 4 0, 0 2, 4 2, 0 0))"),
+        ("st_zero_area", "POLYGON ((0 0, 1 0, 2 0, 0 0))"),
         ("st_self_crossing_line", "LINESTRING (0 0, 2 2, 2 0, 0 2)"),
         ("st_dup_points", "MULTIPOINT (1 1, 1 1)"),
         (
@@ -471,6 +473,7 @@ def main():
                 "K_rustgis",
                 "L_georust",
                 "M_geos_valid",
+                "N_repair_measure",
             )
         }
 
@@ -841,6 +844,83 @@ def main():
                     + str(len(repaired_ids))
                     + " deliveries GEOS called invalid or non-simple into valid, simple ones: "
                     + ", ".join(repaired_ids)
+                )
+
+        # M must be able to fail. A judge that cannot reject a bowtie proves nothing.
+        if os.environ.get("CONFORMANCE_SELFTEST") and shapely is not None:
+            probe = shapely_wkt.loads("POLYGON ((0 0, 1 1, 1 0, 0 1, 0 0))")
+            if shapely.is_valid(probe) and shapely.is_simple(probe):
+                print("self test: the GEOS judge called a bowtie clean, so M proves nothing")
+                sys.exit(1)
+
+        # N: repair must not lose measure, and must leave a clean geometry alone.
+        if shapely is not None:
+            wider = []
+            dropped = []
+            for cid in ids:
+                row = ours.get(cid, {})
+                raw = row.get("wkt_delivery") or ""
+                rep = row.get("wkt_repaired") or ""
+                if not raw:
+                    continue
+                try:
+                    raw_g = shapely_wkt.loads(raw)
+                except Exception:
+                    continue
+                clean = bool(shapely.is_valid(raw_g) and shapely.is_simple(raw_g))
+                if not rep:
+                    if clean:
+                        rec("N_repair_measure", False, cid, "a clean geometry produced no output")
+                    elif raw_g.area > 1e-9:
+                        rec("N_repair_measure", False, cid, "repair dropped a geometry with area")
+                    else:
+                        dropped.append(cid)
+                    continue
+                try:
+                    rep_g = shapely_wkt.loads(rep)
+                except Exception as exc:
+                    rec("N_repair_measure", False, cid, "unreadable repair: " + str(exc)[:60])
+                    continue
+                if clean:
+                    same = bool(shapely.equals(raw_g, rep_g))
+                    rec(
+                        "N_repair_measure",
+                        same,
+                        cid,
+                        "" if same else "repair moved a geometry that was already clean",
+                    )
+                    continue
+                fixed = shapely.make_valid(raw_g)
+                kind = raw_g.geom_type
+                if kind in ("Polygon", "MultiPolygon"):
+                    ours_m, geos_m = rep_g.area, fixed.area
+                    ok = ours_m >= geos_m * (1.0 - 1e-9)
+                    if ours_m > geos_m * (1.0 + 1e-9):
+                        wider.append(cid)
+                    detail = "" if ok else "area %.6g below GEOS %.6g" % (ours_m, geos_m)
+                elif kind in ("LineString", "MultiLineString"):
+                    ours_m, geos_m = rep_g.length, fixed.length
+                    ok = abs(ours_m - geos_m) <= 1e-9 * max(1.0, geos_m)
+                    detail = "" if ok else "length %.6g vs GEOS %.6g" % (ours_m, geos_m)
+                else:
+                    ours_m = float(shapely.get_num_coordinates(rep_g))
+                    geos_m = float(shapely.get_num_coordinates(fixed))
+                    ok = 1.0 <= ours_m <= geos_m
+                    detail = "" if ok else "count %.0f vs GEOS %.0f" % (ours_m, geos_m)
+                rec("N_repair_measure", ok, cid, detail)
+            if wider:
+                print(
+                    "check N: repair fills more than GEOS in "
+                    + str(len(wider))
+                    + " cases: "
+                    + ", ".join(wider)
+                )
+            if dropped:
+                print(
+                    "check N: repair produced nothing for "
+                    + str(len(dropped))
+                    + " zero-area cases: "
+                    + ", ".join(dropped)
                 )
 
         print("corpus " + str(len(cases)) + " cases, oracle " + OGR2OGR)

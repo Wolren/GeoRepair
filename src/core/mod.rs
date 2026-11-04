@@ -98,7 +98,7 @@ pub struct MakeValidConfig {
     /// Which polygon repair strategy to use.
     pub poly_method: PolyMethod,
 
-    /// - `NonZero`: holes treated as positive space
+    /// Accepted for API compatibility; repair assembles by winding number and never reads it.
     pub fill_rule: FillRule,
 
     /// When set, used for crs-aware tolerance and metadata preservation.

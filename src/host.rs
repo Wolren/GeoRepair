@@ -76,9 +76,40 @@ pub fn to_host_with_owned(
     let mut report = HostReport::default();
     let mut parts = reduce(geometry, &mut report);
     if options.repair {
-        parts.points = repair_points(parts.points, &mut report);
-        parts.lines = repair_lines(parts.lines, &mut report);
-        parts.polys = repair_polygons(parts.polys, &mut report);
+        // Repair may improve a geometry, never delete one: a family that comes back empty
+        // falls back to what the reduce pass kept.
+        let points_before = parts.points;
+        let restored = repair_points(points_before.clone(), &mut report);
+        parts.points = if restored.is_empty() && !points_before.is_empty() {
+            report.repaired = report.repaired.saturating_sub(1);
+            points_before
+        } else {
+            restored
+        };
+        let lines_before = parts.lines;
+        let restored = repair_lines(lines_before.clone(), &mut report);
+        parts.lines = if restored.is_empty()
+            && lines_before
+                .iter()
+                .any(|l| l.0.windows(2).any(|w| w[0] != w[1]))
+        {
+            report.repaired = report.repaired.saturating_sub(1);
+            lines_before
+        } else {
+            restored
+        };
+        let polys_before = parts.polys;
+        let restored = repair_polygons(polys_before.clone(), &mut report);
+        parts.polys = if restored.is_empty()
+            && polys_before
+                .iter()
+                .any(|p| geo::Area::unsigned_area(p) > 0.0f64)
+        {
+            report.repaired = report.repaired.saturating_sub(1);
+            polys_before
+        } else {
+            restored
+        };
     }
     (assemble(parts), report)
 }
