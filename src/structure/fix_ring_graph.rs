@@ -484,9 +484,9 @@ fn split_face_at_pinch_points_depth(
 
     vec![face.to_vec()]
 }
-/// Face labeling by even-odd winding parity, equivalent to geos MakeValidPoly. The geos
-/// BuildArea and symdiff loop selects faces whose winding number against the input ring
-/// is odd. Measured: 5 of 9 faces kept, geos area 9931.89 against bfs interior
+/// Face labeling by even-odd winding parity for one self-crossing ring: the same kept
+/// set the MakeValid loop reaches through BuildArea levels. Measured 5 of 9 faces kept,
+/// area 9931.89. Not used by the repair path.
 pub fn label_interior_faces(
     _edges: &[Line<f64>],
     verts: &[Coord<f64>],
@@ -536,7 +536,7 @@ fn face_probe_point(
     })
 }
 
-/// Winding number of a point w.r.t. a closed ring (even-odd rule).
+/// Winding number of a point w.r.t. a closed ring.
 fn winding_number(ring: &[Coord<f64>], pt: Coord<f64>) -> i32 {
     let mut wn = 0i32;
     for w in ring.windows(2) {

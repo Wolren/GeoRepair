@@ -14,7 +14,7 @@ the divergence is named below.
 
 | Surface | Status | Evidence |
 |---|---|---|
-| Seven types, nested `GEOMETRYCOLLECTION` | Accepted | A 111, B 87, I |
+| Seven types, nested `GEOMETRYCOLLECTION` | Accepted | A 111, B 94, I |
 | `EMPTY` at every level | Accepted | A, B (31 empty cases) |
 | `Z`, `M`, `ZM` separated from the type name | Accepted | A, D, E |
 | Modifier welded to the type name (`POINTZ`, `MULTIPOLYGONZM`) | Accepted | A (4 cases), unit test |
@@ -50,11 +50,11 @@ dimension. A refusal never invents a coordinate, which is the reason for the cho
 
 | Surface | Status | Evidence |
 |---|---|---|
-| ISO 13249 type codes 1 to 7 | Accepted | E 87 |
+| ISO 13249 type codes 1 to 7 | Accepted | E 94 |
 | ISO 1000, 2000 and 3000 offsets, nested | Accepted | E, D (`Z_multipolygon` = 3003) |
-| EWKB high-bit flags with SRID | Accepted | G 87 |
+| EWKB high-bit flags with SRID | Accepted | G 94 |
 | SRID together with Z, M and ZM | Accepted | probe 4 of 4 |
-| Both byte orders | Accepted | F 87 |
+| Both byte orders | Accepted | F 94 |
 | Empty geometry as NaN ordinates | Accepted | E, probe (`iso_z_empty`, `iso_m_empty`) |
 | Damaged, truncated and hostile bytes | Clean error, no panic, no hang | H 458 |
 | Curved and SQL/MM codes 8 to 17 | Refused | J 8 |
@@ -64,8 +64,8 @@ dimension. A refusal never invents a coordinate, which is the reason for the cho
 
 | Surface | Status | Evidence |
 |---|---|---|
-| EWKB with SRID, ISO without | Correct | D 86, G |
-| Byte identical to GDAL, XY to ZM | Correct | D 86 of 86 |
+| EWKB with SRID, ISO without | Correct | D 93, G |
+| Byte identical to GDAL, XY to ZM | Correct | D 93 of 93 |
 | Empty Z and M as NaN ordinates | Correct | D (`POINT Z EMPTY` bytes) |
 | Big-endian output | Not offered; the writer emits little-endian | by design |
 
@@ -78,7 +78,7 @@ dimension. A refusal never invents a coordinate, which is the reason for the cho
 | Closes an open ring, moves no coordinate | Guaranteed | unit test |
 | Type chosen from survivors | Guaranteed | `the_type_follows_the_survivors` |
 | Idempotent | Guaranteed | 500 generated shapes |
-| Output accepted by RustGIS and the georust `wkt` crate | Verified | K 58, L 58 |
+| Output accepted by RustGIS and the georust `wkt` crate | Verified | K 63, L 63 |
 | Repair of invalid points, lines and polygons on request | Guaranteed | `HostOptions::REPAIR`, 8 tests |
 | Polygon ring with one or two points | Refused | `WkbError::InvalidRing`, 11 of 135,494 fuzzed blobs |
 | Ring of three points | Accepted | GDAL round trips it, `st_degenerate_ring` |
@@ -88,7 +88,7 @@ dimension. A refusal never invents a coordinate, which is the reason for the cho
 | A geometry GEOS calls valid and simple is unchanged by repair | Verified | N, 64 cases |
 | Repaired output keeps area, length and point count against GEOS | Verified | N, 64 cases, no wider fill |
 | Repair at collection level, so overlapping valid parts are fixed | Guaranteed | `repair_mode_fixes_overlapping_polygons`, M |
-| Repaired output valid and simple per GEOS | Verified | M 62 delivered geometries, 5 repaired |
+| Repaired output valid and simple per GEOS | Verified | M 64 delivered geometries, 6 repaired |
 | Repair does not touch a valid polygon | Guaranteed | test `repair_mode_does_not_touch_a_valid_polygon` |
 | Bytes in, host shape out (`to_host_wkb`, `to_host_ewkt`) | Guaranteed | 2 tests |
 

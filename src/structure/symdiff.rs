@@ -10,7 +10,8 @@ use log::warn;
 
 use super::fix_ring::{basic_cleanup, collapse_sub_ulp_vertices, is_collinear_ring};
 
-/// Single-pass geos MakeValid-style repair.
+/// geos MakeValid-style repair: BuildArea levels XORed in even-odd order. The public
+/// name is historical; the loop may run more than one pass.
 pub fn single_pass_fix(poly: &Polygon<f64>) -> Option<MultiPolygon<f64>> {
     single_pass_fix_tuned(poly, &crate::core::Tuning::default())
 }
@@ -243,13 +244,9 @@ mod tests {
     }
 
     /// Even-odd is the assembly rule: the pentagram centre has winding 2 and stays
-    /// empty. GEOS makeValid returns the same 3.333 on this ring.
+    /// empty. GEOS makeValid returns the same 3.333 on this ring, in both strategies.
     #[test]
     fn pentagram_keeps_the_centre_empty() {
-        let cfg = MakeValidConfig {
-            poly_method: PolyMethod::Structure,
-            ..Default::default()
-        };
         let coords = vec![
             Coord { x: 0.0, y: 0.0 },
             Coord { x: 2.0, y: 3.0 },
@@ -258,12 +255,22 @@ mod tests {
             Coord { x: 4.0, y: 2.0 },
             Coord { x: 0.0, y: 0.0 },
         ];
-        let out = Polygon::new(LineString::new(coords), Vec::new()).make_valid_with_config(&cfg);
-        assert!(crate::is_valid(&out), "pentagram repair must stay valid");
-        let area = out.unsigned_area();
-        assert!(
-            (area - 3.333_333_333_333_333_5).abs() < 1e-6,
-            "pentagram area {area} is not the GEOS even-odd 3.333"
-        );
+        for method in [PolyMethod::Structure, PolyMethod::Arrange] {
+            let cfg = MakeValidConfig {
+                poly_method: method,
+                ..Default::default()
+            };
+            let out = Polygon::new(LineString::new(coords.clone()), Vec::new())
+                .make_valid_with_config(&cfg);
+            assert!(
+                crate::is_valid(&out),
+                "{method:?} pentagram repair must stay valid"
+            );
+            let area = out.unsigned_area();
+            assert!(
+                (area - 3.333_333_333_333_333_5).abs() < 1e-6,
+                "{method:?} pentagram area {area} is not the GEOS even-odd 3.333"
+            );
+        }
     }
 }

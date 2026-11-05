@@ -15,7 +15,8 @@ version). The wheel vendored under `qgis/` is a pinned snapshot, not
 a release artifact: rebuild it from the release tag before shipping
 QGIS updates. Python exposes `method` plus `keep_collapsed` only; the
 C `..._with_config_full` entry points additionally accept `fill_rule`
-and an EPSG code. WASM ships fetch helpers only, with no
+and an EPSG code. `fill_rule` is accepted and ignored: repair applies
+EvenOdd either way. WASM ships fetch helpers only, with no
 `wasm_bindgen` repair exports.
 
 ---
@@ -166,7 +167,7 @@ WKB (all take `const uint8_t* wkb_data, size_t wkb_len`):
 |---|---|
 | `geo_repair_make_valid` | Default config (Auto). |
 | `geo_repair_make_valid_with_config` | `keep_collapsed`, `poly_method` (0 Auto, 1 Arrange, 2 Structure). |
-| `geo_repair_make_valid_with_config_full` | Adds `fill_rule` (0 EvenOdd, 1 NonZero) and `epsg_code` (<= 0 unknown). |
+| `geo_repair_make_valid_with_config_full` | Adds `fill_rule` (0 EvenOdd, 1 NonZero; accepted and ignored) and `epsg_code` (<= 0 unknown). |
 | `geo_repair_is_valid` | Returns 1/0; 0 on parse failure. |
 | `geo_repair_validate` | `success` = validity; reasons in `error_msg`. |
 | `geo_repair_validate_reason` | Alias of `geo_repair_validate`. |

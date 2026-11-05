@@ -30,7 +30,7 @@ not a gate.
 | A read acceptance | our verdict matches the specification | corpus of 118 cases |
 | B geometry equality | our geometry equals OGR's | canonical 2D WKB |
 | C write semantics | our WKT, read by OGR, equals OGR's geometry | second oracle pass |
-| D write bytes | our ISO WKB equals OGR's bytes | 82 cases, XY to ZM |
+| D write bytes | our ISO WKB equals OGR's bytes | 93 cases, XY to ZM |
 | E WKB round trip | OGR's bytes read and re-emit unchanged | all dimensions |
 | F big-endian | big-endian bytes read and kept | encoder independent of the crate |
 | G EWKB SRID | an EWKB SRID survives the read | SRID 4326 on every readable case |
@@ -40,7 +40,7 @@ not a gate.
 | K RustGIS consumer | RustGIS reads what we deliver and sees the same shape | needs `RUSTGIS_DIR` |
 | L georust consumer | the georust `wkt` crate reads our delivered text and agrees | same corpus |
 | M GEOS validity | what we hand a host is valid and simple per GEOS, and repair is shown to act | needs `shapely` |
-| N repair measure | repair never loses area, length or points against GEOS, and leaves a clean shape alone | `shapely.make_valid`, names the wider fills |
+| N repair measure | repair never loses area, length or points against GEOS, and leaves a clean shape alone | `shapely.make_valid`, reports wider fills by name |
 
 Check M is the validity check and needs shapely, which ships GEOS. It parses the repaired delivery
 with GEOS, requires `is_valid` and `is_simple` on every case, and fails outright when no case was
@@ -82,24 +82,24 @@ Every row counts three outcomes against the oracle's geometry: agree, differ, re
 the oracle cannot express, such as a curved type, has no shared model and is left out of the
 agree and differ columns.
 
-Measured on 107 cases:
+Measured on 118 cases:
 
 ```
 impl             cases   agree  differ  refused
-GeoRepair          107      83       1        6
-RustGIS            107      48       8       34
-georust wkt        107      77       6        7
-GDAL               107      90       0        0
+GeoRepair          118      94       1        6
+RustGIS            118      59       8       34
+georust wkt        118      88       6        7
+GDAL               118     101       0        0
 ```
 
 WKB acceptance is measured separately, on the oracle's own bytes:
 
 ```
-WKB acceptance: GeoRepair 90/98, georust wkb 95/98, disagreements 5
+WKB acceptance: GeoRepair 101/109, georust wkb 106/109, disagreements 5
 ```
 
 The five disagreements are curved types, and they are not a matter of strictness. The `wkb`
-crate 0.9.3 accepts four of them by reading them as a different geometry:
+crate 0.9.3 accepts all five by reading them as a different geometry:
 
 | type code | what the bytes are | what `wkb` 0.9.3 returns |
 |---|---|---|
@@ -123,8 +123,8 @@ What the differences are, named:
   GDAL promotes the whole collection to XYZ and fills a zero. We refuse because promotion
   invents a coordinate the input never carried. This is the one case check D cannot compare,
   and the run names it.
-- georust `wkt`: `POINT EMPTY` becomes an empty MultiPoint, so four cases differ by type; two
-  cases are refused (`MULTIPOINT (EMPTY, ...)`, NaN); the six lenient acceptances above are
+- georust `wkt`: `POINT EMPTY` becomes an empty MultiPoint, so EMPTY cases differ by type;
+  `MULTIPOINT (EMPTY, ...)` and NaN are refused, and the six lenient acceptances above are
   refused too.
 - RustGIS: a `GEOMETRYCOLLECTION` keeps only its first member, so eight collection cases
   differ; every EMPTY and every NaN is refused, which is 34 cases.
@@ -166,114 +166,6 @@ coordinate. `host_clean` states the invariants a host may check for itself.
 Four cases in the corpus are unreadable by RustGIS before that pass and readable after it:
 `st_mpoint_empty`, `st_nan`, `st_inf`, `st_ninf`. The run prints them by name. This is why K
 and L measure the delivered text and not the raw text.
-
-## Comparison matrix
-
-The gate checks our own properties. The matrix answers a different question: given the same
-text, what does each implementation do? Run it with `--matrix`:
-
-```
-RUSTGIS_DIR=/path/to/RustGIS python3 conformance/run.py --matrix
-```
-
-Four columns read the raw corpus, so the measurements are like for like:
-
-| column | how it reads |
-|---|---|
-| GeoRepair | our reader, geometry normalised from our own WKB |
-| RustGIS | `conformance/rustgis_probe`, that checkout's `parse_wkt` |
-| georust wkt | `conformance/georust_probe`, the `wkt` crate with `geo-types` |
-| GDAL | `ogr2ogr`, the reference |
-
-Every row counts three outcomes against the oracle's geometry: agree, differ, refused. A case
-the oracle cannot express, such as a curved type, has no shared model and is left out of the
-agree and differ columns.
-
-Measured on 107 cases:
-
-```
-impl             cases   agree  differ  refused
-GeoRepair          107      83       1        6
-RustGIS            107      48       8       34
-georust wkt        107      77       6        7
-GDAL               107      90       0        0
-```
-
-WKB acceptance is measured separately, on the oracle's own bytes:
-
-```
-WKB acceptance: GeoRepair 90/98, georust wkb 95/98, disagreements 5
-```
-
-The five disagreements are curved types, and they are not a matter of strictness. The `wkb`
-crate 0.9.3 accepts four of them by reading them as a different geometry:
-
-| type code | what the bytes are | what `wkb` 0.9.3 returns |
-|---|---|---|
-| 9 | CompoundCurve | Point |
-| 10 | CurvePolygon | LineString |
-| 12 | MultiSurface | MultiPoint |
-| 15 | PolyhedralSurface | GeometryCollection |
-| 17 | Triangle | Point |
-
-Codes 8, 11 and 16 are rejected with a clear error. Codes 9, 10, 12, 15 and 17 are silently
-mapped to a base type, so a caller receives geometry that was never in the input and no error.
-Our reader rejects all eight. Acceptance counts alone hide this, which is why the matrix names
-the cases.
-
-What the differences are, named:
-
-- GeoRepair: one coordinate set differs (`st_unclosed_ring`, we close the ring and GDAL keeps
-  it open), and six refusals of input GDAL tolerates because the input is invalid.
-- GeoRepair refuses a collection that mixes dimension modifiers,
-  `GEOMETRYCOLLECTION (POINT Z (1 2 3), POINT (4 5))`, with an error naming the position.
-  GDAL promotes the whole collection to XYZ and fills a zero. We refuse because promotion
-  invents a coordinate the input never carried. This is the one case check D cannot compare,
-  and the run names it.
-- georust `wkt`: `POINT EMPTY` becomes an empty MultiPoint, so four cases differ by type; two
-  cases are refused (`MULTIPOINT (EMPTY, ...)`, NaN); the six lenient acceptances above are
-  refused too.
-- RustGIS: a `GEOMETRYCOLLECTION` keeps only its first member, so eight collection cases
-  differ; every EMPTY and every NaN is refused, which is 34 cases.
-
-The matrix is information, not a gate. A check can only fail on something we control.
-
-## Coverage contract
-
-Covered and gated: the seven OGC simple-feature types, at XY, Z, M and ZM; EMPTY at every
-level; both `MULTIPOINT` forms; nested collections; empty holes and empty parts; both byte
-orders; ISO and EWKB type-code forms; SRID on EWKB; truncated and malformed input.
-
-Out of scope, with the reason stated: SQL/MM curved and surface types (`CIRCULARSTRING`,
-`COMPOUNDCURVE`, `CURVEPOLYGON`, `MULTICURVE`, `MULTISURFACE`, `POLYHEDRALSURFACE`, `TIN`,
-`TRIANGLE`). `geo` has no data model for them, so the reader refuses them with an unknown-type
-error rather than inventing line segments. A caller with curved data must flatten it first.
-
-Not covered yet, and therefore not claimed: CRS semantics of an SRID (we check the number
-survives, not that it means a projection), the GeoPackage and CSV format layers themselves,
-and precision round trips for values that need more than 17 significant digits.
-
-## Rings and validity
-
-The reader closes a ring. Four coordinates in give five out, first point repeated, which is
-measured on `st_unclosed_ring`. The writer drops a ring that has no coordinates, because WKT
-has no EMPTY inside a ring list. Nothing else is moved: coordinates are never snapped, merged
-or reordered. Validity beyond closure is the validator's job and `make_valid`'s job.
-
-OGR keeps both an unclosed ring and an empty ring as given, so those two cases are compared by
-geometry only, never by bytes.
-
-## Delivery to a closed 2D host
-
-Our raw output is OGC-shaped, and a host with no empties and no NaN cannot always read it.
-`output::sanitize` is the delivery pass: it drops non-finite coordinates, drops empty members,
-closes open rings, and returns `None` when nothing usable survives. It never moves a
-coordinate and it never changes the geometry type. `apply_policy` runs first to reduce a
-collection to one dimension, then `sanitize`.
-
-Four cases in the corpus are unreadable by RustGIS before that pass and readable after it:
-`st_mpoint_empty`, `st_nan`, `st_inf`, `st_ninf`. The run prints them by name. This is why K
-measures the delivered text and not the raw text.
 
 ## House rule
 

@@ -1,5 +1,5 @@
-//! MultiPolygon/Geometry repair: union + even-parent filtering, nested component
-//! dropping, and precision-reduction fallbacks.
+//! MultiPolygon/Geometry repair: even-odd assembly, even-parent filtering, nested
+//! component dropping, and precision-reduction fallbacks.
 
 use super::polygon::has_nan_or_infinite;
 use super::polygon::{

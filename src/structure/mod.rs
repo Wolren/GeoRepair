@@ -2,7 +2,7 @@
 
 use alloc::vec::Vec;
 /// GEOS BuildArea port: polygonize linework → shell/hole classification → even-parent
-/// filter.
+/// filter; the repair loop asks for the dissolved area and its boundary.
 pub mod build_area;
 /// Edge classification and planar graph building for polygon faces.
 pub mod classify;

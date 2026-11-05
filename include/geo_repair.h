@@ -95,7 +95,8 @@ const char* geo_repair_version(void);
 
 /* --- WKB: Repair --- */
 /* poly_method: 0 = Auto, 1 = Arrange, 2 = Structure.
- * fill_rule: 0 = EvenOdd, 1 = NonZero. epsg_code <= 0 means unknown CRS. */
+ * fill_rule: 0 = EvenOdd, 1 = NonZero; accepted and ignored, repair applies EvenOdd.
+ * epsg_code <= 0 means unknown CRS. */
 GeoRepairResult geo_repair_make_valid(const uint8_t* wkb_data, size_t wkb_len);
 GeoRepairResult geo_repair_make_valid_with_config(
     const uint8_t* wkb_data, size_t wkb_len,

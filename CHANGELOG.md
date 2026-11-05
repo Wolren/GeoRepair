@@ -42,14 +42,20 @@
   and 9.3 MiB before, and against the 10 MB cap. The XML suite prints `NO TEST DIR` and passes
   when the fixtures are absent.
 
+### Performance
+- Even-odd assembly costs more on overlapping MultiPolygon parts: `overlap mp 100sh` goes from
+  72.3 us (the union answer) to 1 484 us, still 10x faster than GEOS makeValid at 15 482 us.
+  Dense grid improved (30x30: 2 061 to 996 us). The README and `docs/BENCHMARKS.md` rows were
+  re-measured 2026-11-05; the CI baseline for `overlap mp 100sh` needs re-recording on the runner.
+
 ### Fixed
 - `make_valid` assembles by even-odd, as GEOS does. `build_area` returned the atomic BuildArea
   faces and the MakeValid loop XORed them by ring fingerprint, so a self-crossing pentagram
   filled 4.667 where GEOS fills 3.333, and a MultiPolygon of two overlapping squares kept the
   union 7 against GEOS's 6. `build_area` now dissolves its faces (internal path) and reports the
   segments on their boundary; the loop subtracts those segments instead of ring windows and XORs
-  with a real overlay; a MultiPolygon whose repaired parts overlap is assembled by the same XOR
-  fold. Check N names no wider fill case, and the pentagram and overlap cases match GEOS.
+  with a real overlay; a MultiPolygon whose repaired parts overlap goes through one EvenOdd
+  overlay call. Check N names no wider fill case, and the pentagram and overlap cases match GEOS.
   `fill_rule` stays accepted and unread: EvenOdd is what repair applies.
 - The WKB reader refuses a polygon ring with one or two points as `WkbError::InvalidRing`. Such a
   ring is dropped by the WKT writer, so the round trip silently changed the geometry; 11 of 135,494

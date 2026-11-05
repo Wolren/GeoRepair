@@ -4,7 +4,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::fix_ring_graph::{build_graph, extract_all_faces_geos};
 
-/// geos BuildArea port.
+/// geos BuildArea port. The public call keeps the atomic faces; `build_area_with_boundary`
+/// dissolves them for the MakeValid loop, the step GEOS does inside BuildArea.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn build_area(lines: &[geo::Line<f64>]) -> Option<MultiPolygon<f64>> {
     build_area_impl(lines, false).map(|(area, _)| area)

@@ -448,10 +448,10 @@ fn run_build_area_divergence(
     (true, String::new())
 }
 
-/// GEOS buildarea oracle: our BuildArea port vs the expected WKT.
-/// GEOS BuildArea polygonizes the input's linework (even-parent filter);
-/// empty linework yields GEOMETRYCOLLECTION EMPTY. Type family, area, and
-/// component count are compared against the parsed expected geometry.
+/// GEOS buildarea oracle: our BuildArea port vs the expected WKT. The public call keeps
+/// atomic faces, not GEOS's dissolved output; self_touching_multipolygons and checkerboard
+/// are pinned by run_build_area_divergence. Empty linework yields GEOMETRYCOLLECTION EMPTY.
+/// Type family, area, and component count are compared against the parsed expected geometry.
 fn run_build_area_compare(geom: &Geometry<f64>, expected_wkt: &str) -> (bool, String) {
     let expected = match parse_wkt(expected_wkt) {
         Some(g) => g,

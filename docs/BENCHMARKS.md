@@ -25,21 +25,21 @@ The README carries the summary; this file is the detail.
 - Sub-µs rows are Rayon dispatch noise; read the larger rows and the
   real-world batch numbers.
 - Historical note: pre-2026-08-07 GEOS columns went through a WKT
-  round-trip per geometry, which inflated the GEOS side of large
-  MultiPolygon cases 30-500x (e.g. "dense grid ~200x", "overlap ~175x" in
-  earlier READMEs). The current harness constructs CoordSeq directly; the
-  wins on those rows are ~4-14x, still wins, but the old magnitudes were
-  an artifact.
+  round-trip per geometry. The 2026-08-07 MultiPolygon rows also used
+  `UnaryUnion` as the GEOS reference, which understated `makeValid` by
+  30-50x on the overlap and dense grid shapes. Those rows were
+  re-measured 2026-11-05 with `makeValid` and CoordSeq construction.
 
 ## Real-world dataset (1,579,030 polygons)
 
 813 features from a production GeoPackage (geometry blobs are WKB),
-flattened to 1,579,030 polygon parts. Measured 2026-08-07.
+flattened to 1,579,030 polygon parts. Measured 2026-09-18; the README
+`## Performance` table is the single source for this dataset.
 
 | Dataset | GeoRepair | GEOS | Ratio |
 |---------|----------:|-----:|------:|
-| Validation (1.58M) | 2.47 s (1.57 µs/poly) | 3.46 s (2.19 µs/poly) | 1.40x |
-| Full pass (1.58M) | 4.05 s (2.56 µs/poly) | 3.49 s (2.21 µs/poly) | 0.86x |
+| Validation (1.58M) | 2.1 s (1.3 µs/poly) | 3.0 s (1.9 µs/poly) | 1.4x |
+| Full pass (1.58M) | 2.1 s (1.3 µs/poly) | 3.2 s (2.1 µs/poly) | 1.5x |
 
 Validity agreement with GEOS: 100% (0/0 disagreements). GEOS setup cost
 (one-time pre-build of 1.58M geometries, 1.35 s) excluded.
@@ -57,7 +57,7 @@ flags the ~1.58M clockwise rings as orientation violations - those are
 GEOS-valid; that is the OGC winding contract (see the tolerance section),
 not a validity gap.
 
-## Synthetic benchmarks (2026-08-07, lean-predicate + gate-fusion pass)
+## Synthetic benchmarks (2026-08-07; overlap and grid rows re-measured 2026-11-05)
 
 ### Polygons
 
@@ -184,14 +184,19 @@ revert these rows to `makeValid`.
 | hole hier 5h | 1.811 | 2.128 | 1.17x |
 | hole hier 20h | 7.744 | 9.939 | 1.28x |
 | hole hier 50h | 22.23 | 27.72 | 1.25x |
-| overlap mp 5sh | 2.080 | 14.24 | 6.85x |
-| overlap mp 20sh | 8.220 | 78.48 | 9.55x |
-| overlap mp 50sh | 22.26 | 230.2 | 10.34x |
-| dense grid 5x5=25 | 9.022 | 122.9 | 13.63x |
-| dense grid 10x10=100 | 46.03 | 485.3 | 10.54x |
-| dense grid 20x20=400 | 500.1 | 2114.2 | 4.23x |
+| overlap mp 5sh | 7.473 | 452.2 | 60.5x |
+| overlap mp 20sh | 70.36 | 2727 | 38.8x |
+| overlap mp 50sh | 450.6 | 6972 | 15.5x |
+| overlap mp 100sh | 1484 | 15482 | 10.4x |
+| dense grid 5x5=25 | 9.744 | 1750.7 | 179.7x |
+| dense grid 10x10=100 | 45.83 | 13016.8 | 284.0x |
+| dense grid 20x20=400 | 340.8 | 97617.7 | 286.4x |
+| dense grid 30x30=900 | 996.4 | 396083.9 | 397.5x |
 | sliver 100v | 1.748 | 2.118 | 1.21x |
 | sliver 500v | 9.201 | 11.80 | 1.28x |
+
+The overlap and dense grid rows were re-measured 2026-11-05 after the
+even-odd assembly change; the rest are the 2026-08-07 run.
 
 ### Arrange pipeline (CDT fallback)
 
@@ -205,6 +210,10 @@ revert these rows to `makeValid`.
 | arrange star 50sp | 0.894 | 261.2 | 292.25x |
 
 ### Summary of the losses (2026-08-07)
+
+Historical: this section describes the 2026-08-07 rows. The current set is the
+README table (2026-09-18); spaghetti, valid ls 500v and valid polygons 500-1000v
+have since moved to wins.
 
 GeoRepair wins 73 of 91 cases; the losses are four known, measured
 classes, in order of size:

@@ -5,6 +5,9 @@ description: Two approaches to fix the 25 remaining fuzz pipeline failures: a GE
 
 # GeoRepair Deep Fix Investigation
 
+> Status: historical design note (2026-07-04). The BuildArea port landed; the current
+> contract is `conformance/COVERAGE.md`, and the pipeline is in `docs/ARCHITECTURE.md`.
+
 ## The Remaining Problem
 
 25 fuzz tests fail (81 pass) after all O(n log n) post-repair gates are in place. The pipeline itself produces invalid output. Validation is not missing. Categories:

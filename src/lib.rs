@@ -307,7 +307,7 @@
 //! | Strategy | Approach | Strengths | Weaknesses |
 //! |----------|----------|-----------|------------|
 //! | **Arrange** (CDT) | Constrained Delaunay triangulation → face labeling → ring extraction | Handles any topology. No self-intersection limit. | Slower, especially on large rings. Requires `spade`. |
-//! | **Structure** (fast path) | Planar graph extraction → face walking → winding-number assembly | 10-100× faster for valid/simple inputs. No external deps. | Falls back on complex topologies (many holes, nested self-intersections). |
+//! | **Structure** (fast path) | Planar graph extraction → face walking → even-odd assembly | 10-100× faster for valid/simple inputs. No external deps. | Falls back on complex topologies (many holes, nested self-intersections). |
 //!
 //!
 //! # CRS support

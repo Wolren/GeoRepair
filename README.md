@@ -26,7 +26,7 @@ back unchanged.
 Two strategies, chosen by geometry type:
 
 - **Structure** (default) mirrors GEOS `ST_MakeValid`: planar graph
-  extraction, face walking, winding-number assembly.
+  extraction, face walking, even-odd assembly.
 - **Arrange** is a CDT-based fallback for complex topologies.
 
 WKB and WKT reading and writing, plus a custom binary batch format, are
@@ -38,18 +38,19 @@ WKT keeps Z and M when you ask for it: `read_wkt_zm` returns the geometry, its
 same files and returns x/y, so a Z-enabled layer from OGR or QGIS loads without
 error.
 
-Everything is evaluated against a huge ported test sets from GEOS, CGAL and own fuzz tests. 
-The result should always come as valid per GEOS, but the strategy differences might make the output slightly differ.
+Everything is evaluated against a large test set ported from GEOS and CGAL, plus the crate's
+own fuzz tests. The result should always come out valid per GEOS, but the strategy differences
+can make the output slightly differ.
 
 ## Performance
 
 ### A test dataset (1,579,030 polygons)
 
-Structure batch on an a GIS dataset (813 features from a GeoPackage,
-flattened to 1,579,030 polygon parts). i5-12400F (6C/12T), release LTO,
-Rayon 12-thread batch; GEOS is conda-forge 3.14.1, serial per-call, run
-concurrently via Rayon, geometries built via CoordSeq direct construction
-(the one-time 1.5 s pre-build is excluded).
+Structure batch on a GIS dataset (813 features from a GeoPackage,
+flattened to 1,579,030 polygon parts), measured 2026-09-18. i5-12400F
+(6C/12T), release LTO, Rayon 12-thread batch; GEOS is conda-forge 3.14.1,
+serial per-call, run concurrently via Rayon, geometries built via CoordSeq
+direct construction (the one-time 1.5 s pre-build is excluded).
 
 | Dataset | GeoRepair | GEOS | Ratio |
 |---------|----------:|-----:|------:|
@@ -61,7 +62,8 @@ concurrently via Rayon, geometries built via CoordSeq direct construction
 Full table, parallel batch (µs); ratio = GEOS / GeoRepair, >1 means
 we win. Methodology: `docs/BENCHMARKS.md`. Regenerate:
 `python scripts/readme_bench_table.py --update <bench.json>`; CI gate:
-`python scripts/readme_bench_table.py --check <bench.json>`.
+`python scripts/readme_bench_table.py --check <bench.json>`. The overlap and
+dense grid rows were re-measured 2026-11-05; the rest are the 2026-09-18 set.
 
 | Benchmark | GeoRepair | GEOS | Ratio |
 |-----------|----------:|-----:|------:|
@@ -175,14 +177,14 @@ we win. Methodology: `docs/BENCHMARKS.md`. Regenerate:
 | hole hier 20h | 5.3 | 7.5 | 1.4x |
 | hole hier 50h | 19.4 | 26.1 | 1.3x |
 | hole hier 100h | 44.5 | 50.9 | 1.1x |
-| overlap mp 5sh | 2.1 | 410 | 196x |
-| overlap mp 20sh | 8.7 | 2419 | 279x |
-| overlap mp 50sh | 29.0 | 6610 | 228x |
-| overlap mp 100sh | 72.3 | 14036 | 194x |
-| dense grid 5x5=25 | 7.6 | 1626 | 215x |
-| dense grid 10x10=100 | 57.5 | 12644 | 220x |
-| dense grid 20x20=400 | 500 | 97753 | 195x |
-| dense grid 30x30=900 | 2061 | 346670 | 168x |
+| overlap mp 5sh | 7.5 | 452 | 61x |
+| overlap mp 20sh | 70.4 | 2727 | 39x |
+| overlap mp 50sh | 451 | 6972 | 15x |
+| overlap mp 100sh | 1484 | 15482 | 10x |
+| dense grid 5x5=25 | 9.7 | 1751 | 180x |
+| dense grid 10x10=100 | 45.8 | 13017 | 284x |
+| dense grid 20x20=400 | 341 | 97618 | 286x |
+| dense grid 30x30=900 | 996 | 396084 | 398x |
 | sliver 100v | 1.3 | 2.5 | 1.9x |
 | sliver 500v | 7.3 | 17.6 | 2.4x |
 | sliver 1000v | 14.0 | 27.4 | 2.0x |
@@ -217,9 +219,9 @@ we win. Methodology: `docs/BENCHMARKS.md`. Regenerate:
 4. **Giants (>4,096 ring edges) route to the boolean pipeline** - on a
    200k-edge giant single-pass noding costs 168 ms vs 36 ms for the
    boolean path (`SP_MAX_EDGES` in `src/core/mod.rs`).
-5. **Mass-overlap repairs are the slowest synthetic class** (~0.46 ms/poly
-   at dense grid 20x20) but stay over 200x faster than GEOS makeValid on the
-   same shapes.
+5. **Mass-overlap repairs are the slowest synthetic class** (~1.5 ms for a
+   100-shell overlap) but still beat GEOS makeValid by 10x to 61x on the overlap
+   rows and 180x to 398x on the dense grid.
 6. **Python bindings: `tests/test_python.py` covers the WKB and WKT surface**
    (41 tests); GeoJSON bindings were removed deliberately.
 7. **`simd-portable` is nightly-only** (3 E0554 on stable, expected);

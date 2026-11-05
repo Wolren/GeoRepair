@@ -43,7 +43,8 @@ input
   │                   hole validity.
   │
   ├─ Structure single-pass   (structure/symdiff.rs)
-  │   node shell + holes in ONE pass, walk even-odd faces (BuildArea).
+  │   node shell + holes once, then the MakeValid loop: BuildArea,
+  │   XOR the level, subtract its boundary. Even-odd by construction.
   │   Primary path for self-crossings, crossing holes, hole overlaps.
   │   Result is OGC-wound and validated; failure falls through.
   │
