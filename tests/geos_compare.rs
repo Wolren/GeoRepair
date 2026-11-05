@@ -381,8 +381,6 @@ fn compare_one(
             "hole_equals_shell" => our_area == 0.0 && component_count(&ours) == 0,
             // Area must match GEOS to within the sliver's share (1.6e-6).
             "mixed_magnitude" => (our_area - geos_area).abs() <= 1e-5 * geos_area.abs(),
-            // We union overlapping MP shells to a single component (JTS rule 09, area 46); GEOS even-odd EXCLUDES the overlap (42).
-            "mp_overlapping" => (our_area - 46.0).abs() < 1e-9,
             // All-repeated-point polygon: we emit empty; GEOS keeps a collapsed POINT(0 0).
             "poly_all_repeated" => our_area == 0.0 && component_count(&ours) == 0,
             "line_self_crossing" => {
@@ -462,7 +460,7 @@ fn make_valid_fixtures() -> Vec<(&'static str, &'static str)> {
             "mixed_magnitude",
             "POLYGON ((84956205.27307954 -45986769.5228732, -99794971.69789362 4896957.693364016, 95593402.35083151 -37252189.83613572, 37149609.09726282 -63327990.14115548, 78418546.04729833 69380301.01700698, 0 0, 0 0, 0 5.089116040917129e-9, 84956205.27307954 -45986769.5228732))",
         ),
-        // (area 46 = 25 + 25 − 4); exercises the MP merge path.
+        // (area 42: even-odd cancels the 4 area overlap); exercises the MP merge path.
         (
             "mp_overlapping",
             "MULTIPOLYGON (((0 0, 5 0, 5 5, 0 5, 0 0)), ((3 3, 8 3, 8 8, 3 8, 3 3)))",
@@ -496,9 +494,6 @@ fn area_only_fixtures() -> &'static [&'static str] {
         "figure_eight",      // we emit even-odd fill; GEOS keeps overlap as lines
         "hole_equals_shell", // we emit empty; GEOS keeps the shell
         "mixed_magnitude",   // we collapse the degenerate sliver component
-        // MakeValidPoly returns the noded even-odd partition (2 components).
-        // (measured: both 46.0).
-        "mp_overlapping",
         // All-repeated-point polygon: we emit GEOMETRYCOLLECTION EMPTY; GEOS keeps a collapsed POINT(0 0).
         "poly_all_repeated",
         // Self-crossing line: the line-validity contract (2026-08-07) -make_valid never ships a non-simple line

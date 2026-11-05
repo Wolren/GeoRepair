@@ -309,18 +309,17 @@ fn xml_multipolygon_overlapping() {
     let result = g.make_valid_with_config(&cfg_auto());
     assert_valid_ogc(&result);
     assert_not_empty(&result);
-    // overlapping shells per JTS rule 09
-    // Mirrors the geos_compare.rs mp_overlapping pin (46.0).
+    // GEOS even-odd: the overlap is cancelled, two L-shaped parts.
     let area = total_poly_area(&result);
     let scale = area.abs().max(1.0);
     assert!(
-        (area - 1.8).abs() <= 1e-6 * scale,
-        "pinned union answer moved: got {area}, expected 1.8 (GEOS even-odd: 1.64)"
+        (area - 1.64).abs() <= 1e-6 * scale,
+        "GEOS even-odd answer moved: got {area}, expected 1.64"
     );
     assert_eq!(
         component_count(&result),
-        1,
-        "union of overlapping shells must collapse to one component"
+        2,
+        "even-odd of two overlapping shells is two components"
     );
 }
 
@@ -333,18 +332,17 @@ fn xml_multipolygon_crossing_overlapping() {
     let result = g.make_valid_with_config(&cfg_auto());
     assert_valid_ogc(&result);
     assert_not_empty(&result);
-    // PINNED divergence (makevalid.xml case 14), measured three ways
-    // (2026-08-05): XML expected WKT area 1.445; GEOS makeValid TODAY emits
+    // GEOS even-odd: the crossing bowtie and the overlapping shell give three parts.
     let area = total_poly_area(&result);
     let scale = area.abs().max(1.0);
     assert!(
-        (area - 1.45).abs() <= 1e-6 * scale,
-        "pinned union answer moved: got {area}, expected 1.45 (GEOS-now 1.44, XML 1.445)"
+        (area - 1.44).abs() <= 1e-6 * scale,
+        "GEOS even-odd answer moved: got {area}, expected 1.44 (XML 1.445)"
     );
     assert_eq!(
         component_count(&result),
-        1,
-        "union of crossing+overlapping shells must collapse to one component"
+        3,
+        "even-odd of a crossing bowtie and an overlapping shell is three components"
     );
 }
 

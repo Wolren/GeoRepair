@@ -86,7 +86,7 @@ dimension. A refusal never invents a coordinate, which is the reason for the cho
 | A part `make_valid` consumes without a replacement | Counted | `dropped_unrepairable`, `repair_reports_a_polygon_it_cannot_fix` |
 | Repair never deletes what it cannot improve | Guaranteed | N, fallback in `to_host_with`, 6 adapter tests |
 | A geometry GEOS calls valid and simple is unchanged by repair | Verified | N, 64 cases |
-| Repaired output keeps area, length and point count against GEOS | Verified | N, 2 wider-fill cases named |
+| Repaired output keeps area, length and point count against GEOS | Verified | N, 64 cases, no wider fill |
 | Repair at collection level, so overlapping valid parts are fixed | Guaranteed | `repair_mode_fixes_overlapping_polygons`, M |
 | Repaired output valid and simple per GEOS | Verified | M 62 delivered geometries, 5 repaired |
 | Repair does not touch a valid polygon | Guaranteed | test `repair_mode_does_not_touch_a_valid_polygon` |
@@ -125,5 +125,6 @@ they do not claim a limit on what any of them could reach.
 - Validity beyond closure is not this crate's claim. `make_valid` and the validator own it.
 - No claim about digits beyond what `f64` holds. `ryu` writes the shortest exact round trip.
 - No claim of being the fastest implementation. The table compares two crates on one corpus.
-- `fill_rule` on `MakeValidConfig` is accepted and never read: repair assembles by the winding number, so a pentagram fills area 4.667 where GEOS fills 3.333.
-- Repair keeps the union of overlapping parts where GEOS removes one, so two squares give area 7 here and 6 there. Check N requires only that repair never loses area against GEOS.
+- `fill_rule` on `MakeValidConfig` is accepted and never read: repair always applies EvenOdd, which matches GEOS on a pentagram (both 3.333). The NonZero result, 4.667 with the centre filled, is not reachable.
+- Repair cancels an overlapping or nested part as GEOS does: two 2x2 squares overlapping by 1 give area 6, not the union's 7.
+- A self-crossing ring is not claimed to match GEOS in area outside check N: the 2000-vertex walk in the symdiff test converges to 212.74 where GEOS fills 790.49.

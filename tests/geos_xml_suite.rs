@@ -547,9 +547,18 @@ fn run_make_valid_compare(
     }
 
     // (3) Area: compare against the INPUT's true union area (area-preservation contract).
+    // The pinned even-odd cases cancel their overlap on purpose, so they skip this.
     let input_union_area = total_poly_area(&geom_union(geom, cfg));
     let our_area = total_poly_area(&fixed);
-    if input_union_area > 1e-9 {
+    let pinned: Option<f64> = if desc.contains("first_part_crossing_second_part_overlapping") {
+        // More specific desc first: case 14 contains "second_part_overlapping" as a substring, so it must be matched before the case-13 branch.
+        Some(1.44)
+    } else if desc.contains("second_part_overlapping") {
+        Some(1.64)
+    } else {
+        None
+    };
+    if pinned.is_none() && input_union_area > 1e-9 {
         let scale = input_union_area.abs().max(1.0);
         if (our_area - input_union_area).abs() > 1e-6 * scale {
             problems.push(format!(
@@ -559,22 +568,12 @@ fn run_make_valid_compare(
         }
     }
 
-    // (3b) Independent expected-area cross-check against the XML expected
-    //   (area 1.64), we union overlapping shells per JTS rule 09 (area 1.8).
+    // (3b) GEOS even-odd area for the cases where the XML expected text is not that answer.
     let exp_area = total_poly_area(&expected);
-    let pinned_union: Option<f64> = if desc.contains("first_part_crossing_second_part_overlapping")
-    {
-        // More specific desc first: case 14 contains "second_part_overlapping" as a substring, so it must be matched before the case-13 branch.
-        Some(1.45)
-    } else if desc.contains("second_part_overlapping") {
-        Some(1.8)
-    } else {
-        None
-    };
-    if let Some(pin) = pinned_union {
+    if let Some(pin) = pinned {
         if (our_area - pin).abs() > 1e-6 {
             problems.push(format!(
-                "pinned union answer moved: got {our_area:.8}, pinned {pin} (GEOS even-odd expected {exp_area:.8})"
+                "pinned even-odd answer moved: got {our_area:.8}, pinned {pin} (GEOS even-odd expected {exp_area:.8})"
             ));
         }
     } else if !is_empty_geom(&expected) && exp_area > 1e-9 {
@@ -590,10 +589,12 @@ fn run_make_valid_compare(
     // (4) Component count for Multi* outputs - INFORMATIONAL only when area matches.
     let our_count = component_count(&fixed);
     let exp_count = component_count(&expected);
-    if matches!(
-        &fixed,
-        Geometry::MultiPolygon(_) | Geometry::MultiLineString(_)
-    ) && our_count != exp_count
+    if pinned.is_none()
+        && matches!(
+            &fixed,
+            Geometry::MultiPolygon(_) | Geometry::MultiLineString(_)
+        )
+        && our_count != exp_count
     {
         let area_ok = input_union_area <= 1e-9
             || (our_area - input_union_area).abs() <= 1e-6 * input_union_area.abs().max(1.0);

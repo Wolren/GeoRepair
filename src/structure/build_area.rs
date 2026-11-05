@@ -1,24 +1,41 @@
 use alloc::vec::Vec;
-use geo::{Coord, LineString, MultiPolygon, Polygon};
-use rustc_hash::FxHashMap;
+use geo::{Coord, Line, LineString, MultiPolygon, Polygon, Winding};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::fix_ring_graph::{build_graph, extract_all_faces_geos};
 
 /// geos BuildArea port.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn build_area(lines: &[geo::Line<f64>]) -> Option<MultiPolygon<f64>> {
+    build_area_impl(lines, false).map(|(area, _)| area)
+}
+
+/// The dissolved area plus its boundary segments. The MakeValid loop subtracts those
+/// segments from the remaining cut edges; dissolve merges collinear runs, so ring
+/// windows cannot be matched back to the noded input.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+pub(crate) fn build_area_with_boundary(
+    lines: &[geo::Line<f64>],
+) -> Option<(MultiPolygon<f64>, Vec<Line<f64>>)> {
+    build_area_impl(lines, true)
+}
+
+fn build_area_impl(
+    lines: &[geo::Line<f64>],
+    dissolve: bool,
+) -> Option<(MultiPolygon<f64>, Vec<Line<f64>>)> {
     if lines.is_empty() {
-        return Some(MultiPolygon::new(Vec::new()));
+        return Some((MultiPolygon::new(Vec::new()), Vec::new()));
     }
     let graph = build_graph(lines);
     if graph.edges.is_empty() {
-        return Some(MultiPolygon::new(Vec::new()));
+        return Some((MultiPolygon::new(Vec::new()), Vec::new()));
     }
     // None as a fallback signal (make_valid.rs polygonizer_fallback, fix_ring.rs) -
     // keep the semantics
     let faces = extract_all_faces_geos(&graph)?;
     if faces.is_empty() {
-        return Some(MultiPolygon::new(Vec::new()));
+        return Some((MultiPolygon::new(Vec::new()), Vec::new()));
     }
 
     struct Face {
@@ -56,7 +73,7 @@ pub fn build_area(lines: &[geo::Line<f64>]) -> Option<MultiPolygon<f64>> {
         });
     }
     if faces_out.is_empty() {
-        return Some(MultiPolygon::new(Vec::new()));
+        return Some((MultiPolygon::new(Vec::new()), Vec::new()));
     }
 
     // Step 2: sort by envelope area desc (GEOS CompareByEnvarea)
@@ -135,19 +152,85 @@ pub fn build_area(lines: &[geo::Line<f64>]) -> Option<MultiPolygon<f64>> {
         if ancestor_count(s) % 2 != 0 {
             continue;
         }
+        let mut shell = LineString::new(faces_out[s].ring.clone());
+        if dissolve {
+            shell.make_ccw_winding();
+        }
         let mut holes: Vec<LineString<f64>> = Vec::new();
         if let Some(hs) = shell_holes.get(&s) {
             for &h in hs {
-                holes.push(LineString::new(faces_out[h].ring.clone()));
+                let mut hole = LineString::new(faces_out[h].ring.clone());
+                if dissolve {
+                    hole.make_cw_winding();
+                }
+                holes.push(hole);
             }
         }
-        kept.push(Polygon::new(
-            LineString::new(faces_out[s].ring.clone()),
-            holes,
-        ));
+        kept.push(Polygon::new(shell, holes));
     }
 
-    Some(MultiPolygon::new(kept))
+    if !dissolve {
+        return Some((MultiPolygon::new(kept), Vec::new()));
+    }
+
+    let mut seg_faces: FxHashMap<(u64, u64, u64, u64), usize> = FxHashMap::default();
+    for p in &kept {
+        let mut seen: FxHashSet<(u64, u64, u64, u64)> = FxHashSet::default();
+        for ring in core::iter::once(p.exterior()).chain(p.interiors()) {
+            for w in ring.0.windows(2) {
+                if w[0] == w[1] {
+                    continue;
+                }
+                let k = seg_key(w[0], w[1]);
+                if seen.insert(k) {
+                    *seg_faces.entry(k).or_insert(0) += 1;
+                }
+            }
+        }
+    }
+    let mut boundary: Vec<Line<f64>> = Vec::new();
+    let mut emitted: FxHashSet<(u64, u64, u64, u64)> = FxHashSet::default();
+    for p in &kept {
+        for ring in core::iter::once(p.exterior()).chain(p.interiors()) {
+            for w in ring.0.windows(2) {
+                if w[0] == w[1] {
+                    continue;
+                }
+                let k = seg_key(w[0], w[1]);
+                if seg_faces.get(&k) == Some(&1) && emitted.insert(k) {
+                    boundary.push(Line::new(w[0], w[1]));
+                }
+            }
+        }
+    }
+
+    if kept.is_empty() {
+        return Some((MultiPolygon::new(Vec::new()), Vec::new()));
+    }
+    if kept.len() == 1 {
+        return Some((MultiPolygon::new(kept), boundary));
+    }
+    // GEOS dissolves the kept faces with CascadedPolygonUnion; without this a
+    // self-crossing ring returns its atomic faces (pentagram: 6 parts)
+    let mp = MultiPolygon::new(kept);
+    #[cfg(feature = "std")]
+    let dissolved = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        geo::algorithm::bool_ops::unary_union(&mp)
+    }))
+    .unwrap_or(mp);
+    #[cfg(not(feature = "std"))]
+    let dissolved = geo::algorithm::bool_ops::unary_union(&mp);
+    Some((dissolved, boundary))
+}
+
+/// Orientation-insensitive bit key for a segment.
+fn seg_key(a: Coord<f64>, b: Coord<f64>) -> (u64, u64, u64, u64) {
+    let (ax, ay, bx, by) = (a.x.to_bits(), a.y.to_bits(), b.x.to_bits(), b.y.to_bits());
+    if (ax, ay) <= (bx, by) {
+        (ax, ay, bx, by)
+    } else {
+        (bx, by, ax, ay)
+    }
 }
 
 /// Fingerprint of a ring: sorted coordinate bit pairs, closure removed.

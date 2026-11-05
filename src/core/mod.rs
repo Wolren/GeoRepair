@@ -98,7 +98,8 @@ pub struct MakeValidConfig {
     /// Which polygon repair strategy to use.
     pub poly_method: PolyMethod,
 
-    /// Accepted for API compatibility; repair assembles by winding number and never reads it.
+    /// Accepted for API compatibility; repair always applies the EvenOdd rule and
+    /// never reads this field.
     pub fill_rule: FillRule,
 
     /// When set, used for crs-aware tolerance and metadata preservation.

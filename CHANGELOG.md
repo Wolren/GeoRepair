@@ -43,6 +43,14 @@
   when the fixtures are absent.
 
 ### Fixed
+- `make_valid` assembles by even-odd, as GEOS does. `build_area` returned the atomic BuildArea
+  faces and the MakeValid loop XORed them by ring fingerprint, so a self-crossing pentagram
+  filled 4.667 where GEOS fills 3.333, and a MultiPolygon of two overlapping squares kept the
+  union 7 against GEOS's 6. `build_area` now dissolves its faces (internal path) and reports the
+  segments on their boundary; the loop subtracts those segments instead of ring windows and XORs
+  with a real overlay; a MultiPolygon whose repaired parts overlap is assembled by the same XOR
+  fold. Check N names no wider fill case, and the pentagram and overlap cases match GEOS.
+  `fill_rule` stays accepted and unread: EvenOdd is what repair applies.
 - The WKB reader refuses a polygon ring with one or two points as `WkbError::InvalidRing`. Such a
   ring is dropped by the WKT writer, so the round trip silently changed the geometry; 11 of 135,494
   fuzzed blobs hit this. A ring of three points stays readable, because GDAL round trips it.

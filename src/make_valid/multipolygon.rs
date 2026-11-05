@@ -39,9 +39,7 @@ impl MakeValid for MultiPolygon<f64> {
             return Geometry::MultiPolygon(MultiPolygon::new(Vec::new()));
         }
         if shells.len() == 1 {
-            // still gated (fuzz wkb seed 1da58cf8 - the component repair shipped a
-            // genuinely crossing polygon and this early return skipped) Returned
-            // directly instead of through `repair`
+            // fuzz wkb seed 1da58cf8: an early return shipped a crossing polygon; keep the gate.
             let single = shells.pop().expect("len==1 verified");
             let enforced = enforce_ogc_winding(Geometry::Polygon(single)).0;
             let orig = match &enforced {
@@ -60,17 +58,34 @@ impl MakeValid for MultiPolygon<f64> {
             let gated = validity_gate(enforced, orig);
             return gated;
         }
-        // Panic containment: everything from the merge to the final union/gate result
-        // runs under one catch_unwind below. unary_union (i_overlay debug_asserts on
-        // degenerate merges - fuzz wkt seeds aa4bb7d2 / 455657db, extract_ogc
-        // is_fill_top) and the arrange ladder inside
+        // unary_union and the arrange ladder can panic here; catch_unwind contains them
+        // (fuzz wkt seeds aa4bb7d2 / 455657db).
         let repair = || -> Geometry<f64> {
             let mp = MultiPolygon::new(shells);
             if is_valid_with_geo(&Geometry::MultiPolygon(mp.clone())) {
                 return enforce_ogc_winding(Geometry::MultiPolygon(mp)).0;
             }
             let orig_shells = mp.0.clone();
-            let filtered = crate::structure::merge::merge_shells(mp.0);
+            let filtered = if shells_have_overlapping_bboxes(&mp) {
+                #[cfg(feature = "std")]
+                let even =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| even_odd_parts(&mp)))
+                        .ok()
+                        .flatten();
+                #[cfg(not(feature = "std"))]
+                let even = even_odd_parts(&mp);
+                match even {
+                    Some(u)
+                        if !u.0.is_empty()
+                            && is_valid_with_geo(&Geometry::MultiPolygon(u.clone())) =>
+                    {
+                        u
+                    }
+                    _ => crate::structure::merge::merge_shells(mp.0),
+                }
+            } else {
+                crate::structure::merge::merge_shells(mp.0)
+            };
             if filtered.0.is_empty() {
                 return empty_geom::<f64>();
             }
@@ -142,6 +157,16 @@ impl MakeValid for MultiPolygon<f64> {
     fn par_make_valid_with_config(&self, config: &MakeValidConfig) -> Geometry<f64> {
         crate::parallel::par_fix_multi_polygon(self, config)
     }
+}
+
+/// Even-odd of the repaired parts. GEOS make_valid cancels an overlapping or nested
+/// part, so two 2x2 squares overlapping by 1 give 6, not the union's 7. One overlay call
+/// with the fill rule, not a fold: folding is quadratic on many-part fuzz seeds.
+#[cfg(any(feature = "arrange", feature = "structure"))]
+fn even_odd_parts(mp: &MultiPolygon<f64>) -> Option<MultiPolygon<f64>> {
+    use geo::algorithm::bool_ops::{BooleanOps, FillRule};
+    let empty = MultiPolygon::new(Vec::new());
+    Some(mp.union_with_fill_rule(&empty, FillRule::EvenOdd))
 }
 
 /// The validator rejects that as `DisconnectedInteriorRing`. Seeds `3111ecaf` and
