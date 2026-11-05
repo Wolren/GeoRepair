@@ -278,7 +278,7 @@ fn check_chain_pair(
 }
 
 impl NodingValidator {
-    /// Validation is not performed until [`validate`] is
+    /// Validation is not performed until [`validate`](NodingValidator::validate) is
     /// called.
     pub fn new(edges: Vec<Line<f64>>) -> Self {
         Self {

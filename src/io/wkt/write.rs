@@ -30,7 +30,7 @@ pub fn write_wkt(geom: &Geometry<f64>) -> String {
 /// Serialize a geometry with its dimension modifier and extra ordinates.
 ///
 /// `extra_coords` must hold `dims.coord_count() - 2` values per coordinate, in the order
-/// [`read_wkt_zm`] returns them.
+/// [`read_wkt_zm`](super::read_wkt_zm) returns them.
 pub fn write_wkt_zm(wkt: &WktGeometry) -> String {
     let mut s = String::new();
     let mut offset = 0;
