@@ -13,31 +13,32 @@ env:
 # supply-chain risk; pins verified against the tagged release HEADs on
 # 2026-08-04). Bump by re-resolving the tag, never by trusting a new tag.
 jobs:
-  check:
+  # Guards the private working config out of the tree and its history. Kept first
+  # so a leaked file fails before the expensive jobs start.
+  private-config:
+    name: private config guard
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # stable
         with:
-          toolchain: stable
-      - run: cargo check --locked --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,io-shp,ffi"
-        env:
-          RUSTFLAGS: -Dwarnings
-      # Version drift gate: the maturin pyproject version must track
-      # Cargo.toml (published wheels and the crate share a version).
-      - run: |
-          cargo_v=$(grep -m1 '^version' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
-          py_v=$(grep -m1 '^version' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
-          if [ "$cargo_v" != "$py_v" ]; then
-            echo "version drift: Cargo.toml=$cargo_v pyproject.toml=$py_v"
+          fetch-depth: 0
+      - name: Block the private commentkit config
+        run: |
+          set -e
+          if git ls-files | grep -iE '(^|/)\.commentkit\.toml$|(^|/)\.commentkit/'; then
+            echo "::error::.commentkit.toml is private working config. Untrack it and add it to .gitignore."
             exit 1
           fi
+          if git log --all --oneline -- .commentkit.toml | head -5 | grep .; then
+            echo "::error::Commit history contains .commentkit.toml. Remove it with git filter-repo."
+            exit 1
+          fi
+          echo "no private config found"
 
-  # MSRV gate: the crate declares rust-version = 1.88 (the floor set by
-  # geo 0.33.1); this job proves the declared feature set still builds on
-  # it. Deviations from the CI feature list are deliberate: io backends and
-  # ffi pull newer transitive deps.
-  msrv:
+  # MSRV + no_std gate: rust-version = 1.88 (the floor set by geo 0.33.1) and
+  # the alloc-only configs must both build. io backends and ffi are excluded
+  # because they pull newer transitive deps.
+  compat:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
@@ -46,40 +47,40 @@ jobs:
           toolchain: "1.88"
       - run: cargo check --locked --features "arrange,structure,parallel,simd,validate"
       - run: cargo check --locked --features "arrange,structure,parallel,simd,validate,geo-traits"
-
-  # no_std gate: alloc-only builds (std feature off) must compile. The bare
-  # zero-feature config and a validate-only validator config are both
-  # supported; the repair features imply each other (see Cargo.toml).
-  no-std:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # stable
-        with:
-          toolchain: stable
       - run: cargo check --locked --no-default-features
       - run: cargo check --locked --no-default-features --features validate
       - run: cargo check --locked --no-default-features --features validate,structure,arrange
 
-  test:
+  tests:
+    name: tests (${{ matrix.name }})
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: full
+            args: --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,io-shp,ffi"
+          - name: no-defaults
+            args: --no-default-features --features "arrange,structure,parallel,simd,validate"
+          - name: serde
+            args: --features "serde"
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # stable
         with:
           toolchain: stable
       - run: sudo apt-get update && sudo apt-get install -y libgeos-dev geos-bin
-      - run: cargo test --locked --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,io-shp,ffi"
+      - run: cargo test --locked ${{ matrix.args }}
 
-  test-no-defaults:
+  # Branch protection requires a check named exactly `test`; the matrix legs are
+  # `tests (full)` and friends, so this aggregator carries the required name.
+  test:
+    name: test
+    needs: [tests]
+    if: always()
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # stable
-        with:
-          toolchain: stable
-      - run: sudo apt-get update && sudo apt-get install -y libgeos-dev geos-bin
-      - run: cargo test --locked --no-default-features --features "arrange,structure,parallel,simd,validate"
+      - run: test "${{ needs.tests.result }}" = "success"
 
   # Python bindings gate: build the maturin wheel and run the WKT-surface
   # test suite (tests/test_python.py) against the real wheel.
@@ -134,45 +135,6 @@ jobs:
       - run: cargo build --locked --example conformance_dump
       - run: python3 conformance/run.py
 
-  test-serde:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # stable
-        with:
-          toolchain: stable
-      - run: cargo check --locked --features "serde"
-
-  # Regression smoke for the dual-bar benchmarks: the synthetic sweep (all
-  # shape families, serial vs parallel) and the real-world sample bench
-  # (committed alaska subset, Structure vs GEOS). No hard timing gate -
-  # runner noise makes absolute thresholds meaningless - but compile
-  # breakage, panics, or GEOS-link failures fail the job. The committed
-  # alaska.* set is a SMALL sample (the full 1,579,030-part dataset is
-  # 748 MB and stays local; the bench defaults to data_0.gpkg there).
-  bench:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # stable
-        with:
-          toolchain: stable
-      - run: sudo apt-get update && sudo apt-get install -y libgeos-dev
-      - name: Synthetic bench (serial vs parallel sweep)
-        run: cargo bench --locked --bench bench
-        env:
-          BENCH_JSON: target/bench_full.json
-      - name: README synthetic table coverage gate
-        run: python scripts/readme_bench_table.py --check target/bench_full.json
-      - name: Real-world sample bench (alaska subset, Structure vs GEOS)
-        run: cargo bench --locked --features "arrange,structure,parallel,simd,bench-geos-system,io-gpkg" --bench real_world -- --fast
-        env:
-          BENCH_FILE: benches/real_world/alaska.bin
-      - name: WKB/WKT head-to-head bench (ours vs georust/wkb + wkt)
-        run: cargo bench --locked --bench wkb_cmp
-        env:
-          BENCH_FILE: benches/real_world/alaska.bin
-
   # Regression gate: the synthetic bench's curated subset must stay within
   # threshold of the committed baseline (recorded on this runner type).
   # Added 2026-08-07 after the LineString validity-contract fix shipped a
@@ -199,31 +161,6 @@ jobs:
         with:
           name: bench-baseline
           path: benches/bench_baseline.json
-          if-no-files-found: ignore
-          retention-days: 7
-
-  # CRS WKT parse/serialize gate: benches/crs_wkt.rs measures WKT1 vs WKT2
-  # parsing and serialization for the SAME CRS (both encodings), with
-  # best-of-batches timing, and gates itself against
-  # benches/crs_wkt_baseline.txt - recording that baseline on the first run
-  # (a maintainer commits the uploaded artifact, like the bench-gate job).
-  # This is the only gate that can see a regression in the CRS parser: the
-  # repair benchmarks never touch it.
-  crs-wkt-bench-gate:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # stable
-        with:
-          toolchain: stable
-      - name: CRS WKT bench (records the baseline on the first run)
-        run: CRS_WKT_BASELINE=benches/crs_wkt_baseline.txt cargo bench --locked --features "arrange,structure,parallel,simd" --bench crs_wkt
-      - name: Upload recorded baseline (when the first run created it)
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v4
-        with:
-          name: crs-wkt-baseline
-          path: benches/crs_wkt_baseline.txt
           if-no-files-found: ignore
           retention-days: 7
 
@@ -283,7 +220,7 @@ jobs:
   # Lint gate: rustfmt + clippy on ALL targets (lib, tests, benches,
   # examples) under the full non-GEOS feature set. --all-targets matches
   # the geo ecosystem's gate (geo, wkt run it) - the CI feature set is the
-  # one the test job uses, so every target that ships gets linted.
+  # one the tests job uses, so every target that ships gets linted.
   lint:
     runs-on: ubuntu-24.04
     steps:
@@ -296,85 +233,37 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Clippy (all targets)
         run: cargo clippy --locked --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,io-shp,ffi" --all-targets -- -D warnings
+      # Version drift gate: the maturin pyproject version must track Cargo.toml.
+      - name: Version drift (Cargo.toml vs pyproject.toml)
+        run: |
+          cargo_v=$(grep -m1 '^version' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          py_v=$(grep -m1 '^version' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          if [ "$cargo_v" != "$py_v" ]; then
+            echo "version drift: Cargo.toml=$cargo_v pyproject.toml=$py_v"
+            exit 1
+          fi
 
-  rustdoc:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # stable
-        with:
-          toolchain: stable
-      - run: cargo doc --locked --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,io-shp,ffi,serde"
-        env:
-          RUSTDOCFLAGS: -D warnings
-
-  # docs.rs build gate (the wkt crate's practice): the
-  # [package.metadata.docs.rs] feature set must actually build. The
-  # publish path only discovers a broken docs.rs config at release time;
-  # this catches it at commit time. Nightly, because docs.rs builds on
-  # nightly. cargo-docs-rs reads the metadata's all-features=false +
-  # pinned feature list, so simd-portable and bench-geos-system never
-  # leak into the docs build.
-  docs-rs:
+  # Docs gate: stable rustdoc lints + the docs.rs nightly build. Stable and
+  # nightly do not agree on what is a broken link, so both run in one job.
+  docs:
     runs-on: ubuntu-24.04
     env:
-      RUSTDOCFLAGS: -Dwarnings
+      RUSTDOCFLAGS: -D warnings
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # nightly
         with:
           toolchain: nightly
+      - run: rustup toolchain install stable --profile minimal
+      - name: Stable rustdoc (full feature set)
+        run: cargo +stable doc --locked --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,io-shp,ffi,serde"
       - uses: dtolnay/install@a75ae3c3a13004d4d2db69b04946c7f7687bda91  # cargo-docs-rs
         with:
           crate: cargo-docs-rs
-      - run: cargo docs-rs
+      - name: docs.rs metadata build
+        run: cargo docs-rs
 
-  # Static-GEOS gate: the bench-geos feature (geos-src cmake static
-  # build) is untested anywhere - CI only exercised bench-geos-system
-  # (the geos crate's CI runs both). A broken cmake/static linkage
-  # otherwise ships silently until a hermetic user hits it.
-  geos-static:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # stable
-        with:
-          toolchain: stable
-      - run: sudo apt-get update && sudo apt-get install -y cmake
-      - run: cargo check --locked --features "arrange,structure,parallel,simd,validate,bench-geos"
-
-  # Semver gate: a minor/patch bump must never silently break the public
-  # API. `check-release` compares the working tree against the latest
-  # crates.io release of geo-repair (self-updating - no per-release
-  # baseline to bump). Runs on push AND pull_request: when the local
-  # version equals the published one the check is a no-op.
-  semver:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # stable
-        with:
-          toolchain: stable
-      - name: Install cargo-semver-checks
-        run: cargo install cargo-semver-checks --locked
-      - name: Check release API compatibility
-        run: cargo semver-checks check-release
-
-  # Supply-chain gate 1: RustSec advisory database (known vulnerabilities
-  # in the dependency graph fail the build).
-  audit:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # stable
-        with:
-          toolchain: stable
-      - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
-      - name: Audit
-        run: cargo audit
-
-  # Supply-chain gate 2: license policy + sources + advisories via
+  # Supply-chain gate: license policy + sources + advisories via
   # cargo-deny (policy in deny.toml at the repo root). Explicit install +
   # invocation: the cargo-deny-action bundle historically shipped an old
   # cargo-deny whose `check` rejected the multi-check argument form
@@ -397,7 +286,8 @@ jobs:
   # mutations. A crash (panic escaping the containment guards, or invalid
   # output shipped) fails the job; artifacts land in fuzz/artifacts and are
   # uploaded on failure so discoveries can be committed back to the corpus
-  # as regression seeds (the pull-back loop).
+  # as regression seeds (the pull-back loop). fuzz-nightly.yml runs all five
+  # targets plus ASan at 600 s each.
   fuzz:
     runs-on: ubuntu-24.04
     steps:
@@ -409,24 +299,9 @@ jobs:
       - name: Build fuzz targets
         run: cargo fuzz build
       - name: Smoke - make_valid (Auto/Arrange/Structure contract)
-        run: cargo fuzz run make_valid -- -runs=3000 -max_len=1024
-      - name: Smoke - validate (panic-free + valid-input preservation)
-        run: cargo fuzz run validate -- -runs=3000 -max_len=1024
+        run: cargo fuzz run make_valid -- -runs=500 -max_len=1024
       - name: Smoke - wkt_repair (parse + repair pipeline)
-        run: cargo fuzz run wkt_repair -- -runs=3000 -max_len=2048
-      - name: Smoke - wkb_repair (parse + repair pipeline)
-        run: cargo fuzz run wkb_repair -- -runs=3000 -max_len=2048
-      - name: Smoke - roundtrip (serialize + repair invariants)
-        run: cargo fuzz run roundtrip -- -runs=3000 -max_len=2048
-      # Sanitized pass: AddressSanitizer on make_valid (the 2026-08-04
-      # mixed-magnitude deadly signal was unreproducible on Windows - the
-      # sanitizer pinpoints heap/stack corruption that plain runs only
-      # surface as a late signal). Corpus seeds replay first, so a
-      # committed crash seed deterministically exercises the instrumented
-      # build. cargo-fuzz 0.13 accepts only address/leak/memory/thread
-      # (no 'undefined' - UBSan is not supported by libFuzzer's runner).
-      - name: Sanitized - make_valid (ASan)
-        run: cargo fuzz run --sanitizer address make_valid -- -runs=2000 -max_len=1024
+        run: cargo fuzz run wkt_repair -- -runs=500 -max_len=2048
       - name: Upload crash artifacts (pull-back loop)
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v4

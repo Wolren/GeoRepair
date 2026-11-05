@@ -22,6 +22,22 @@ permissions:
   contents: read
 
 jobs:
+  # Tag-time API gate: a release must not silently break the published API.
+  # Kept off every-push CI because it compares against the latest crates.io
+  # version and a minor bump is the breaking release.
+  semver:
+    name: semver
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # stable
+        with:
+          toolchain: stable
+      - name: Install cargo-semver-checks
+        run: cargo install cargo-semver-checks --locked
+      - name: Check release API compatibility
+        run: cargo semver-checks check-release
+
   python-wheels:
     name: wheel (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
@@ -84,7 +100,7 @@ jobs:
 
   publish-pypi:
     name: publish to PyPI
-    needs: [python-wheels, python-sdist]
+    needs: [semver, python-wheels, python-sdist]
     if: vars.PYPI_PUBLISH == 'true'
     runs-on: ubuntu-24.04
     environment: release
@@ -181,7 +197,7 @@ jobs:
 
   github-release:
     name: GitHub release with C artifacts
-    needs: [c-libs]
+    needs: [semver, c-libs]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

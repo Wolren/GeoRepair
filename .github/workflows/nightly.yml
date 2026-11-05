@@ -1,0 +1,75 @@
+name: nightly
+
+# Long-running gates that do not need a run per push: the full synthetic and
+# real-world benchmarks, the CRS WKT parser micro-gate, and the static-GEOS
+# (cmake) build. bench-gate remains in ci.yml for the regression signal.
+on:
+  schedule:
+    - cron: "0 2 * * *"   # 02:00 UTC daily
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Full benchmark sweep: all shape families serial vs parallel, the committed
+  # alaska sample, and the WKB/WKT head-to-head. The README table gate
+  # compares every bench label against its documented row.
+  bench:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # stable
+        with:
+          toolchain: stable
+      - run: sudo apt-get update && sudo apt-get install -y libgeos-dev
+      - name: Synthetic bench (serial vs parallel sweep)
+        run: cargo bench --locked --bench bench
+        env:
+          BENCH_JSON: target/bench_full.json
+      - name: README synthetic table coverage gate
+        run: python scripts/readme_bench_table.py --check target/bench_full.json
+      - name: Real-world sample bench (alaska subset, Structure vs GEOS)
+        run: cargo bench --locked --features "arrange,structure,parallel,simd,bench-geos-system,io-gpkg" --bench real_world -- --fast
+        env:
+          BENCH_FILE: benches/real_world/alaska.bin
+      - name: WKB/WKT head-to-head bench (ours vs georust/wkb + wkt)
+        run: cargo bench --locked --bench wkb_cmp
+        env:
+          BENCH_FILE: benches/real_world/alaska.bin
+
+  # CRS WKT parse/serialize gate: benches/crs_wkt.rs measures WKT1 vs WKT2
+  # for the same CRS and gates against benches/crs_wkt_baseline.txt.
+  crs-wkt-bench-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # stable
+        with:
+          toolchain: stable
+      - name: CRS WKT bench (records the baseline on the first run)
+        run: CRS_WKT_BASELINE=benches/crs_wkt_baseline.txt cargo bench --locked --features "arrange,structure,parallel,simd" --bench crs_wkt
+      - name: Upload recorded baseline (when the first run created it)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v4
+        with:
+          name: crs-wkt-baseline
+          path: benches/crs_wkt_baseline.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Static-GEOS gate: the bench-geos feature (geos-src cmake static build)
+  # is untested by the system-GEOS jobs. A broken static linkage would
+  # otherwise ship silently until a hermetic user hits it.
+  geos-static:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # stable
+        with:
+          toolchain: stable
+      - run: sudo apt-get update && sudo apt-get install -y cmake
+      - run: cargo check --locked --features "arrange,structure,parallel,simd,validate,bench-geos"
