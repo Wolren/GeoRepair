@@ -211,8 +211,8 @@ fn build_area_impl(
     if kept.len() == 1 {
         return Some((MultiPolygon::new(kept), boundary));
     }
-    // GEOS dissolves the kept faces with CascadedPolygonUnion; without this a
-    // self-crossing ring returns its atomic faces (pentagram: 6 parts)
+    // GEOS dissolves the kept faces with CascadedPolygonUnion; point-touching faces
+    // need it too, or the next XOR sees an invalid MultiPolygon (pentagram: 6 parts).
     let mp = MultiPolygon::new(kept);
     #[cfg(feature = "std")]
     let dissolved = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

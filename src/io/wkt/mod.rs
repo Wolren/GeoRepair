@@ -17,7 +17,7 @@
 //! Z, M and ZM modifiers are read on every type. [`read_wkt`] returns x and y only,
 //! because `geo::Coord` holds two values. [`read_wkt_zm`] returns the extra ordinates in
 //! flat coordinate order, the same layout as
-//! [`EwkbGeometry`](crate::io::wkb::EwkbGeometry), and [`write_wkt_zm`] writes the
+//! [`EwkbGeometry`], and [`write_wkt_zm`] writes the
 //! modifier back.
 //!
 //! One geometry carries one modifier. [`read_wkt`] reads a collection whose members

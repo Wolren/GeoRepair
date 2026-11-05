@@ -293,7 +293,8 @@ def oracle(texts, workdir, name):
 
 
 def dump_rust(args, workdir):
-    exe = os.path.join(ROOT, "target", "debug", "examples", "conformance_dump.exe")
+    name = "conformance_dump.exe" if os.name == "nt" else "conformance_dump"
+    exe = os.path.join(ROOT, "target", "debug", "examples", name)
     if not os.path.exists(exe):
         raise SystemExit("missing " + exe + "; run: cargo build --example conformance_dump")
     proc = subprocess.run([exe] + args, capture_output=True, text=True, timeout=300)

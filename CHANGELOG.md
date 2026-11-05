@@ -45,10 +45,13 @@
 ### Performance
 - Even-odd assembly costs more on overlapping MultiPolygon parts: `overlap mp 100sh` goes from
   72.3 us (the union answer) to 1 484 us, still 10x faster than GEOS makeValid at 15 482 us.
-  Dense grid improved (30x30: 2 061 to 996 us). The README and `docs/BENCHMARKS.md` rows were
-  re-measured 2026-11-05; the CI baseline for `overlap mp 100sh` needs re-recording on the runner.
+  Dense grid improved (30x30: 2 061 to 996 us). A bowtie pays one extra dissolve overlay:
+  2.28 to 3.37 us on the CI runner. The README and `docs/BENCHMARKS.md` rows were re-measured
+  2026-11-05, and both CI baselines were re-recorded from the runner.
 
 ### Fixed
+- The conformance harness looked for `conformance_dump.exe` on every platform, so the Linux CI
+  job failed before running a check. It now picks the executable suffix by platform.
 - `make_valid` assembles by even-odd, as GEOS does. `build_area` returned the atomic BuildArea
   faces and the MakeValid loop XORed them by ring fingerprint, so a self-crossing pentagram
   filled 4.667 where GEOS fills 3.333, and a MultiPolygon of two overlapping squares kept the

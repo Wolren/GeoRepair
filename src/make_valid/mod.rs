@@ -132,9 +132,8 @@ impl<T: NodingFloat> MakeValid for LineString<T> {
     type Scalar = T;
 
     fn make_valid_with_config(&self, _config: &MakeValidConfig) -> Geometry<T> {
-        // (the old two-step collect + remove_consecutive_duplicates paid two Vecs and
-        // two walks for every line - measured 2026-08-09, the valid-ls) Semantics
-        // identical: dropping NaN coords first, then dedup of consecutive equals.
+        // One pass drops NaN coords, then dedups consecutive equals.
+        // The old collect + remove paid two Vecs and two walks per line (measured 2026-08-09).
         let mut deduped: Vec<Coord<T>> = Vec::with_capacity(self.0.len());
         let mut prev: Option<Coord<T>> = None;
         for c in &self.0 {
