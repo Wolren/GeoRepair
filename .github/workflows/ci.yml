@@ -255,6 +255,8 @@ jobs:
         with:
           toolchain: nightly
       - run: rustup toolchain install stable --profile minimal
+      - name: Stable rustdoc (default features)
+        run: cargo +stable doc --locked
       - name: Stable rustdoc (full feature set)
         run: cargo +stable doc --locked --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,io-shp,ffi,serde"
       - uses: dtolnay/install@a75ae3c3a13004d4d2db69b04946c7f7687bda91  # cargo-docs-rs

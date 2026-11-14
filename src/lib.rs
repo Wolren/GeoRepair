@@ -63,7 +63,7 @@
 //!
 //! ### geo-traits sources (feature `geo-traits`)
 //!
-//! The [`interop`] module exposes the engines over `geo_traits::GeometryTrait` /
+//! The `interop` module exposes the engines over `geo_traits::GeometryTrait` /
 //! `geo_traits::GeometryCollectionTrait`, the trait layer implemented by `geo`,
 //! geoarrow, geozero, and the `wkb` crate. Any geometry source that implements those
 //! traits can be validated or repaired in one call; geo types materialize internally,

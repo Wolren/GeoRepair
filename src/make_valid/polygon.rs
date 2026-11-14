@@ -575,7 +575,7 @@ pub(super) fn make_valid_impl_owned(
 }
 
 /// Owned twin of [`Polygon::make_valid_with_config`] for batch pipelines that already
-/// own their polygons (e.g. [`crate::parallel::par_fix_polygon_batch_owned`]).
+/// own their polygons (e.g. `crate::parallel::par_fix_polygon_batch_owned`).
 /// Zero-copy for the ~99.85% of real-world polygons that are already valid.
 #[cfg(any(feature = "arrange", feature = "structure"))]
 pub fn make_valid_owned(poly: Polygon<f64>, config: &MakeValidConfig) -> Geometry<f64> {
