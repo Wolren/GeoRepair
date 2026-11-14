@@ -1,452 +1,574 @@
-//! Face extraction from fully-noded edge sets, in geos BuildArea order.
+//! Planar faces of a noded edge set.
+//!
+//! Duplicate segments cancel by parity; dangles and bridges are pruned. Even-odd
+//! membership is the dual walk parity from the unbounded face.
 
+use ::core::ops::ControlFlow;
 use alloc::vec::Vec;
-use geo::{Coord, Line, LineString, MultiPolygon, Polygon, Winding};
+use geo::{Coord, Line, LineString, MultiPolygon, Polygon};
+use rstar::{AABB, RTree, RTreeObject};
+use rustc_hash::{FxHashMap, FxHashSet};
+use smallvec::SmallVec;
 
-use super::fix_ring_graph;
+use crate::arrange::prep::prepare_lines;
+use crate::orient::orient2d;
+use crate::structure::fix_ring_graph::{
+    Graph, extract_all_faces_polygonize, split_face_at_pinch_points,
+};
+use crate::structure::symdiff::segment_key;
 
-pub fn polygonize(lines: &[Line<f64>]) -> Vec<Polygon<f64>> {
-    if lines.is_empty() {
-        return Vec::new();
-    }
+/// Unbounded-face marker shared by the cycle ownership and parity walks.
+const NONE: usize = usize::MAX;
 
-    let graph = fix_ring_graph::build_graph(lines);
-    if graph.edges.is_empty() {
-        return Vec::new();
-    }
-
-    let face_edges = match fix_ring_graph::extract_all_faces_polygonize(&graph) {
-        Some(faces) => faces,
-        None => return Vec::new(),
-    };
-
-    let face_edges: Vec<Vec<(usize, usize)>> = face_edges
-        .into_iter()
-        .flat_map(|face| fix_ring_graph::split_face_at_pinch_points(&face, &graph.edges))
-        .filter(|face| face.len() >= 3)
-        .collect();
-
-    let mut rings: Vec<Vec<Coord<f64>>> = Vec::new();
-    for face in &face_edges {
-        let ring = face_to_ring(&graph, face);
-        if ring.len() >= 4 && signed_area_x2(&ring).abs() > 0.0 {
-            let split = split_at_pinch_point(&ring);
-            rings.extend(split);
-        }
-    }
-    if rings.is_empty() {
-        return Vec::new();
-    }
-
-    let mut shell_rings: Vec<(usize, Vec<Coord<f64>>, f64)> = Vec::new();
-    let mut hole_rings: Vec<(usize, Vec<Coord<f64>>, f64)> = Vec::new();
-    for (i, coords) in rings.iter().enumerate() {
-        let area = signed_area_x2(coords);
-        if area > 0.0 {
-            shell_rings.push((i, coords.clone(), area));
-        } else {
-            hole_rings.push((i, coords.clone(), -area));
-        }
-    }
-    shell_rings.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(core::cmp::Ordering::Equal));
-    hole_rings.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(core::cmp::Ordering::Equal));
-
-    let holes: Vec<(usize, Vec<Coord<f64>>, f64)> = if hole_rings.len() > 1 {
-        hole_rings.into_iter().skip(1).collect()
-    } else {
-        Vec::new()
-    };
-
-    let mut shell_holes: Vec<Vec<LineString<f64>>> = vec![Vec::new(); shell_rings.len()];
-    for (_, hole_coords, _) in &holes {
-        let mut best_shell: Option<usize> = None;
-        for (si, (_, shell_coords, _)) in shell_rings.iter().enumerate() {
-            if hole_in_shell(hole_coords, shell_coords) {
-                best_shell = Some(si);
-            }
-        }
-        if let Some(si) = best_shell {
-            let mut ls = LineString::new(hole_coords.clone());
-            ls.make_cw_winding();
-            shell_holes[si].push(ls);
-        }
-    }
-
-    let mut face_polys: Vec<Polygon<f64>> = Vec::new();
-    for (si, (_, shell_coords, _)) in shell_rings.iter().enumerate() {
-        let mut shell_ls = LineString::new(shell_coords.clone());
-        shell_ls.make_ccw_winding();
-        let holes = core::mem::take(&mut shell_holes[si]);
-        face_polys.push(Polygon::new(shell_ls, holes));
-    }
-    if face_polys.len() <= 1 {
-        return face_polys;
-    }
-
-    build_area_filter(face_polys)
+/// One simple boundary ring, stored in walk order without the closing point.
+struct Cycle {
+    coords: Vec<Coord<f64>>,
+    /// Twice the signed area: negative for a shell walk, positive for a hole walk.
+    area2: f64,
+    bbox: AABB<[f64; 2]>,
 }
 
-/// GEOS-style containment: check points one at a time for interior/exterior.
-fn hole_in_shell(hole: &[Coord<f64>], shell: &[Coord<f64>]) -> bool {
-    if hole.len() < 3 || shell.len() < 4 {
-        return false;
+/// R-tree entry that maps a query hit back to its cycle index.
+#[derive(Clone, Copy)]
+struct CycleEnv {
+    idx: usize,
+    env: AABB<[f64; 2]>,
+}
+
+impl RTreeObject for CycleEnv {
+    type Envelope = AABB<[f64; 2]>;
+
+    fn envelope(&self) -> Self::Envelope {
+        self.env
     }
-    for pt in hole {
-        match point_class(*pt, shell) {
-            PtClass::Inside => return true,
-            PtClass::Outside => return false,
-            PtClass::Boundary => continue,
+}
+
+#[inline]
+fn canonical(c: Coord<f64>) -> Coord<f64> {
+    Coord {
+        x: if c.x == 0.0 { 0.0 } else { c.x },
+        y: if c.y == 0.0 { 0.0 } else { c.y },
+    }
+}
+
+#[inline]
+fn finite(c: Coord<f64>) -> bool {
+    c.x.is_finite() && c.y.is_finite()
+}
+
+fn ring_bbox(coords: &[Coord<f64>]) -> AABB<[f64; 2]> {
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for c in coords {
+        min_x = min_x.min(c.x);
+        min_y = min_y.min(c.y);
+        max_x = max_x.max(c.x);
+        max_y = max_y.max(c.y);
+    }
+    AABB::from_corners([min_x, min_y], [max_x, max_y])
+}
+
+fn signed_area2(coords: &[Coord<f64>]) -> f64 {
+    let n = coords.len();
+    let mut sum = 0.0;
+    for i in 0..n {
+        let a = coords[i];
+        let b = coords[(i + 1) % n];
+        sum += a.x * b.y - b.x * a.y;
+    }
+    sum
+}
+
+/// Cancels duplicate undirected segments by parity, keeping first-occurrence order.
+fn parity_filter(lines: &[Line<f64>]) -> Vec<Line<f64>> {
+    let mut slot_of: FxHashMap<(u64, u64, u64, u64), usize> = FxHashMap::default();
+    let mut slots: Vec<Line<f64>> = Vec::new();
+    let mut odd: Vec<bool> = Vec::new();
+    for line in lines {
+        let a = canonical(line.start);
+        let b = canonical(line.end);
+        if !finite(a) || !finite(b) || a == b {
+            continue;
+        }
+        let key = segment_key(a, b);
+        if let Some(&slot) = slot_of.get(&key) {
+            odd[slot] = !odd[slot];
+        } else {
+            slot_of.insert(key, slots.len());
+            slots.push(Line::new(a, b));
+            odd.push(true);
+        }
+    }
+    slots
+        .into_iter()
+        .zip(odd)
+        .filter_map(|(line, keep)| keep.then_some(line))
+        .collect()
+}
+
+/// Index of a coordinate, keyed by exact bits after the -0.0 fold.
+fn vertex_index(
+    c: Coord<f64>,
+    map: &mut FxHashMap<(u64, u64), usize>,
+    verts: &mut Vec<Coord<f64>>,
+) -> usize {
+    let key = (c.x.to_bits(), c.y.to_bits());
+    if let Some(&idx) = map.get(&key) {
+        return idx;
+    }
+    let idx = verts.len();
+    verts.push(c);
+    map.insert(key, idx);
+    idx
+}
+
+/// Removes trees and isolated chains: an edge with a degree-1 end bounds no face.
+fn prune_dangles(edges: &mut Vec<(usize, usize)>, nv: usize) {
+    if edges.is_empty() {
+        return;
+    }
+    let mut adj: Vec<Vec<usize>> = vec![Vec::new(); nv];
+    for (e, &(u, v)) in edges.iter().enumerate() {
+        adj[u].push(e);
+        adj[v].push(e);
+    }
+    let mut degree: Vec<usize> = adj.iter().map(Vec::len).collect();
+    let mut alive = vec![true; edges.len()];
+    let mut stack: Vec<usize> = (0..nv).filter(|&v| degree[v] == 1).collect();
+    while let Some(v) = stack.pop() {
+        if degree[v] != 1 {
+            continue;
+        }
+        let Some(&e) = adj[v].iter().find(|&&e| alive[e]) else {
+            continue;
+        };
+        alive[e] = false;
+        let (u, w) = edges[e];
+        for x in [u, w] {
+            degree[x] -= 1;
+            if degree[x] == 1 {
+                stack.push(x);
+            }
+        }
+    }
+    let mut i = 0;
+    edges.retain(|_| {
+        let keep = alive[i];
+        i += 1;
+        keep
+    });
+}
+
+/// Removes bridges: an edge whose two half-edges bound one face bounds none.
+fn prune_bridges(edges: &mut Vec<(usize, usize)>, nv: usize) {
+    let ne = edges.len();
+    if ne == 0 {
+        return;
+    }
+    let mut adj: Vec<Vec<(usize, usize)>> = vec![Vec::new(); nv];
+    for (e, &(u, v)) in edges.iter().enumerate() {
+        adj[u].push((v, e));
+        adj[v].push((u, e));
+    }
+    let mut disc = vec![NONE; nv];
+    let mut low = vec![0usize; nv];
+    let mut parent_edge = vec![NONE; nv];
+    let mut bridge = vec![false; ne];
+    let mut timer = 0usize;
+    for root in 0..nv {
+        if disc[root] != NONE || adj[root].is_empty() {
+            continue;
+        }
+        disc[root] = timer;
+        low[root] = timer;
+        timer += 1;
+        let mut stack: Vec<(usize, usize)> = vec![(root, 0)];
+        while let Some(&(v, pos)) = stack.last() {
+            if pos < adj[v].len() {
+                stack.last_mut().expect("non-empty stack").1 += 1;
+                let (to, e) = adj[v][pos];
+                if e == parent_edge[v] {
+                    continue;
+                }
+                if disc[to] == NONE {
+                    disc[to] = timer;
+                    low[to] = timer;
+                    timer += 1;
+                    parent_edge[to] = e;
+                    stack.push((to, 0));
+                } else {
+                    low[v] = low[v].min(disc[to]);
+                }
+            } else {
+                stack.pop();
+                if let Some(&(parent, _)) = stack.last() {
+                    low[parent] = low[parent].min(low[v]);
+                    if low[v] > disc[parent] {
+                        bridge[parent_edge[v]] = true;
+                    }
+                }
+            }
+        }
+    }
+    let mut i = 0;
+    edges.retain(|_| {
+        let keep = !bridge[i];
+        i += 1;
+        keep
+    });
+}
+
+/// Adjacency lists sorted counter-clockwise with a coordinate tie-break.
+fn sorted_adjacency(
+    verts: &[Coord<f64>],
+    edges: &[(usize, usize)],
+) -> Vec<SmallVec<[(usize, usize); 4]>> {
+    let nv = verts.len();
+    let mut adj: Vec<Vec<(f64, usize, usize)>> = vec![Vec::new(); nv];
+    for (e, &(u, v)) in edges.iter().enumerate() {
+        let a = verts[u];
+        let b = verts[v];
+        adj[u].push(((b.y - a.y).atan2(b.x - a.x), v, e));
+        adj[v].push(((a.y - b.y).atan2(a.x - b.x), u, e));
+    }
+    adj.into_iter()
+        .map(|mut list| {
+            list.sort_by(|l, r| {
+                l.0.total_cmp(&r.0)
+                    .then_with(|| verts[l.1].x.total_cmp(&verts[r.1].x))
+                    .then_with(|| verts[l.1].y.total_cmp(&verts[r.1].y))
+                    .then_with(|| l.2.cmp(&r.2))
+            });
+            list.into_iter().map(|(_, n, e)| (n, e)).collect()
+        })
+        .collect()
+}
+
+fn build_graph(lines: &[Line<f64>]) -> Graph {
+    let mut key_to_idx: FxHashMap<(u64, u64), usize> = FxHashMap::default();
+    let mut verts: Vec<Coord<f64>> = Vec::new();
+    let mut edges: Vec<(usize, usize)> = Vec::with_capacity(lines.len());
+    for line in lines {
+        let a = canonical(line.start);
+        let b = canonical(line.end);
+        if a == b {
+            continue;
+        }
+        let ia = vertex_index(a, &mut key_to_idx, &mut verts);
+        let ib = vertex_index(b, &mut key_to_idx, &mut verts);
+        if ia != ib {
+            edges.push((ia, ib));
+        }
+    }
+    prune_dangles(&mut edges, verts.len());
+    prune_bridges(&mut edges, verts.len());
+    let sorted_adj = sorted_adjacency(&verts, &edges);
+    Graph {
+        verts,
+        edges,
+        sorted_adj,
+    }
+}
+
+fn ring_is_simple(ids: &[usize]) -> bool {
+    let mut seen: FxHashSet<usize> = FxHashSet::default();
+    ids.iter().all(|&id| seen.insert(id))
+}
+
+/// Extracts every minimal face boundary, with the half-edge owner of each side.
+fn extract_cycles(graph: &Graph) -> (Vec<Cycle>, Vec<usize>) {
+    let ne = graph.edges.len();
+    let mut owner = vec![NONE; ne * 2];
+    let mut cycles: Vec<Cycle> = Vec::new();
+    let Some(faces) = extract_all_faces_polygonize(graph) else {
+        return (cycles, owner);
+    };
+    for face in faces {
+        for sub in split_face_at_pinch_points(&face, &graph.edges) {
+            if sub.len() < 3 {
+                continue;
+            }
+            let (first_edge, first_head) = sub[0];
+            let (from, to) = graph.edges[first_edge];
+            let start = if to == first_head { from } else { to };
+            let mut ids: Vec<usize> = Vec::with_capacity(sub.len() + 1);
+            ids.push(start);
+            let mut half_edges: Vec<usize> = Vec::with_capacity(sub.len());
+            for &(e, head) in &sub {
+                ids.push(head);
+                half_edges.push(if graph.edges[e].1 == head { e } else { e + ne });
+            }
+            if ids.len() < 4 || ids[ids.len() - 1] != ids[0] {
+                continue;
+            }
+            ids.pop();
+            if !ring_is_simple(&ids) {
+                continue;
+            }
+            let coords: Vec<Coord<f64>> = ids.iter().map(|&id| graph.verts[id]).collect();
+            let area2 = signed_area2(&coords);
+            if area2 == 0.0 {
+                continue;
+            }
+            let idx = cycles.len();
+            for h in half_edges {
+                if owner[h] == NONE {
+                    owner[h] = idx;
+                }
+            }
+            cycles.push(Cycle {
+                bbox: ring_bbox(&coords),
+                coords,
+                area2,
+            });
+        }
+    }
+    (cycles, owner)
+}
+
+#[inline]
+fn on_segment(a: Coord<f64>, b: Coord<f64>, p: Coord<f64>) -> bool {
+    p.x >= a.x.min(b.x) && p.x <= a.x.max(b.x) && p.y >= a.y.min(b.y) && p.y <= a.y.max(b.y)
+}
+
+/// 1 inside, 0 outside, -1 on the boundary.
+fn locate_point(pt: Coord<f64>, ring: &[Coord<f64>]) -> i8 {
+    let n = ring.len();
+    let mut inside = false;
+    for i in 0..n {
+        let a = ring[i];
+        let b = ring[(i + 1) % n];
+        if orient2d(a, b, pt) == 0.0 && on_segment(a, b, pt) {
+            return -1;
+        }
+        if (a.y > pt.y) != (b.y > pt.y) {
+            let x = a.x + (pt.y - a.y) * (b.x - a.x) / (b.y - a.y);
+            if pt.x < x {
+                inside = !inside;
+            }
+        }
+    }
+    if inside { 1 } else { 0 }
+}
+
+/// True when a non-boundary vertex of `inner` lies inside `outer`.
+fn ring_inside(inner: &Cycle, outer: &Cycle) -> bool {
+    for &p in &inner.coords {
+        match locate_point(p, &outer.coords) {
+            1 => return true,
+            0 => return false,
+            _ => {}
         }
     }
     false
 }
 
-#[derive(Debug, PartialEq)]
-enum PtClass {
-    Inside,
-    Outside,
-    Boundary,
-}
-
-/// Classify a point relative to a ring (handles boundary correctly).
-fn point_class(pt: Coord<f64>, ring: &[Coord<f64>]) -> PtClass {
-    if ring.len() < 4 {
-        return PtClass::Outside;
-    }
-    let n = ring.len() - 1;
-    for i in 0..n {
-        let (xi, yi) = (ring[i].x, ring[i].y);
-        let (xj, yj) = (ring[(i + 1) % n].x, ring[(i + 1) % n].y);
-        let cross = (xj - xi) * (pt.y - yi) - (yj - yi) * (pt.x - xi);
-        if cross.abs() < 1e-12
-            && pt.x >= xi.min(xj) - 1e-10
-            && pt.x <= xi.max(xj) + 1e-10
-            && pt.y >= yi.min(yj) - 1e-10
-            && pt.y <= yi.max(yj) + 1e-10
-        {
-            return PtClass::Boundary;
-        }
-    }
-    let mut inside = false;
-    for i in 0..n {
-        let (xi, yi) = (ring[i].x, ring[i].y);
-        let (xj, yj) = (ring[(i + 1) % n].x, ring[(i + 1) % n].y);
-        let intersect =
-            ((yi > pt.y) != (yj > pt.y)) && (pt.x < (xj - xi) * (pt.y - yi) / (yj - yi) + xi);
-        if intersect {
-            inside = !inside;
-        }
-    }
-    if inside {
-        PtClass::Inside
-    } else {
-        PtClass::Outside
-    }
-}
-
-/// BuildArea even-parent filter.
-fn build_area_filter(polys: Vec<Polygon<f64>>) -> Vec<Polygon<f64>> {
-    struct FaceInfo {
-        poly: Polygon<f64>,
-        env_area: f64,
-        parent: Option<usize>,
-    }
-
-    let mut faces: Vec<FaceInfo> = polys
-        .into_iter()
-        .map(|p| {
-            let env = envelope_area(&p);
-            FaceInfo {
-                poly: p,
-                env_area: env,
-                parent: None,
-            }
-        })
+/// Assigns every hole walk to the smallest shell walk that contains it.
+fn assign_holes(cycles: &[Cycle]) -> Vec<Vec<usize>> {
+    let mut holes: Vec<Vec<usize>> = vec![Vec::new(); cycles.len()];
+    let shells: Vec<CycleEnv> = cycles
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.area2 < 0.0)
+        .map(|(idx, c)| CycleEnv { idx, env: c.bbox })
         .collect();
-
-    faces.sort_by(|a, b| {
-        b.env_area
-            .partial_cmp(&a.env_area)
-            .unwrap_or(core::cmp::Ordering::Equal)
-    });
-
-    let n = faces.len();
-    for i in 0..n {
-        let nholes = faces[i].poly.interiors().len();
-        if nholes == 0 {
+    if shells.is_empty() {
+        return holes;
+    }
+    let tree = RTree::bulk_load(shells);
+    for (h, cycle) in cycles.iter().enumerate() {
+        if cycle.area2 < 0.0 {
             continue;
         }
-        for h in 0..nholes {
-            let hole_ring = faces[i].poly.interiors()[h].clone();
-            for f in faces.iter_mut().skip(i + 1) {
-                if f.parent.is_some() {
-                    continue;
-                }
-                let ext_ring = f.poly.exterior().clone();
-                if rings_equal_any_direction(&hole_ring.0, &ext_ring.0) {
-                    f.parent = Some(i);
-                    break;
-                }
-            }
-        }
-    }
-
-    let mut result: Vec<Polygon<f64>> = Vec::new();
-    for fi in &faces {
-        let mut count = 0usize;
-        let mut cur = fi.parent;
-        while let Some(pidx) = cur {
-            count += 1;
-            cur = faces[pidx].parent;
-        }
-        if count.is_multiple_of(2) {
-            result.push(fi.poly.clone());
-        }
-    }
-
-    if result.len() <= 1 {
-        return result;
-    }
-    let mp = MultiPolygon::new(result);
-    geo::algorithm::bool_ops::unary_union(&mp).0
-}
-
-/// Check if two rings are equal in either direction.
-fn rings_equal_any_direction(r1: &[Coord<f64>], r2: &[Coord<f64>]) -> bool {
-    if r1.len() < 4 || r2.len() < 4 || r1.len() != r2.len() {
-        return false;
-    }
-    let n = r1.len() - 1;
-    let first = r1[0];
-    let offset = match r2
-        .iter()
-        .position(|p| (p.x - first.x).abs() < 1e-10 && (p.y - first.y).abs() < 1e-10)
-    {
-        Some(o) => o,
-        None => return false,
-    };
-    let mut eq = true;
-    for (k, &p1) in r1[1..n].iter().enumerate() {
-        let j = (offset + k + 1) % n;
-        if (p1.x - r2[j].x).abs() > 1e-10 || (p1.y - r2[j].y).abs() > 1e-10 {
-            eq = false;
-            break;
-        }
-    }
-    if eq {
-        return true;
-    }
-    eq = true;
-    for (k, &p1) in r1[1..n].iter().enumerate() {
-        let j = (offset + n - (k + 1)) % n;
-        if (p1.x - r2[j].x).abs() > 1e-10 || (p1.y - r2[j].y).abs() > 1e-10 {
-            eq = false;
-            break;
-        }
-    }
-    eq
-}
-
-fn envelope_area(p: &Polygon<f64>) -> f64 {
-    let coords = &p.exterior().0;
-    if coords.is_empty() {
-        return 0.0;
-    }
-    let (mut min_x, mut max_x, mut min_y, mut max_y) =
-        (coords[0].x, coords[0].x, coords[0].y, coords[0].y);
-    for c in coords.iter().skip(1) {
-        if c.x < min_x {
-            min_x = c.x;
-        }
-        if c.x > max_x {
-            max_x = c.x;
-        }
-        if c.y < min_y {
-            min_y = c.y;
-        }
-        if c.y > max_y {
-            max_y = c.y;
-        }
-    }
-    (max_x - min_x) * (max_y - min_y)
-}
-
-fn face_to_ring(graph: &fix_ring_graph::Graph, face: &[(usize, usize)]) -> Vec<Coord<f64>> {
-    let mut ring: Vec<Coord<f64>> = Vec::with_capacity(face.len() + 1);
-    for &(_, v_idx) in face {
-        ring.push(graph.verts[v_idx]);
-    }
-    if ring.len() >= 2 && ring.first() != ring.last() {
-        ring.push(ring[0]);
-    }
-    ring
-}
-
-fn signed_area_x2(coords: &[Coord<f64>]) -> f64 {
-    let n = coords.len();
-    if n < 3 {
-        return 0.0;
-    }
-    let end = if coords.first() == coords.last() {
-        n - 1
-    } else {
-        n
-    };
-    let mut sum = 0.0_f64;
-    for i in 0..end - 1 {
-        sum += coords[i].x * coords[i + 1].y - coords[i + 1].x * coords[i].y;
-    }
-    sum += coords[end - 1].x * coords[0].y - coords[0].x * coords[end - 1].y;
-    sum
-}
-
-/// Split a ring at pinch points (vertices that appear more than once), producing
-/// separate rings.
-fn split_at_pinch_point(ring: &[Coord<f64>]) -> Vec<Vec<Coord<f64>>> {
-    if ring.len() < 4 {
-        return vec![ring.to_vec()];
-    }
-    let interior_end = if ring.first() == ring.last() {
-        ring.len() - 1
-    } else {
-        ring.len()
-    };
-    let mut dup: Option<usize> = None;
-    for i in 1..interior_end {
-        for j in 0..i {
-            if (ring[i].x - ring[j].x).abs() < 1e-12 && (ring[i].y - ring[j].y).abs() < 1e-12 {
-                dup = Some(j);
+        let mut candidates: Vec<usize> = Vec::new();
+        let _ = tree.locate_in_envelope_intersecting_int(cycle.bbox, |c| {
+            candidates.push(c.idx);
+            ControlFlow::<(), ()>::Continue(())
+        });
+        candidates.sort_by(|&a, &b| cycles[b].area2.total_cmp(&cycles[a].area2));
+        for shell in candidates {
+            if ring_inside(cycle, &cycles[shell]) {
+                holes[shell].push(h);
                 break;
             }
         }
-        if dup.is_some() {
-            break;
+    }
+    holes
+}
+
+/// Maps every cycle to its face node; the unbounded face is the last node.
+fn face_nodes(cycles: &[Cycle], holes: &[Vec<usize>]) -> (Vec<usize>, usize) {
+    let unbounded = cycles.iter().filter(|c| c.area2 < 0.0).count();
+    let mut node = vec![unbounded; cycles.len()];
+    let mut next = 0;
+    for (i, cycle) in cycles.iter().enumerate() {
+        if cycle.area2 < 0.0 {
+            node[i] = next;
+            next += 1;
         }
     }
-    if let Some(dup_idx) = dup {
-        let mut positions: Vec<usize> = Vec::new();
-        for i in 0..interior_end {
-            if (ring[i].x - ring[dup_idx].x).abs() < 1e-12
-                && (ring[i].y - ring[dup_idx].y).abs() < 1e-12
-            {
-                positions.push(i);
-            }
+    for (shell, list) in holes.iter().enumerate() {
+        for &hole in list {
+            node[hole] = node[shell];
         }
-        if positions.len() >= 2 {
-            let mut result: Vec<Vec<Coord<f64>>> = Vec::new();
-            for w in positions.windows(2) {
-                let mut new_ring: Vec<Coord<f64>> = ring[w[0]..=w[1]].to_vec();
-                if new_ring.first() != new_ring.last() {
-                    new_ring.push(new_ring[0]);
-                }
-                if new_ring.len() >= 4 && signed_area_x2(&new_ring).abs() > 0.0 {
-                    result.push(new_ring);
-                }
-            }
-            let last_pos = positions[positions.len() - 1];
-            if last_pos + 1 < interior_end {
-                let mut close_ring: Vec<Coord<f64>> = ring[last_pos..].to_vec();
-                close_ring.extend_from_slice(&ring[0..=positions[0]]);
-                if close_ring.first() != close_ring.last() {
-                    close_ring.push(close_ring[0]);
-                }
-                if close_ring.len() >= 4 && signed_area_x2(&close_ring).abs() > 0.0 {
-                    result.push(close_ring);
-                }
-            }
-            if !result.is_empty() {
-                return result;
+    }
+    (node, unbounded)
+}
+
+/// Even-odd parity per face, walked from the unbounded face across every edge.
+fn face_parity(owner: &[usize], ne: usize, node: &[usize], unbounded: usize) -> Vec<bool> {
+    let mut parity: Vec<Option<bool>> = vec![None; unbounded + 1];
+    parity[unbounded] = Some(false);
+    let mut adj: Vec<Vec<usize>> = vec![Vec::new(); unbounded + 1];
+    for e in 0..ne {
+        let a = owner[e];
+        let b = owner[e + ne];
+        if a == NONE || b == NONE || a == b {
+            continue;
+        }
+        let (fa, fb) = (node[a], node[b]);
+        if fa == fb {
+            continue;
+        }
+        adj[fa].push(fb);
+        adj[fb].push(fa);
+    }
+    let mut stack: Vec<usize> = vec![unbounded];
+    while let Some(f) = stack.pop() {
+        let p = parity[f].unwrap_or(false);
+        for &nb in &adj[f] {
+            if parity[nb].is_none() {
+                parity[nb] = Some(!p);
+                stack.push(nb);
             }
         }
     }
-    vec![ring.to_vec()]
+    parity.into_iter().map(|p| p.unwrap_or(true)).collect()
+}
+
+/// Builds polygons from shell walks and their hole walks, plus the boundary lines.
+fn assemble(
+    cycles: &[Cycle],
+    holes: &[Vec<usize>],
+    parity: &[bool],
+    node: &[usize],
+    even_odd_only: bool,
+) -> (Vec<Polygon<f64>>, Vec<Line<f64>>) {
+    let mut polygons: Vec<Polygon<f64>> = Vec::new();
+    let mut boundary: Vec<Line<f64>> = Vec::new();
+    for (i, cycle) in cycles.iter().enumerate() {
+        if cycle.area2 >= 0.0 || (even_odd_only && !parity[node[i]]) {
+            continue;
+        }
+        let mut ring: Vec<Coord<f64>> = cycle.coords.iter().rev().copied().collect();
+        ring.push(ring[0]);
+        let exterior = LineString::new(ring);
+        boundary.extend(exterior.0.windows(2).map(|w| Line::new(w[0], w[1])));
+        let mut interiors: Vec<LineString<f64>> = Vec::with_capacity(holes[i].len());
+        for &h in &holes[i] {
+            let mut ring: Vec<Coord<f64>> = cycles[h].coords.iter().rev().copied().collect();
+            ring.push(ring[0]);
+            let hole = LineString::new(ring);
+            boundary.extend(hole.0.windows(2).map(|w| Line::new(w[0], w[1])));
+            interiors.push(hole);
+        }
+        polygons.push(Polygon::new(exterior, interiors));
+    }
+    (polygons, boundary)
+}
+
+fn subdivision(lines: &[Line<f64>]) -> Option<(Vec<Cycle>, Vec<usize>, usize)> {
+    let prepared = prepare_lines(lines.to_vec()).ok()?;
+    let unique = parity_filter(&prepared.lines);
+    let graph = build_graph(&unique);
+    let ne = graph.edges.len();
+    let (cycles, owner) = extract_cycles(&graph);
+    Some((cycles, owner, ne))
+}
+
+/// Even-odd interior of the edge set, with the boundary lines of the built area.
+pub(crate) fn even_odd_area(lines: &[Line<f64>]) -> Option<(MultiPolygon<f64>, Vec<Line<f64>>)> {
+    let (cycles, owner, ne) = subdivision(lines)?;
+    let holes = assign_holes(&cycles);
+    let (node, unbounded) = face_nodes(&cycles, &holes);
+    let parity = face_parity(&owner, ne, &node, unbounded);
+    let (polygons, boundary) = assemble(&cycles, &holes, &parity, &node, true);
+    Some((MultiPolygon::new(polygons), boundary))
+}
+
+/// Every bounded face of the edge set, holes assigned.
+pub fn polygonize(lines: &[Line<f64>]) -> Vec<Polygon<f64>> {
+    let Some((cycles, owner, ne)) = subdivision(lines) else {
+        return Vec::new();
+    };
+    let holes = assign_holes(&cycles);
+    let (node, unbounded) = face_nodes(&cycles, &holes);
+    let parity = face_parity(&owner, ne, &node, unbounded);
+    assemble(&cycles, &holes, &parity, &node, false).0
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::validation::GeoValidation;
-    use geo::Line;
+    use geo::{Area, Coord, Line};
 
-    #[test]
-    fn test_simple_square() {
-        let lines = vec![
-            Line::new(Coord { x: 0.0, y: 0.0 }, Coord { x: 5.0, y: 0.0 }),
-            Line::new(Coord { x: 5.0, y: 0.0 }, Coord { x: 5.0, y: 5.0 }),
-            Line::new(Coord { x: 5.0, y: 5.0 }, Coord { x: 0.0, y: 5.0 }),
-            Line::new(Coord { x: 0.0, y: 5.0 }, Coord { x: 0.0, y: 0.0 }),
-        ];
-        let polys = polygonize(&lines);
-        assert_eq!(polys.len(), 1);
-        assert!(polys[0].is_valid());
+    fn ring(coords: &[(f64, f64)]) -> Vec<Line<f64>> {
+        coords
+            .windows(2)
+            .map(|w| {
+                Line::new(
+                    Coord {
+                        x: w[0].0,
+                        y: w[0].1,
+                    },
+                    Coord {
+                        x: w[1].0,
+                        y: w[1].1,
+                    },
+                )
+            })
+            .collect()
+    }
+
+    fn square(x: f64, y: f64, width: f64) -> Vec<Line<f64>> {
+        ring(&[
+            (x, y),
+            (x + width, y),
+            (x + width, y + width),
+            (x, y + width),
+            (x, y),
+        ])
+    }
+
+    fn total_area(polys: &[Polygon<f64>]) -> f64 {
+        polys.iter().map(Area::unsigned_area).sum()
     }
 
     #[test]
-    fn test_two_squares() {
-        let lines = vec![
-            Line::new(Coord { x: 0.0, y: 0.0 }, Coord { x: 5.0, y: 0.0 }),
-            Line::new(Coord { x: 5.0, y: 0.0 }, Coord { x: 5.0, y: 5.0 }),
-            Line::new(Coord { x: 5.0, y: 5.0 }, Coord { x: 0.0, y: 5.0 }),
-            Line::new(Coord { x: 0.0, y: 5.0 }, Coord { x: 0.0, y: 0.0 }),
-            Line::new(Coord { x: 10.0, y: 10.0 }, Coord { x: 15.0, y: 10.0 }),
-            Line::new(Coord { x: 15.0, y: 10.0 }, Coord { x: 15.0, y: 15.0 }),
-            Line::new(Coord { x: 15.0, y: 15.0 }, Coord { x: 10.0, y: 15.0 }),
-            Line::new(Coord { x: 10.0, y: 15.0 }, Coord { x: 10.0, y: 10.0 }),
-        ];
-        let polys = polygonize(&lines);
-        assert_eq!(polys.len(), 2);
+    fn polygonize_keeps_one_face_per_bounded_region() {
+        let faces = polygonize(&square(0.0, 0.0, 10.0));
+        assert_eq!(faces.len(), 1);
+        assert!((total_area(&faces) - 100.0).abs() < 1e-9);
     }
 
     #[test]
-    fn test_square_with_hole() {
-        let lines = vec![
-            Line::new(Coord { x: 0.0, y: 0.0 }, Coord { x: 10.0, y: 0.0 }),
-            Line::new(Coord { x: 10.0, y: 0.0 }, Coord { x: 10.0, y: 10.0 }),
-            Line::new(Coord { x: 10.0, y: 10.0 }, Coord { x: 0.0, y: 10.0 }),
-            Line::new(Coord { x: 0.0, y: 10.0 }, Coord { x: 0.0, y: 0.0 }),
-            Line::new(Coord { x: 3.0, y: 3.0 }, Coord { x: 3.0, y: 7.0 }),
-            Line::new(Coord { x: 3.0, y: 7.0 }, Coord { x: 7.0, y: 7.0 }),
-            Line::new(Coord { x: 7.0, y: 7.0 }, Coord { x: 7.0, y: 3.0 }),
-            Line::new(Coord { x: 7.0, y: 3.0 }, Coord { x: 3.0, y: 3.0 }),
-        ];
-        let polys = polygonize(&lines);
-        assert!(!polys.is_empty());
-        assert!(polys[0].is_valid());
-        let has_hole = polys.iter().any(|p| !p.interiors().is_empty());
-        assert!(has_hole);
+    fn polygonize_assigns_the_hole_to_its_shell() {
+        let mut lines = square(0.0, 0.0, 10.0);
+        lines.extend(square(3.0, 3.0, 4.0));
+        let faces = polygonize(&lines);
+        assert_eq!(faces.len(), 2);
+        assert!((total_area(&faces) - 100.0).abs() < 1e-9);
+        assert_eq!(faces.iter().filter(|p| p.interiors().len() == 1).count(), 1);
     }
 
     #[test]
-    fn test_deep_nesting() {
-        let lines = vec![
-            Line::new(Coord { x: 0.0, y: 0.0 }, Coord { x: 20.0, y: 0.0 }),
-            Line::new(Coord { x: 20.0, y: 0.0 }, Coord { x: 20.0, y: 20.0 }),
-            Line::new(Coord { x: 20.0, y: 20.0 }, Coord { x: 0.0, y: 20.0 }),
-            Line::new(Coord { x: 0.0, y: 20.0 }, Coord { x: 0.0, y: 0.0 }),
-            Line::new(Coord { x: 3.0, y: 3.0 }, Coord { x: 17.0, y: 3.0 }),
-            Line::new(Coord { x: 17.0, y: 3.0 }, Coord { x: 17.0, y: 17.0 }),
-            Line::new(Coord { x: 17.0, y: 17.0 }, Coord { x: 3.0, y: 17.0 }),
-            Line::new(Coord { x: 3.0, y: 17.0 }, Coord { x: 3.0, y: 3.0 }),
-            Line::new(Coord { x: 6.0, y: 6.0 }, Coord { x: 14.0, y: 6.0 }),
-            Line::new(Coord { x: 14.0, y: 6.0 }, Coord { x: 14.0, y: 14.0 }),
-            Line::new(Coord { x: 14.0, y: 14.0 }, Coord { x: 6.0, y: 14.0 }),
-            Line::new(Coord { x: 6.0, y: 14.0 }, Coord { x: 6.0, y: 6.0 }),
-        ];
-        let polys = polygonize(&lines);
-        for p in &polys {
-            assert!(p.is_valid(), "Each polygon should be valid");
-        }
-        assert_eq!(
-            polys.len(),
-            2,
-            "Should have 2 polygons (L0+hole + L2 island)"
-        );
-        let l0 = polys.iter().find(|p| p.interiors().len() == 1);
-        let l2 = polys.iter().find(|p| p.interiors().is_empty());
-        assert!(l0.is_some(), "Should have a polygon with a hole (L0)");
-        assert!(
-            l2.is_some(),
-            "Should have a polygon with no holes (L2 island)"
-        );
+    fn crossing_squares_partition_the_union() {
+        let mut lines = square(0.0, 0.0, 2.0);
+        lines.extend(square(1.0, 1.0, 2.0));
+        let faces = polygonize(&lines);
+        assert_eq!(faces.len(), 3);
+        assert!((total_area(&faces) - 7.0).abs() < 1e-9);
     }
 }

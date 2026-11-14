@@ -1,8 +1,7 @@
 //! It is 10 to 100x faster than cdt on valid or simple input and needs only geo.
 
 use alloc::vec::Vec;
-/// GEOS BuildArea port: polygonize linework → shell/hole classification → even-parent
-/// filter; the repair loop asks for the dissolved area and its boundary.
+/// Even-odd area of an edge set: planar faces plus nesting parity.
 pub mod build_area;
 /// Edge classification and planar graph building for polygon faces.
 pub mod classify;
@@ -14,13 +13,13 @@ pub mod fix_ring;
 pub mod fix_ring_graph;
 /// Face merging after planar graph extraction.
 pub mod merge;
-/// Topological face extraction from noded edge sets (BuildArea).
+/// Topological face extraction from noded edge sets.
 pub mod polygonizer;
 /// Hole subtraction during polygon face assembly.
 pub mod subtract;
 /// Plane-sweep intersection detection for edge segments.
 pub mod sweep;
-/// GEOS MakeValidPoly symdiff loop (BuildArea + xor accumulation).
+/// Even-odd composition behind the polygon repair loop.
 pub(crate) mod symdiff;
 
 use ::core::sync::atomic::Ordering;

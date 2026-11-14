@@ -1,219 +1,167 @@
-//! GEOS MakeValidPoly symdiff loop: BuildArea the remaining cut edges, xor the new
-//! faces into the accumulated area, remove the built boundary, and repeat until nothing
-//! remains (even-odd rule, GEOS MakeValidPoly.cpp).
+//! Even-odd area composition behind polygon repair.
 
 use alloc::vec::Vec;
-use geo::algorithm::bool_ops::BooleanOps;
-use geo::{Coord, Line, MultiPolygon, Polygon};
+use geo::{Coord, Line, LinesIter, MultiPolygon, Polygon};
 
-use log::warn;
+use crate::core::Tuning;
+use crate::structure::build_area::build_area_with_boundary;
 
-use super::fix_ring::{basic_cleanup, collapse_sub_ulp_vertices, is_collinear_ring};
-
-/// geos MakeValid-style repair: BuildArea levels XORed in even-odd order. The public
-/// name is historical; the loop may run more than one pass.
-pub fn single_pass_fix(poly: &Polygon<f64>) -> Option<MultiPolygon<f64>> {
-    single_pass_fix_tuned(poly, &crate::core::Tuning::default())
+/// Ring segments in walk order; zero-length steps are skipped.
+pub fn edges_from_coords(coords: &[Coord<f64>]) -> Vec<Line<f64>> {
+    coords
+        .windows(2)
+        .filter(|w| w[0] != w[1])
+        .map(|w| Line::new(w[0], w[1]))
+        .collect()
 }
 
-/// Tuned variant of [`single_pass_fix`]: the repair pipeline threads the caller's
-/// [`crate::core::Tuning`] through the dispatch thresholds.
+/// Even-odd interior of an edge set, as disjoint polygons.
+pub fn make_valid_poly_symdiff(cut_edges: &[Line<f64>]) -> Vec<Polygon<f64>> {
+    build_area_with_boundary(cut_edges)
+        .map(|(area, _)| area.0)
+        .unwrap_or_default()
+}
+
+/// Even-odd repair of one polygon boundary; `None` when it bounds no area.
+pub fn single_pass_fix(poly: &Polygon<f64>) -> Option<MultiPolygon<f64>> {
+    single_pass_fix_tuned(poly, &Tuning::default())
+}
+
+/// Tuned variant of [`single_pass_fix`]; splits crossings with the robust noder.
 pub(crate) fn single_pass_fix_tuned(
     poly: &Polygon<f64>,
-    tuning: &crate::core::Tuning,
+    tuning: &Tuning,
 ) -> Option<MultiPolygon<f64>> {
-    // pipeline (measured 168 ms/poly on 200k-edge monsters vs ~36 ms)
-    let n_edges: usize = poly.exterior().0.len().saturating_sub(1)
-        + poly
-            .interiors()
-            .iter()
-            .map(|h| h.0.len().saturating_sub(1))
-            .sum::<usize>();
-    if n_edges > tuning.sp_max_edges {
+    let mut lines: Vec<Line<f64>> = Vec::new();
+    lines.extend(edges_from_coords(&poly.exterior().0));
+    for hole in poly.interiors() {
+        lines.extend(edges_from_coords(&hole.0));
+    }
+    if lines.is_empty() {
         return None;
     }
-
-    let mut edges: Vec<Line<f64>> = Vec::new();
-    for ring in core::iter::once(poly.exterior()).chain(poly.interiors()) {
-        let Some(coords) = basic_cleanup(ring) else {
-            continue;
-        };
-        if coords.len() < 4 {
-            continue;
-        }
-        if is_collinear_ring(&coords) {
-            continue;
-        }
-        let coords = collapse_sub_ulp_vertices(&coords, false);
-        if coords.len() < 4 {
-            continue;
-        }
-        edges.extend(edges_from_coords(&coords));
-    }
-    if edges.is_empty() {
-        return None;
-    }
-
-    let mut noded = crate::structure::edge_split::split_edges_tuned(&edges, tuning);
+    let noded = crate::structure::edge_split::split_edges_tuned(&lines, tuning);
     if noded.is_empty() {
         return None;
     }
-
-    let mut validator = crate::noding::validator::NodingValidator::new(noded.clone());
-    validator.validate();
-    if validator.has_violations() {
-        warn!(
-            "single_pass_fix: {} noding violation(s) remain, retrying with snap rounding",
-            validator.violations().len()
-        );
-        let snapped = crate::noding::snap_round::snap_round_lines(&edges);
-        if !snapped.is_empty() {
-            noded = snapped;
-        }
-    }
-    if noded.is_empty() {
-        return None;
-    }
-
-    // The GEOS loop, not one BuildArea pass: a self-crossing ring's inner level has to
-    // be subtracted by the next pass (pentagram 4.667 as a union, 3.333 after the xor).
-    let area = make_valid_poly_symdiff(&noded);
-    if area.is_empty() {
-        return None;
-    }
-    Some(MultiPolygon::new(area))
+    let area = build_area_with_boundary(&noded)?.0;
+    if area.0.is_empty() { None } else { Some(area) }
 }
 
-/// GEOS MakeValidPoly::buildArea loop: repeatedly BuildArea the remaining cut edges,
-/// xor into the accumulated area.
-#[cfg_attr(feature = "hotpath", hotpath::measure)]
-pub fn make_valid_poly_symdiff(cut_edges: &[Line<f64>]) -> Vec<Polygon<f64>> {
-    let snap = |c: Coord<f64>| Coord {
-        x: (c.x * crate::core::SNAP_SCALE).round() / crate::core::SNAP_SCALE,
-        y: (c.y * crate::core::SNAP_SCALE).round() / crate::core::SNAP_SCALE,
-    };
-    let mut remaining: Vec<Line<f64>> = cut_edges
-        .iter()
-        .map(|l| Line::new(snap(l.start), snap(l.end)))
-        .collect();
-    let mut area: Vec<Polygon<f64>> = Vec::new(); // accumulated (XOR) area
-    let mut guard = 0usize;
-    while !remaining.is_empty() {
-        guard += 1;
-        if guard > 64 {
-            warn!("make_valid_poly_symdiff: iteration guard exceeded");
-            #[cfg(test)]
-            panic!("make_valid_poly_symdiff hit the iteration guard (non-convergence)");
-            #[cfg(not(test))]
-            break;
-        }
-        let Some((new_area, boundary)) =
-            crate::structure::build_area::build_area_with_boundary(&remaining)
-        else {
-            break;
-        };
-        if new_area.0.is_empty() {
-            break;
-        }
-        area = symdiff_polygons(&area, &new_area.0);
-        #[cfg(all(any(test, debug_assertions), feature = "std"))]
-        if std::env::var("DIAG_SYMDIFF").is_ok() {
-            use geo::Area;
-            eprintln!(
-                "symdiff iter {guard}: remaining edges = {}, new_area = {} polys, boundary = {} segs",
-                remaining.len(),
-                new_area.0.len(),
-                boundary.len()
-            );
-            let mut total = 0.0;
-            for (i, p) in new_area.0.iter().enumerate() {
-                let a = p.unsigned_area();
-                total += a;
-                eprintln!(
-                    "   new_area[{i}]: area={a:.4} holes={}",
-                    p.interiors().len()
-                );
-            }
-            eprintln!("   new_area total = {total:.4}");
-            let t: f64 = area.iter().map(|p| p.unsigned_area()).sum();
-            eprintln!("   area after XOR = {t:.4} ({} polys)", area.len());
-        }
-        let boundary_keys: rustc_hash::FxHashSet<(u64, u64, u64, u64)> = boundary
-            .iter()
-            .map(|l| segment_key(l.start, l.end))
-            .collect();
-        remaining.retain(|l| !boundary_keys.contains(&segment_key(l.start, l.end)));
-    }
-    area
-}
-
-/// Orientation-insensitive key for a segment (bit-exact after snapping).
-pub(crate) fn segment_key(a: Coord<f64>, b: Coord<f64>) -> (u64, u64, u64, u64) {
-    let (ax, ay, bx, by) = (a.x.to_bits(), a.y.to_bits(), b.x.to_bits(), b.y.to_bits());
-    if (ax, ay) <= (bx, by) {
-        (ax, ay, bx, by)
-    } else {
-        (bx, by, ax, ay)
-    }
-}
-
+/// Symmetric difference of two polygon sets, as disjoint polygons.
 pub fn symdiff_test(a: &[Polygon<f64>], b: &[Polygon<f64>]) -> Vec<Polygon<f64>> {
-    symdiff_polygons(a, b)
+    let mut lines: Vec<Line<f64>> = Vec::new();
+    for poly in a.iter().chain(b) {
+        lines.extend(poly.lines_iter());
+    }
+    make_valid_poly_symdiff(&lines)
 }
 
-/// Symmetric difference of two polygon sets, accumulated xor, for the MakeValidPoly
-/// loop. BuildArea dissolves its faces, so iteration N+1 can carry a hole that
-/// iteration N does not, and only a real overlay cancels it (overlapping parts: 7
-/// from union, 6 from xor, matching GEOS).
-fn symdiff_polygons(a: &[Polygon<f64>], b: &[Polygon<f64>]) -> Vec<Polygon<f64>> {
-    if a.is_empty() {
-        return b.to_vec();
-    }
-    if b.is_empty() {
-        return a.to_vec();
-    }
-    let out = MultiPolygon::new(a.to_vec()).xor(&MultiPolygon::new(b.to_vec()));
-    out.0
+/// Undirected segment key: -0.0 folds to 0.0 and the smaller endpoint comes first.
+pub(crate) fn segment_key(a: Coord<f64>, b: Coord<f64>) -> (u64, u64, u64, u64) {
+    let a = fold(a);
+    let b = fold(b);
+    let (lo, hi) = match a.x.total_cmp(&b.x).then_with(|| a.y.total_cmp(&b.y)) {
+        ::core::cmp::Ordering::Greater => (b, a),
+        _ => (a, b),
+    };
+    (
+        lo.x.to_bits(),
+        lo.y.to_bits(),
+        hi.x.to_bits(),
+        hi.y.to_bits(),
+    )
 }
 
-pub fn edges_from_coords(coords: &[Coord<f64>]) -> Vec<Line<f64>> {
-    coords.windows(2).map(|w| Line::new(w[0], w[1])).collect()
+#[inline]
+fn fold(c: Coord<f64>) -> Coord<f64> {
+    Coord {
+        x: if c.x == 0.0 { 0.0 } else { c.x },
+        y: if c.y == 0.0 { 0.0 } else { c.y },
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{MakeValid, MakeValidConfig, PolyMethod};
-    use geo::{Area, LineString, Polygon};
+    use geo::{Area, LineString};
 
-    /// Even-odd is the assembly rule: the pentagram centre has winding 2 and stays
-    /// empty. GEOS makeValid returns the same 3.333 on this ring, in both strategies.
+    fn ring(coords: &[(f64, f64)]) -> Vec<Line<f64>> {
+        coords
+            .windows(2)
+            .map(|w| {
+                Line::new(
+                    Coord {
+                        x: w[0].0,
+                        y: w[0].1,
+                    },
+                    Coord {
+                        x: w[1].0,
+                        y: w[1].1,
+                    },
+                )
+            })
+            .collect()
+    }
+
+    fn area_of(lines: &[Line<f64>]) -> f64 {
+        make_valid_poly_symdiff(lines)
+            .iter()
+            .map(Area::unsigned_area)
+            .sum()
+    }
+
+    fn square(x: f64, y: f64, width: f64) -> Polygon<f64> {
+        Polygon::new(
+            LineString::new(
+                [
+                    (x, y),
+                    (x + width, y),
+                    (x + width, y + width),
+                    (x, y + width),
+                    (x, y),
+                ]
+                .iter()
+                .map(|&(x, y)| Coord { x, y })
+                .collect(),
+            ),
+            Vec::new(),
+        )
+    }
+
     #[test]
-    fn pentagram_keeps_the_centre_empty() {
-        let coords = vec![
-            Coord { x: 0.0, y: 0.0 },
-            Coord { x: 2.0, y: 3.0 },
-            Coord { x: 4.0, y: 0.0 },
-            Coord { x: 0.0, y: 2.0 },
-            Coord { x: 4.0, y: 2.0 },
-            Coord { x: 0.0, y: 0.0 },
-        ];
-        for method in [PolyMethod::Structure, PolyMethod::Arrange] {
-            let cfg = MakeValidConfig {
-                poly_method: method,
-                ..Default::default()
-            };
-            let out = Polygon::new(LineString::new(coords.clone()), Vec::new())
-                .make_valid_with_config(&cfg);
-            assert!(
-                crate::is_valid(&out),
-                "{method:?} pentagram repair must stay valid"
-            );
-            let area = out.unsigned_area();
-            assert!(
-                (area - 3.333_333_333_333_333_5).abs() < 1e-6,
-                "{method:?} pentagram area {area} is not the GEOS even-odd 3.333"
-            );
-        }
+    fn pentagram_centre_is_empty() {
+        let lines = ring(&[
+            (0.0, 0.0),
+            (2.0, 3.0),
+            (4.0, 0.0),
+            (0.0, 2.0),
+            (4.0, 2.0),
+            (0.0, 0.0),
+        ]);
+        assert!((area_of(&lines) - 3.333_333_333).abs() < 1e-6);
+    }
+
+    #[test]
+    fn two_overlapping_squares_give_six() {
+        let out = symdiff_test(&[square(0.0, 0.0, 2.0)], &[square(1.0, 1.0, 2.0)]);
+        let area: f64 = out.iter().map(Area::unsigned_area).sum();
+        assert!((area - 6.0).abs() < 1e-9, "even-odd area {area}");
+    }
+
+    #[test]
+    fn doubled_ring_bounds_nothing() {
+        let lines = ring(&[
+            (0.0, 0.0),
+            (10.0, 0.0),
+            (10.0, 10.0),
+            (0.0, 10.0),
+            (0.0, 0.0),
+            (10.0, 0.0),
+            (10.0, 10.0),
+            (0.0, 10.0),
+            (0.0, 0.0),
+        ]);
+        assert!(area_of(&lines) < 1e-9);
     }
 }
