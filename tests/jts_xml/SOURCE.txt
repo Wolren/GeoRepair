@@ -1,0 +1,7 @@
+Source: https://github.com/locationtech/jts, modules/tests/src/test/resources/testxml
+Licence: Eclipse Distribution License 1.0 (see the repository NOTICE).
+
+These files are the JTS testxml cases that the GEOS corpus in tests/geos_xml
+does not carry. The same dispatcher runs them; mask divergence is reported,
+not failed, because this crate's validator is deliberately stricter on the
+documented classes.

@@ -13,6 +13,9 @@ polygonize face extraction:
   src/validation/holes/cycle.rs
   src/structure/fix_ring_graph.rs
 
+The JTS testxml cases in tests/jts_xml, and the files listed in
+tests/geos_xml/JTS-REIMPORT.txt, are also under the EDL-1.0 terms below.
+
 Eclipse Distribution License - v 1.0
 
 Copyright (c) 2007, Eclipse Foundation, Inc. and its licensors.

@@ -26,17 +26,13 @@ fn ring(coords: &[(f64, f64)]) -> Vec<Line<f64>> {
 }
 
 fn square(x: f64, y: f64, w: f64) -> Vec<Line<f64>> {
-    ring(&[
-        (x, y),
-        (x + w, y),
-        (x + w, y + w),
-        (x, y + w),
-        (x, y),
-    ])
+    ring(&[(x, y), (x + w, y), (x + w, y + w), (x, y + w), (x, y)])
 }
 
 fn area(lines: &[Line<f64>]) -> f64 {
-    build_area(lines).expect("build_area returns None only on internal failure").unsigned_area()
+    build_area(lines)
+        .expect("build_area returns None only on internal failure")
+        .unsigned_area()
 }
 
 #[test]

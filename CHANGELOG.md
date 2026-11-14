@@ -120,6 +120,7 @@
 - `tests/geos_xml`: 64 files re-imported from the JTS testxml corpus (content-equivalent,
   EDL-1.0). The rest stay GEOS test data under LGPL-2.1-or-later, remain excluded from
   the crate package, and are recorded in `SOURCE.txt` and `JTS-REIMPORT.txt`.
+- `tests/jts_xml` runs the JTS testxml cases the GEOS corpus lacks (81 isValid cases, 3 masked by the stricter validator) through the same dispatcher; the JTS PolygonNodeTopologyTest interior/exterior cases are a unit test on the relabelled topology.
 - `docs/REPAIR-CORE-SPEC.md` states the even-odd area and MakeValid contracts for an
   independent implementation, with `tests/repair_core_spec.rs` as the acceptance gate.
 - `read_wkt` accepts `POINT Z (1 2 3)`, `POINT M (...)` and `POINT ZM (...)` on every

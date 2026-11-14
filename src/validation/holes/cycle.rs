@@ -364,3 +364,18 @@ pub(super) fn quadrant(origin: Coord<f64>, p: Coord<f64>) -> u8 {
         2
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// JTS PolygonNodeTopologyTest: testInteriorSegment and testExteriorSegment.
+    #[test]
+    fn interior_and_exterior_segment_match_jts() {
+        let node = Coord { x: 5.0, y: 5.0 };
+        let a0 = Coord { x: 5.0, y: 9.0 };
+        let a1 = Coord { x: 9.0, y: 5.0 };
+        assert!(is_interior_segment(node, a0, a1, Coord { x: 0.0, y: 0.0 }));
+        assert!(!is_interior_segment(node, a0, a1, Coord { x: 9.0, y: 9.0 }));
+    }
+}

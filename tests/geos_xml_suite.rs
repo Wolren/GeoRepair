@@ -761,9 +761,8 @@ type XmlCaseRow = (
     Vec<String>,
 );
 
-fn run_all_geos_xml_tests() -> Vec<XmlCaseRow> {
+fn run_xml_tests(dir: &Path) -> Vec<XmlCaseRow> {
     let mut results = Vec::new();
-    let dir = Path::new("tests/geos_xml");
     if !dir.is_dir() {
         results.push((
             "NO TEST DIR".into(),
@@ -773,7 +772,7 @@ fn run_all_geos_xml_tests() -> Vec<XmlCaseRow> {
             0,
             0,
             0,
-            vec!["tests/geos_xml/ not found".into()],
+            vec![format!("{} not found", dir.display())],
         ));
         return results;
     }
@@ -1076,7 +1075,7 @@ const VALIDATOR_DIVERGENCE_BASELINE: usize = 213;
 // We run everything in a single #[test] to avoid 123 separate test binaries
 #[test]
 fn geos_xml_suite() {
-    let results = run_all_geos_xml_tests();
+    let results = run_xml_tests(Path::new("tests/geos_xml"));
     let mut total_passed = 0usize;
     let mut total_failed = 0usize;
     let mut total_masked = 0usize;
@@ -1161,6 +1160,50 @@ fn geos_xml_suite() {
     assert!(
         !had_issues,
         "GEOS XML suite had failures - see stderr for details (total_passed={total_passed}, total_failed={total_failed}, masked={total_masked}, known_gaps={total_known_gaps})"
+    );
+}
+
+/// JTS testxml cases that the GEOS corpus does not carry. The same dispatcher
+/// runs them; the stricter-validator classes are reported as masked, as in the
+/// GEOS suite.
+#[test]
+fn jts_xml_suite() {
+    let results = run_xml_tests(Path::new("tests/jts_xml"));
+    let mut total_passed = 0usize;
+    let mut total_failed = 0usize;
+    let mut total_masked = 0usize;
+    let mut total_known_gaps = 0usize;
+    let mut total_skipped = 0usize;
+    let mut total_unparseable = 0usize;
+    eprintln!("\n=== JTS XML Test Suite ===");
+    for (fname, passed, failed, masked, known_gaps, skipped_cases, unparseable, failures) in
+        &results
+    {
+        let status = if *failed == 0 { "ok" } else { "FAIL" };
+        let total = passed + failed;
+        eprintln!(
+            "  {status} {fname}: {passed}/{total} dispatched-case passed, {masked} masked-divergence, {known_gaps} known-gap, {skipped_cases} overlay-skipped, {unparseable} unparseable"
+        );
+        for f in failures {
+            eprintln!("      fail: {f}");
+        }
+        total_passed += passed;
+        total_failed += failed;
+        total_masked += masked;
+        total_known_gaps += known_gaps;
+        total_skipped += skipped_cases;
+        total_unparseable += unparseable;
+    }
+    let total = total_passed + total_failed;
+    eprintln!("  -----");
+    eprintln!("  Total: {total_passed}/{total} dispatched-case passed ({total_failed} failed)");
+    eprintln!(
+        "  Masked validator divergence: {total_masked}; known gaps: {total_known_gaps}; overlay-skipped: {total_skipped}"
+    );
+    eprintln!("==========================");
+    assert!(
+        total_failed == 0 && total_unparseable == 0,
+        "JTS XML suite failed (passed={total_passed}, failed={total_failed}, unparseable={total_unparseable})"
     );
 }
 
