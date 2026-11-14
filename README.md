@@ -38,9 +38,9 @@ WKT keeps Z and M when you ask for it: `read_wkt_zm` returns the geometry, its
 same files and returns x/y, so a Z-enabled layer from OGR or QGIS loads without
 error.
 
-Everything is evaluated against a large test set ported from GEOS and CGAL, plus the crate's
-own fuzz tests. The result should always come out valid per GEOS, but the strategy differences
-can make the output slightly differ.
+Everything is evaluated against the JTS testxml and GEOS XML suites, a CGAL case set, plus the
+crate's own fuzz tests. The result should always come out valid per GEOS, but the strategy
+differences can make the output slightly differ.
 
 ## Performance
 
@@ -337,3 +337,10 @@ macOS are attached to every GitHub release. Full API reference:
 ## License
 
 Apache-2.0
+
+Portions of the validation topology and face extraction derive from the JTS
+Topology Suite under the Eclipse Distribution License 1.0. See `NOTICE`.
+
+`tests/geos_xml` is test data. 64 files were re-imported from JTS (EDL 1.0); the
+rest are GEOS data under LGPL-2.1-or-later. The directory is excluded from the
+published crate.

@@ -85,10 +85,10 @@ pub fn build_graph(lines: &[Line<f64>]) -> Graph {
 }
 
 /// --------------------------------------------------------------------------- Face
-/// extraction - faithful port of GEOS PolygonizeGraph::getEdgeRings (computeNextCWEdges
-/// + findLabeledEdgeRings + convertMaximalToMinimalEdgeRings, then findEdgeRing).
+/// extraction from JTS PolygonizeGraph.getEdgeRings (computeNextCWEdges,
+/// findLabeledEdgeRings, convertMaximalToMinimalEdgeRings, then findEdgeRing).
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
-pub fn extract_all_faces_geos(graph: &Graph) -> Option<Vec<Vec<(usize, usize)>>> {
+pub fn extract_all_faces_polygonize(graph: &Graph) -> Option<Vec<Vec<(usize, usize)>>> {
     let n_edges = graph.edges.len();
     let mut next: Vec<usize> = vec![0; n_edges * 2];
 

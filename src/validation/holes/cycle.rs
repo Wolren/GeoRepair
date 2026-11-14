@@ -4,10 +4,9 @@
 use super::*;
 use alloc::vec::Vec;
 
-/// Ring-touch graph cycle detection, a port of geos polygonring::findholecyclelocation
-/// and scanForHoleCycle. Touches at one coordinate never close a cycle: geos isValid is
-/// true for holes that meet at a point. Never re-sort or re-index per pair; the naive
-/// version cost 170x on giants (2026-08-06).
+/// Ring-touch cycle detection from JTS PolygonRing.findHoleCycleLocation and scanForHoleCycle,
+/// indexed for batch runs. A single shared vertex never closes a cycle, as JTS isValid agrees.
+/// Never re-sort or re-index per pair; the naive version cost 170x on giants (2026-08-06).
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(super) fn detect_hole_cycle(
     rings: &[&[Coord<f64>]],
@@ -16,9 +15,8 @@ pub(super) fn detect_hole_cycle(
     #[cfg(feature = "rstar")] shell_tree: Option<&Arc<rstar::RTree<EdgeIdx>>>,
 ) -> bool {
     let n = rings.len();
-    // (rings[0] is the shell) - building a second rstar bulk_load of a 600k-edge shell
-    // cost ~100ms per giant (measured 2026-08-06). The vertex lists are radix-sorted by
-    // x (std sort cost ~50ms on the giant shells; measured 2026-08-06).
+    // rings[0] is the shell; a second rstar bulk_load of a 600k-edge shell cost ~100ms per
+    // giant (2026-08-06). Radix-sorted x (std sort cost ~50ms on giant shells, same day).
     let mut sorted: Vec<Vec<Coord<f64>>> = Vec::with_capacity(n);
     for r in rings {
         let mut v = r.to_vec();
@@ -242,7 +240,7 @@ pub(super) fn first_non_equal(ring: &[Coord<f64>], p0: Coord<f64>) -> Option<Coo
         .copied()
 }
 
-/// GEOS PolygonTopologyAnalyzer::isRingNested port: is `test` nested inside `target`?
+/// JTS PolygonTopologyAnalyzer.isRingNested: is `test` nested inside `target`?
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(super) fn is_ring_nested(test: &[Coord<f64>], target: &[Coord<f64>], eps: f64) -> bool {
     let Some(&p0) = test.first() else {
@@ -260,7 +258,7 @@ pub(super) fn is_ring_nested(test: &[Coord<f64>], target: &[Coord<f64>], eps: f6
     point_in_ring_exclusive(p0, target)
 }
 
-/// GEOS PolygonTopologyAnalyzer::isIncidentSegmentInRing port: is the segment p0->p1
+/// JTS PolygonTopologyAnalyzer.isIncidentSegmentInRing: is the segment p0->p1
 /// (p0 on the ring boundary) inside the ring at the node?
 pub(super) fn is_incident_segment_in_ring(
     p0: Coord<f64>,
@@ -272,7 +270,7 @@ pub(super) fn is_incident_segment_in_ring(
     if n < 2 {
         return false;
     }
-    // Segment containing p0 (GEOS intersectingSegIndex: p0 == segment end selects the
+    // Segment containing p0 (JTS intersectingSegIndex: p0 == segment end selects the
     // next segment start).
     let mut idx = 0usize;
     for i in 0..n {
@@ -309,7 +307,7 @@ pub(super) fn is_incident_segment_in_ring(
     is_interior_segment(p0, a0, a1, p1)
 }
 
-/// GEOS PolygonNodeTopology::isInteriorSegment port.
+/// JTS PolygonNodeTopology.isInteriorSegment.
 pub(super) fn is_interior_segment(
     node: Coord<f64>,
     a0: Coord<f64>,
@@ -326,7 +324,7 @@ pub(super) fn is_interior_segment(
     (b_between && is_interior_between) || (!b_between && !is_interior_between)
 }
 
-/// GEOS Quadrant + isAngleGreater port: p > q when p is ccw of q as seen from the
+/// JTS Quadrant and PolygonNodeTopology.isAngleGreater: p > q when p is ccw of q as seen from the
 /// origin.
 pub(super) fn is_angle_greater(origin: Coord<f64>, p: Coord<f64>, q: Coord<f64>) -> bool {
     let qp = quadrant(origin, p);
@@ -340,7 +338,7 @@ pub(super) fn is_angle_greater(origin: Coord<f64>, p: Coord<f64>, q: Coord<f64>)
     crate::orient::orient2d(origin, q, p) > 0.0
 }
 
-/// GEOS isBetween port: p lies in the ccw angle wedge e0 -> e1 from origin.
+/// JTS PolygonNodeTopology.isBetween: p lies in the ccw angle wedge e0 -> e1 from origin.
 pub(super) fn is_between(
     origin: Coord<f64>,
     p: Coord<f64>,
@@ -353,7 +351,7 @@ pub(super) fn is_between(
     !is_angle_greater(origin, p, e1)
 }
 
-/// GEOS Quadrant numbering: NE=0, NW=1, SW=2, SE=3.
+/// JTS Quadrant numbering: NE=0, NW=1, SW=2, SE=3.
 pub(super) fn quadrant(origin: Coord<f64>, p: Coord<f64>) -> u8 {
     let dx = p.x - origin.x;
     let dy = p.y - origin.y;

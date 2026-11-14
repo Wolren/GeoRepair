@@ -1,3 +1,12 @@
 GEOS commit: 24ec89dc300e1f403dfb234506bb54a8c9f3e68c
 synced from: D:\Projects\gis\lib\geos\tests\xmltester\tests
 synced at: 2026-08-05T15:29:16Z
+
+64 of these files were re-imported from the JTS testxml corpus on 2026-11-14.
+The JTS and GEOS cases are content-equivalent; only formatting differs.
+The mapping is in JTS-REIMPORT.txt. Those files fall under the Eclipse
+Distribution License 1.0 (see the repository NOTICE).
+
+The remaining files are GEOS test data under LGPL-2.1-or-later. This
+directory is excluded from the crate package (Cargo.toml, package.exclude),
+so the published crate contains neither this data nor its licence.

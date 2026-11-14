@@ -15,7 +15,7 @@ pub fn polygonize(lines: &[Line<f64>]) -> Vec<Polygon<f64>> {
         return Vec::new();
     }
 
-    let face_edges = match fix_ring_graph::extract_all_faces_geos(&graph) {
+    let face_edges = match fix_ring_graph::extract_all_faces_polygonize(&graph) {
         Some(faces) => faces,
         None => return Vec::new(),
     };

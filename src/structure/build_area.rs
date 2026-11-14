@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 use geo::{Coord, Line, LineString, MultiPolygon, Polygon, Winding};
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use super::fix_ring_graph::{build_graph, extract_all_faces_geos};
+use super::fix_ring_graph::{build_graph, extract_all_faces_polygonize};
 
 /// geos BuildArea port. The public call keeps the atomic faces; `build_area_with_boundary`
 /// dissolves them for the MakeValid loop, the step GEOS does inside BuildArea.
@@ -34,7 +34,7 @@ fn build_area_impl(
     }
     // None as a fallback signal (make_valid.rs polygonizer_fallback, fix_ring.rs) -
     // keep the semantics
-    let faces = extract_all_faces_geos(&graph)?;
+    let faces = extract_all_faces_polygonize(&graph)?;
     if faces.is_empty() {
         return Some((MultiPolygon::new(Vec::new()), Vec::new()));
     }

@@ -149,8 +149,8 @@ pub(crate) fn check_holes_valid(
             }
         }
 
-        // --- hole-cycle detection (GEOS PolygonRing::findHoleCycleLocation +
-        // scanForHoleCycle port, source-verified 2026-08-05)
+        // --- hole-cycle detection (JTS PolygonRing.findHoleCycleLocation and
+        // scanForHoleCycle; the batch indexing is local)
         #[cfg(feature = "rstar")]
         let cycle = detect_hole_cycle(&rings, &bboxes, eps, shell_tree.as_ref());
         #[cfg(not(feature = "rstar"))]
@@ -173,9 +173,8 @@ pub(crate) fn check_holes_valid(
     errors
 }
 
-// Ring-touch graph helpers (GEOS PolygonRing / PolygonTopologyAnalyzer /
-// PolygonNodeTopology ports, source-verified against the GEOS clone at 24ec89dc3,
-// 2026-08-05).
+// Ring-touch graph helpers. The topology follows JTS PolygonRing,
+// PolygonTopologyAnalyzer and PolygonNodeTopology; the indexing is local.
 
 /// Candidate ring pairs (i < j) with overlapping bounding boxes, skipping rings below
 /// `min_ring` (0 includes the shell, 1 = holes only).

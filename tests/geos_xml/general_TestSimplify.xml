@@ -16,7 +16,7 @@
 
 <case>
   <desc>mP - point with EMPTY</desc>
-  <a> MULTIPOINT(EMPTY, (10 10), (20 20))
+  <a> MULTIPOINT( EMPTY, (10 10), (20 20)) 
     </a>
   <test> <op name="simplifyDP" arg1="A" arg2="1"> 
       MULTIPOINT((10 10), (20 20))

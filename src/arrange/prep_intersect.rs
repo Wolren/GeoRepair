@@ -385,7 +385,7 @@ impl ChainSink {
     }
 }
 
-/// GEOS PolygonIntersectionAnalyzer::findInvalidIntersection treats a non-adjacent
+/// JTS PolygonIntersectionAnalyzer.isInvalidIntersection treats a non-adjacent
 /// same-segString intersection as eRingSelfIntersection. lean_pair_intersects marks an
 /// exact shared endpoint ambiguous and not intersecting.
 #[inline]

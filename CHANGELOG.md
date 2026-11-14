@@ -110,6 +110,18 @@
 
 ### Changed
 
+- Provenance: the ring-touch validator topology (`validation/holes.rs`,
+  `validation/holes/cycle.rs`) and the polygonize face walk
+  (`structure/fix_ring_graph.rs`) now cite JTS, where `PolygonRing`,
+  `PolygonTopologyAnalyzer`, `PolygonNodeTopology`, `Quadrant` and
+  `PolygonizeGraph.getEdgeRings` live under the Eclipse Distribution License 1.0.
+  A new `NOTICE` carries the Eclipse Foundation copyright and the EDL text. The
+  `BuildArea` and `MakeValid` modules keep their separate lineage.
+- `tests/geos_xml`: 64 files re-imported from the JTS testxml corpus (content-equivalent,
+  EDL-1.0). The rest stay GEOS test data under LGPL-2.1-or-later, remain excluded from
+  the crate package, and are recorded in `SOURCE.txt` and `JTS-REIMPORT.txt`.
+- `docs/REPAIR-CORE-SPEC.md` states the even-odd area and MakeValid contracts for an
+  independent implementation, with `tests/repair_core_spec.rs` as the acceptance gate.
 - `read_wkt` accepts `POINT Z (1 2 3)`, `POINT M (...)` and `POINT ZM (...)` on every
   geometry type, keeps x and y, and drops the extra ordinates. OGR and QGIS write the
   modifier for any Z-enabled layer, so the crate now reads files GEOS reads. A member
