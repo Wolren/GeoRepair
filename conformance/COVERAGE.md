@@ -14,7 +14,7 @@ the divergence is named below.
 
 | Surface | Status | Evidence |
 |---|---|---|
-| Seven types, nested `GEOMETRYCOLLECTION` | Accepted | A 118, B 94, I |
+| Seven types, nested `GEOMETRYCOLLECTION` | Accepted | A 120, B 96, I |
 | `EMPTY` at every level | Accepted | A, B (28 empty cases) |
 | `Z`, `M`, `ZM` separated from the type name | Accepted | A, D, E |
 | Modifier welded to the type name (`POINTZ`, `MULTIPOLYGONZM`) | Accepted | A (4 cases), unit test |
@@ -50,11 +50,11 @@ dimension. A refusal never invents a coordinate, which is the reason for the cho
 
 | Surface | Status | Evidence |
 |---|---|---|
-| ISO 13249 type codes 1 to 7 | Accepted | E 94 |
+| ISO 13249 type codes 1 to 7 | Accepted | E 96 |
 | ISO 1000, 2000 and 3000 offsets, nested | Accepted | E, D (`Z_multipolygon` = 3003) |
-| EWKB high-bit flags with SRID | Accepted | G 94 |
+| EWKB high-bit flags with SRID | Accepted | G 96 |
 | SRID together with Z, M and ZM | Accepted | probe 4 of 4 |
-| Both byte orders | Accepted | F 94 |
+| Both byte orders | Accepted | F 96 |
 | Empty geometry as NaN ordinates | Accepted | E, probe (`iso_z_empty`, `iso_m_empty`) |
 | Damaged, truncated and hostile bytes | Clean error, no panic, no hang | H 458 |
 | Curved and SQL/MM codes 8 to 17 | Refused | J 8 |
@@ -64,8 +64,8 @@ dimension. A refusal never invents a coordinate, which is the reason for the cho
 
 | Surface | Status | Evidence |
 |---|---|---|
-| EWKB with SRID, ISO without | Correct | D 93, G |
-| Byte identical to GDAL, XY to ZM | Correct | D 93 of 93 |
+| EWKB with SRID, ISO without | Correct | D 95, G |
+| Byte identical to GDAL, XY to ZM | Correct | D 95 of 95 |
 | Empty Z and M as NaN ordinates | Correct | D (`POINT Z EMPTY` bytes) |
 | Big-endian output | Not offered; the writer emits little-endian | by design |
 
@@ -78,17 +78,18 @@ dimension. A refusal never invents a coordinate, which is the reason for the cho
 | Closes an open ring, moves no coordinate | Guaranteed | unit test |
 | Type chosen from survivors | Guaranteed | `the_type_follows_the_survivors` |
 | Idempotent | Guaranteed | 500 generated shapes |
-| Output accepted by RustGIS and the georust `wkt` crate | Verified | K 63, L 63 |
+| Output accepted by RustGIS and the georust `wkt` crate | Verified | K 65, L 65 |
 | Repair of invalid points, lines and polygons on request | Guaranteed | `HostOptions::REPAIR`, 8 tests |
 | Polygon ring with one or two points | Refused | `WkbError::InvalidRing`, 11 of 135,494 fuzzed blobs |
 | Ring of three points | Accepted | GDAL round trips it, `st_degenerate_ring` |
 | Multipoint with duplicate coordinates | Deduplicated | GEOS 3.13.1 keeps both and calls the result not simple; M requires simple output |
 | A part `make_valid` consumes without a replacement | Counted | `dropped_unrepairable`, `repair_reports_a_polygon_it_cannot_fix` |
 | Repair never deletes what it cannot improve | Guaranteed | N, fallback in `to_host_with`, 6 adapter tests |
-| A geometry GEOS calls valid and simple is unchanged by repair | Verified | N, 64 cases |
-| Repaired output keeps area, length and point count against GEOS | Verified | N, 64 cases, no wider fill |
+| A geometry GEOS calls valid and simple is unchanged by repair | Verified | N, 66 cases |
+| Repaired output keeps area, length and point count against GEOS | Verified | N, 66 cases, wider fill named |
+| Repair preserves the even-odd interior | Verified | O, 18 cases |
 | Repair at collection level, so overlapping valid parts are fixed | Guaranteed | `repair_mode_fixes_overlapping_polygons`, M |
-| Repaired output valid and simple per GEOS | Verified | M 64 delivered geometries, 6 repaired |
+| Repaired output valid and simple per GEOS | Verified | M 66 delivered geometries, 8 repaired |
 | Repair does not touch a valid polygon | Guaranteed | test `repair_mode_does_not_touch_a_valid_polygon` |
 | Bytes in, host shape out (`to_host_wkb`, `to_host_ewkt`) | Guaranteed | 2 tests |
 
@@ -127,4 +128,3 @@ they do not claim a limit on what any of them could reach.
 - No claim of being the fastest implementation. The table compares two crates on one corpus.
 - `fill_rule` on `MakeValidConfig` is accepted and never read: repair always applies EvenOdd, which matches GEOS on a pentagram (both 3.333). The NonZero result, 4.667 with the centre filled, is not reachable.
 - Repair cancels an overlapping or nested part as GEOS does: two 2x2 squares overlapping by 1 give area 6, not the union's 7.
-- A self-crossing ring is not claimed to match GEOS in area outside check N: the 2000-vertex walk in the symdiff test converges to 212.74 where GEOS fills 790.49.

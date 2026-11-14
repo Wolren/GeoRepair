@@ -148,7 +148,7 @@ pub fn make_valid_poly_symdiff(cut_edges: &[Line<f64>]) -> Vec<Polygon<f64>> {
 }
 
 /// Orientation-insensitive key for a segment (bit-exact after snapping).
-fn segment_key(a: Coord<f64>, b: Coord<f64>) -> (u64, u64, u64, u64) {
+pub(crate) fn segment_key(a: Coord<f64>, b: Coord<f64>) -> (u64, u64, u64, u64) {
     let (ax, ay, bx, by) = (a.x.to_bits(), a.y.to_bits(), b.x.to_bits(), b.y.to_bits());
     if (ax, ay) <= (bx, by) {
         (ax, ay, bx, by)
@@ -185,63 +185,6 @@ mod tests {
     use super::*;
     use crate::{MakeValid, MakeValidConfig, PolyMethod};
     use geo::{Area, LineString, Polygon};
-
-    /// Verbatim replication of benches/bench.rs::make_spaghetti_ring.
-    fn spaghetti_ring(n: usize) -> Polygon<f64> {
-        let span = (n as f64).sqrt().ceil() as i64;
-        let mut x = 0i64;
-        let mut y = 0i64;
-        let mut seed = 0x9E3779B97F4A7C15u64;
-        let mut next = move || {
-            seed = seed
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
-            (seed >> 33) as u32
-        };
-        let mut coords = Vec::with_capacity(n + 1);
-        coords.push(Coord {
-            x: x as f64,
-            y: y as f64,
-        });
-        for _ in 1..n {
-            match next() % 4 {
-                0 => x += 1,
-                1 => x -= 1,
-                2 => y += 1,
-                _ => y -= 1,
-            }
-            x = x.rem_euclid(span);
-            y = y.rem_euclid(span);
-            coords.push(Coord {
-                x: x as f64,
-                y: y as f64,
-            });
-        }
-        coords.push(coords[0]);
-        Polygon::new(LineString::new(coords), Vec::new())
-    }
-
-    /// The symdiff loop used to cycle on this class: the same faces were rebuilt every
-    /// pass, so the area turned on the 64-iteration guard's parity. The dissolved
-    /// BuildArea and the boundary-segment subtraction make it converge.
-    #[test]
-    fn symdiff_converges_on_self_crossing_walk() {
-        let cfg = MakeValidConfig {
-            poly_method: PolyMethod::Structure,
-            ..Default::default()
-        };
-        // GEOS gives 144.244318 and 790.486264 on these rings. These pins guard
-        // convergence, not GEOS parity.
-        for (n, expected) in [(500usize, 193.681818f64), (2000, 212.741758)] {
-            let out = spaghetti_ring(n).make_valid_with_config(&cfg);
-            assert!(crate::is_valid(&out), "n={n}: repair must stay valid");
-            let area = out.unsigned_area();
-            assert!(
-                (area - expected).abs() < 1e-4,
-                "n={n}: area {area} drifted from the pinned {expected}"
-            );
-        }
-    }
 
     /// Even-odd is the assembly rule: the pentagram centre has winding 2 and stays
     /// empty. GEOS makeValid returns the same 3.333 on this ring, in both strategies.

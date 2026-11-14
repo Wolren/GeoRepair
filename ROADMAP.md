@@ -23,7 +23,7 @@ Z and M stay beside the geometry: `to_host_zm`, `to_host_wkb_zm` and `to_host_ew
 six kinds are in `HostChange`.
 
 Conformance check K measures the claim. A probe built from a RustGIS checkout reads the delivered
-text and reports the same coordinates, 63 cases, compared as raw f64 bits. Four corpus cases are
+text and reports the same coordinates, 65 cases, compared as raw f64 bits. Four corpus cases are
 unreadable by RustGIS raw and readable after the delivery pass: `st_mpoint_empty`, `st_nan`,
 `st_inf`, `st_ninf`.
 
@@ -49,8 +49,6 @@ No priority is set. Each item names the evidence that put it here.
 
 ### Correctness
 
-- **One area divergence from GEOS outside check N.** The 2000-vertex self-crossing walk fills
-  212.74 where GEOS fills 790.49.
 - **213 baselined XML cases diverge from GEOS**, mostly on the OGC winding contract
   (`docs/BENCHMARKS.md`).
 - **No dimension inference from the ordinate count.** GEOS reads `POINT (1 2 3)` as Z; we refuse it

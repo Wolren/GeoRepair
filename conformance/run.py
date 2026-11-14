@@ -12,6 +12,11 @@ Checks
   H  damaged WKB (every truncation, impossible headers) never panics
   I  nested collections parse, and absurd depth fails cleanly
   J  SQL/MM curved types are refused, not misread
+  K  RustGIS reads what we deliver and sees the same shape (needs RUSTGIS_DIR)
+  L  the georust wkt crate reads our delivered text and agrees
+  M  what we hand a host is valid and simple per GEOS
+  N  repair never loses area, length or points against GEOS makeValid
+  O  repair preserves the even-odd interior, which GEOS makeValid does not always
 
 Usage: python conformance/run.py [--keep]
 Exit code 1 on an unexpected failure. Ids listed in known_divergences.txt do not fail the gate.
@@ -21,6 +26,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 import os
 import shutil
 import sqlite3
@@ -29,9 +35,11 @@ import sys
 
 try:
     import shapely
+    from shapely import ops as shapely_ops
     from shapely import wkt as shapely_wkt
 except ImportError:  # the GEOS checks need it; main() fails loudly instead of skipping
     shapely = None
+    shapely_ops = None
     shapely_wkt = None
 import tempfile
 
@@ -149,6 +157,30 @@ TYPES = [
 ]
 
 
+def spaghetti_walk(n):
+    """The bench's make_spaghetti_ring: a lattice walk that revisits segments."""
+    span = int(math.ceil(math.sqrt(n)))
+    x = y = 0
+    seed = 0x9E3779B97F4A7C15
+    coords = [(0, 0)]
+    for _ in range(1, n):
+        seed = (seed * 6364136223846793005 + 1442695040888963407) & ((1 << 64) - 1)
+        d = (seed >> 33) % 4
+        if d == 0:
+            x += 1
+        elif d == 1:
+            x -= 1
+        elif d == 2:
+            y += 1
+        else:
+            y -= 1
+        x %= span
+        y %= span
+        coords.append((x, y))
+    coords.append(coords[0])
+    return "POLYGON ((" + ", ".join("%d %d" % c for c in coords) + "))"
+
+
 def corpus():
     cases = []
     for dims in ("", "Z", "M", "ZM"):
@@ -246,6 +278,9 @@ def corpus():
         ("curve_triangle", "TRIANGLE ((0 0, 1 0, 1 1, 0 0))"),
     ]
     cases += [(i, "curved", t) for i, t in curved]
+    # Coincident-segment walks: valid output with the wrong area used to ship here.
+    cases.append(("st_spaghetti500", "shape", spaghetti_walk(500)))
+    cases.append(("st_spaghetti2000", "shape", spaghetti_walk(2000)))
     return cases
 
 
@@ -421,6 +456,40 @@ def expectation(cid, cat):
     return "accept", False
 
 
+def even_odd_area(g):
+    """Area of the even-odd interior of a polygonal boundary, without GEOS makeValid."""
+    if g.geom_type == "Polygon":
+        parts = [g]
+    elif g.geom_type == "MultiPolygon":
+        parts = list(g.geoms)
+    else:
+        return None
+    rings = []
+    for p in parts:
+        rings.append(p.exterior)
+        rings.extend(p.interiors)
+    segments = []
+    for ring in rings:
+        cs = list(ring.coords)
+        for a, b in zip(cs, cs[1:]):
+            if a[1] != b[1]:
+                segments.append((a[0], a[1], b[0], b[1]))
+    faces = shapely_ops.polygonize(shapely_ops.unary_union([shapely.LineString(r) for r in rings]))
+    total = 0.0
+    for face in faces:
+        p = face.representative_point()
+        px, py = p.x, p.y
+        inside = False
+        for x0, y0, x1, y1 in segments:
+            if (y0 > py) != (y1 > py):
+                xint = x0 + (py - y0) * (x1 - x0) / (y1 - y0)
+                if px < xint:
+                    inside = not inside
+        if inside:
+            total += face.area
+    return total
+
+
 def load_known():
     path = os.path.join(HERE, "known_divergences.txt")
     known = {}
@@ -475,6 +544,7 @@ def main():
                 "L_georust",
                 "M_geos_valid",
                 "N_repair_measure",
+                "O_even_odd",
             )
         }
 
@@ -937,6 +1007,30 @@ def main():
                     + " zero-area cases: "
                     + ", ".join(dropped)
                 )
+
+        # O: the even-odd interior must survive repair. GEOS makeValid is not the
+        # oracle: on coincident-segment walks it keeps 70 percent and we used to keep 19.
+        if shapely is not None and shapely_ops is not None:
+            for cid in ids:
+                row = ours.get(cid, {})
+                raw = row.get("wkt_delivery") or ""
+                rep = row.get("wkt_repaired") or ""
+                if not raw or not rep:
+                    continue
+                try:
+                    raw_g = shapely_wkt.loads(raw)
+                    rep_g = shapely_wkt.loads(rep)
+                except Exception:
+                    continue
+                if raw_g.geom_type not in ("Polygon", "MultiPolygon"):
+                    continue
+                want = even_odd_area(raw_g)
+                if want is None or want <= 1e-9:
+                    continue
+                got = rep_g.area
+                ok = abs(got - want) <= max(1e-6 * want, 1e-9)
+                detail = "" if ok else "area %.6g against even-odd %.6g" % (got, want)
+                rec("O_even_odd", ok, cid, detail)
 
         print("corpus " + str(len(cases)) + " cases, oracle " + OGR2OGR)
         print()

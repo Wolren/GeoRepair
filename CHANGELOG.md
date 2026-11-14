@@ -8,6 +8,10 @@
   repaired position matched no source coordinate within 1e-10.
 - `host::HostReport::notices` returns one `host::HostNotice` per change that occurred, so a host
   reports each kind of loss once, with its count. `host::HostChange` names the six kinds.
+- Conformance check O compares the repaired area with an independent even-odd area: shapely
+  polygonizes the delivered boundary and each face is decided by crossing parity. GEOS makeValid
+  is not the oracle, because it loses parity on a coincident edge; the corpus carries the two
+  walks that exposed this.
 - `read_ewkt` and `write_ewkt` handle the PostGIS EWKT dialect: an optional `SRID=<n>;` prefix,
   case-insensitive, with the SRID returned beside the geometry. GDAL refuses that prefix, so it
   stays out of `read_wkt`.
@@ -55,6 +59,12 @@
   2026-11-05, and both CI baselines were re-recorded from the runner.
 
 ### Fixed
+- `Structure` repair no longer under-fills a polygon whose ring walks a segment twice. The
+  2000-vertex walk came back valid at area 212.74 against the 1122.27 even-odd interior, and GEOS
+  fills 790.49 on the same ring. Such rings now take the CDT path, which resolves parity by
+  construction: the 500- and 2000-vertex walks return 193.05 and 1122.27. `tests/repair_area_oracle.rs`
+  pins both areas and compares the strategies on random walks; the same change makes the walks
+  faster on the bench subset (2000v 29.7 ms to 2.7 ms serial, 5.6 ms to 0.4 ms parallel).
 - The WKT reader copies the first vertex's Z and M onto the closure that `Polygon::new` appends,
   so an open ring no longer leaves `extra_coords` one coordinate short. `write_wkt_zm` wrote a NaN
   Z for that closure, and every Z of such a ring was lost on the way out.

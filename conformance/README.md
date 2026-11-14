@@ -32,10 +32,10 @@ not a gate.
 
 | check | proof | how |
 |---|---|---|
-| A read acceptance | our verdict matches the specification | corpus of 118 cases |
+| A read acceptance | our verdict matches the specification | corpus of 120 cases |
 | B geometry equality | our geometry equals OGR's | canonical 2D WKB |
 | C write semantics | our WKT, read by OGR, equals OGR's geometry | second oracle pass |
-| D write bytes | our ISO WKB equals OGR's bytes | 93 cases, XY to ZM |
+| D write bytes | our ISO WKB equals OGR's bytes | 95 cases, XY to ZM |
 | E WKB round trip | OGR's bytes read and re-emit unchanged | all dimensions |
 | F big-endian | big-endian bytes read and kept | encoder independent of the crate |
 | G EWKB SRID | an EWKB SRID survives the read | SRID 4326 on every readable case |
@@ -46,12 +46,18 @@ not a gate.
 | L georust consumer | the georust `wkt` crate reads our delivered text and agrees | same corpus |
 | M GEOS validity | what we hand a host is valid and simple per GEOS, and repair is shown to act | needs `shapely` |
 | N repair measure | repair never loses area, length or points against GEOS, and leaves a clean shape alone | `shapely.make_valid`, reports wider fills by name |
+| O even-odd area | repair preserves the input's even-odd interior | polygonize plus crossing parity, not GEOS makeValid |
 
 Check M is the validity check and needs shapely, which ships GEOS. It parses the repaired delivery
 with GEOS, requires `is_valid` and `is_simple` on every case, and fails outright when no case was
 invalid before repair and clean after it, so the repair path cannot pass by being idle. Every run
 also feeds the same judge a bowtie and a square: if the judge accepts either answer it is wrong,
 and the gate stops.
+
+Check O is the area check. It polygonizes the delivered boundary, decides each face by crossing
+parity, and requires the repaired area to match the even-odd area within 1e-6. GEOS `makeValid` is
+not the oracle here: on a ring that walks a segment twice it loses parity too, so check N alone
+can pass against a similarly wrong answer.
 
 Check K is the consumer check. `RUSTGIS_DIR=/path/to/RustGIS python3 conformance/run.py` builds
 a probe against that checkout's own `parse_wkt` and compares the shape it reports, coordinate
@@ -87,20 +93,20 @@ Every row counts three outcomes against the oracle's geometry: agree, differ, re
 the oracle cannot express, such as a curved type, has no shared model and is left out of the
 agree and differ columns.
 
-Measured on 118 cases:
+Measured on 120 cases:
 
 ```
 impl             cases   agree  differ  refused
-GeoRepair          118      94       1        6
-RustGIS            118      59       8       34
-georust wkt        118      88       6        7
-GDAL               118     101       0        0
+GeoRepair          120      96       1        6
+RustGIS            120      61       8       34
+georust wkt        120      90       6        7
+GDAL               120     103       0        0
 ```
 
 WKB acceptance is measured separately, on the oracle's own bytes:
 
 ```
-WKB acceptance: GeoRepair 101/109, georust wkb 106/109, disagreements 5
+WKB acceptance: GeoRepair 103/111, georust wkb 108/111, disagreements 5
 ```
 
 The five disagreements are curved types, and they are not a matter of strictness. The `wkb`

@@ -186,6 +186,22 @@ pub(crate) fn fast_path_check(
     }
 }
 
+/// True when the rings walk the same undirected segment twice, in either direction.
+fn has_coincident_edges(poly: &Polygon<f64>) -> bool {
+    let mut seen: rustc_hash::FxHashSet<(u64, u64, u64, u64)> = Default::default();
+    for ring in core::iter::once(poly.exterior()).chain(poly.interiors()) {
+        for w in ring.0.windows(2) {
+            if w[0] == w[1] {
+                continue;
+            }
+            if !seen.insert(crate::structure::symdiff::segment_key(w[0], w[1])) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// About 99.85% of real-world polygons are already valid. This is a zero-copy
 /// passthrough that matches the geos shared-geometry return. ext_scale is the caller
 /// precomputed exterior bbox scale, the max spread floored at 1.0.
@@ -219,6 +235,11 @@ pub(crate) fn fix_polygon_owned(
         if let Some(outcome) = crate::make_valid::precondition::precondition_fix(&poly, config) {
             return outcome;
         }
+        return FixOutcome::Unconsumed(poly);
+    }
+    // BuildArea under-fills a ring that walks a segment twice (2000v: 212.74 against 1122.27).
+    // The CDT path keeps parity exact, so route that class there.
+    if has_coincident_edges(&poly) {
         return FixOutcome::Unconsumed(poly);
     }
     if let Some(mp) = crate::structure::symdiff::single_pass_fix_tuned(&poly, &config.tuning) {

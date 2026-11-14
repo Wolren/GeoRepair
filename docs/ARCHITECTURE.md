@@ -46,7 +46,8 @@ input
   │   node shell + holes once, then the MakeValid loop: BuildArea,
   │   XOR the level, subtract its boundary. Even-odd by construction.
   │   Primary path for self-crossings, crossing holes, hole overlaps.
-  │   Result is OGC-wound and validated; failure falls through.
+  │   A ring that walks a segment twice falls through to Arrange, whose
+  │   face walk keeps parity exact. Result is OGC-wound and validated.
   │
   ├─ Structure boolean pipeline   (structure/, i_overlay subtract)
   │   per-ring symdiff + subtract_holes + merge. Safety net for
