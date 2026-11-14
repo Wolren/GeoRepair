@@ -1,8 +1,13 @@
 use geo::{
     Coord, Geometry, GeometryCollection, LineString, MultiPoint, MultiPolygon, Point, Polygon, Rect,
 };
-use geo_repair::host::{HostOptions, host_clean, to_host, to_host_ewkt, to_host_with, to_host_wkb};
+use geo_repair::host::{
+    HostChange, HostNotice, HostOptions, host_clean, to_host, to_host_ewkt, to_host_ewkt_zm,
+    to_host_with, to_host_wkb, to_host_wkb_zm, to_host_zm,
+};
 use geo_repair::validation::GeoValidation;
+use geo_repair::zm::ZmValue;
+use geo_repair::{Dims, EwkbGeometry, read_wkt_zm, write_ewkb, write_wkt_zm};
 
 fn ring(coords: &[(f64, f64)]) -> LineString<f64> {
     LineString::from(coords.to_vec())
@@ -363,4 +368,159 @@ fn repair_reports_a_polygon_it_cannot_fix() {
         report.dropped_unrepairable, 1,
         "the drop must be counted: {report:?}"
     );
+}
+
+#[test]
+fn a_clean_geometry_produces_no_notice() {
+    let (_, report) = to_host(&Geometry::Polygon(square()));
+    assert!(report.notices().is_empty(), "nothing changed: {report:?}");
+}
+
+#[test]
+fn each_change_is_one_notice_with_its_count() {
+    let gc = GeometryCollection::new_from(vec![
+        Geometry::Point(Point::new(f64::NAN, 0.0)),
+        Geometry::Point(Point::new(1.0, 1.0)),
+    ]);
+    let (_, report) = to_host(&Geometry::GeometryCollection(gc));
+    assert_eq!(
+        report.notices(),
+        vec![
+            HostNotice {
+                change: HostChange::FlattenedCollection,
+                count: 1,
+            },
+            HostNotice {
+                change: HostChange::DroppedNonFinite,
+                count: 1,
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_repair_is_a_notice() {
+    let (_, report) = to_host_with(&Geometry::Polygon(bowtie()), HostOptions::REPAIR);
+    assert_eq!(
+        report.notices(),
+        vec![HostNotice {
+            change: HostChange::Repaired,
+            count: 1,
+        }]
+    );
+}
+
+#[test]
+fn every_change_carries_a_label() {
+    let changes = [
+        HostChange::FlattenedCollection,
+        HostChange::DroppedNonFinite,
+        HostChange::DroppedDegenerate,
+        HostChange::Repaired,
+        HostChange::DroppedUnrepairable,
+        HostChange::LostOrdinate,
+    ];
+    for change in changes {
+        assert!(!change.label().is_empty(), "{change:?} has no label");
+    }
+}
+
+#[test]
+fn zm_delivery_keeps_every_ring_coordinate() {
+    let read =
+        read_wkt_zm("POLYGON Z ((0 0 10, 10 0 20, 10 10 30, 0 10 40, 0 0 10))").expect("wkt");
+    let (out, report) = to_host_zm(
+        &read.geometry,
+        read.dims,
+        &read.extra_coords,
+        HostOptions::REDUCE,
+    );
+    let out = out.expect("polygon survives");
+    assert_eq!(report.lost_zm, 0);
+    assert_eq!(out.zm.len(), 5);
+    assert_eq!(out.zm[0].z, Some(10.0));
+    assert_eq!(out.zm[2].z, Some(30.0));
+    assert_eq!(out.zm[4].z, Some(10.0));
+    assert!(out.zm.iter().all(|value| value.m.is_none()));
+}
+
+#[test]
+fn closing_a_ring_gives_the_new_vertex_the_first_z() {
+    let read = read_wkt_zm("POLYGON Z ((0 0 10, 10 0 20, 10 10 30, 0 10 40))").expect("wkt");
+    assert_eq!(read.extra_coords, vec![10.0, 20.0, 30.0, 40.0, 10.0]);
+    let text = write_wkt_zm(&read);
+    assert!(
+        !text.contains("NaN"),
+        "the closure carries the first Z: {text}"
+    );
+    assert_eq!(
+        read_wkt_zm(&text).expect("round trip").extra_coords,
+        read.extra_coords
+    );
+
+    let (out, report) = to_host_zm(
+        &read.geometry,
+        read.dims,
+        &read.extra_coords,
+        HostOptions::REDUCE,
+    );
+    let out = out.expect("polygon survives");
+    assert_eq!(out.zm.len(), 5, "the delivery pass closes the ring");
+    assert_eq!(report.lost_zm, 0);
+    assert_eq!(out.zm[4].z, Some(10.0));
+}
+
+#[test]
+fn a_zm_value_that_cannot_match_is_counted_and_noticed() {
+    // One Z value for a five-coordinate ring: preserve_zm cannot align it, so every vertex loses Z.
+    let (out, report) = to_host_zm(
+        &Geometry::Polygon(square()),
+        Dims::XYZ,
+        &[5.0],
+        HostOptions::REDUCE,
+    );
+    let out = out.expect("polygon survives");
+    assert_eq!(out.zm.len(), 5);
+    assert_eq!(report.lost_zm, 5);
+    assert!(out.zm.iter().all(|value| value.is_empty()));
+    assert_eq!(
+        report.notices(),
+        vec![HostNotice {
+            change: HostChange::LostOrdinate,
+            count: 5,
+        }]
+    );
+}
+
+#[test]
+fn the_xy_path_reports_no_zm_loss() {
+    let read = read_wkt_zm("POINT Z (1 2 3)").expect("wkt");
+    let (out, report) = to_host_zm(&read.geometry, Dims::XY, &[], HostOptions::REDUCE);
+    let out = out.expect("point survives");
+    assert!(out.zm.iter().all(|value| value.is_empty()));
+    assert_eq!(report.lost_zm, 0);
+}
+
+#[test]
+fn a_host_can_be_fed_ewkb_and_keep_z() {
+    let source = EwkbGeometry {
+        geometry: Geometry::Point(Point::new(1.0, 2.0)),
+        srid: Some(4326),
+        dims: Dims::XYZ,
+        extra_coords: vec![3.0],
+    };
+    let bytes = write_ewkb(&source);
+    let (out, report) = to_host_wkb_zm(&bytes, HostOptions::REDUCE).expect("ewkb reads");
+    let out = out.expect("point survives");
+    assert_eq!(report.lost_zm, 0);
+    assert_eq!(out.zm, vec![ZmValue::z_only(3.0)]);
+}
+
+#[test]
+fn a_measure_value_survives_delivery() {
+    let (out, report) =
+        to_host_ewkt_zm("SRID=4326;POINT M (1 2 7)", HostOptions::REDUCE).expect("ewkt reads");
+    let out = out.expect("point survives");
+    assert_eq!(report.lost_zm, 0);
+    assert_eq!(out.zm, vec![ZmValue::m_only(7.0)]);
 }

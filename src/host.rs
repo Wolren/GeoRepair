@@ -14,8 +14,10 @@ use geo::{
     GeoFloat, Geometry, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon,
 };
 
+use crate::io::Dims;
 use crate::make_valid::MakeValid;
 use crate::validation::GeoValidation;
+use crate::zm::{ZmGeometry, ZmValue, count_coords, preserve_zm};
 
 /// What the adapter dropped or rebuilt on the way to the host model.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -30,6 +32,70 @@ pub struct HostReport {
     pub repaired: usize,
     /// Parts dropped because repair produced nothing storable.
     pub dropped_unrepairable: usize,
+    /// Delivered coordinates that lost their Z or M; 0 on the XY path.
+    pub lost_zm: usize,
+}
+
+/// One kind of change the adapter made, in the order [`HostReport::notices`] lists it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum HostChange {
+    /// Collection levels were flattened away and their members kept.
+    FlattenedCollection,
+    /// A part carried a NaN or infinite coordinate and was dropped.
+    DroppedNonFinite,
+    /// A part could not form a shape and was dropped.
+    DroppedDegenerate,
+    /// A collection failed validity and was rebuilt.
+    Repaired,
+    /// Repair consumed a part and produced nothing storable.
+    DroppedUnrepairable,
+    /// A delivered coordinate lost its Z or M because no source coordinate matched.
+    LostOrdinate,
+}
+
+impl HostChange {
+    /// Short English label for a notice message. A host with a catalogue translates its own.
+    pub fn label(self) -> &'static str {
+        match self {
+            HostChange::FlattenedCollection => "flattened collection",
+            HostChange::DroppedNonFinite => "dropped non-finite part",
+            HostChange::DroppedDegenerate => "dropped degenerate part",
+            HostChange::Repaired => "repaired collection",
+            HostChange::DroppedUnrepairable => "dropped unrepairable part",
+            HostChange::LostOrdinate => "coordinate lost its Z or M",
+        }
+    }
+}
+
+/// One change with a count: what a host turns into one notice.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HostNotice {
+    /// Which change happened.
+    pub change: HostChange,
+    /// How many parts or coordinates it cost.
+    pub count: usize,
+}
+
+impl HostReport {
+    /// One notice per kind that occurred, in [`HostChange`] order. Empty when nothing changed.
+    pub fn notices(&self) -> Vec<HostNotice> {
+        let counts = [
+            (HostChange::FlattenedCollection, self.flattened_collections),
+            (HostChange::DroppedNonFinite, self.dropped_nonfinite),
+            (HostChange::DroppedDegenerate, self.dropped_degenerate),
+            (HostChange::Repaired, self.repaired),
+            (HostChange::DroppedUnrepairable, self.dropped_unrepairable),
+            (HostChange::LostOrdinate, self.lost_zm),
+        ];
+        counts
+            .iter()
+            .filter(|(_, count)| *count > 0)
+            .map(|(change, count)| HostNotice {
+                change: *change,
+                count: *count,
+            })
+            .collect()
+    }
 }
 
 /// How far the delivery pass goes.
@@ -114,6 +180,45 @@ pub fn to_host_with_owned(
     (assemble(parts), report)
 }
 
+/// Deliver to a closed host and keep Z and M beside the geometry.
+///
+/// `dims` and `extra_coords` follow the readers: one value per ordinate, depth first, Z before M.
+/// A coordinate with no source position within 1e-10 loses its Z and M, and `lost_zm` counts it.
+pub fn to_host_zm(
+    geometry: &Geometry<f64>,
+    dims: Dims,
+    extra_coords: &[f64],
+    options: HostOptions,
+) -> (Option<ZmGeometry>, HostReport) {
+    let (delivered, mut report) = to_host_with(geometry, options);
+    let Some(delivered) = delivered else {
+        return (None, report);
+    };
+    let zm = if dims == Dims::XY {
+        vec![ZmValue::NONE; count_coords(&delivered)]
+    } else {
+        let source = zm_values(dims, extra_coords);
+        let zm = preserve_zm(geometry, &source, &delivered);
+        report.lost_zm = zm.iter().filter(|value| value.is_empty()).count();
+        zm
+    };
+    (Some(ZmGeometry::with_zm(delivered, zm)), report)
+}
+
+fn zm_values(dims: Dims, extra_coords: &[f64]) -> Vec<ZmValue> {
+    match (dims.has_z, dims.has_m) {
+        (true, true) => extra_coords
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| ZmValue::new(Some(pair[0]), Some(pair[1])))
+            .collect(),
+        (true, false) => extra_coords.iter().map(|z| ZmValue::z_only(*z)).collect(),
+        (false, true) => extra_coords.iter().map(|m| ZmValue::m_only(*m)).collect(),
+        (false, false) => Vec::new(),
+    }
+}
+
 /// Read WKB or EWKB bytes, then deliver to a closed host, repairing when asked.
 ///
 /// The path a producer takes when it hands over bytes: the reader keeps SRID and Z/M beside the
@@ -133,6 +238,34 @@ pub fn to_host_ewkt(
 ) -> Result<(Option<Geometry<f64>>, HostReport), crate::io::wkt::WktError> {
     let (_, read) = crate::io::wkt::read_ewkt(text)?;
     Ok(to_host_with_owned(read.geometry, options))
+}
+
+/// Read WKB or EWKB bytes, deliver to a closed host, and keep Z and M beside the geometry.
+pub fn to_host_wkb_zm(
+    bytes: &[u8],
+    options: HostOptions,
+) -> Result<(Option<ZmGeometry>, HostReport), crate::io::wkb::WkbError> {
+    let read = crate::io::wkb::read_ewkb(bytes)?;
+    Ok(to_host_zm(
+        &read.geometry,
+        read.dims,
+        &read.extra_coords,
+        options,
+    ))
+}
+
+/// Read PostGIS EWKT, deliver to a closed host, and keep Z and M beside the geometry.
+pub fn to_host_ewkt_zm(
+    text: &str,
+    options: HostOptions,
+) -> Result<(Option<ZmGeometry>, HostReport), crate::io::wkt::WktError> {
+    let (_, read) = crate::io::wkt::read_ewkt(text)?;
+    Ok(to_host_zm(
+        &read.geometry,
+        read.dims,
+        &read.extra_coords,
+        options,
+    ))
 }
 
 /// The invariants a host may rely on, checkable by the host itself.

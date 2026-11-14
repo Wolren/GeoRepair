@@ -517,10 +517,11 @@ pub use core::{MakeValidConfig, MakeValidError, PolyMethod, Tuning};
 pub use crs::Crs;
 /// A feature combining geometry with optional attributes and crs.
 pub use feature::Feature;
-/// Output policy types and the reduction pass.
+/// Adapter for a host with a closed geometry model: reduction, repair, notices, and Z/M delivery.
 pub use host::{
-    HostOptions, HostReport, host_clean, to_host, to_host_ewkt, to_host_owned, to_host_with,
-    to_host_with_owned, to_host_wkb,
+    HostChange, HostNotice, HostOptions, HostReport, host_clean, to_host, to_host_ewkt,
+    to_host_ewkt_zm, to_host_owned, to_host_with, to_host_with_owned, to_host_wkb, to_host_wkb_zm,
+    to_host_zm,
 };
 pub use io::{
     Dims, Encoding, Endianness, EwkbDims, EwkbGeometry, WkbError, WktError, WktGeometry,

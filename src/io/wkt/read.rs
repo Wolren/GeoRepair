@@ -321,8 +321,19 @@ impl<'a> Parser<'a> {
                 }
             }
             self.expect(b'(')?;
+            let extra_start = self.extra.len();
             let coords = self.read_coord_list(dims)?;
             self.expect(b')')?;
+            // Polygon::new closes an open ring below, so the closure needs the first vertex's ordinates.
+            if self.keep_extra && coords.len() > 1 && coords[0] != coords[coords.len() - 1] {
+                let stride = usize::from(dims.has_z) + usize::from(dims.has_m);
+                let first = self
+                    .extra
+                    .get(extra_start..extra_start + stride)
+                    .unwrap_or(&[])
+                    .to_vec();
+                self.extra.extend_from_slice(&first);
+            }
             rings.push(LineString::new(coords));
             saw_any = true;
         }

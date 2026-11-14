@@ -245,14 +245,19 @@ validator through geo's own `Validation` trait. Details and examples:
 
 ## Embedding surface
 
-Three pieces exist for a host application: a batch entry that builds with or
-without the thread pool, an opt-in output policy, and error classes.
+Four pieces exist for a host application: a batch entry that builds with or
+without the thread pool, an opt-in output policy, a delivery adapter for a
+closed host model, and error classes.
 
 - `batch::{fix_polygon_batch, fix_polygon_batch_owned, fix_polygon_batch_chunked}`
   run on rayon when `parallel` is enabled, and on a serial loop when it is not.
 - `output::{OutputPolicy, apply_policy, make_valid_with_policy}` reduce a result
   to one homogeneous geometry for a host that has no collection type.
   `OutputReport` counts the parts kept and dropped.
+- `host::{to_host, to_host_with, to_host_wkb, to_host_ewkt}` deliver geometry that
+  a closed 2D host can store. `to_host_zm`, `to_host_wkb_zm` and
+  `to_host_ewkt_zm` keep Z and M beside it. `HostReport::notices` gives one
+  notice per change, with its count.
 - `GeometryValidationError::code()` gives a stable key, `label()` a short name,
   and `class()` one of six `ValidationClass` values.
   `ValidationResult::class_counts()` totals them per class.

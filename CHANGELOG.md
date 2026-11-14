@@ -3,6 +3,11 @@
 ## [Unreleased]
 
 ### Added
+- `host::to_host_zm`, `to_host_wkb_zm` and `to_host_ewkt_zm` deliver geometry and keep Z and M
+  beside it in a `zm::ZmGeometry`. `HostReport::lost_zm` counts a delivered coordinate whose
+  repaired position matched no source coordinate within 1e-10.
+- `host::HostReport::notices` returns one `host::HostNotice` per change that occurred, so a host
+  reports each kind of loss once, with its count. `host::HostChange` names the six kinds.
 - `read_ewkt` and `write_ewkt` handle the PostGIS EWKT dialect: an optional `SRID=<n>;` prefix,
   case-insensitive, with the SRID returned beside the geometry. GDAL refuses that prefix, so it
   stays out of `read_wkt`.
@@ -50,6 +55,9 @@
   2026-11-05, and both CI baselines were re-recorded from the runner.
 
 ### Fixed
+- The WKT reader copies the first vertex's Z and M onto the closure that `Polygon::new` appends,
+  so an open ring no longer leaves `extra_coords` one coordinate short. `write_wkt_zm` wrote a NaN
+  Z for that closure, and every Z of such a ring was lost on the way out.
 - The conformance harness looked for `conformance_dump.exe` on every platform, so the Linux CI
   job failed before running a check. It now picks the executable suffix by platform.
 - `make_valid` assembles by even-odd, as GEOS does. `build_area` returned the atomic BuildArea
