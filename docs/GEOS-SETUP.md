@@ -41,14 +41,15 @@ PROPTEST_CASES=256 cargo test --features arrange,structure,parallel,simd,validat
 # Fuzz tests (5000 cases, thorough)
 PROPTEST_CASES=5000 cargo test --features arrange,structure,parallel,simd,validate --test fuzz
 
-# All features (slow: includes IO, benchmarks, Python bindings)
-cargo test --all-features
+# CI test matrix, full feature set (slow: IO backends, FFI, parallel)
+cargo test --features "arrange,structure,parallel,simd,io-geojson,io-wkt,io-wkb,io-csv,io-gpkg,io-gml,io-shp,ffi"
 
 # Clippy (CI gate)
 cargo clippy --features arrange,structure,parallel,simd,validate -- -D warnings
 
-# Full CI check
-cargo check --all-features
+# Compat checks (CI): lean shapes and the geo-traits surface
+cargo check --no-default-features
+cargo check --features "arrange,structure,parallel,simd,validate,geo-traits"
 ```
 
 ## Build and install Python wheel for QGIS
@@ -59,8 +60,9 @@ QGIS (OSGeo4W) uses Python at `C:\Users\Wildbot\AppData\Local\Programs\OSGeo4W\a
 # Build wheel
 & "C:\Users\Wildbot\AppData\Local\Programs\OSGeo4W\apps\Python312\python.exe" -m maturin build --release --features python
 
-# Install into QGIS Python (force reinstall; the wheel version follows Cargo.toml)
-& "C:\Users\Wildbot\AppData\Local\Programs\OSGeo4W\apps\Python312\python.exe" -m pip install target\wheels\geo_repair-*.whl --force-reinstall
+# Install into QGIS Python (force reinstall the newest wheel, whatever the version)
+$whl = (Get-ChildItem target\wheels\geo_repair-*win_amd64.whl | Select-Object -Last 1).FullName
+& "C:\Users\Wildbot\AppData\Local\Programs\OSGeo4W\apps\Python312\python.exe" -m pip install --force-reinstall $whl
 
 # Copy QGIS processing script
 Copy-Item -Path qgis\qgis_geo_repair.py -Destination "$env:APPDATA\QGIS\QGIS3\profiles\default\processing\scripts\" -Force

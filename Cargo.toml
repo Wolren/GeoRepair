@@ -81,8 +81,8 @@ io-shp = ["dep:shapefile", "std"]
 io-wkt = []
 io-csv = ["dep:csv", "io-wkt", "std"]
 io-gml = ["dep:quick-xml", "std"]
-# GeoPackage is a DEFAULT feature (bundled SQLite, target-gated below):
-# `geo_repair::io::load("*.gpkg")` works out of the box. WASM targets skip
+# GeoPackage is opt-in (part of `full`) and bundles SQLite, target-gated below:
+# `geo_repair::io::load("*.gpkg")` needs this feature. WASM targets skip
 # the module (the dep is in the non-wasm target block).
 io-gpkg = ["dep:rusqlite", "std"]
 io-all = ["io-shp", "io-wkt", "io-csv", "io-gml"]

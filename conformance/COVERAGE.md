@@ -14,8 +14,8 @@ the divergence is named below.
 
 | Surface | Status | Evidence |
 |---|---|---|
-| Seven types, nested `GEOMETRYCOLLECTION` | Accepted | A 111, B 94, I |
-| `EMPTY` at every level | Accepted | A, B (31 empty cases) |
+| Seven types, nested `GEOMETRYCOLLECTION` | Accepted | A 118, B 94, I |
+| `EMPTY` at every level | Accepted | A, B (28 empty cases) |
 | `Z`, `M`, `ZM` separated from the type name | Accepted | A, D, E |
 | Modifier welded to the type name (`POINTZ`, `MULTIPOLYGONZM`) | Accepted | A (4 cases), unit test |
 | Any case (`point`, `PoInT`) | Accepted | `lex_lower`, `lex_mixed_case` |

@@ -1,8 +1,8 @@
 # Release Checklist
 
 Every geo-repair release, in order. The whole point is that no step is
-skipped and nothing depends on memory: the 0.15.0/0.14.2 incident
-(2026-08-03) happened because the version dance was manual.
+skipped and nothing depends on memory: the 2026-08-03 incident happened
+because the version dance was manual.
 
 ## 1. Version
 
@@ -50,26 +50,46 @@ cargo bench --features "arrange,structure,parallel,simd,bench-geos-system,io-gpk
 ```
 
 Runs on the full 1,579,030-part dataset (the bench defaults to
-`data_0.gpkg`; do NOT point it at the lossy transcription). Full-pass
-band: 3.5-3.9s. A release that moves the bar outside the band without a
-documented reason does not ship. The committed `alaska.*` set in CI is a
-small sample and is not the bar.
+`data_0.gpkg`; do NOT point it at the lossy transcription). Compare the
+full-pass time with the README `## Performance` row for the same dataset;
+that table is the single source for the published numbers. A release that
+moves the bar without a documented reason does not ship. The committed
+`alaska.*` set in CI is a small sample and is not the bar.
 
 ## 5. Push and CI
 
-Push, then watch all 20 jobs to green: check, msrv, no-std, test,
-test-no-defaults, python, test-geos-oracle, test-serde, bench, bench-gate,
-wasm, c-ffi, lint, rustdoc, docs-rs, geos-static, semver, audit, deny,
-fuzz (5 smokes + ASan; cargo-fuzz has no UBSan). Fuzz artifacts upload on
-failure. A fuzz crash means a corpus seed + a root
-cause before release.
+Push the commit, then watch these green:
+
+- `ci.yml`, every push: `private-config`, `compat`, `tests` (full, no-defaults and serde
+  legs), `test`, `python`, `test-geos-oracle`, `conformance`, `bench-gate`, `wasm`,
+  `c-ffi`, `lint`, `docs`, `deny`, `fuzz` (2 targets, 500 runs).
+- `nightly.yml`: `bench`, `crs-wkt-bench-gate`, `geos-static`, `conformance-consumer`.
+- `fuzz-nightly.yml`: the five deep targets at 600 s each, plus two ASan runs;
+  cargo-fuzz has no UBSan.
+
+A fuzz crash means a corpus seed + a root cause before release. Fuzz artifacts upload on
+failure. The tag in step 6 starts `release.yml`, which runs `semver` before the wheels and
+the C libraries; watch those too.
 
 ## 6. Publish
 
+Push the tag; `release.yml` runs on it:
+
 ```bash
-cargo publish --dry-run   # verify
+git tag -a vX.Y.Z -m "vX.Y.Z"
+git push origin vX.Y.Z
+```
+
+The workflow runs `semver`, builds the abi3 wheels and the sdist, and builds the C libraries.
+It uploads to PyPI only when the repository variable `PYPI_PUBLISH` is `"true"`; otherwise it
+builds and tests the wheel without uploading. The C libraries are attached to the GitHub
+release after the C harness passes on each.
+
+Publish the crate itself after the tag is green:
+
+```bash
+cargo publish --dry-run
 cargo publish
-maturin publish           # wheels (verify credentials/CI first)
 ```
 
 docs.rs is preconfigured with an explicit feature list (all-features

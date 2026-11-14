@@ -215,7 +215,7 @@ dense grid rows were re-measured 2026-11-05; the rest are the 2026-09-18 set.
    otherwise.
 3. **W/12 pool-saturation floor:** the parallel batch fills all 12 workers
    with giants; nested intra-poly rayon finds no idle threads in-batch
-   (Amdahl-bound; standalone the parallel check measures 96 ms vs 53 ms in-batch).
+   (Amdahl-bound; standalone the parallel check dropped from 96 ms to 53 ms).
 4. **Giants (>4,096 ring edges) route to the boolean pipeline** - on a
    200k-edge giant single-pass noding costs 168 ms vs 36 ms for the
    boolean path (`SP_MAX_EDGES` in `src/core/mod.rs`).
@@ -278,7 +278,7 @@ Every function exists for WKB and WKT (`repair_*`, `repair_*_batch`,
 `validate_and_fix_*`, plus batch forms), with `method`
 (auto/arrange/structure) and `keep_collapsed` parameters. A QGIS
 Processing script (`qgis/qgis_geo_repair.py`) streams features through
-the WKB batch API. Mind  that due to overhead it might suffer from performance issues.
+the WKB batch API. Mind that due to overhead it might suffer from performance issues.
 Examples and full API reference: `docs/BINDINGS.md`.
 
 ## C API

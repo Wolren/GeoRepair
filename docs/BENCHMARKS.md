@@ -59,6 +59,10 @@ not a validity gap.
 
 ## Synthetic benchmarks (2026-08-07; overlap and grid rows re-measured 2026-11-05)
 
+Measured 2026-08-07. The README `### Synthetic benchmarks` table is the single source for current
+numbers. This section records that earlier run, so a label can differ from the README value. The
+overlap and dense grid rows were re-measured on 2026-11-05 in both tables.
+
 ### Polygons
 
 | Benchmark | GeoRepair (µs) | GEOS (µs) | Ratio |

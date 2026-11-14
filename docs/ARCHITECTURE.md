@@ -26,8 +26,8 @@ map for maintainers; code comments carry the per-site detail.
 
 The upstream guarantee the crate is measured against: GEOS `makeValid`
 accepts every GeoRepair repair output on the real-world dataset
-(full-mode bench; the non-winding invalid class there is 1 polygon as of
-2026-08-03, see section 3).
+(full-mode bench; the non-winding invalid class there is 0 as of
+2026-08-07, see section 3).
 
 ## 2. The repair pipeline
 
@@ -109,9 +109,10 @@ definition (937/937 GEOS XML suite cases pass). On top of exact
 predicates it applies one **deliberate strictness gate**: edges whose
 exact orientation is nonzero but within ~32 ulps of the pair's own
 length scale (`32 * EPSILON * L²`) are treated as coincident. Measured
-on the 1.58M real-world dataset (2026-08-03): 1,579,029 parts are
-winding-only (CW, GEOS-valid) and exactly 1 carries a non-winding
-defect: the gate's real-world impact is ~1 polygon. Earlier counts of
+on the 1.58M real-world dataset: 1,579,029 parts are winding-only (CW,
+GEOS-valid) and the remaining 1 was a validator gap, closed by the
+2026-08-06 fixes, so both sides report 0 invalid as of 2026-08-07
+(`docs/BENCHMARKS.md`). Earlier counts of
 2,298 (via `arrange::validate_polygon`) and 1,855 (via the full
 validator) were inflated by a genuine bug: the product-form
 proper-crossing test `o1 * o2 < 0.0` treated a -0.0 orientation (an
@@ -178,22 +179,24 @@ dropped.
 | `simd` | scalar auto-vectorized kernels | hand-written AVX2 removed: measured slower than auto-vectorized scalar |
 | `simd-portable` | `core::simd` | nightly-only (E0554 on stable, expected) |
 | `geo-traits` | georust `GeometryTrait` interop | `interop.rs` + `validation/geo_bridge.rs` |
-| `ffi` | C API + Python bindings (pyo3) | `VERSION_CSTR` derives from `CARGO_PKG_VERSION` |
-| `io-*` | file formats (geojson, wkt, wkb, csv, gpkg, gml, shp) | `io-gpkg` + `proj` mutually exclusive (sqlite link conflict) |
+| `ffi` | C API over WKB and WKT | `VERSION_CSTR` derives from `CARGO_PKG_VERSION` |
+| `python` | PyO3 bindings | abi3 wheel; `geo/serde` |
+| `io-*` | optional file formats: csv, gpkg, gml, shp | wkt and wkb are built in; geojson was removed; `io-gpkg` + `proj` mutually exclusive (sqlite link conflict) |
 | `serde` | config/geometry serialization | |
 | `bench-geos(-system)` | GEOS comparison benches | needs system GEOS for `-system` |
 | `mimalloc` | allocator (default) | |
 
 No `std` feature means alloc-only: WKB parsing, validation, and repair
-work without `std`; only file/network I/O requires it. The no_std CI job
-proves the bare and validate-only configurations compile.
+work without `std`; only file/network I/O requires it. The `compat` CI
+job proves the bare and validate-only configurations compile.
 
 ## 6. Benchmark methodology
 
 - `benches/real_world.rs` is the canonical measurement: full pass over
-  the 1.58M-polygon dataset (~3.9s, 0.98x vs GEOS), invalid-subset
-  comparison vs GEOS, validation speed. `--fast` skips the GEOS
-  comparison sections (~10s wall).
+  the 1.58M-polygon dataset, the invalid-subset comparison vs GEOS, and
+  validation speed. The README `## Performance` table carries the
+  published numbers; `--fast` skips the GEOS comparison sections
+  (~10s wall).
 - Always take the **settled second run** (first-run-after-build is
   inflated ~18% by Windows Defender + cold LTO).
 - Never trust a bench binary you cannot trace to a source file; rebuild
