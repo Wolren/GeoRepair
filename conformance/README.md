@@ -15,6 +15,11 @@ python3 conformance/run.py
 `OGR2OGR` overrides the binary when GDAL is not on `PATH`. CI runs this in the `conformance`
 job with `gdal-bin` installed.
 
+Check K needs a RustGIS checkout: `RUSTGIS_DIR=/path/to/RustGIS python3 conformance/run.py`
+builds a probe from that checkout's parser. Without the variable the check skips, which keeps a
+plain run cheap. The nightly `conformance-consumer` job sets `RUSTGIS_DIR` and
+`CONFORMANCE_REQUIRE_K=1`, so a skipped consumer fails that job instead of passing silently.
+
 The gate measures our verdict against the specification, never against OGR's tolerance. Each
 case carries an expected verdict, and a mismatch fails. OGR is used only where it is a real
 authority: for bytes, and for geometry.

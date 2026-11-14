@@ -15,30 +15,33 @@ and empty parts, closes open rings, repairs when asked, and picks the type from 
 take bytes or PostGIS text in one call, and `src/interop.rs` does the same for any `geo-traits`
 source.
 
+Z and M stay beside the geometry: `to_host_zm`, `to_host_wkb_zm` and `to_host_ewkt_zm` return a
+`ZmGeometry`, and a coordinate that matches no source position within 1e-10 is counted in
+`HostReport::lost_zm`.
+
+`HostReport::notices` returns one `HostNotice` per change that occurred, each with its count. The
+six kinds are in `HostChange`.
+
 Conformance check K measures the claim. A probe built from a RustGIS checkout reads the delivered
 text and reports the same coordinates, 63 cases, compared as raw f64 bits. Four corpus cases are
 unreadable by RustGIS raw and readable after the delivery pass: `st_mpoint_empty`, `st_nan`,
 `st_inf`, `st_ninf`.
 
+The nightly `conformance-consumer` job runs that check against a pinned RustGIS commit, with
+`CONFORMANCE_REQUIRE_K` set, so a skipped consumer fails the job. The pin moves by a pull request
+that edits `RUSTGIS_PIN` in `.github/workflows/nightly.yml`.
+
 ## Next
 
-1. **Gate the consumer in CI.** Check K needs `RUSTGIS_DIR`. Without it the run builds no probe and
-   prints `check K skipped`, which is how CI runs today. Pin a RustGIS revision and run the check
-   nightly, so a delivery regression fails on the day it lands.
-2. **Report every drop the way RustGIS reports it.** `HostReport` counts five kinds of loss. RustGIS
-   forbids a silent drop, so the counts must reach `Session::notify`, one notice per kind.
-3. **Keep Z when RustGIS keeps it.** Delivery drops Z and M because the host model is 2D. RustGIS
-   keeps Z in phases 1 and 2 of #726. Delivery needs a Z mode before that lands, and check K
-   compares Z at that point.
+The adapter side is in place. What remains is the consumer wiring, and it lands in the RustGIS
+repository:
 
-## Where the consumer work lands
-
-These changes belong in the RustGIS repository, not here:
-
-- a dependency on this crate on the load path;
-- the `check and fix geometry` vector tool, which writes a new layer and carries the `HostReport`
-  counts as notices;
-- one undo step per run.
+1. **Depend on the crate on the load path.** RustGIS has no `geo-repair` dependency today.
+2. **Ship the `check and fix geometry` vector tool.** It writes a new layer and turns each
+   `HostNotice` into `Session::notify`, so no drop is silent.
+3. **Run the tool as one undo step.** The repair call is one command, so one undo entry covers it.
+4. **Keep Z when RustGIS keeps it.** RustGIS adds Z in phases 1 and 2 of #726. Its WKT parser then
+   needs a Z path, and check K compares Z at that point.
 
 ## Outside the adapter path
 

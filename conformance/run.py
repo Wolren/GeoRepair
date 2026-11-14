@@ -655,6 +655,14 @@ def main():
                     ok = status == "ok" and payload == expected
                     rec("K_rustgis", ok, cid, "" if ok else "shape differs")
 
+        # A consumer job must fail when the consumer never ran; the plain run keeps its skip.
+        if (
+            os.environ.get("CONFORMANCE_REQUIRE_K")
+            and not res["K_rustgis"][0]
+            and not res["K_rustgis"][1]
+        ):
+            rec("K_rustgis", False, "check_k_setup", "no case reached the consumer")
+
         # L and the comparison matrix: the same delivered text through every implementation.
         gexe = build_georust()
         if gexe is None:

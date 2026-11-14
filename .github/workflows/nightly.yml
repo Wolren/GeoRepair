@@ -73,3 +73,28 @@ jobs:
           toolchain: stable
       - run: sudo apt-get update && sudo apt-get install -y cmake
       - run: cargo check --locked --features "arrange,structure,parallel,simd,validate,bench-geos"
+
+  # Consumer gate: check K builds a probe against the RustGIS checkout and compares what its
+  # WKT parser reads with what we deliver. The checkout is pinned so the consumer moves by a
+  # deliberate bump here, not under the gate. Bump RUSTGIS_PIN with a pull request that
+  # records why. CONFORMANCE_REQUIRE_K turns the plain check's skip into a failure.
+  conformance-consumer:
+    runs-on: ubuntu-24.04
+    env:
+      RUSTGIS_PIN: 83d36a8ce4b032e71447701c141b1874a0384734
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7
+        with:
+          repository: opengeos/RustGIS
+          ref: ${{ env.RUSTGIS_PIN }}
+          path: rustgis
+          fetch-depth: 1
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # stable
+        with:
+          toolchain: stable
+      - run: sudo apt-get update && sudo apt-get install -y gdal-bin
+      # shapely brings GEOS: check M still judges the rest of the run in this job.
+      - run: python3 -m pip install --upgrade pip shapely
+      - run: cargo build --locked --example conformance_dump
+      - run: RUSTGIS_DIR="$GITHUB_WORKSPACE/rustgis" CONFORMANCE_REQUIRE_K=1 python3 conformance/run.py
