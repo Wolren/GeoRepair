@@ -40,6 +40,9 @@ fn ring_is_exactly_collinear(ext: &[Coord<f64>], interior_n: usize, ia: usize, i
     (0..interior_n).all(|i| crate::orient::orient2d(a, b, ext[i]) == 0.0)
 }
 
+/// Pair checks are quadratic; above 64 components the noded output ships unfiltered.
+const PAIR_FILTER_MAX: usize = 64;
+
 /// Use the MultiLineString validator rule and scale-derived eps from
 /// check_line_components_intersect. prep::has_no_intersections uses other tolerances
 /// and passed a subnormal sliver that the validator flags NotSimple (fuzz nightly crash
@@ -49,7 +52,7 @@ pub(super) fn filter_demoted_lines(candidates: Vec<LineString<f64>>) -> Vec<Line
         .into_iter()
         .filter(|ls| !check_linestring_self_intersection(&ls.0))
         .collect();
-    if simple.len() < 2 {
+    if simple.len() < 2 || simple.len() > PAIR_FILTER_MAX {
         return simple;
     }
     let (mut gmin_x, mut gmax_x, mut gmin_y, mut gmax_y) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
