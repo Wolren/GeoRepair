@@ -9,6 +9,35 @@ pub(crate) fn ring_has_non_finite(ring: &[Coord<f64>]) -> bool {
     ring.iter().any(|c| !c.x.is_finite() || !c.y.is_finite())
 }
 
+/// True when an edge runs back along its neighbour: exact collinearity, reversed direction.
+/// Edges under 1e-300 are skipped because their cross product underflows to zero.
+pub(crate) fn ring_has_adjacent_backtrack(ring: &[Coord<f64>]) -> bool {
+    let n = ring.len().saturating_sub(1);
+    if n < 3 {
+        return false;
+    }
+    for i in 0..n {
+        let j = (i + 1) % n;
+        let a = ring[i];
+        let b = ring[j];
+        let c = ring[(j + 1) % n];
+        let l1 = ((b.x - a.x).powi(2) + (b.y - a.y).powi(2)).sqrt();
+        let l2 = ((c.x - b.x).powi(2) + (c.y - b.y).powi(2)).sqrt();
+        // Below this the cross product underflows to zero and reads as collinear at any angle.
+        if l1 * l2 <= 1e-300 {
+            continue;
+        }
+        if crate::orient::orient2d(a, b, c) != 0.0 {
+            continue;
+        }
+        let dot = (b.x - a.x) * (c.x - b.x) + (b.y - a.y) * (c.y - b.y);
+        if dot < 0.0 {
+            return true;
+        }
+    }
+    false
+}
+
 pub fn check_ring_validity(ring: &[Coord<f64>], is_exterior: bool) -> Vec<GeometryValidationError> {
     let mut errors = Vec::new();
 
@@ -88,6 +117,13 @@ pub fn check_ring_validity(ring: &[Coord<f64>], is_exterior: bool) -> Vec<Geomet
     // sign - differential fuzz 2026-08-07).
     if first_pinch_dup(&ring[..n]).is_some() {
         errors.push(GeometryValidationError::PinchPoint);
+    }
+
+    // A ring that runs back along its own previous edge: adjacent edges are skipped by the
+    // pair loops below, so a retrace of a sub-segment was accepted (fuzz retrace seed).
+    if ring_has_adjacent_backtrack(ring) {
+        errors.push(GeometryValidationError::SelfIntersection);
+        return errors;
     }
 
     if n > 64 {
@@ -433,3 +469,6 @@ pub(crate) fn bbox_overlap(a: [f64; 4], b: [f64; 4]) -> bool {
 pub(crate) fn bbox_covers(a: [f64; 4], b: [f64; 4]) -> bool {
     a[0] <= b[0] && a[2] >= b[2] && a[1] <= b[1] && a[3] >= b[3]
 }
+
+
+

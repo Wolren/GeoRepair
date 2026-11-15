@@ -70,6 +70,16 @@ pub(crate) fn fast_path_check(
     if total_verts == 0 || poly.exterior().0.len() < 4 {
         return false;
     }
+    // A retrace along the previous edge is invalid, and the scale-relative gate below is
+    // blind to one shorter than its epsilon (1e-12 of the extent). Exact and O(n).
+    if crate::validation::ring::ring_has_adjacent_backtrack(&poly.exterior().0)
+        || poly
+            .interiors()
+            .iter()
+            .any(|h| crate::validation::ring::ring_has_adjacent_backtrack(&h.0))
+    {
+        return false;
+    }
     // extreme-span gate (crash-65111cd0 guard, 2026-08-09) does not
     let mut bbox = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
     let (mut sub_ulp, ext_min_abs) = crate::arrange::ring_guards(&poly.exterior().0);

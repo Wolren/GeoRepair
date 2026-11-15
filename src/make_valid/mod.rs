@@ -307,7 +307,8 @@ fn run_to_line<T: NodingFloat>(run: &[Coord<f64>]) -> LineString<T> {
 
 /// Greedy cross-component conflict filter (mirror of the validator's
 /// [`check_line_components_intersect`] rule): keep a run unless it conflicts with an
-fn keep_conflicting_runs(runs: &[Vec<Coord<f64>>]) -> Option<Vec<usize>> {
+/// earlier one. Used as the final safety net after [`lines::node_components`].
+pub(crate) fn keep_conflicting_runs(runs: &[Vec<Coord<f64>>]) -> Option<Vec<usize>> {
     if runs.len() < 2 {
         return None;
     }
@@ -392,9 +393,10 @@ impl<T: NodingFloat> MakeValid for MultiLineString<T> {
                         .collect()
                 })
                 .collect();
-            if let Some(kept) = keep_conflicting_runs(&fd) {
-                lines = kept.into_iter().map(|i| lines[i].clone()).collect();
-            }
+            lines = lines::node_components(&fd)
+                .into_iter()
+                .map(|r| run_to_line::<T>(&r))
+                .collect();
         }
         match (points.len(), lines.len()) {
             (0, 0) => empty_geom(),
@@ -453,6 +455,7 @@ impl<T: GeoFloat> MakeValid for Rect<T> {
 
 #[cfg(any(feature = "arrange", feature = "structure"))]
 mod multipolygon;
+mod lines;
 mod polygon;
 pub(crate) mod precondition;
 mod strip;
