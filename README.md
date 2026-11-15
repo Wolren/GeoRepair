@@ -234,6 +234,27 @@ dense grid rows were re-measured 2026-11-05; the rest are the 2026-09-18 set.
 9. **WKT reads a dimension modifier, it does not infer one from the ordinate
    count:** `POINT Z (1 2 3)` parses, `POINT (1 2 3)` stays an error.
 
+## Roadmap
+
+Fixed in `a0848de`: line components node at their contacts instead of dropping; a ring that
+retraces its previous edge is rejected; the fuzz corpus replay decodes each corpus the way its
+target does. The items below remain, each measured on 1,282 differential cases.
+
+1. **Fix the collinearity tolerance in `segments_collinear_overlap`.** An orientation value is
+   compared with a length (`eps`), so a pair of near-parallel segments reads as overlapping at
+   any gap. On the `geos-392` linework (123 parts) this drops 29 parts, 30% of their length.
+   Compare `|f| / len` with `eps` and re-baseline the XML suite; the change moves verdicts on
+   near-parallel linework.
+2. **Decide what to do below the snap grid.** A polygon at 1e208 whose sliver is 3.7e4 wide is
+   thinner than one grid step at that extent (`SNAP_SCALE = 1e8`), and the repair returns empty.
+   Choose a warning, or return the input unchanged when the even-odd area is not representable.
+3. **Benchmark `node_components` on large MultiLineStrings.** Every pair of pieces is checked;
+   123 parts cost about 0.3 ms. Gate the loop behind the R-tree if 1k parts dominate.
+4. **Report dropped line pieces.** Identical or overlapping components are deduplicated
+   silently. `OutputReport` counts polygon parts; extend it to line components.
+5. **Fail the corpus replay when a seed is skipped.** `tests/corpus_replay.rs` allows up to 8
+   skipped seeds. The format fix brought the count to 0, so make the assert exact.
+
 ## Integration with the geo ecosystem
 
 geo-repair plugs into georust two ways: a `geo-traits` interop module that
