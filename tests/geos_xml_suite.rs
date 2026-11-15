@@ -411,13 +411,8 @@ fn geometry_lines(g: &Geometry<f64>) -> Vec<Line<f64>> {
     }
 }
 
-/// DOCUMENTED DIVERGENCE for the two hard buildarea corpus cases (measured
-/// 2026-08-01): our directed-label face walker (extract_all_faces_geos)
-/// splits faces at shared/pinch vertices differently than GEOS's
-/// PolygonizeGraph, so we keep extra shells (over-coverage: 89000 vs 56000
-/// and 215000 vs 140000). The fix is a GEOS-parity face walker, not a
-/// comparison tweak. These pins fail when the behavior changes: when the
-/// walker is fixed, update the pins to GEOS's expected areas/counts.
+/// Exact pin for the two hard buildarea corpus cases: GEOS's expected area and part
+/// count. Update only against the corpus expected WKT, never a local measurement.
 fn run_build_area_divergence(
     geom: &Geometry<f64>,
     expected_wkt: &str,
@@ -431,9 +426,9 @@ fn run_build_area_divergence(
     let our_area = total_poly_area(&result);
     let our_count = component_count(&result);
     let (pin_area, pin_count) = if name.contains("self_touching_multipolygons") {
-        (89000.0, 5)
+        (56000.0, 4)
     } else if name.contains("checkerboard") {
-        (215000.0, 21)
+        (140000.0, 11)
     } else {
         return (false, format!("unknown divergence pin: {name}"));
     };
@@ -441,17 +436,17 @@ fn run_build_area_divergence(
         return (
             false,
             format!(
-                "divergence pin moved: area {our_area}, count {our_count} (pinned {pin_area}/{pin_count}) - if the face walker was fixed, update the pin to GEOS's expected: {expected_wkt}"
+                "pin moved: area {our_area}, count {our_count} (pinned {pin_area}/{pin_count}) - corpus expected: {expected_wkt}"
             ),
         );
     }
     (true, String::new())
 }
 
-/// GEOS buildarea oracle: our BuildArea port vs the expected WKT. The public call keeps
-/// atomic faces, not GEOS's dissolved output; self_touching_multipolygons and checkerboard
-/// are pinned by run_build_area_divergence. Empty linework yields GEOMETRYCOLLECTION EMPTY.
-/// Type family, area, and component count are compared against the parsed expected geometry.
+/// GEOS buildarea oracle: build_area vs the expected WKT. Empty linework yields
+/// GEOMETRYCOLLECTION EMPTY. The two hard corpus cases are pinned by
+/// run_build_area_divergence. Type family, area, and component count are compared
+/// against the parsed expected geometry.
 fn run_build_area_compare(geom: &Geometry<f64>, expected_wkt: &str) -> (bool, String) {
     let expected = match parse_wkt(expected_wkt) {
         Some(g) => g,
