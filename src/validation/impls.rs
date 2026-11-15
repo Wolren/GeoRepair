@@ -353,10 +353,7 @@ pub(crate) fn segments_collinear_overlap(
     }
     let o1 = crate::orient::orient2d(a1, a2, b1);
     let o2 = crate::orient::orient2d(a1, a2, b2);
-    if o1.abs() > eps || o2.abs() > eps {
-        return false;
-    }
-    true
+    !(o1.abs() > eps || o2.abs() > eps)
 }
 
 /// Bbox containment with epsilon (endpoints included).

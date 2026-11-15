@@ -843,16 +843,16 @@ pub(super) fn shells_have_overlapping_bboxes(mp: &MultiPolygon<f64>) -> bool {
 /// Check if any vertex of one shell is strictly inside another shell's ring.
 #[cfg(any(feature = "arrange", feature = "structure"))]
 pub(super) fn shells_have_vertex_inside(mp: &MultiPolygon<f64>) -> bool {
-    for i in 0..mp.0.len() {
-        let ext_i = &mp.0[i].exterior().0;
+    for (i, poly_i) in mp.0.iter().enumerate() {
+        let ext_i = &poly_i.exterior().0;
         if ext_i.len() < 4 {
             continue;
         }
-        for j in 0..mp.0.len() {
+        for (j, poly_j) in mp.0.iter().enumerate() {
             if i == j {
                 continue;
             }
-            let ext_j = &mp.0[j].exterior().0;
+            let ext_j = &poly_j.exterior().0;
             if ext_j.len() < 4 {
                 continue;
             }

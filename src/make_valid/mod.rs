@@ -193,7 +193,9 @@ impl<T: NodingFloat> MakeValid for LineString<T> {
 
 /// Map noded coordinate runs to the output geometry.
 fn noded_runs_to_geometry<T: NodingFloat>(runs: &[Vec<Coord<f64>>]) -> Geometry<T> {
-    let out: Vec<LineString<T>> = runs.iter().map(|r| run_to_line::<T>(r)).collect();
+    let raw: Vec<LineString<f64>> = runs.iter().map(|r| LineString::new(r.clone())).collect();
+    let kept = crate::make_valid::strip::filter_demoted_lines(raw);
+    let out: Vec<LineString<T>> = kept.iter().map(|ls| run_to_line::<T>(&ls.0)).collect();
     match out.len() {
         0 => empty_geom(),
         1 => Geometry::LineString(out.into_iter().next().expect("len==1 verified")),

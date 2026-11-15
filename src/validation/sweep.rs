@@ -456,10 +456,7 @@ fn sweep_with_grid(
             }
         });
     }
-    if hit {
-        return Some(true);
-    }
-    Some(false)
+    Some(hit)
 }
 
 /// R-tree self-intersection check (the dense-ring fallback; kept exact - same predicate

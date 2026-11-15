@@ -44,7 +44,7 @@ fn ring_is_exactly_collinear(ext: &[Coord<f64>], interior_n: usize, ia: usize, i
 /// check_line_components_intersect. prep::has_no_intersections uses other tolerances
 /// and passed a subnormal sliver that the validator flags NotSimple (fuzz nightly crash
 /// 2026-09-14).
-fn filter_demoted_lines(candidates: Vec<LineString<f64>>) -> Vec<LineString<f64>> {
+pub(super) fn filter_demoted_lines(candidates: Vec<LineString<f64>>) -> Vec<LineString<f64>> {
     let simple: Vec<LineString<f64>> = candidates
         .into_iter()
         .filter(|ls| !check_linestring_self_intersection(&ls.0))
