@@ -25,7 +25,7 @@ back unchanged.
 
 Two strategies, chosen by geometry type:
 
-- **Structure** (default) matches GEOS `ST_MakeValid` output semantics:
+- **Structure** (default) matches `ST_MakeValid` output semantics:
   planar graph extraction, face walking, even-odd assembly.
 - **Arrange** is a CDT-based fallback for complex topologies.
 
@@ -38,9 +38,9 @@ WKT keeps Z and M when you ask for it: `read_wkt_zm` returns the geometry, its
 same files and returns x/y, so a Z-enabled layer from OGR or QGIS loads without
 error.
 
-Everything is evaluated against the JTS testxml and GEOS XML suites, a CGAL case set, plus the
-crate's own fuzz tests. The result should always come out valid per GEOS, but the strategy
-differences can make the output slightly differ.
+Everything is evaluated against the JTS testxml suite, the GEOS XML corpus, a CGAL case set,
+plus the crate's own fuzz tests. The result is always valid, but the strategy differences can
+make the output slightly differ.
 
 ## Performance
 
@@ -232,8 +232,7 @@ dense grid rows were re-measured 2026-11-05; the rest are the 2026-09-18 set.
    (sqlite3 link conflict). `io-gpkg` is opt-in, so a `proj` build enables
    `proj` and leaves `io-gpkg` off.
 9. **WKT reads a dimension modifier, it does not infer one from the ordinate
-   count:** `POINT Z (1 2 3)` parses, `POINT (1 2 3)` stays an error, where GEOS
-   infers Z from the third ordinate.
+   count:** `POINT Z (1 2 3)` parses, `POINT (1 2 3)` stays an error.
 
 ## Integration with the geo ecosystem
 

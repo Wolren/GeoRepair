@@ -49,12 +49,12 @@ No priority is set. Each item names the evidence that put it here.
 
 ### Correctness
 
-- **213 baselined XML cases diverge from GEOS**, mostly on the OGC winding contract
+- **213 baselined cases in the reference XML corpus diverge**, mostly on the OGC winding contract
   (`docs/BENCHMARKS.md`).
-- **No dimension inference from the ordinate count.** GEOS reads `POINT (1 2 3)` as Z; we refuse it
-  because no modifier is present.
-- **`fill_rule` is accepted and never read.** Repair applies EvenOdd, which matches GEOS on a
-  pentagram (3.333 against NonZero's 4.667).
+- **No dimension inference from the ordinate count.** The reference reads `POINT (1 2 3)` as Z;
+  we refuse it because no modifier is present.
+- **`fill_rule` is accepted and never read.** Repair applies EvenOdd, which matches the reference
+  on a pentagram (3.333 against NonZero's 4.667).
 - **Z and M stay outside `Geometry`.** `WktGeometry::extra_coords` carries them.
 
 ### Performance

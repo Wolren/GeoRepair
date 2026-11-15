@@ -96,7 +96,7 @@ fail, the result is empty. This is what makes "valid or empty" hold by
 construction rather than by hope.
 
 The Structure arm winds *before* its gate: the fast path can pass a
-wrong-wound (CW) input through, and CW shells are valid per GEOS but
+wrong-wound (CW) input through, and CW shells are valid per OGC but
 flagged `WrongOrientation` by our validator. Gating pre-winding would
 send every CW passthrough to Arrange, which decomposes boundary-touching
 holes into MultiPolygons (measured: `speed_bug_regressions`
@@ -105,13 +105,13 @@ holes into MultiPolygons (measured: `speed_bug_regressions`
 ## 3. Validation model
 
 The validator (`src/validation/`) runs Shewchuk exact predicates
-(`orient2d` via the `robust` crate) and agrees with GEOS on the OGC
-definition (937/937 GEOS XML suite cases pass). On top of exact
+(`orient2d` via the `robust` crate) and follows the OGC definition
+(937/937 GEOS XML suite cases pass). On top of exact
 predicates it applies one **deliberate strictness gate**: edges whose
 exact orientation is nonzero but within ~32 ulps of the pair's own
 length scale (`32 * EPSILON * L²`) are treated as coincident. Measured
 on the 1.58M real-world dataset: 1,579,029 parts are winding-only (CW,
-GEOS-valid) and the remaining 1 was a validator gap, closed by the
+valid per the reference) and the remaining 1 was a validator gap, closed by the
 2026-08-06 fixes, so both sides report 0 invalid as of 2026-08-07
 (`docs/BENCHMARKS.md`). Earlier counts of
 2,298 (via `arrange::validate_polygon`) and 1,855 (via the full
@@ -124,8 +124,8 @@ crossing. The zero-safe strict opposite-sign predicate
 (`segments_properly_cross`, `has_no_intersections`) removed the false
 positives and, together with an inclusive hole-containment check in
 `arrange::validate_polygon`, closed the `--fast` bench gate artifact
-(Structure outputs were flagged 2,298/2,298 while GEOS accepted them;
-now the light gate agrees with GEOS). The crate still ships with the
+(Structure outputs were flagged 2,298/2,298 while the reference accepted them;
+now the light gate agrees). The crate still ships with the
 strictness gate because production data's precision floor is far below
 f64 and accepting noise-scale separations destabilizes downstream
 overlay/buffer geometry.
@@ -135,7 +135,7 @@ repaired output the pipeline ships, and our stricter validator accepts
 every repaired output it rejected the input for (the dispatch gates
 guarantee valid-or-empty).
 
-Validator gaps closed by differential fuzz vs GEOS (2026-08-03):
+Validator gaps closed by differential fuzz against the reference (2026-08-03):
 
 - **Exact-collinear micro-edge overlap** below the length gate: two
   edges bit-exactly on the same line whose length is below `eps` were
@@ -164,7 +164,7 @@ Validator gaps closed by differential fuzz vs GEOS (2026-08-03):
 | Panic inside i_overlay | `catch_unwind` → empty + warning log |
 | Unresolvable after all paths | Empty `GeometryCollection` |
 
-`keep_collapsed` semantics mirror GEOS `MakeValid`'s keepCollapsed flag:
+`keep_collapsed` semantics mirror the `MakeValid` keepCollapsed flag:
 a collapsed ring is preserved as a lower dimension (LineString for a
 collinear ring, Point for a single distinct point) instead of being
 dropped.
