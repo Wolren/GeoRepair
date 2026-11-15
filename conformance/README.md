@@ -19,6 +19,8 @@ Check K needs a RustGIS checkout: `RUSTGIS_DIR=/path/to/RustGIS python3 conforma
 builds a probe from that checkout's parser. Without the variable the check skips, which keeps a
 plain run cheap. The nightly `conformance-consumer` job sets `RUSTGIS_DIR` and
 `CONFORMANCE_REQUIRE_K=1`, so a skipped consumer fails that job instead of passing silently.
+Check R is the same checkout used by a separate script, not by `run.py`:
+`RUSTGIS_DIR=/path/to/RustGIS python3 conformance/rustgis_repair_oracle.py`.
 
 The gate measures our verdict against the specification, never against OGR's tolerance. Each
 case carries an expected verdict, and a mismatch fails. OGR is used only where it is a real
@@ -47,6 +49,7 @@ not a gate.
 | M GEOS validity | what we hand a host is valid and simple per GEOS, and repair is shown to act | needs `shapely` |
 | N repair measure | repair never loses area, length or points against GEOS, and leaves a clean shape alone | `shapely.make_valid`, reports wider fills by name |
 | O even-odd area | repair preserves the input's even-odd interior | polygonize plus crossing parity, not GEOS makeValid |
+| R repair oracle | RustGIS Repair Geometry keeps the even-odd interior | needs `RUSTGIS_DIR` and `shapely` |
 
 Check M is the validity check and needs shapely, which ships GEOS. It parses the repaired delivery
 with GEOS, requires `is_valid` and `is_simple` on every case, and fails outright when no case was
@@ -58,6 +61,19 @@ Check O is the area check. It polygonizes the delivered boundary, decides each f
 parity, and requires the repaired area to match the even-odd area within 1e-6. GEOS `makeValid` is
 not the oracle here: on a ring that walks a segment twice it loses parity too, so check N alone
 can pass against a similarly wrong answer.
+
+Check R is the external repair comparison. `RUSTGIS_DIR=/path/to/RustGIS python3
+conformance/rustgis_repair_oracle.py` builds a probe against that checkout's public tool dispatch
+(`rustgis_analysis::run("repairGeometry", ...)`), runs it on seven cases, and compares the area it
+keeps with the same even-odd oracle check O uses. RustGIS applies shells-minus-holes rather than
+the even-odd rule, so five of the seven diverge on the checkout tested (2026-11-15, commit
+`046bd3c2`); the script says so and cites opengeos/RustGIS#2003. It is a measurement, not a gate:
+it exits 0, skips when `RUSTGIS_DIR` is unset, when the checkout has no Repair Geometry, when
+`shapely` is missing, or when the probe cannot be built, and `--strict` is the opt-in exit 1 a
+human can ask for. The first run builds the probe (a few minutes) into
+`%TEMP%/georepair-rustgis-probe`; later runs reuse it. `RUSTGIS_REPAIR_PROBE` points at an
+already-built probe, and a skip there is never a pass. The differential run over 1,282 cases
+behind this check lives outside this repo, in `D:\Scratch\dsh\rustgis-repair-harness`.
 
 Check K is the consumer check. `RUSTGIS_DIR=/path/to/RustGIS python3 conformance/run.py` builds
 a probe against that checkout's own `parse_wkt` and compares the shape it reports, coordinate
