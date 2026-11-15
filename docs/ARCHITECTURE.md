@@ -43,8 +43,8 @@ input
   │                   hole validity.
   │
   ├─ Structure single-pass   (structure/symdiff.rs)
-  │   node shell + holes once, then the MakeValid loop: BuildArea,
-  │   XOR the level, subtract its boundary. Even-odd by construction.
+  │   node shell + holes once, build the planar faces, and read the
+  │   even-odd interior from a dual walk rooted at the unbounded face.
   │   Primary path for self-crossings, crossing holes, hole overlaps.
   │   A ring that walks a segment twice falls through to Arrange, whose
   │   face walk keeps parity exact. Result is OGC-wound and validated.

@@ -236,8 +236,7 @@ pub(crate) fn fix_polygon_owned(
         }
         return FixOutcome::Unconsumed(poly);
     }
-    // BuildArea under-fills a ring that walks a segment twice (2000v: 212.74 against 1122.27).
-    // The CDT path keeps parity exact, so route that class there.
+    // A ring that walks a segment twice goes to the CDT path, whose parity is exact.
     if has_coincident_edges(&poly) {
         return FixOutcome::Unconsumed(poly);
     }

@@ -115,8 +115,10 @@
   (`structure/fix_ring_graph.rs`) now cite JTS, where `PolygonRing`,
   `PolygonTopologyAnalyzer`, `PolygonNodeTopology`, `Quadrant` and
   `PolygonizeGraph.getEdgeRings` live under the Eclipse Distribution License 1.0.
-  A new `NOTICE` carries the Eclipse Foundation copyright and the EDL text. The
-  `BuildArea` and `MakeValid` modules keep their separate lineage.
+  A new `NOTICE` carries the Eclipse Foundation copyright and the EDL text.
+- Polygon repair core rewritten from `docs/REPAIR-CORE-SPEC.md`. The noded
+  boundary goes through one even-odd parity walk over the planar faces instead
+  of the BuildArea/XOR loop. The GEOS/rttopo lineage is gone from the source.
 - `tests/geos_xml`: 64 files re-imported from the JTS testxml corpus (content-equivalent,
   EDL-1.0). The rest stay GEOS test data under LGPL-2.1-or-later, remain excluded from
   the crate package, and are recorded in `SOURCE.txt` and `JTS-REIMPORT.txt`.

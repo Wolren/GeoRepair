@@ -55,21 +55,24 @@ implementation. A clean-room implementation can work from this file alone.
 ### Boundary report
 
 The implementation also returns the segments on the boundary of the built area,
-each once, in the order the rings were built. The MakeValid loop uses this list;
-it is not part of the public API.
+each once, in the order the rings were built. The MakeValid entry points use this
+list; it is not part of the public API.
 
 ### Cost
 
 Expected `O((n + k) log n)` time and `O(n + k)` memory, where `n` is the edge
 count and `k` the number of intersections. No unbounded loop, no panic.
 
-## 3. MakeValid loop
+## 3. MakeValid entry points
 
 ### Input
 
 A polygon boundary: the shell and hole rings of one polygon, as segments.
 
 ### Steps
+
+The XOR loop below is one valid method. A direct parity calculation over the
+planar faces gives the same result. The output contract is what matters.
 
 1. Node the boundary. Split segments at every crossing and drop zero-length
    segments. Duplicate segments keep their multiplicity.
@@ -95,9 +98,9 @@ A polygon boundary: the shell and hole rings of one polygon, as segments.
 
 ### Cost and termination
 
-Each pass removes at least the boundary of the built area. The guard bounds the
-worst case. Expected cost is `O(m log m)` per pass with `m` remaining edges, and
-the number of passes is small on real data.
+Expected cost is `O((n + k) log n)` for the noded boundary. The XOR method adds
+a pass per level, and the guard bounds the worst case. The direct parity method
+uses one pass.
 
 ## 4. Contract tests
 
@@ -114,8 +117,9 @@ the number of passes is small on real data.
 
 ## 5. Provenance
 
-The current implementation follows the GEOS/rttopo lineage, recorded in the module
-comments. This specification describes behaviour only. An implementation written
-from it, by a person who has not read the GEOS or rttopo source, is not a
-derivative of that source and can be licensed under Apache-2.0. Keep the tests in
-section 4 as the acceptance gate for that implementation.
+The current implementation was written from this specification. It computes the
+even-odd interior with one dual walk over the planar faces, so it carries no
+GEOS or rttopo lineage. This specification describes behaviour only. A future
+implementation written from it, by a person who has not read the GEOS or rttopo
+source, is not a derivative of that source and can be licensed under
+Apache-2.0. Keep the tests in section 4 as the acceptance gate.

@@ -25,8 +25,8 @@ back unchanged.
 
 Two strategies, chosen by geometry type:
 
-- **Structure** (default) mirrors GEOS `ST_MakeValid`: planar graph
-  extraction, face walking, even-odd assembly.
+- **Structure** (default) matches GEOS `ST_MakeValid` output semantics:
+  planar graph extraction, face walking, even-odd assembly.
 - **Arrange** is a CDT-based fallback for complex topologies.
 
 WKB and WKT reading and writing, plus a custom binary batch format, are

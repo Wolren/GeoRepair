@@ -1,6 +1,6 @@
 [package]
 name = "geo-repair"
-description = "Fix invalid GIS geometries in parallel using rewritten GEOS/JTS repair module"
+description = "Fix invalid GIS geometries in parallel with an even-odd repair core"
 version = "0.15.0"
 license = "Apache-2.0"
 repository = "https://github.com/Wolren/GeoRepair"
