@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-15
+
 ### Added
 - `host::to_host_zm`, `to_host_wkb_zm` and `to_host_ewkt_zm` deliver geometry and keep Z and M
   beside it in a `zm::ZmGeometry`. `HostReport::lost_zm` counts a delivered coordinate whose
@@ -59,6 +61,11 @@
   2026-11-05, and both CI baselines were re-recorded from the runner.
 
 ### Fixed
+- The noded line path emitted a `MultiLineString` its own validator rejected (`NotSimple`,
+  components intersect at interior points) for a 6-point WKB line near 1e83. Every run set now
+  passes the same consistency filter as polygon demotion, bounded to 64 components and 128
+  segments so large outputs keep the noder's cost. The scheduled fuzz artifact returns valid
+  geometry in `Auto` and `Structure`.
 - `Structure` repair no longer under-fills a polygon whose ring walks a segment twice. The
   2000-vertex walk came back valid at area 212.74 against the 1122.27 even-odd interior, and GEOS
   fills 790.49 on the same ring. Such rings now take the CDT path, which resolves parity by
