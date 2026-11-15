@@ -337,6 +337,11 @@ macOS are attached to every GitHub release. Full API reference:
 
 Apache-2.0
 
+GEOS is an inspiration in the broad sense: it defines the repair behaviour this
+crate targets, and the model that wrote the core may have seen GEOS in training
+data. The core was written from `docs/REPAIR-CORE-SPEC.md`, not from the source.
+No GEOS or rttopo code ships.
+
 Portions of the validation topology and face extraction derive from the JTS
 Topology Suite under the Eclipse Distribution License 1.0. See `NOTICE`.
 

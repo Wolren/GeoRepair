@@ -119,7 +119,9 @@ uses one pass.
 
 The current implementation was written from this specification. It computes the
 even-odd interior with one dual walk over the planar faces, so it carries no
-GEOS or rttopo lineage. This specification describes behaviour only. A future
-implementation written from it, by a person who has not read the GEOS or rttopo
-source, is not a derivative of that source and can be licensed under
-Apache-2.0. Keep the tests in section 4 as the acceptance gate.
+GEOS or rttopo lineage. The model that wrote it may have seen GEOS in training
+data, so GEOS is an inspiration in the broad sense, not a source. This
+specification describes behaviour only. A future implementation written from
+it, by a person who has not read the GEOS or rttopo source, is not a derivative
+of that source and can be licensed under Apache-2.0. Keep the tests in section 4
+as the acceptance gate.
