@@ -40,11 +40,15 @@ pub(crate) fn single_pass_fix_tuned(
     if lines.is_empty() {
         return None;
     }
-    let noded = crate::structure::edge_split::split_edges_tuned(&lines, tuning);
+    let snapped = crate::arrange::prep::snap_endpoints(lines);
+    if snapped.is_empty() {
+        return None;
+    }
+    let noded = crate::structure::edge_split::split_edges_tuned(&snapped, tuning);
     if noded.is_empty() {
         return None;
     }
-    let area = build_area_with_boundary(&noded)?.0;
+    let area = crate::structure::polygonizer::even_odd_area_noded(&noded)?.0;
     if area.0.is_empty() { None } else { Some(area) }
 }
 

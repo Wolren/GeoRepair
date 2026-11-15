@@ -402,7 +402,7 @@ pub(crate) fn edge_intersection(
 
     let e1 = Line::new(a1, a2);
     let e2 = Line::new(b1, b2);
-    let (ti, tj) = intersect_param(&e1, &e2, eps)?;
+    let (ti, tj) = *intersect_param(&e1, &e2, eps).first()?;
     if (ti > eps && ti < 1.0 - eps) || (tj > eps && tj < 1.0 - eps) {
         let pi = lerp(e1, ti);
         let pj = lerp(e2, tj);

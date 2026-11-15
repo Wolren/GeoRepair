@@ -211,20 +211,20 @@ fn split_edges_rtree(edges: &[Line<f64>], split_points: &mut [SplitPoint], eps: 
                         return ::core::ops::ControlFlow::<(), ()>::Continue(());
                     }
 
-                    if let Some((ti, tj)) = intersect_param(&edges[i], &edges[j], eps)
-                        && ((ti > eps && ti < 1.0 - eps) || (tj > eps && tj < 1.0 - eps))
-                    {
-                        let pi = lerp(edges[i], ti);
-                        let pj = lerp(edges[j], tj);
-                        let pt = Coord {
-                            x: (pi.x + pj.x) * 0.5,
-                            y: (pi.y + pj.y) * 0.5,
-                        };
-                        if ti > eps && ti < 1.0 - eps {
-                            local.push((i, ti, pt));
-                        }
-                        if tj > eps && tj < 1.0 - eps {
-                            local.push((j, tj, pt));
+                    for (ti, tj) in intersect_param(&edges[i], &edges[j], eps) {
+                        if (ti > eps && ti < 1.0 - eps) || (tj > eps && tj < 1.0 - eps) {
+                            let pi = lerp(edges[i], ti);
+                            let pj = lerp(edges[j], tj);
+                            let pt = Coord {
+                                x: (pi.x + pj.x) * 0.5,
+                                y: (pi.y + pj.y) * 0.5,
+                            };
+                            if ti > eps && ti < 1.0 - eps {
+                                local.push((i, ti, pt));
+                            }
+                            if tj > eps && tj < 1.0 - eps {
+                                local.push((j, tj, pt));
+                            }
                         }
                     }
                     ::core::ops::ControlFlow::<(), ()>::Continue(())
@@ -275,20 +275,20 @@ fn split_edges_rtree(edges: &[Line<f64>], split_points: &mut [SplitPoint], eps: 
                     return ::core::ops::ControlFlow::<(), ()>::Continue(());
                 }
 
-                if let Some((ti, tj)) = intersect_param(&edges[i], &edges[j], eps)
-                    && ((ti > eps && ti < 1.0 - eps) || (tj > eps && tj < 1.0 - eps))
-                {
-                    let pi = lerp(edges[i], ti);
-                    let pj = lerp(edges[j], tj);
-                    let pt = Coord {
-                        x: (pi.x + pj.x) * 0.5,
-                        y: (pi.y + pj.y) * 0.5,
-                    };
-                    if ti > eps && ti < 1.0 - eps {
-                        split_points[i].push((ti, pt));
-                    }
-                    if tj > eps && tj < 1.0 - eps {
-                        split_points[j].push((tj, pt));
+                for (ti, tj) in intersect_param(&edges[i], &edges[j], eps) {
+                    if (ti > eps && ti < 1.0 - eps) || (tj > eps && tj < 1.0 - eps) {
+                        let pi = lerp(edges[i], ti);
+                        let pj = lerp(edges[j], tj);
+                        let pt = Coord {
+                            x: (pi.x + pj.x) * 0.5,
+                            y: (pi.y + pj.y) * 0.5,
+                        };
+                        if ti > eps && ti < 1.0 - eps {
+                            split_points[i].push((ti, pt));
+                        }
+                        if tj > eps && tj < 1.0 - eps {
+                            split_points[j].push((tj, pt));
+                        }
                     }
                 }
                 ::core::ops::ControlFlow::<(), ()>::Continue(())
@@ -328,20 +328,20 @@ fn split_edges_bruteforce(edges: &[Line<f64>], split_points: &mut [SplitPoint], 
             {
                 continue;
             }
-            if let Some((ti, tj)) = intersect_param(&edges[i], &edges[j], eps)
-                && ((ti > eps && ti < 1.0 - eps) || (tj > eps && tj < 1.0 - eps))
-            {
-                let pi = lerp(edges[i], ti);
-                let pj = lerp(edges[j], tj);
-                let pt = Coord {
-                    x: (pi.x + pj.x) * 0.5,
-                    y: (pi.y + pj.y) * 0.5,
-                };
-                if ti > eps && ti < 1.0 - eps {
-                    split_points[i].push((ti, pt));
-                }
-                if tj > eps && tj < 1.0 - eps {
-                    split_points[j].push((tj, pt));
+            for (ti, tj) in intersect_param(&edges[i], &edges[j], eps) {
+                if (ti > eps && ti < 1.0 - eps) || (tj > eps && tj < 1.0 - eps) {
+                    let pi = lerp(edges[i], ti);
+                    let pj = lerp(edges[j], tj);
+                    let pt = Coord {
+                        x: (pi.x + pj.x) * 0.5,
+                        y: (pi.y + pj.y) * 0.5,
+                    };
+                    if ti > eps && ti < 1.0 - eps {
+                        split_points[i].push((ti, pt));
+                    }
+                    if tj > eps && tj < 1.0 - eps {
+                        split_points[j].push((tj, pt));
+                    }
                 }
             }
         }
@@ -375,27 +375,31 @@ fn split_edges_sweepline(edges: &[Line<f64>], split_points: &mut [SplitPoint], e
         {
             continue;
         }
-        if let Some((ti, tj)) = intersect_param(&edges[i], &edges[j], eps)
-            && ((ti > eps && ti < 1.0 - eps) || (tj > eps && tj < 1.0 - eps))
-        {
-            let pi = lerp(edges[i], ti);
-            let pj = lerp(edges[j], tj);
-            let pt = Coord {
-                x: (pi.x + pj.x) * 0.5,
-                y: (pi.y + pj.y) * 0.5,
-            };
-            if ti > eps && ti < 1.0 - eps {
-                split_points[i].push((ti, pt));
-            }
-            if tj > eps && tj < 1.0 - eps {
-                split_points[j].push((tj, pt));
+        for (ti, tj) in intersect_param(&edges[i], &edges[j], eps) {
+            if (ti > eps && ti < 1.0 - eps) || (tj > eps && tj < 1.0 - eps) {
+                let pi = lerp(edges[i], ti);
+                let pj = lerp(edges[j], tj);
+                let pt = Coord {
+                    x: (pi.x + pj.x) * 0.5,
+                    y: (pi.y + pj.y) * 0.5,
+                };
+                if ti > eps && ti < 1.0 - eps {
+                    split_points[i].push((ti, pt));
+                }
+                if tj > eps && tj < 1.0 - eps {
+                    split_points[j].push((tj, pt));
+                }
             }
         }
     }
 }
 
 #[inline]
-pub(crate) fn intersect_param(e1: &Line<f64>, e2: &Line<f64>, eps: f64) -> Option<(f64, f64)> {
+pub(crate) fn intersect_param(
+    e1: &Line<f64>,
+    e2: &Line<f64>,
+    eps: f64,
+) -> SmallVec<[(f64, f64); 2]> {
     // Phase 1: Detection via robust orient2d (Shewchuk adaptive precision).
     let o1 = orient2d(e1.start, e1.end, e2.start);
     let o2 = orient2d(e1.start, e1.end, e2.end);
@@ -403,10 +407,10 @@ pub(crate) fn intersect_param(e1: &Line<f64>, e2: &Line<f64>, eps: f64) -> Optio
     let o4 = orient2d(e2.start, e2.end, e1.end);
 
     if o1.signum() == o2.signum() && o1 != 0.0 && o2 != 0.0 {
-        return None;
+        return SmallVec::new();
     }
     if o3.signum() == o4.signum() && o3 != 0.0 && o4 != 0.0 {
-        return None;
+        return SmallVec::new();
     }
 
     if o1 == 0.0 && o2 == 0.0 && o3 == 0.0 && o4 == 0.0 {
@@ -419,27 +423,32 @@ pub(crate) fn intersect_param(e1: &Line<f64>, e2: &Line<f64>, eps: f64) -> Optio
         let t = t_dd.to_f64();
         let u = u_dd.to_f64();
         if t >= -eps && t <= 1.0 + eps && u >= -eps && u <= 1.0 + eps {
-            return Some((t, u));
+            return smallvec::smallvec![(t, u)];
         }
     }
-    None
+    SmallVec::new()
 }
 
+/// Splits a collinear overlap at both ends: one point per end may lie inside both.
 #[inline]
-fn intersect_param_collinear(e1: &Line<f64>, e2: &Line<f64>, eps: f64) -> Option<(f64, f64)> {
+fn intersect_param_collinear(
+    e1: &Line<f64>,
+    e2: &Line<f64>,
+    eps: f64,
+) -> SmallVec<[(f64, f64); 2]> {
     let o1 = orient2d(e1.start, e1.end, e2.start);
     let o2 = orient2d(e1.start, e1.end, e2.end);
     let o3 = orient2d(e2.start, e2.end, e1.start);
     let o4 = orient2d(e2.start, e2.end, e1.end);
     if o1.abs() > eps || o2.abs() > eps || o3.abs() > eps || o4.abs() > eps {
-        return None;
+        return SmallVec::new();
     }
 
     let dx = e1.end.x - e1.start.x;
     let dy = e1.end.y - e1.start.y;
     let len2 = dx * dx + dy * dy;
     if len2 < eps {
-        return None;
+        return SmallVec::new();
     }
 
     let dot = |c: Coord<f64>| -> f64 { (c.x - e1.start.x) * dx + (c.y - e1.start.y) * dy };
@@ -457,6 +466,7 @@ fn intersect_param_collinear(e1: &Line<f64>, e2: &Line<f64>, eps: f64) -> Option
     let lo = e1a.max(e2a);
     let hi = e1b.min(e2b);
 
+    let mut out = SmallVec::new();
     if lo + eps < hi {
         let e2_dot = |c: Coord<f64>| -> f64 {
             let dx2 = e2.end.x - e2.start.x;
@@ -467,14 +477,6 @@ fn intersect_param_collinear(e1: &Line<f64>, e2: &Line<f64>, eps: f64) -> Option
             }
             ((c.x - e2.start.x) * dx2 + (c.y - e2.start.y) * dy2) / len2_2
         };
-
-        let mid_x = e1.start.x + lo * dx;
-        let mid_y = e1.start.y + lo * dy;
-        let mid = Coord { x: mid_x, y: mid_y };
-
-        let t_param = lo;
-        let u_param = e2_dot(mid).clamp(0.0, 1.0);
-
         let e1_eps = eps / dx.abs().max(dy.abs()).max(1.0);
         let e2_eps = eps
             / (e2.end.x - e2.start.x)
@@ -482,13 +484,20 @@ fn intersect_param_collinear(e1: &Line<f64>, e2: &Line<f64>, eps: f64) -> Option
                 .max((e2.end.y - e2.start.y).abs())
                 .max(1.0);
 
-        let on_e1 = t_param > e1_eps && t_param < 1.0 - e1_eps;
-        let on_e2 = u_param > e2_eps && u_param < 1.0 - e2_eps;
-        if on_e1 || on_e2 {
-            return Some((t_param, u_param));
+        for t_param in [lo, hi] {
+            let mid = Coord {
+                x: e1.start.x + t_param * dx,
+                y: e1.start.y + t_param * dy,
+            };
+            let u_param = e2_dot(mid).clamp(0.0, 1.0);
+            let on_e1 = t_param > e1_eps && t_param < 1.0 - e1_eps;
+            let on_e2 = u_param > e2_eps && u_param < 1.0 - e2_eps;
+            if on_e1 || on_e2 {
+                out.push((t_param, u_param));
+            }
         }
     }
-    None
+    out
 }
 
 #[inline(always)]

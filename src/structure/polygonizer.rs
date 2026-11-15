@@ -26,6 +26,10 @@ struct Cycle {
     /// Twice the signed area: negative for a shell walk, positive for a hole walk.
     area2: f64,
     bbox: AABB<[f64; 2]>,
+    /// Index of the cycle on the other side of the first half-edge.
+    opposite: usize,
+    /// First half-edge id, used to find the opposite cycle after the walk.
+    first_half: usize,
 }
 
 /// R-tree entry that maps a query hit back to its cycle index.
@@ -49,6 +53,12 @@ fn canonical(c: Coord<f64>) -> Coord<f64> {
         x: if c.x == 0.0 { 0.0 } else { c.x },
         y: if c.y == 0.0 { 0.0 } else { c.y },
     }
+}
+
+#[inline]
+fn vkey(c: Coord<f64>) -> (u64, u64) {
+    let c = canonical(c);
+    (c.x.to_bits(), c.y.to_bits())
 }
 
 #[inline]
@@ -106,6 +116,85 @@ fn parity_filter(lines: &[Line<f64>]) -> Vec<Line<f64>> {
         .zip(odd)
         .filter_map(|(line, keep)| keep.then_some(line))
         .collect()
+}
+
+/// Joins collinear chains through their interior degree-2 vertices.
+fn merge_collinear(lines: Vec<Line<f64>>) -> Vec<Line<f64>> {
+    let n = lines.len();
+    if n < 2 {
+        return lines;
+    }
+    let mut incident: FxHashMap<(u64, u64), SmallVec<[u32; 4]>> = FxHashMap::default();
+    for (i, line) in lines.iter().enumerate() {
+        incident.entry(vkey(line.start)).or_default().push(i as u32);
+        incident.entry(vkey(line.end)).or_default().push(i as u32);
+    }
+    let far = |line: &Line<f64>, v: (u64, u64)| {
+        if vkey(line.start) == v {
+            line.end
+        } else {
+            line.start
+        }
+    };
+    let joins = |v: (u64, u64), from: usize, used: &[bool]| -> Option<usize> {
+        let inc = incident.get(&v)?;
+        if inc.len() != 2 {
+            return None;
+        }
+        let other = if inc[0] as usize == from {
+            inc[1]
+        } else {
+            inc[0]
+        } as usize;
+        if other == from || used[other] {
+            return None;
+        }
+        let (vp, op) = (far(&lines[from], v), far(&lines[other], v));
+        if vkey(vp) == vkey(op) || vkey(vp) == v || vkey(op) == v {
+            return None;
+        }
+        let vv = Coord {
+            x: f64::from_bits(v.0),
+            y: f64::from_bits(v.1),
+        };
+        let dx = op.x - vp.x;
+        let dy = op.y - vp.y;
+        let len2 = dx * dx + dy * dy;
+        let cross = (vv.x - vp.x) * dy - (vv.y - vp.y) * dx;
+        let scale = 1.0 + vp.x.abs().max(vp.y.abs()).max(op.x.abs()).max(op.y.abs());
+        let eps = 1e-12 * scale;
+        if cross * cross > eps * eps * len2 {
+            return None;
+        }
+        let straight = (vv.x - vp.x) * (op.x - vv.x) + (vv.y - vp.y) * (op.y - vv.y) > 0.0;
+        straight.then_some(other)
+    };
+    let mut used = vec![false; n];
+    let mut out: Vec<Line<f64>> = Vec::with_capacity(n);
+    for i in 0..n {
+        if used[i] {
+            continue;
+        }
+        used[i] = true;
+        let mut head = lines[i].start;
+        let mut tail = lines[i].end;
+        let mut cur = i;
+        while let Some(next) = joins(vkey(tail), cur, &used) {
+            used[next] = true;
+            tail = far(&lines[next], vkey(tail));
+            cur = next;
+        }
+        cur = i;
+        while let Some(prev) = joins(vkey(head), cur, &used) {
+            used[prev] = true;
+            head = far(&lines[prev], vkey(head));
+            cur = prev;
+        }
+        if vkey(head) != vkey(tail) {
+            out.push(Line::new(head, tail));
+        }
+    }
+    out
 }
 
 /// Index of a coordinate, keyed by exact bits after the -0.0 fold.
@@ -313,6 +402,7 @@ fn extract_cycles(graph: &Graph) -> (Vec<Cycle>, Vec<usize>) {
                 continue;
             }
             let idx = cycles.len();
+            let first_half = half_edges[0];
             for h in half_edges {
                 if owner[h] == NONE {
                     owner[h] = idx;
@@ -322,8 +412,15 @@ fn extract_cycles(graph: &Graph) -> (Vec<Cycle>, Vec<usize>) {
                 bbox: ring_bbox(&coords),
                 coords,
                 area2,
+                opposite: NONE,
+                first_half,
             });
         }
+    }
+    for cycle in cycles.iter_mut() {
+        let h = cycle.first_half;
+        let twin = if h < ne { h + ne } else { h - ne };
+        cycle.opposite = owner[twin];
     }
     (cycles, owner)
 }
@@ -389,6 +486,14 @@ fn assign_holes(cycles: &[Cycle]) -> Vec<Vec<usize>> {
         });
         candidates.sort_by(|&a, &b| cycles[b].area2.total_cmp(&cycles[a].area2));
         for shell in candidates {
+            // The twin walk bounds the same ring from the other side.
+            if shell == cycle.opposite {
+                continue;
+            }
+            // A hole ring is strictly smaller than the shell that contains it.
+            if cycles[shell].area2.abs() <= cycle.area2.abs() {
+                continue;
+            }
             if ring_inside(cycle, &cycles[shell]) {
                 holes[shell].push(h);
                 break;
@@ -481,21 +586,45 @@ fn assemble(
 
 fn subdivision(lines: &[Line<f64>]) -> Option<(Vec<Cycle>, Vec<usize>, usize)> {
     let prepared = prepare_lines(lines.to_vec()).ok()?;
-    let unique = parity_filter(&prepared.lines);
+    let unique = merge_collinear(parity_filter(&prepared.lines));
     let graph = build_graph(&unique);
     let ne = graph.edges.len();
     let (cycles, owner) = extract_cycles(&graph);
     Some((cycles, owner, ne))
 }
 
-/// Even-odd interior of the edge set, with the boundary lines of the built area.
-pub(crate) fn even_odd_area(lines: &[Line<f64>]) -> Option<(MultiPolygon<f64>, Vec<Line<f64>>)> {
-    let (cycles, owner, ne) = subdivision(lines)?;
+fn subdivision_noded(lines: &[Line<f64>]) -> Option<(Vec<Cycle>, Vec<usize>, usize)> {
+    let unique = merge_collinear(parity_filter(lines));
+    let graph = build_graph(&unique);
+    let ne = graph.edges.len();
+    let (cycles, owner) = extract_cycles(&graph);
+    Some((cycles, owner, ne))
+}
+
+fn assemble_area(
+    cycles: Vec<Cycle>,
+    owner: Vec<usize>,
+    ne: usize,
+) -> (MultiPolygon<f64>, Vec<Line<f64>>) {
     let holes = assign_holes(&cycles);
     let (node, unbounded) = face_nodes(&cycles, &holes);
     let parity = face_parity(&owner, ne, &node, unbounded);
     let (polygons, boundary) = assemble(&cycles, &holes, &parity, &node, true);
-    Some((MultiPolygon::new(polygons), boundary))
+    (MultiPolygon::new(polygons), boundary)
+}
+
+/// Even-odd interior of the edge set, with the boundary lines of the built area.
+pub(crate) fn even_odd_area(lines: &[Line<f64>]) -> Option<(MultiPolygon<f64>, Vec<Line<f64>>)> {
+    let (cycles, owner, ne) = subdivision(lines)?;
+    Some(assemble_area(cycles, owner, ne))
+}
+
+/// Even-odd interior of an edge set that the caller already welded and split.
+pub(crate) fn even_odd_area_noded(
+    lines: &[Line<f64>],
+) -> Option<(MultiPolygon<f64>, Vec<Line<f64>>)> {
+    let (cycles, owner, ne) = subdivision_noded(lines)?;
+    Some(assemble_area(cycles, owner, ne))
 }
 
 /// Every bounded face of the edge set, holes assigned.

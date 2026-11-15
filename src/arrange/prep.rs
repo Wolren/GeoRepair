@@ -23,6 +23,15 @@ pub fn prepare_lines(lines: Vec<Line<f64>>) -> Result<PreparedLines, MakeValidEr
             }
         }
     }
+    let mut snapped = snap_endpoints(lines);
+    odd_even_filter(&mut snapped);
+    let mut split = split_segments(snapped)?;
+    odd_even_filter(&mut split);
+    Ok(PreparedLines { lines: split })
+}
+
+/// Welds endpoints within the 1e-8 snap radius and drops zero-length lines.
+pub(crate) fn snap_endpoints(lines: Vec<Line<f64>>) -> Vec<Line<f64>> {
     let snap_radius = 1e-8;
     let cell_size = snap_radius * 2.0;
     let mut grid: FxHashMap<(i64, i64), Coord<f64>> = FxHashMap::default();
@@ -34,10 +43,7 @@ pub fn prepare_lines(lines: Vec<Line<f64>>) -> Result<PreparedLines, MakeValidEr
             snapped.push(line);
         }
     }
-    odd_even_filter(&mut snapped);
-    let mut split = split_segments(snapped)?;
-    odd_even_filter(&mut split);
-    Ok(PreparedLines { lines: split })
+    snapped
 }
 
 fn grid_key(coord: Coord<f64>, cell_size: f64) -> (i64, i64) {
