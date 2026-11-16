@@ -64,12 +64,16 @@ pub struct OutputReport {
     pub kept_parts: usize,
     /// Parts removed because a different dimension was selected.
     pub dropped_parts: usize,
+    /// Line components the call received, before repair and policy.
+    pub line_parts_in: usize,
+    /// Line components the call emitted.
+    pub line_parts_out: usize,
 }
 
 impl OutputReport {
-    /// True when no part was removed.
+    /// True when no part was removed and no line component was merged away.
     pub fn is_lossless(&self) -> bool {
-        self.dropped_parts == 0
+        self.dropped_parts == 0 && self.line_parts_in == self.line_parts_out
     }
 }
 
@@ -136,6 +140,22 @@ fn count_parts<T: GeoFloat>(geometry: &Geometry<T>) -> usize {
     count
 }
 
+/// Count line components without moving them: repair merges duplicates silently.
+fn count_line_parts<T: GeoFloat>(geometry: &Geometry<T>) -> usize {
+    let mut count = 0usize;
+    let mut stack: Vec<&Geometry<T>> = Vec::new();
+    stack.push(geometry);
+    while let Some(g) = stack.pop() {
+        match g {
+            Geometry::Line(_) | Geometry::LineString(_) => count += 1,
+            Geometry::MultiLineString(mls) => count += mls.0.len(),
+            Geometry::GeometryCollection(gc) => stack.extend(gc.0.iter()),
+            _ => {}
+        }
+    }
+    count
+}
+
 fn areal_geometry<T: GeoFloat>(mut polygons: Vec<Polygon<T>>) -> Geometry<T> {
     if polygons.len() == 1 {
         Geometry::Polygon(polygons.pop().expect("len==1 verified"))
@@ -171,17 +191,21 @@ pub fn apply_policy<T: GeoFloat>(
 ) -> (Geometry<T>, OutputReport) {
     if policy == OutputPolicy::KeepAll {
         let kept_parts = count_parts(&geometry);
+        let lines = count_line_parts(&geometry);
         return (
             geometry,
             OutputReport {
                 kept_parts,
                 dropped_parts: 0,
+                line_parts_in: lines,
+                line_parts_out: lines,
             },
         );
     }
 
     let parts = parts_of(geometry);
     let total = parts.len();
+    let line_parts_in = parts.lines.len();
 
     let kept = match policy {
         OutputPolicy::ArealOnly => parts.polygons.len(),
@@ -205,11 +229,14 @@ pub fn apply_policy<T: GeoFloat>(
         puntal_geometry(parts.points)
     };
 
+    let line_parts_out = count_line_parts(&out);
     (
         out,
         OutputReport {
             kept_parts: kept,
             dropped_parts: total - kept,
+            line_parts_in,
+            line_parts_out,
         },
     )
 }
@@ -224,7 +251,10 @@ pub fn make_valid_with_policy(
     config: &MakeValidConfig,
     policy: OutputPolicy,
 ) -> (Geometry<f64>, OutputReport) {
-    apply_policy(geometry.make_valid_with_config(config), policy)
+    let (out, mut report) = apply_policy(geometry.make_valid_with_config(config), policy);
+    // The repair merges duplicate line pieces before the policy runs, so count the caller's input.
+    report.line_parts_in = count_line_parts(geometry);
+    (out, report)
 }
 
 /// Drop what a closed host format cannot carry: non-finite coordinates, empty members, open rings.
@@ -329,6 +359,44 @@ fn sanitize_polygon<T: GeoFloat>(p: &Polygon<T>) -> Option<Polygon<T>> {
         }
     }
     Some(Polygon::new(LineString::new(exterior), holes))
+}
+
+#[cfg(all(test, feature = "arrange", feature = "structure"))]
+mod policy_tests {
+    use super::{apply_policy, count_line_parts, make_valid_with_policy, OutputPolicy};
+    use crate::core::MakeValidConfig;
+    use geo::{Coord, Geometry, LineString, MultiLineString};
+
+    fn line(points: &[(f64, f64)]) -> LineString<f64> {
+        LineString::new(points.iter().map(|&(x, y)| Coord { x, y }).collect())
+    }
+
+    #[test]
+    fn keep_all_counts_every_line_component() {
+        let mls = MultiLineString::new(vec![
+            line(&[(0.0, 0.0), (10.0, 0.0)]),
+            line(&[(0.0, 1.0), (10.0, 1.0)]),
+        ]);
+        let (out, report) = apply_policy(Geometry::MultiLineString(mls), OutputPolicy::KeepAll);
+        assert_eq!(report.line_parts_in, 2);
+        assert_eq!(report.line_parts_out, count_line_parts(&out));
+        assert!(report.is_lossless());
+    }
+
+    #[test]
+    fn a_deduplicated_line_component_is_reported() {
+        // Identical parts: the repair keeps one, and the report must show the merge.
+        let mls = MultiLineString::new(vec![
+            line(&[(0.0, 0.0), (10.0, 0.0)]),
+            line(&[(0.0, 0.0), (10.0, 0.0)]),
+        ]);
+        let g = Geometry::MultiLineString(mls);
+        let (out, report) = make_valid_with_policy(&g, &MakeValidConfig::default(), OutputPolicy::KeepAll);
+        assert_eq!(report.line_parts_in, 2);
+        assert_eq!(report.line_parts_out, 1);
+        assert_eq!(report.line_parts_out, count_line_parts(&out));
+        assert!(!report.is_lossless());
+    }
 }
 
 #[cfg(test)]
