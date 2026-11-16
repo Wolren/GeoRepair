@@ -262,6 +262,18 @@ fn preserve_valid_input(
     if matches!(&out, Geometry::Polygon(_) | Geometry::MultiPolygon(_)) {
         return out;
     }
+    let empty = matches!(&out, Geometry::GeometryCollection(gc) if gc.0.is_empty());
+    // Below the snap grid the loss cannot be measured, so an empty repair returns the input.
+    if empty && snap_cannot_represent(orig) {
+        let (ext_clean, int_clean) = filter_finite_rings(orig);
+        if let Ok((ext_ring, _)) = dedup_and_close(ext_clean) {
+            let cleaned = Polygon::new(ext_ring, int_clean);
+            if cleaned.validate().valid {
+                warn!("SNAP_SCALE 1e8 cannot hold these coordinates; returning the input with duplicate vertices removed");
+                return Geometry::Polygon(cleaned);
+            }
+        }
+    }
     if orig.validate().valid {
         warn!("repair emptied a valid polygon; returning the input unchanged");
         return Geometry::Polygon(orig.clone());

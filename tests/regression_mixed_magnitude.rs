@@ -99,3 +99,50 @@ fn fuzz_mixed_magnitude_deadly_signal() {
         );
     }
 }
+
+// The three sub-grid fuzz mutants (harness mut26, mut34, mut99): y reaches 1e208 and the
+// sliver is 3.7e4 wide, below one step of the 1e8 snap grid at that extent. The repair
+// cannot measure what it would lose, so it returns the input with the repeated vertex
+// collapsed instead of an empty collection.
+#[test]
+fn sub_grid_mutants_keep_the_input() {
+    let p = |x: f64, y: f64| Coord { x, y };
+    let mut rings = vec![vec![
+        p(1e15, 1e15),
+        p(1e15, 1e15),
+        p(1e15 + 1.0, 1e15),
+        p(1e15 + 1.0, 1e15 + 1.0),
+        p(1e15, 4.919094327364069e208),
+        p(1e15, 1e15),
+    ]];
+    let sliver = vec![
+        p(2.56e17, 2e15),
+        p(3.6893297258671407e19, 4.918498623153493e208),
+        p(3.6893297258671407e19, 4.918498623153493e208),
+        p(3.6893297258671374e19, 4.918498623153493e208),
+        p(2.56e17, 2e15),
+    ];
+    rings.push(sliver.clone());
+    rings.push(sliver);
+    for (k, ring) in rings.into_iter().enumerate() {
+        let poly = Polygon::new(LineString::new(ring.clone()), Vec::new());
+        let mut want: Vec<Coord<f64>> = Vec::new();
+        for c in &ring {
+            if want.last() != Some(c) {
+                want.push(*c);
+            }
+        }
+        for method in [PolyMethod::Auto, PolyMethod::Structure, PolyMethod::Arrange] {
+            let cfg = MakeValidConfig {
+                poly_method: method,
+                ..Default::default()
+            };
+            let out = poly.make_valid_with_config(&cfg);
+            let geo::Geometry::Polygon(got) = &out else {
+                panic!("mutant {k} in mode {method:?} came back as {out:?}");
+            };
+            assert_eq!(got.exterior().0, want, "mutant {k} in mode {method:?}");
+            assert!(out.validate().valid, "mutant {k} in mode {method:?} is invalid");
+        }
+    }
+}
