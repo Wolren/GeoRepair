@@ -212,7 +212,10 @@ dense grid rows were re-measured 2026-11-05; the rest are the 2026-09-18 set.
    diverges on borderline inputs (213 baselined XML cases, mostly the OGC
    winding contract - `docs/BENCHMARKS.md`). Repair ships only
    validator-clean geometry and degrades to an empty GeometryCollection
-   otherwise.
+   otherwise, with one exception below the snap grid: when `|coord| * 1e8`
+   overflows the 2^53 key space, an empty repair returns the input with
+   consecutive duplicate vertices collapsed, because the input's features
+   are finer than the grid can resolve and the loss cannot be measured.
 3. **W/12 pool-saturation floor:** the parallel batch fills all 12 workers
    with giants; nested intra-poly rayon finds no idle threads in-batch
    (Amdahl-bound; standalone the parallel check dropped from 96 ms to 53 ms).

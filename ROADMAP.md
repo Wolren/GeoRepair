@@ -9,7 +9,7 @@ A differential harness ran Repair Geometry (RustGIS `046bd3c2`) and GeoRepair ov
 the 120-case OGC conformance corpus, the GEOS and JTS XML suites, 6 random crossing walks, and
 200 fuzz seeds and variants. Both engines were scored against an independent oracle: even-odd area
 from polygonize plus crossing parity, with GEOS `make_valid` as a second opinion. GeoRepair missed
-the oracle on 45 cases before `a0848de` and on 6 after it.
+the oracle on 45 cases before `a0848de`, on 6 after it, and on 0 after the two fixes below.
 
 ## Done
 
@@ -19,33 +19,18 @@ the oracle on 45 cases before `a0848de` and on 6 after it.
   Six cases.
 - `a0848de` - `tests/corpus_replay.rs` decodes each corpus the way its fuzz target does. 79 seeds
   run, 0 are skipped. Before, all 41 raw f64 seeds were read as WKB and dropped silently.
+- `57de5dd` - Item 1: collinearity is a distance, not an area. `segments_collinear_overlap` and
+  `segments_intersect_any` compare `|f| / len` with `eps`, the longer segment supplies the reference
+  line, and the degenerate guard is `len2 <= eps * eps` (it was `len2 <= eps`, which exempted every
+  segment shorter than 1e-6, so the verdict depended on part order). `node_components` cuts both
+  parts at each end of an overlap, and `on_segment` uses the same convention. `geos-392`: 123 parts
+  in, 125 pieces out, one 1.2e-10 duplicate deduplicated, 1.2e-10 of length lost.
+- `abff4b9` - Item 2: below the snap grid the repair keeps the input. When `|coord| * 1e8` overflows
+  the 2^53 key space and the repair would return nothing, `preserve_valid_input` returns the input
+  with consecutive duplicate vertices collapsed, and only when that result validates. `mut26`,
+  `mut34` and `mut99` keep their polygon.
 
 ## Now
-
-### 1. Collinearity tolerance in the component rule
-
-`segments_collinear_overlap` compares an orientation value (twice an area) with `eps` (a length).
-A pair of near-parallel segments then reads as overlapping at any gap. The `geos-392` geometry
-(123 parts) touches only at endpoints, but the rule reports an overlap, and the repair drops 29
-parts, 30% of the length.
-
-Work: compare `|f| / len` with `eps`. Run the XML suites and re-baseline the masked divergence
-count if it moves.
-
-Done when: the three `geos-392` cases keep all 123 parts, and no suite regresses.
-
-### 2. Policy below the snap grid
-
-A polygon with coordinates at 1e208 and a sliver 3.7e4 wide is thinner than one grid step at that
-extent (`SNAP_SCALE = 1e8`). The repair returns an empty GeometryCollection. The even-odd area of
-that input is not representable in f64 either, so the loss cannot be measured.
-
-Work: choose one policy and write it in `Limitations`: return empty with a warning, or return the
-input unchanged when the area is below the grid.
-
-Done when: the policy is implemented, tested on the three corpus mutants, and documented.
-
-## Next
 
 ### 3. Noding cost on large MultiLineStrings
 
@@ -77,10 +62,10 @@ Work: assert `skipped == 0`.
 
 The XML suite decides line validity by GEOS parity, but the repair enforces the OGC component
 rule. The two disagree on linework that GEOS calls valid and whose parts meet. Decide which one
-the public contract follows, and make the suite and the repair agree. Item 1 removes the false
-positives; this item removes the ambiguity.
+the public contract follows, and make the suite and the repair agree. The distance-based rule in
+`57de5dd` removed the false positives; this item removes the ambiguity.
 
 ## Not planned
 
-- Polygon repair semantics. GeoRepair matches the even-odd oracle on the measured polygon cases
-  outside the two items above, so there is no work item here.
+- Polygon repair semantics. GeoRepair matches the even-odd oracle on every measured polygon case,
+  so there is no work item here.
