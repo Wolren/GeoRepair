@@ -9,7 +9,8 @@ A differential harness ran Repair Geometry (RustGIS `046bd3c2`) and GeoRepair ov
 the 120-case OGC conformance corpus, the GEOS and JTS XML suites, 6 random crossing walks, and
 200 fuzz seeds and variants. Both engines were scored against an independent oracle: even-odd area
 from polygonize plus crossing parity, with GEOS `make_valid` as a second opinion. GeoRepair missed
-the oracle on 45 cases before `a0848de`, on 6 after it, and on 0 after the two fixes below.
+the oracle on 45 cases before `a0848de`, on 6 after it, and on 0 after the component-rule and
+snap-grid fixes (`57de5dd`, `abff4b9`).
 
 ## Done
 
@@ -29,34 +30,18 @@ the oracle on 45 cases before `a0848de`, on 6 after it, and on 0 after the two f
   the 2^53 key space and the repair would return nothing, `preserve_valid_input` returns the input
   with consecutive duplicate vertices collapsed, and only when that result validates. `mut26`,
   `mut34` and `mut99` keep their polygon.
+- `b28c6db` - Item 3: `node_components` scans only nearby pieces. A sweep over the piece boxes,
+  sorted by min x and stopping past `max_x + eps`, replaces the pairwise loops in `connect`,
+  `split_closed_parts`, `dedupe_covered` and `any_conflict`: a pair further apart than `eps` cannot
+  touch. 1,000 parts went from 137 ms to 0.66 ms serial and 0.11 ms parallel; 10,000 parts from
+  11.8 s to 6.2 ms. Bench rows `mls 1000x3v` and `mls 10000x3v`. A set that spreads in y still pays
+  only the four-compare box test per candidate.
+- `5443b37` - Item 4: `OutputReport` now reports line components. `line_parts_in` and
+  `line_parts_out` count the caller's input and the emitted geometry, and `is_lossless()` is false
+  when a deduplicated component disappears: two identical parts report 2 in, 1 out.
+- `476e9b2` - Item 5: `tests/corpus_replay.rs` requires `skipped == 0`. All 79 seeds run.
 
 ## Now
-
-### 3. Noding cost on large MultiLineStrings
-
-`node_components` checks every pair of pieces. 123 parts cost about 0.3 ms. The cost is quadratic
-and unbounded.
-
-Work: benchmark 1k and 10k parts, then gate the pairwise loop behind the R-tree if it dominates.
-
-Done when: a bench row exists and the 1k-part case stays under one millisecond.
-
-### 4. Report deduplicated line pieces
-
-Identical or overlapping components are deduplicated silently. `OutputReport` counts polygon parts
-and drops; line components have no counter.
-
-Work: add a line-component counter and a test that the report matches the output.
-
-Done when: a caller can tell that a repair dropped or merged a line component.
-
-## Later
-
-### 5. Exact replay assert
-
-`tests/corpus_replay.rs` allows up to 8 skipped seeds. The count is 0 since the format fix.
-
-Work: assert `skipped == 0`.
 
 ### 6. Line validity: component rule or GEOS parity
 
