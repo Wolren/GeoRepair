@@ -154,5 +154,5 @@ fn replay_all_corpus_seeds() {
     }
     eprintln!("replayed {n} corpus seeds, skipped {skipped} outside a target's input shape");
     assert!(n >= 70, "replayed only {n} seeds: the corpus was not read as intended");
-    assert!(skipped <= 8, "skipped {skipped} seeds: a corpus is being decoded wrongly");
+    assert_eq!(skipped, 0, "skipped {skipped} seeds: a corpus is being decoded wrongly");
 }
