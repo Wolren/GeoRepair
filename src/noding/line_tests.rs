@@ -38,7 +38,7 @@ fn assert_mls_valid(chains: &[Vec<Coord<f64>>]) {
             .collect(),
     );
     let g = Geometry::MultiLineString(mls);
-    assert!(g.is_valid(), "assembled MultiLineString is not valid");
+    assert!(g.is_valid(), "assembled MultiLineString is not valid: {chains:?}");
 }
 
 fn node_ok(pairs: &[(f64, f64)]) -> Vec<Vec<Coord<f64>>> {
@@ -160,6 +160,10 @@ fn star_burst() {
 
 /// Three segments crossing at nearly the same point (within the noding eps of each
 /// other).
+///
+/// The input retraces the 1e-9 piece at the bottom, so the noder keeps both copies and
+/// the component rule rejects the assembled MLS: deduplication is `node_components`' job.
+/// Both near-coincident crossing points must still end up as chain endpoints.
 #[test]
 fn near_coincident_crossing_cluster() {
     let chains = node_ok(&[
@@ -171,7 +175,13 @@ fn near_coincident_crossing_cluster() {
         (5.0, 5.0),
     ]);
     assert!(chains.len() >= 6, "expected >= 6 chains, got {chains:?}");
-    assert_mls_valid(&chains);
+    let ends: Vec<Coord<f64>> = chains.iter().flat_map(|ch| [ch[0], ch[ch.len() - 1]]).collect();
+    for node in [c(5.0000000005, 0.0), c(5.000000001, 0.0)] {
+        assert!(
+            ends.iter().any(|e| *e == node),
+            "crossing node {node:?} is not a chain endpoint: {chains:?}"
+        );
+    }
 }
 
 /// The bench collinear-overlap shape (50 segments on y = 0 with doubled coverage): the

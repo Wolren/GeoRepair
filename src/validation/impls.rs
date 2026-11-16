@@ -285,7 +285,10 @@ pub(crate) fn segments_intersect_any(
     if o1 * o2 < 0.0 && o3 * o4 < 0.0 {
         return true;
     }
-    if o1.abs() <= eps && o2.abs() <= eps {
+    // Twice an area is len times a distance, so each on-segment gate scales eps by its len.
+    let tol_a = eps * ((a2.x - a1.x) * (a2.x - a1.x) + (a2.y - a1.y) * (a2.y - a1.y)).sqrt();
+    let tol_b = eps * ((b2.x - b1.x) * (b2.x - b1.x) + (b2.y - b1.y) * (b2.y - b1.y)).sqrt();
+    if o1.abs() <= tol_a && o2.abs() <= tol_a {
         return segments_collinear_overlap(a1, a2, b1, b2, eps);
     }
     let on_seg = |p: Coord<f64>, s1: Coord<f64>, s2: Coord<f64>| -> bool {
@@ -300,16 +303,16 @@ pub(crate) fn segments_intersect_any(
             d1 > eps && d2 > eps
         }
     };
-    if o1.abs() <= eps && on_seg(b1, a1, a2) {
+    if o1.abs() <= tol_a && on_seg(b1, a1, a2) {
         return true;
     }
-    if o2.abs() <= eps && on_seg(b2, a1, a2) {
+    if o2.abs() <= tol_a && on_seg(b2, a1, a2) {
         return true;
     }
-    if o3.abs() <= eps && on_seg(a1, b1, b2) {
+    if o3.abs() <= tol_b && on_seg(a1, b1, b2) {
         return true;
     }
-    if o4.abs() <= eps && on_seg(a2, b1, b2) {
+    if o4.abs() <= tol_b && on_seg(a2, b1, b2) {
         return true;
     }
     false
@@ -318,12 +321,24 @@ pub(crate) fn segments_intersect_any(
 /// True if both segments are collinear and overlap over a positive-length interval
 /// (endpoint-only touching is not an overlap).
 pub(crate) fn segments_collinear_overlap(
-    a1: Coord<f64>,
-    a2: Coord<f64>,
-    b1: Coord<f64>,
-    b2: Coord<f64>,
+    mut a1: Coord<f64>,
+    mut a2: Coord<f64>,
+    mut b1: Coord<f64>,
+    mut b2: Coord<f64>,
     eps: f64,
 ) -> bool {
+    let la = (a2.x - a1.x) * (a2.x - a1.x) + (a2.y - a1.y) * (a2.y - a1.y);
+    let lb = (b2.x - b1.x) * (b2.x - b1.x) + (b2.y - b1.y) * (b2.y - b1.y);
+    // The longer segment is the reference line: a 1e-10 sliver's direction is 1e-8 off at 5e-5.
+    if la < lb {
+        (a1, a2, b1, b2) = (b1, b2, a1, a2);
+    }
+    // len2 <= eps rejected every segment shorter than sqrt(eps), 1e-6 at eps 1e-12.
+    let len2 = la.max(lb);
+    if len2 <= eps * eps {
+        return false;
+    }
+    let len = len2.sqrt();
     let dx = a2.x - a1.x;
     let dy = a2.y - a1.y;
     let f1 = dx * (b1.y - a1.y) - dy * (b1.x - a1.x);
@@ -334,26 +349,24 @@ pub(crate) fn segments_collinear_overlap(
     }
     let margin1 = orient_err(dx * (b1.y - a1.y), dy * (b1.x - a1.x));
     let margin2 = orient_err(dx * (b2.y - a1.y), dy * (b2.x - a1.x));
-    if f1.abs() > eps + margin1 && f2.abs() > eps + margin2 {
+    // |f| is len times the distance to the line, so the gate scales eps by len.
+    if f1.abs() > (eps + margin1) * len && f2.abs() > (eps + margin2) * len {
         return false;
     }
     // The parametric overlap is a necessary condition for a collinear overlap, so the
     // projection test runs first: adjacent segments that merely share an endpoint (the
     // subdivided-line case) then skip the two robust orientation calls.
-    let len2 = dx * dx + dy * dy;
-    if len2 <= eps {
-        return false;
-    }
     let t1 = ((b1.x - a1.x) * dx + (b1.y - a1.y) * dy) / len2;
     let t2 = ((b2.x - a1.x) * dx + (b2.y - a1.y) * dy) / len2;
     let lo = 0.0f64.max(t1.min(t2));
     let hi = 1.0f64.min(t1.max(t2));
-    if hi - lo <= eps {
+    // hi - lo is a fraction of len; eps is a length, so the overlap must exceed eps * len.
+    if (hi - lo) * len <= eps {
         return false;
     }
     let o1 = crate::orient::orient2d(a1, a2, b1);
     let o2 = crate::orient::orient2d(a1, a2, b2);
-    !(o1.abs() > eps || o2.abs() > eps)
+    !(o1.abs() > eps * len || o2.abs() > eps * len)
 }
 
 /// Bbox containment with epsilon (endpoints included).

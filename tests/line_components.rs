@@ -88,6 +88,38 @@ fn parts_meeting_at_endpoints_are_unchanged() {
 }
 
 #[test]
+fn near_duplicate_chains_are_kept() {
+    // 1e-11 apart along a diagonal: twice a segment area is 2e-14, below eps, but the
+    // distance is 7x eps. Distance decides, so both chains stay.
+    let chain = |dy: f64| -> Vec<(f64, f64)> {
+        (0..=4).map(|i| (146.28 + 0.002 * f64::from(i), -36.95 + 0.002 * f64::from(i) + dy)).collect()
+    };
+    let g = Geometry::MultiLineString(mls(&[&chain(0.0), &chain(1e-11)]));
+    assert!(g.validate().valid, "two disjoint chains are valid");
+    let want = length(&g);
+    let out = repair(&g);
+    assert!(out.validate().valid, "output must be valid: {out:?}");
+    assert_eq!(components(&out), 2, "the near-duplicate chain is kept: {out:?}");
+    assert!((length(&out) - want).abs() < 1e-9, "length must survive: {out:?}");
+}
+
+#[test]
+fn interior_vertex_on_a_part_is_noded_on_both_sides() {
+    // (1e-9, 0) is a vertex of part 2 that sits inside part 1, and part 2 retraces
+    // 1e-9 of part 1. Both sides must split there: nothing may be dropped.
+    let g = Geometry::MultiLineString(mls(&[
+        &[(0.0, 0.0), (10.0, 0.0)],
+        &[(10.0, 0.0), (5.0, 2.0), (1e-9, 0.0), (0.0, 0.0)],
+    ]));
+    assert!(!g.validate().valid, "the retrace makes the input invalid");
+    let want = length(&g) - 1e-9;
+    let out = repair(&g);
+    assert!(out.validate().valid, "output must be valid: {out:?}");
+    assert_eq!(components(&out), 3, "both parts split, one duplicate piece dropped: {out:?}");
+    assert!((length(&out) - want).abs() < 1e-9, "only the retraced 1e-9 may go: {out:?}");
+}
+
+#[test]
 fn closed_part_touching_an_open_part_keeps_coverage() {
     // A closed component has no boundary, so it cannot touch anything; it is cut into two
     // open paths at the contact point, and no segment is lost.

@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 
 use geo::{Coord, Line};
 
-use crate::noding::intersection::{collinear_split_params, compute_intersection_param, interpolate};
+use crate::noding::intersection::{compute_intersection_param, interpolate};
 use crate::validation::impls::{check_line_components_intersect, segments_collinear_overlap};
 
 type Run = Vec<Coord<f64>>;
@@ -150,6 +150,20 @@ fn add_vertex_cut(cuts: &mut [Vec<(f64, Coord<f64>)>], k: usize, point: Coord<f6
     add_cut(cuts, k, 0.0, point, eps);
 }
 
+/// A cut at either segment end is a split at that vertex, not an interior point.
+fn cut_at(cuts: &mut [Vec<(f64, Coord<f64>)>], seg: usize, t: f64, point: Coord<f64>, eps: f64) {
+    if t < 0.0 || t > 1.0 {
+        return;
+    }
+    if t <= eps {
+        add_vertex_cut(cuts, seg, point, eps);
+    } else if t >= 1.0 - eps {
+        add_vertex_cut(cuts, seg + 1, point, eps);
+    } else {
+        add_cut(cuts, seg, t, point, eps);
+    }
+}
+
 /// Cuts for one pair of parts: point contacts split both, collinear overlaps split at their ends.
 fn connect(
     a: &[Coord<f64>],
@@ -166,26 +180,21 @@ fn connect(
         for j in 0..b.len() - 1 {
             let eb = Line::new(b[j], b[j + 1]);
             if segments_collinear_overlap(a[i], a[i + 1], b[j], b[j + 1], eps) {
-                let (pa, pb) = collinear_split_params(&ea, &eb, eps);
-                for t in pa {
-                    let point = if (param_on(&ea, eb.start) - t).abs() <= 1e-9 {
+                // Both ends of the overlap are contacts, so each end must be a boundary of both parts.
+                let t_bs = param_on(&ea, eb.start);
+                let t_be = param_on(&ea, eb.end);
+                let lo = 0.0f64.max(t_bs.min(t_be));
+                let hi = 1.0f64.min(t_bs.max(t_be));
+                for end in [lo, hi] {
+                    let point = if (end - t_bs).abs() <= 1e-9 {
                         eb.start
-                    } else if (param_on(&ea, eb.end) - t).abs() <= 1e-9 {
+                    } else if (end - t_be).abs() <= 1e-9 {
                         eb.end
                     } else {
-                        interpolate(ea, t)
+                        interpolate(ea, end)
                     };
-                    add_cut(cuts_a, i, t, point, eps);
-                }
-                for t in pb {
-                    let point = if (param_on(&eb, ea.start) - t).abs() <= 1e-9 {
-                        ea.start
-                    } else if (param_on(&eb, ea.end) - t).abs() <= 1e-9 {
-                        ea.end
-                    } else {
-                        interpolate(eb, t)
-                    };
-                    add_cut(cuts_b, j, t, point, eps);
+                    cut_at(cuts_a, i, end, point, eps);
+                    cut_at(cuts_b, j, param_on(&eb, point), point, eps);
                 }
                 continue;
             }
@@ -319,9 +328,9 @@ fn on_segment(s0: Coord<f64>, s1: Coord<f64>, p: Coord<f64>, eps: f64) -> bool {
     if dx == 0.0 && dy == 0.0 {
         return (p.x - s0.x).abs() <= eps && (p.y - s0.y).abs() <= eps;
     }
-    // Absolute tolerance, the same convention the component check uses for its orientation test.
+    // Absolute tolerance, the same reach as the component check: eps is a length.
     let cross = dx * (p.y - s0.y) - dy * (p.x - s0.x);
-    if cross.abs() > eps {
+    if cross.abs() > eps * (dx * dx + dy * dy).sqrt() {
         return false;
     }
     p.x >= s0.x.min(s1.x) - eps

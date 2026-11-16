@@ -345,7 +345,7 @@ pub(crate) fn keep_conflicting_runs(runs: &[Vec<Coord<f64>>]) -> Option<Vec<usiz
         })
         .collect();
     let mut kept: Vec<usize> = Vec::new();
-    // segments_collinear_overlap's `len2 > eps` guard caps L at sqrt(eps)
+    // eps.sqrt() over-reaches past the shortest segment the overlap test accepts, which is safe.
     let reach = eps.sqrt();
     for j in 0..runs.len() {
         let (bx0, bx1, by0, by1) = bboxes[j];
