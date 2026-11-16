@@ -45,11 +45,9 @@ pub(crate) fn node_components(parts: &[Run]) -> Vec<Run> {
     let mut cuts: Vec<Cuts> =
         parts.iter().map(|p| vec![Vec::new(); p.len().saturating_sub(1)]).collect();
 
-    for a in 0..parts.len() {
-        for b in (a + 1)..parts.len() {
-            let (left, right) = cuts.split_at_mut(b);
-            connect(&parts[a], &parts[b], &mut left[a], &mut right[0], eps);
-        }
+    for (a, b) in candidate_pairs(&parts, eps) {
+        let (left, right) = cuts.split_at_mut(b);
+        connect(&parts[a], &parts[b], &mut left[a], &mut right[0], eps);
     }
 
     let mut out: Vec<Run> = Vec::new();
@@ -67,17 +65,65 @@ pub(crate) fn node_components(parts: &[Run]) -> Vec<Run> {
     out
 }
 
+/// Min/max box of a run, or `None` when it has no coordinate.
+fn run_bbox(run: &[Coord<f64>]) -> Option<(f64, f64, f64, f64)> {
+    let mut bb = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+    for c in run {
+        if !c.x.is_finite() || !c.y.is_finite() {
+            return None;
+        }
+        bb.0 = bb.0.min(c.x);
+        bb.1 = bb.1.max(c.x);
+        bb.2 = bb.2.min(c.y);
+        bb.3 = bb.3.max(c.y);
+    }
+    (bb.0 <= bb.1).then_some(bb)
+}
+
+/// Pairs `(i, j)` whose boxes come within eps, ordered by min x so the scan can stop early.
+/// A pair further apart than eps cannot share a point or an overlap, so it is skipped.
+fn candidate_pairs(runs: &[Run], eps: f64) -> Vec<(usize, usize)> {
+    let boxes: Vec<Option<(f64, f64, f64, f64)>> = runs.iter().map(|r| run_bbox(r)).collect();
+    let mut order: Vec<usize> = (0..runs.len()).filter(|&i| boxes[i].is_some()).collect();
+    order.sort_by(|&a, &b| {
+        boxes[a]
+            .expect("filtered above")
+            .0
+            .partial_cmp(&boxes[b].expect("filtered above").0)
+            .unwrap_or(core::cmp::Ordering::Equal)
+    });
+    let mut out = Vec::new();
+    for (k, &i) in order.iter().enumerate() {
+        let (ax0, ax1, ay0, ay1) = boxes[i].expect("filtered above");
+        for &j in &order[k + 1..] {
+            let (bx0, bx1, by0, by1) = boxes[j].expect("filtered above");
+            if bx0 > ax1 + eps {
+                break;
+            }
+            if bx1 < ax0 - eps || by1 < ay0 - eps || by0 > ay1 + eps {
+                continue;
+            }
+            out.push((i.min(j), i.max(j)));
+        }
+    }
+    out
+}
+
 /// A closed component has no boundary, so it cannot legally touch anything. Split it into
 /// two open paths at the contact point: both ends are boundaries then, and coverage stays.
 fn split_closed_parts(parts: &[Run], eps: f64) -> Vec<Run> {
+    let mut neigh: Vec<Vec<usize>> = vec![Vec::new(); parts.len()];
+    for (i, j) in candidate_pairs(parts, eps) {
+        neigh[i].push(j);
+        neigh[j].push(i);
+    }
     let mut out: Vec<Run> = Vec::with_capacity(parts.len());
     for (i, p) in parts.iter().enumerate() {
         let closed = p.len() > 3 && p[0] == p[p.len() - 1];
         let conflicts = closed
-            && parts
+            && neigh[i]
                 .iter()
-                .enumerate()
-                .any(|(j, q)| j != i && check_line_components_intersect(p, q, eps));
+                .any(|&j| check_line_components_intersect(p, &parts[j], eps));
         if !conflicts {
             out.push(p.clone());
             continue;
@@ -283,37 +329,56 @@ fn split_runs(part: &[Coord<f64>], cuts: &[Vec<(f64, Coord<f64>)>], eps: f64) ->
     out
 }
 
-/// Drop a piece that an earlier piece already covers, which is a duplicated or overlapping line.
+/// Drop a piece that the other pieces already cover, which is a duplicated or overlapping line.
 /// Drop every piece that the other pieces already cover, until no piece is redundant.
-fn dedupe_covered(mut kept: Vec<Run>, eps: f64) -> Vec<Run> {
+fn dedupe_covered(kept: Vec<Run>, eps: f64) -> Vec<Run> {
+    let n = kept.len();
+    let mut neigh: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for (i, j) in candidate_pairs(&kept, eps) {
+        neigh[i].push(j);
+        neigh[j].push(i);
+    }
+    let mut alive = vec![true; n];
+    let mut live = n;
     loop {
         let mut removed = false;
-        let mut i = 0;
-        while i < kept.len() {
-            let covered = kept.len() > 1 && run_covered(&kept[i], &kept, i, eps);
-            if covered {
-                kept.remove(i);
+        for i in 0..n {
+            if !alive[i] || live < 2 {
+                continue;
+            }
+            if run_covered(&kept[i], &kept, &neigh[i], &alive, eps) {
+                alive[i] = false;
+                live -= 1;
                 removed = true;
-            } else {
-                i += 1;
             }
         }
         if !removed {
-            return kept;
+            break;
         }
     }
+    kept.into_iter()
+        .zip(alive)
+        .filter_map(|(run, keep)| keep.then_some(run))
+        .collect()
 }
 
-fn run_covered(run: &Run, kept: &[Run], self_idx: usize, eps: f64) -> bool {
+/// Coverage tested only against the candidate pieces whose box comes within eps.
+fn run_covered(
+    run: &Run,
+    kept: &[Run],
+    neigh: &[usize],
+    alive: &[bool],
+    eps: f64,
+) -> bool {
     run.windows(2).all(|w| {
         let mid = Coord {
             x: (w[0].x + w[1].x) / 2.0,
             y: (w[0].y + w[1].y) / 2.0,
         };
         [w[0], mid, w[1]].iter().all(|p| {
-            kept.iter()
-                .enumerate()
-                .any(|(j, other)| j != self_idx && point_on_run(other, *p, eps))
+            neigh
+                .iter()
+                .any(|&j| alive[j] && point_on_run(&kept[j], *p, eps))
         })
     })
 }
@@ -340,14 +405,9 @@ fn on_segment(s0: Coord<f64>, s1: Coord<f64>, p: Coord<f64>, eps: f64) -> bool {
 }
 
 fn any_conflict(parts: &[Run], eps: f64) -> bool {
-    for i in 0..parts.len() {
-        for j in (i + 1)..parts.len() {
-            if check_line_components_intersect(&parts[i], &parts[j], eps) {
-                return true;
-            }
-        }
-    }
-    false
+    candidate_pairs(parts, eps)
+        .into_iter()
+        .any(|(i, j)| check_line_components_intersect(&parts[i], &parts[j], eps))
 }
 
 

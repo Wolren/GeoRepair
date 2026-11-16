@@ -1108,7 +1108,13 @@ fn main() {
         bench_line(&format!("duped ls {:>4}v", pairs * 2), &g, batch, &cfg);
     }
 
-    for &(parts, batch) in &[(50usize, 10000usize), (250, 2000), (500, 1000)] {
+    for &(parts, batch) in &[
+        (50usize, 10000usize),
+        (250, 2000),
+        (500, 1000),
+        (1000, 50),
+        (10000, 5),
+    ] {
         let g = make_mls_parts(parts);
         bench_line(&format!("mls {}x3v", parts), &g, batch, &cfg);
     }
