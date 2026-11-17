@@ -72,6 +72,11 @@ component-rule, snap-grid, line-coverage and area-gate fixes (`57de5dd`, `abff4b
   relative area error 4e-9. `clockwise_thin_shell_keeps_its_area`.
 - Item 14: `MULTIPOINT (EMPTY, (1 2))` writes `MULTIPOINT (EMPTY, (1.0 2.0))`. The old writer emitted
   `MULTIPOINT (NaN NaN, 1.0 2.0)`, which GEOS rejects. `multipoint_with_an_empty_member_writes_geos_valid_wkt`.
+- Item 17: the full 813-feature GeoPackage run finished: 1,579,028 polygon parts, every input
+  GEOS-valid. GeoRepair writes 0 invalid outputs and 4 area misses; the misses are four copies of one
+  1,451-part feature, +0.0122% each (0.0033 area units on 27.1208). RustGIS writes 61 invalid
+  outputs and 0 area misses. The four misses sit above the 1e-6 harness tolerance and are the
+  tolerant near-touch class (item 18), not a lost part.
 
 ## Now
 
@@ -95,6 +100,14 @@ whether Structure mode should carry the same even-odd area contract as Auto.
 engines drop a degenerate component and keep the even-odd area (delta 0). The harness flags the
 lost linework as a divergence, not a wrong area. This is a documented divergence; no repair bug is
 claimed.
+
+### 18. Four real-world features move by 0.0122%
+
+The 813-feature run has four copies of a 1,451-part valid MultiPolygon whose area moves from
+27.1208 to 27.1241 (+0.0033 units, +0.0122%). GEOS calls the input valid; the tolerant validator
+sees a near-touch, and the repair changes the sliver. This is above the harness 1e-6 tolerance.
+Decide whether the tolerant near-touch rule should return the input unchanged when the exact
+predicates find no crossing.
 
 ## Not planned
 
