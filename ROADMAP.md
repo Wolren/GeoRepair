@@ -5,12 +5,13 @@ the known gaps, each with the measurement that found it and the test that will c
 
 ## How the gaps were found
 
-A differential harness ran Repair Geometry (RustGIS `046bd3c2`) and GeoRepair over 1,282 cases:
-the 120-case OGC conformance corpus, the GEOS and JTS XML suites, 6 random crossing walks, and
-200 fuzz seeds and variants. Both engines were scored against an independent oracle: even-odd area
-from polygonize plus crossing parity, with GEOS `make_valid` as a second opinion. GeoRepair missed
-the oracle on 45 cases before `a0848de`, on 6 after it, and on 0 after the component-rule and
-snap-grid fixes (`57de5dd`, `abff4b9`).
+A differential harness ran Repair Geometry (RustGIS `046bd3c2`) and GeoRepair over 1,301 cases:
+the 120-case OGC conformance corpus, the GEOS and JTS XML suites, 6 random crossing walks, 19
+synthetic bench-shaped families, and 200 fuzz seeds and variants. Both engines were scored against
+an independent oracle: the input's even-odd interior as a geometry (symmetric difference, not only
+area), GEOS validity, input boundary/part coverage, and the distinct linework length for lines.
+GeoRepair missed the oracle on 45 cases before `a0848de`, on 6 after it, and on 0 after the
+component-rule, snap-grid, line-coverage and area-gate fixes (`57de5dd`, `abff4b9`, items 7-14).
 
 ## Done
 
@@ -40,6 +41,37 @@ snap-grid fixes (`57de5dd`, `abff4b9`).
   `line_parts_out` count the caller's input and the emitted geometry, and `is_lossless()` is false
   when a deduplicated component disappears: two identical parts report 2 in, 1 out.
 - `476e9b2` - Item 5: `tests/corpus_replay.rs` requires `skipped == 0`. All 79 seeds run.
+- Item 7: line repair keeps every spike. `simple_subline` treated a shared endpoint as a conflict
+  and dropped every later spike, and `filter_demoted_lines` dropped a whole hairpin instead of
+  splitting it. A star-burst now keeps one component per spike: 100 spikes 2 parts / 2,000 units
+  -> 100 parts / 100,000; 1,000 spikes 2 / 2,000 -> 1,000 / 1,000,000. The extreme-span seed
+  `regression_line_not_simple_1e83.bin` keeps 100% of the distinct linework; it lost 5.8e81 of
+  midpoint coverage before. `tests/line_components.rs` pins both.
+- Item 8: nested holes are detected in either input order. `check_holes_valid` tested only the
+  later ring for nesting, so JTS "Holes - Nested" (the inner hole listed first) was called valid
+  and shipped a nested-holes polygon. The pair check now tests both directions:
+  `test_nested_holes_reversed_order`, and the repaired area is 4,400 (was 1,200 in point set,
+  +16.72% wrong in the report).
+- Item 9: a MultiPolygon component nested inside another is detected when every vertex lies on the
+  parent boundary. The validator probed the first vertex only; it now uses an interior probe, so
+  JTS "mA - shell inside shell, all vertices touch" is rejected, and the "shell inside hole" island
+  (GEOS-valid) is accepted instead of losing 18.75% of its area.
+- Item 10: a valid input comes back unchanged. `preserve_valid_input` accepted the snapped repair
+  result before checking the input; at 1e15 the 1e8 snap grid moves a coordinate by 0.1 and changed
+  the area of `mut8`, `mut26`, `mut34`, `mut99` by 12.5% to 25%. A valid ring now returns bit-exact;
+  an invalid sub-grid ring returns its deduplicated input. `sub_grid_mutants_keep_the_input`.
+- Item 11: a valid output with the wrong interior is caught and repaired. Auto compares the repaired
+  area with the even-odd boundary area (`build_area`), then tries the arrangement path and the
+  even-odd faces. `mut13` -99.44% -> 0, `geos-590` +16.89% -> 0, AX_Buffer-1 case 25 -92.51% -> 0,
+  and the two overlapping bowtie holes +16.72% -> 0. `tests/repair_area_oracle.rs` names each.
+- Item 12: a MultiPolygon whose only defect is ring winding is re-wound whole, islands included.
+  "shell inside hole, all vertices touch" returned 125,600 units (-1.875%) before; it now returns
+  128,000.
+- Item 13: a CW thin shell of 45,799 units that returned empty is re-wound, and a vertex within eps
+  of a non-adjacent edge is nudged 3 eps away from it. AX_Buffer-1 part 2: empty -> 45,799.48,
+  relative area error 4e-9. `clockwise_thin_shell_keeps_its_area`.
+- Item 14: `MULTIPOINT (EMPTY, (1 2))` writes `MULTIPOINT (EMPTY, (1.0 2.0))`. The old writer emitted
+  `MULTIPOINT (NaN NaN, 1.0 2.0)`, which GEOS rejects. `multipoint_with_an_empty_member_writes_geos_valid_wkt`.
 
 ## Now
 
@@ -50,7 +82,22 @@ rule. The two disagree on linework that GEOS calls valid and whose parts meet. D
 the public contract follows, and make the suite and the repair agree. The distance-based rule in
 `57de5dd` removed the false positives; this item removes the ambiguity.
 
+### 15. Explicit Structure mode can still return the wrong area
+
+Auto is correct on `mut13` and `geos-590` after the area gate, but the explicitly selected
+Structure method still returns 7.0 instead of 1,269.28 and 24,923.70 instead of 21,322.02. The gate
+is applied to `FixOutcome::Repaired`; these results come through a branch it does not see. Decide
+whether Structure mode should carry the same even-odd area contract as Auto.
+
+### 16. The one remaining both_diverge case
+
+`geos_xml/general_TestValid.xml/mA - multipolygon with component with too few points#50`: both
+engines drop a degenerate component and keep the even-odd area (delta 0). The harness flags the
+lost linework as a divergence, not a wrong area. This is a documented divergence; no repair bug is
+claimed.
+
 ## Not planned
 
-- Polygon repair semantics. GeoRepair matches the even-odd oracle on every measured polygon case,
-  so there is no work item here.
+- Polygon repair semantics on the measured corpus. The differential harness now has 0 `our_bug`
+  cases over 1,301 cases: 895 match, 86 their_bug, 179 different decomposition, 137 unsupported,
+  3 unmeasured, 1 both_diverge (item 16).
