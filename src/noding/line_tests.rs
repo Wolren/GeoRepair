@@ -184,7 +184,7 @@ fn near_coincident_crossing_cluster() {
         .collect();
     for node in [c(5.0000000005, 0.0), c(5.000000001, 0.0)] {
         assert!(
-            ends.iter().any(|e| *e == node),
+            ends.contains(&node),
             "crossing node {node:?} is not a chain endpoint: {chains:?}"
         );
     }

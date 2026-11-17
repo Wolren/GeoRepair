@@ -158,7 +158,7 @@ impl<T: NodingFloat> MakeValid for LineString<T> {
             match crate::noding::line::node_fast(&fd) {
                 crate::noding::line::Fast::Simple => {}
                 crate::noding::line::Fast::Noded(runs) => {
-                    return noded_runs_to_geometry::<T>(&runs);
+                    return noded_runs_to_geometry::<T>(runs);
                 }
                 crate::noding::line::Fast::Unsupported => {
                     if check_linestring_self_intersection(&fd) {
@@ -182,7 +182,7 @@ impl<T: NodingFloat> MakeValid for LineString<T> {
                                 }
                             }
                         };
-                        return noded_runs_to_geometry::<T>(&runs);
+                        return noded_runs_to_geometry::<T>(runs);
                     }
                 }
             }
@@ -192,31 +192,34 @@ impl<T: NodingFloat> MakeValid for LineString<T> {
 }
 
 /// Map noded coordinate runs to the output geometry.
-fn noded_runs_to_geometry<T: NodingFloat>(runs: &[Vec<Coord<f64>>]) -> Geometry<T> {
+fn noded_runs_to_geometry<T: NodingFloat>(runs: Vec<Vec<Coord<f64>>>) -> Geometry<T> {
     // A closed run that touches another run is invalid as a closed component; split it
     // at the shared endpoint into two open paths so both halves survive.
-    let mut open_runs: Vec<Vec<Coord<f64>>> = Vec::with_capacity(runs.len() + 1);
-    for (i, r) in runs.iter().enumerate() {
-        let closed = r.len() > 3 && r[0] == r[r.len() - 1];
-        let touches_other = closed
-            && runs
-                .iter()
-                .enumerate()
-                .any(|(j, q)| j != i && (q[0] == r[0] || q[q.len() - 1] == r[0]));
-        if touches_other {
-            let open = r[..r.len() - 1].to_vec();
+    let touches: Vec<bool> = runs
+        .iter()
+        .enumerate()
+        .map(|(i, r)| {
+            let closed = r.len() > 3 && r[0] == r[r.len() - 1];
+            closed
+                && runs
+                    .iter()
+                    .enumerate()
+                    .any(|(j, q)| j != i && (q[0] == r[0] || q[q.len() - 1] == r[0]))
+        })
+        .collect();
+    let mut raw: Vec<LineString<f64>> = Vec::with_capacity(runs.len() + 1);
+    for (r, touch) in runs.into_iter().zip(touches) {
+        if touch {
+            let mut open = r;
+            open.pop();
             let start = open[0];
             let end = *open.last().expect("len>=4 verified");
-            open_runs.push(open);
-            open_runs.push(vec![end, start]);
+            raw.push(LineString::new(open));
+            raw.push(LineString::new(vec![end, start]));
         } else {
-            open_runs.push(r.clone());
+            raw.push(LineString::new(r));
         }
     }
-    let raw: Vec<LineString<f64>> = open_runs
-        .iter()
-        .map(|r| LineString::new(r.clone()))
-        .collect();
     let kept = crate::make_valid::strip::filter_demoted_lines(raw);
     let out: Vec<LineString<T>> = kept.iter().map(|ls| run_to_line::<T>(&ls.0)).collect();
     match out.len() {
@@ -238,9 +241,24 @@ fn simple_subline(coords: &[Coord<f64>]) -> Vec<Vec<Coord<f64>>> {
     split_repeated_vertices(coords.to_vec(), &mut pieces);
     let mut runs: Vec<Vec<Coord<f64>>> = Vec::new();
     for piece in pieces {
-        runs.extend(greedy_simple_piece(&piece));
+        if piece.len() == 2 {
+            runs.push(piece);
+        } else {
+            runs.extend(greedy_simple_piece(&piece));
+        }
     }
     dedup_segments(runs)
+}
+
+/// Undirected key for one segment, so a reverse retrace matches.
+fn segment_key(a: Coord<f64>, b: Coord<f64>) -> (u64, u64, u64, u64) {
+    let ka = (a.x.to_bits(), a.y.to_bits());
+    let kb = (b.x.to_bits(), b.y.to_bits());
+    if ka <= kb {
+        (ka.0, ka.1, kb.0, kb.1)
+    } else {
+        (kb.0, kb.1, ka.0, ka.1)
+    }
 }
 
 /// Drop segments that occur twice, ignoring direction. A spoke wheel closes through its
@@ -250,20 +268,23 @@ fn dedup_segments(runs: Vec<Vec<Coord<f64>>>) -> Vec<Vec<Coord<f64>>> {
     let mut seen: FxHashSet<(u64, u64, u64, u64)> = FxHashSet::default();
     let mut out: Vec<Vec<Coord<f64>>> = Vec::with_capacity(runs.len());
     for run in runs {
+        if run
+            .windows(2)
+            .all(|w| !seen.contains(&segment_key(w[0], w[1])))
+        {
+            for w in run.windows(2) {
+                seen.insert(segment_key(w[0], w[1]));
+            }
+            out.push(run);
+            continue;
+        }
         let mut cur: Vec<Coord<f64>> = Vec::with_capacity(run.len());
         if let Some(&p) = run.first() {
             cur.push(p);
         }
         for w in run.windows(2) {
             let (a, b) = (w[0], w[1]);
-            let ka = (a.x.to_bits(), a.y.to_bits());
-            let kb = (b.x.to_bits(), b.y.to_bits());
-            let key = if ka <= kb {
-                (ka.0, ka.1, kb.0, kb.1)
-            } else {
-                (kb.0, kb.1, ka.0, ka.1)
-            };
-            if seen.insert(key) {
+            if seen.insert(segment_key(a, b)) {
                 cur.push(b);
             } else {
                 if cur.len() >= 2 {

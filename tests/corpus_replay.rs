@@ -20,7 +20,8 @@ fn polygon_from_raw_coords(bytes: &[u8], max_coords: usize) -> Option<Geometry<f
         return None;
     }
     let mut coords: Vec<Coord<f64>> = Vec::with_capacity(bytes.len() / 16 + 1);
-    for chunk in bytes.chunks_exact(16) {
+    let (chunks, _) = bytes.as_chunks::<16>();
+    for chunk in chunks {
         let mut xb = [0u8; 8];
         let mut yb = [0u8; 8];
         xb.copy_from_slice(&chunk[0..8]);
@@ -62,7 +63,7 @@ fn replay_geometry(geom: &Geometry<f64>, label: &str) {
             out.validate().valid,
             "invalid output on {label} in mode {method:?}: {out:?}"
         );
-        if input_valid && !is_empty(&geom) {
+        if input_valid && !is_empty(geom) {
             assert!(
                 !is_empty(&out),
                 "valid input emptied on {label} in mode {method:?}"
