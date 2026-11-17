@@ -163,12 +163,25 @@ fn write_geom(s: &mut String, geom: &Geometry<f64>, dims: Dims, extra: &[f64], o
             if mp.0.is_empty() {
                 s.push_str(" EMPTY");
             } else {
+                // A bare coordinate list cannot hold EMPTY: (EMPTY, 1 2) is a parse
+                // error in GEOS, so every member is parenthesized when one is empty.
+                let any_empty = mp.0.iter().any(|p| p.0.x.is_nan() && p.0.y.is_nan());
                 s.push_str(" (");
                 for (i, p) in mp.0.iter().enumerate() {
                     if i > 0 {
                         s.push_str(", ");
                     }
-                    write_coord(s, &p.0, dims, extra, offset);
+                    if any_empty {
+                        if p.0.x.is_nan() && p.0.y.is_nan() {
+                            s.push_str("EMPTY");
+                        } else {
+                            s.push('(');
+                            write_coord(s, &p.0, dims, extra, offset);
+                            s.push(')');
+                        }
+                    } else {
+                        write_coord(s, &p.0, dims, extra, offset);
+                    }
                 }
                 s.push(')');
             }

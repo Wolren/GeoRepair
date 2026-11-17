@@ -172,6 +172,17 @@ fn double_roundtrip_multipoint_empty() {
 }
 
 #[test]
+fn multipoint_with_an_empty_member_writes_geos_valid_wkt() {
+    // Measured 2026-11-17: the writer emitted MULTIPOINT (NaN NaN, 1 2), which GEOS
+    // rejects; an EMPTY member forces the parenthesized member form.
+    let geom = read_wkt("MULTIPOINT (EMPTY, (1 2))").unwrap();
+    let wkt = write_wkt(&geom);
+    assert_eq!(wkt, "MULTIPOINT (EMPTY, (1.0 2.0))");
+    let parsed = read_wkt(&wkt).unwrap();
+    assert_eq!(write_wkt(&parsed), wkt);
+}
+
+#[test]
 fn double_roundtrip_multilinestring_empty() {
     let geom = read_wkt("MULTILINESTRING EMPTY").unwrap();
     let wkt = write_wkt(&geom);
