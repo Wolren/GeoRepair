@@ -46,7 +46,9 @@ component-rule, snap-grid, line-coverage and area-gate fixes (`57de5dd`, `abff4b
   splitting it. A star-burst now keeps one component per spike: 100 spikes 2 parts / 2,000 units
   -> 100 parts / 100,000; 1,000 spikes 2 / 2,000 -> 1,000 / 1,000,000. The extreme-span seed
   `regression_line_not_simple_1e83.bin` keeps 100% of the distinct linework; it lost 5.8e81 of
-  midpoint coverage before. `tests/line_components.rs` pins both.
+  midpoint coverage before. `tests/line_components.rs` pins both. Repeated-vertex splitting runs
+  before the greedy walk, so 1,000 spikes cost 83 us on CI (the old lossy output cost 48 us); the
+  gate baseline records the correct output.
 - Item 8: nested holes are detected in either input order. `check_holes_valid` tested only the
   later ring for nesting, so JTS "Holes - Nested" (the inner hole listed first) was called valid
   and shipped a nested-holes polygon. The pair check now tests both directions:
