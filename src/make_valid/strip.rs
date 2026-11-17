@@ -44,6 +44,42 @@ fn ring_is_exactly_collinear(ext: &[Coord<f64>], interior_n: usize, ia: usize, i
 const PAIR_FILTER_MAX: usize = 64;
 const PAIR_FILTER_SEGMENTS: usize = 128;
 
+/// Add a demoted line, splitting it at interior vertices when it conflicts with a kept
+/// line. A hairpin whose end lies within eps of its own earlier segment conflicts as one
+/// run but splits into two clean runs, so coverage survives.
+fn add_demoted(
+    kept: &mut Vec<LineString<f64>>,
+    ls: LineString<f64>,
+    eps: f64,
+    depth: usize,
+) -> bool {
+    if kept
+        .iter()
+        .all(|k| !check_line_components_intersect(&k.0, &ls.0, eps))
+    {
+        kept.push(ls);
+        return true;
+    }
+    if depth == 0 || ls.0.len() <= 2 {
+        return false;
+    }
+    for k in 1..ls.0.len() - 1 {
+        let left = LineString::new(ls.0[..=k].to_vec());
+        let right = LineString::new(ls.0[k..].to_vec());
+        if left.0.len() < 2 || right.0.len() < 2 {
+            continue;
+        }
+        let mut trial = kept.clone();
+        let left_ok = add_demoted(&mut trial, left, eps, depth - 1);
+        let right_ok = add_demoted(&mut trial, right, eps, depth - 1);
+        if left_ok || right_ok {
+            *kept = trial;
+            return true;
+        }
+    }
+    false
+}
+
 /// Use the MultiLineString validator rule and scale-derived eps from
 /// check_line_components_intersect. prep::has_no_intersections uses other tolerances
 /// and passed a subnormal sliver that the validator flags NotSimple (fuzz nightly crash
@@ -72,13 +108,8 @@ pub(super) fn filter_demoted_lines(candidates: Vec<LineString<f64>>) -> Vec<Line
         .max(1.0);
     let eps = 1e-12 * scale;
     let mut kept: Vec<LineString<f64>> = Vec::new();
-    'cand: for ls in simple {
-        for k in &kept {
-            if check_line_components_intersect(&k.0, &ls.0, eps) {
-                continue 'cand;
-            }
-        }
-        kept.push(ls);
+    for ls in simple {
+        add_demoted(&mut kept, ls, eps, 6);
     }
     kept
 }

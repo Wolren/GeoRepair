@@ -193,7 +193,30 @@ impl<T: NodingFloat> MakeValid for LineString<T> {
 
 /// Map noded coordinate runs to the output geometry.
 fn noded_runs_to_geometry<T: NodingFloat>(runs: &[Vec<Coord<f64>>]) -> Geometry<T> {
-    let raw: Vec<LineString<f64>> = runs.iter().map(|r| LineString::new(r.clone())).collect();
+    // A closed run that touches another run is invalid as a closed component; split it
+    // at the shared endpoint into two open paths so both halves survive.
+    let mut open_runs: Vec<Vec<Coord<f64>>> = Vec::with_capacity(runs.len() + 1);
+    for (i, r) in runs.iter().enumerate() {
+        let closed = r.len() > 3 && r[0] == r[r.len() - 1];
+        let touches_other = closed
+            && runs
+                .iter()
+                .enumerate()
+                .any(|(j, q)| j != i && (q[0] == r[0] || q[q.len() - 1] == r[0]));
+        if touches_other {
+            let open = r[..r.len() - 1].to_vec();
+            let start = open[0];
+            let end = *open.last().expect("len>=4 verified");
+            open_runs.push(open);
+            open_runs.push(vec![end, start]);
+        } else {
+            open_runs.push(r.clone());
+        }
+    }
+    let raw: Vec<LineString<f64>> = open_runs
+        .iter()
+        .map(|r| LineString::new(r.clone()))
+        .collect();
     let kept = crate::make_valid::strip::filter_demoted_lines(raw);
     let out: Vec<LineString<T>> = kept.iter().map(|ls| run_to_line::<T>(&ls.0)).collect();
     match out.len() {
@@ -205,6 +228,8 @@ fn noded_runs_to_geometry<T: NodingFloat>(runs: &[Vec<Coord<f64>>]) -> Geometry<
 
 /// Greedy simplification of a non-simple line: walk the segments, keep a segment unless
 /// it conflicts with an already-kept segment, using the same pairwise tests as
+/// [`check_line_components_intersect`]. A shared endpoint is a revisit, not a conflict:
+/// the run splitter cuts the chain there, so every spike survives.
 fn simple_subline(coords: &[Coord<f64>]) -> Vec<Vec<Coord<f64>>> {
     let n = coords.len() - 1;
     if n < 2 {
@@ -257,14 +282,22 @@ fn simple_subline(coords: &[Coord<f64>]) -> Vec<Vec<Coord<f64>>> {
                     || coords[i] == coords[j + 1]
                     || coords[i + 1] == coords[j]
                     || coords[i + 1] == coords[j + 1];
-                if shared
-                    || edges_intersect_general(
+                if shared {
+                    // A shared endpoint is connectivity, not an intersection: keep the
+                    // segment and let `split_repeated_vertices` cut the run there. Only a
+                    // collinear overlap at that point duplicates linework.
+                    if segments_collinear_overlap(
                         coords[i],
                         coords[i + 1],
                         coords[j],
                         coords[j + 1],
                         eps,
-                    )
+                    ) {
+                        continue 'seg;
+                    }
+                    continue;
+                }
+                if edges_intersect_general(coords[i], coords[i + 1], coords[j], coords[j + 1], eps)
                     || edges_vertex_on_edge(coords[i], coords[i + 1], coords[j], coords[j + 1])
                 {
                     continue 'seg;
@@ -290,7 +323,36 @@ fn simple_subline(coords: &[Coord<f64>]) -> Vec<Vec<Coord<f64>>> {
     if !run.is_empty() {
         runs.push(run);
     }
-    runs
+    let mut split: Vec<Vec<Coord<f64>>> = Vec::with_capacity(runs.len());
+    for r in runs {
+        split_repeated_vertices(r, &mut split);
+    }
+    split
+}
+
+/// Cut a run at every repeated interior vertex, so each piece is simple. A closed run may
+/// repeat its first vertex once, at the end.
+fn split_repeated_vertices(run: Vec<Coord<f64>>, out: &mut Vec<Vec<Coord<f64>>>) {
+    use rustc_hash::FxHashSet;
+    let closed = run.len() > 2 && run[0] == run[run.len() - 1];
+    let mut cur: Vec<Coord<f64>> = Vec::new();
+    let mut seen: FxHashSet<(u64, u64)> = FxHashSet::default();
+    for (k, p) in run.iter().copied().enumerate() {
+        let key = (p.x.to_bits(), p.y.to_bits());
+        let last = k + 1 == run.len();
+        if !cur.is_empty() && seen.contains(&key) && !(closed && last) {
+            if cur.len() >= 2 {
+                out.push(cur);
+            }
+            cur = Vec::new();
+            seen.clear();
+        }
+        cur.push(p);
+        seen.insert(key);
+    }
+    if cur.len() >= 2 {
+        out.push(cur);
+    }
 }
 
 /// Map a f64 coordinate run (noder / greedy-fallback output) onto the target scalar.
@@ -453,9 +515,9 @@ impl<T: GeoFloat> MakeValid for Rect<T> {
     }
 }
 
+mod lines;
 #[cfg(any(feature = "arrange", feature = "structure"))]
 mod multipolygon;
-mod lines;
 mod polygon;
 pub(crate) mod precondition;
 mod strip;
