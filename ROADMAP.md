@@ -79,6 +79,9 @@ component-rule, snap-grid, line-coverage and area-gate fixes (`57de5dd`, `abff4b
   1,451-part feature, +0.0122% each (0.0033 area units on 27.1208). RustGIS writes 61 invalid
   outputs and 0 area misses. The four misses sit above the 1e-6 harness tolerance and are the
   tolerant near-touch class (item 18), not a lost part.
+- Item 19: a valid MultiPolygon returns unchanged, minus empty components. The old path repaired
+  every part and re-noded all components even when the feature was valid. An 80,000-part valid
+  checkerboard went from 298 ms to 119 ms. `valid_multipolygon_comes_back_byte_for_byte`.
 
 ## Now
 

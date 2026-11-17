@@ -3,9 +3,10 @@
 //! These pin the even-odd area contract and the MakeValid loop independently of
 //! the implementation that currently provides them.
 
-use geo::{Area, Coord, Line, LineString, MultiPolygon, Polygon};
+use geo::{Area, Coord, Geometry, Line, LineString, MultiPolygon, Polygon};
 use geo_repair::io::wkt::read_wkt;
 use geo_repair::structure::build_area::build_area;
+use geo_repair::validation::GeoValidation;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod, is_valid};
 
 fn ring(coords: &[(f64, f64)]) -> Vec<Line<f64>> {
@@ -57,6 +58,48 @@ fn make_valid(poly: &Polygon<f64>, method: PolyMethod) -> geo::Geometry<f64> {
         ..Default::default()
     };
     poly.make_valid_with_config(&config)
+}
+
+#[test]
+fn valid_multipolygon_comes_back_byte_for_byte() {
+    let sq = |x: f64, y: f64| {
+        Polygon::new(
+            LineString::new(vec![
+                Coord { x, y },
+                Coord { x: x + 1.0, y },
+                Coord {
+                    x: x + 1.0,
+                    y: y + 1.0,
+                },
+                Coord { x, y: y + 1.0 },
+                Coord { x, y },
+            ]),
+            Vec::new(),
+        )
+    };
+    // Checkerboard: diagonal neighbours touch at one point, no shared edge.
+    let parts: Vec<Polygon<f64>> = (0..8)
+        .flat_map(|i| {
+            (0..8).filter_map(move |j| {
+                if (i + j) % 2 == 0 {
+                    Some(sq(i as f64, j as f64))
+                } else {
+                    None
+                }
+            })
+        })
+        .collect();
+    let mp = MultiPolygon::new(parts);
+    assert!(mp.validate().valid, "the fixture must be valid");
+    let out = mp.make_valid_with_config(&MakeValidConfig {
+        poly_method: PolyMethod::Auto,
+        ..Default::default()
+    });
+    assert_eq!(
+        out,
+        Geometry::MultiPolygon(mp),
+        "a valid MultiPolygon must come back unchanged"
+    );
 }
 
 /// Measured 2026-11-17: AX_Buffer-1 case 25's second part is a valid ring wound CW.
