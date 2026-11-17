@@ -469,6 +469,3 @@ pub(crate) fn bbox_overlap(a: [f64; 4], b: [f64; 4]) -> bool {
 pub(crate) fn bbox_covers(a: [f64; 4], b: [f64; 4]) -> bool {
     a[0] <= b[0] && a[2] >= b[2] && a[1] <= b[1] && a[3] >= b[3]
 }
-
-
-

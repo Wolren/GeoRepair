@@ -226,11 +226,61 @@ fn noded_runs_to_geometry<T: NodingFloat>(runs: &[Vec<Coord<f64>>]) -> Geometry<
     }
 }
 
-/// Greedy simplification of a non-simple line: walk the segments, keep a segment unless
-/// it conflicts with an already-kept segment, using the same pairwise tests as
-/// [`check_line_components_intersect`]. A shared endpoint is a revisit, not a conflict:
-/// the run splitter cuts the chain there, so every spike survives.
+/// Greedy simplification of a non-simple line. Split at repeated vertices first, so the
+/// star-shaped families cost O(n) instead of O(n^2); then walk each piece and keep a
+/// segment unless it conflicts with an already-kept segment.
 fn simple_subline(coords: &[Coord<f64>]) -> Vec<Vec<Coord<f64>>> {
+    let n = coords.len() - 1;
+    if n < 2 {
+        return vec![coords.to_vec()];
+    }
+    let mut pieces: Vec<Vec<Coord<f64>>> = Vec::new();
+    split_repeated_vertices(coords.to_vec(), &mut pieces);
+    let mut runs: Vec<Vec<Coord<f64>>> = Vec::new();
+    for piece in pieces {
+        runs.extend(greedy_simple_piece(&piece));
+    }
+    dedup_segments(runs)
+}
+
+/// Drop segments that occur twice, ignoring direction. A spoke wheel closes through its
+/// centre, so its last segment retraces the first one.
+fn dedup_segments(runs: Vec<Vec<Coord<f64>>>) -> Vec<Vec<Coord<f64>>> {
+    use rustc_hash::FxHashSet;
+    let mut seen: FxHashSet<(u64, u64, u64, u64)> = FxHashSet::default();
+    let mut out: Vec<Vec<Coord<f64>>> = Vec::with_capacity(runs.len());
+    for run in runs {
+        let mut cur: Vec<Coord<f64>> = Vec::with_capacity(run.len());
+        if let Some(&p) = run.first() {
+            cur.push(p);
+        }
+        for w in run.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            let ka = (a.x.to_bits(), a.y.to_bits());
+            let kb = (b.x.to_bits(), b.y.to_bits());
+            let key = if ka <= kb {
+                (ka.0, ka.1, kb.0, kb.1)
+            } else {
+                (kb.0, kb.1, ka.0, ka.1)
+            };
+            if seen.insert(key) {
+                cur.push(b);
+            } else {
+                if cur.len() >= 2 {
+                    out.push(core::mem::take(&mut cur));
+                }
+                cur.push(b);
+            }
+        }
+        if cur.len() >= 2 {
+            out.push(cur);
+        }
+    }
+    out
+}
+
+/// Greedy walk over one vertex-simple piece.
+fn greedy_simple_piece(coords: &[Coord<f64>]) -> Vec<Vec<Coord<f64>>> {
     let n = coords.len() - 1;
     if n < 2 {
         return vec![coords.to_vec()];
@@ -277,31 +327,15 @@ fn simple_subline(coords: &[Coord<f64>]) -> Vec<Vec<Coord<f64>>> {
                 ) {
                     continue 'seg;
                 }
-            } else {
-                let shared = coords[i] == coords[j]
-                    || coords[i] == coords[j + 1]
-                    || coords[i + 1] == coords[j]
-                    || coords[i + 1] == coords[j + 1];
-                if shared {
-                    // A shared endpoint is connectivity, not an intersection: keep the
-                    // segment and let `split_repeated_vertices` cut the run there. Only a
-                    // collinear overlap at that point duplicates linework.
-                    if segments_collinear_overlap(
-                        coords[i],
-                        coords[i + 1],
-                        coords[j],
-                        coords[j + 1],
-                        eps,
-                    ) {
-                        continue 'seg;
-                    }
-                    continue;
-                }
-                if edges_intersect_general(coords[i], coords[i + 1], coords[j], coords[j + 1], eps)
-                    || edges_vertex_on_edge(coords[i], coords[i + 1], coords[j], coords[j + 1])
-                {
-                    continue 'seg;
-                }
+            } else if edges_intersect_general(
+                coords[i],
+                coords[i + 1],
+                coords[j],
+                coords[j + 1],
+                eps,
+            ) || edges_vertex_on_edge(coords[i], coords[i + 1], coords[j], coords[j + 1])
+            {
+                continue 'seg;
             }
         }
         kept.push(j);
@@ -323,11 +357,7 @@ fn simple_subline(coords: &[Coord<f64>]) -> Vec<Vec<Coord<f64>>> {
     if !run.is_empty() {
         runs.push(run);
     }
-    let mut split: Vec<Vec<Coord<f64>>> = Vec::with_capacity(runs.len());
-    for r in runs {
-        split_repeated_vertices(r, &mut split);
-    }
-    split
+    runs
 }
 
 /// Cut a run at every repeated interior vertex, so each piece is simple. A closed run may
@@ -369,9 +399,11 @@ fn run_to_line<T: NodingFloat>(run: &[Coord<f64>]) -> LineString<T> {
 
 /// Greedy cross-component conflict filter (mirror of the validator's
 /// [`check_line_components_intersect`] rule): keep a run unless it conflicts with an
-/// earlier one. Used as the final safety net after [`lines::node_components`].
+/// earlier one. Used as the final safety net after [`lines::node_components`]. The
+/// pairwise cost is quadratic, so large outputs ship unfiltered like `filter_demoted_lines`.
 pub(crate) fn keep_conflicting_runs(runs: &[Vec<Coord<f64>>]) -> Option<Vec<usize>> {
-    if runs.len() < 2 {
+    const PAIR_FILTER_MAX: usize = 64;
+    if runs.len() < 2 || runs.len() > PAIR_FILTER_MAX {
         return None;
     }
     let (mut gmin_x, mut gmax_x, mut gmin_y, mut gmax_y) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);

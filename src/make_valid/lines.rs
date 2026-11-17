@@ -42,8 +42,10 @@ pub(crate) fn node_components(parts: &[Run]) -> Vec<Run> {
     }
     let eps = scale_eps(parts);
     let parts = split_closed_parts(parts, eps);
-    let mut cuts: Vec<Cuts> =
-        parts.iter().map(|p| vec![Vec::new(); p.len().saturating_sub(1)]).collect();
+    let mut cuts: Vec<Cuts> = parts
+        .iter()
+        .map(|p| vec![Vec::new(); p.len().saturating_sub(1)])
+        .collect();
 
     for (a, b) in candidate_pairs(&parts, eps) {
         let (left, right) = cuts.split_at_mut(b);
@@ -140,7 +142,12 @@ fn split_closed_parts(parts: &[Run], eps: f64) -> Vec<Run> {
 }
 
 /// Rotate the closed ring to the first contact point and cut it into two open paths.
-fn split_closed(part: &[Coord<f64>], parts: &[Run], self_idx: usize, eps: f64) -> Option<(Run, Run)> {
+fn split_closed(
+    part: &[Coord<f64>],
+    parts: &[Run],
+    self_idx: usize,
+    eps: f64,
+) -> Option<(Run, Run)> {
     let n = part.len() - 1;
     let contact = (0..n).find(|&k| {
         parts
@@ -162,7 +169,11 @@ fn split_closed(part: &[Coord<f64>], parts: &[Run], self_idx: usize, eps: f64) -
     }
     let head: Run = rotated[..=cut].to_vec();
     let tail: Run = rotated[cut..].to_vec();
-    if head.len() < 2 || tail.len() < 2 || head[0] == head[head.len() - 1] || tail[0] == tail[tail.len() - 1] {
+    if head.len() < 2
+        || tail.len() < 2
+        || head[0] == head[head.len() - 1]
+        || tail[0] == tail[tail.len() - 1]
+    {
         return None;
     }
     Some((head, tail))
@@ -172,17 +183,23 @@ fn vertex_touches(v: Coord<f64>, q: &[Coord<f64>], eps: f64) -> bool {
     if q.len() < 2 {
         return false;
     }
-    q.iter().any(|c| (c.x - v.x).abs() <= eps && (c.y - v.y).abs() <= eps)
+    q.iter()
+        .any(|c| (c.x - v.x).abs() <= eps && (c.y - v.y).abs() <= eps)
         || q.windows(2).any(|w| on_segment(w[0], w[1], v, eps))
 }
 
 /// Record a cut at parameter `t` of segment `seg`, keeping the exact point to insert.
 fn add_cut(cuts: &mut [Vec<(f64, Coord<f64>)>], seg: usize, t: f64, point: Coord<f64>, eps: f64) {
-    let Some(seg_cuts) = cuts.get_mut(seg) else { return };
+    let Some(seg_cuts) = cuts.get_mut(seg) else {
+        return;
+    };
     if t < 0.0 || t > 1.0 || !point.x.is_finite() || !point.y.is_finite() {
         return;
     }
-    if seg_cuts.iter().any(|(s, p)| (*s - t).abs() <= eps && *p == point) {
+    if seg_cuts
+        .iter()
+        .any(|(s, p)| (*s - t).abs() <= eps && *p == point)
+    {
         return;
     }
     seg_cuts.push((t, point));
@@ -244,7 +261,9 @@ fn connect(
                 }
                 continue;
             }
-            let Some((t, u, pt)) = compute_intersection_param(&ea, &eb, eps) else { continue };
+            let Some((t, u, pt)) = compute_intersection_param(&ea, &eb, eps) else {
+                continue;
+            };
             if t > eps && t < 1.0 - eps {
                 add_cut(cuts_a, i, t, pt, eps);
             } else {
@@ -293,8 +312,7 @@ fn split_runs(part: &[Coord<f64>], cuts: &[Vec<(f64, Coord<f64>)>], eps: f64) ->
     let mut out: Vec<Run> = Vec::new();
     let mut cur: Run = vec![part[0]];
     for i in 0..n - 1 {
-        let mut segment_cuts: Vec<(f64, Coord<f64>)> =
-            cuts.get(i).cloned().unwrap_or_default();
+        let mut segment_cuts: Vec<(f64, Coord<f64>)> = cuts.get(i).cloned().unwrap_or_default();
         segment_cuts.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(core::cmp::Ordering::Equal));
         for (t, pt) in segment_cuts {
             if t <= eps {
@@ -363,13 +381,7 @@ fn dedupe_covered(kept: Vec<Run>, eps: f64) -> Vec<Run> {
 }
 
 /// Coverage tested only against the candidate pieces whose box comes within eps.
-fn run_covered(
-    run: &Run,
-    kept: &[Run],
-    neigh: &[usize],
-    alive: &[bool],
-    eps: f64,
-) -> bool {
+fn run_covered(run: &Run, kept: &[Run], neigh: &[usize], alive: &[bool], eps: f64) -> bool {
     run.windows(2).all(|w| {
         let mid = Coord {
             x: (w[0].x + w[1].x) / 2.0,
@@ -409,5 +421,3 @@ fn any_conflict(parts: &[Run], eps: f64) -> bool {
         .into_iter()
         .any(|(i, j)| check_line_components_intersect(&parts[i], &parts[j], eps))
 }
-
-

@@ -363,7 +363,7 @@ fn sanitize_polygon<T: GeoFloat>(p: &Polygon<T>) -> Option<Polygon<T>> {
 
 #[cfg(all(test, feature = "arrange", feature = "structure"))]
 mod policy_tests {
-    use super::{apply_policy, count_line_parts, make_valid_with_policy, OutputPolicy};
+    use super::{OutputPolicy, apply_policy, count_line_parts, make_valid_with_policy};
     use crate::core::MakeValidConfig;
     use geo::{Coord, Geometry, LineString, MultiLineString};
 
@@ -391,7 +391,8 @@ mod policy_tests {
             line(&[(0.0, 0.0), (10.0, 0.0)]),
         ]);
         let g = Geometry::MultiLineString(mls);
-        let (out, report) = make_valid_with_policy(&g, &MakeValidConfig::default(), OutputPolicy::KeepAll);
+        let (out, report) =
+            make_valid_with_policy(&g, &MakeValidConfig::default(), OutputPolicy::KeepAll);
         assert_eq!(report.line_parts_in, 2);
         assert_eq!(report.line_parts_out, 1);
         assert_eq!(report.line_parts_out, count_line_parts(&out));

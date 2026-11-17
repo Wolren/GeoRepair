@@ -38,7 +38,10 @@ fn assert_mls_valid(chains: &[Vec<Coord<f64>>]) {
             .collect(),
     );
     let g = Geometry::MultiLineString(mls);
-    assert!(g.is_valid(), "assembled MultiLineString is not valid: {chains:?}");
+    assert!(
+        g.is_valid(),
+        "assembled MultiLineString is not valid: {chains:?}"
+    );
 }
 
 fn node_ok(pairs: &[(f64, f64)]) -> Vec<Vec<Coord<f64>>> {
@@ -175,7 +178,10 @@ fn near_coincident_crossing_cluster() {
         (5.0, 5.0),
     ]);
     assert!(chains.len() >= 6, "expected >= 6 chains, got {chains:?}");
-    let ends: Vec<Coord<f64>> = chains.iter().flat_map(|ch| [ch[0], ch[ch.len() - 1]]).collect();
+    let ends: Vec<Coord<f64>> = chains
+        .iter()
+        .flat_map(|ch| [ch[0], ch[ch.len() - 1]])
+        .collect();
     for node in [c(5.0000000005, 0.0), c(5.000000001, 0.0)] {
         assert!(
             ends.iter().any(|e| *e == node),

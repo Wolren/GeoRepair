@@ -36,7 +36,10 @@ fn polygon_from_raw_coords(bytes: &[u8], max_coords: usize) -> Option<Geometry<f
     if coords.first() != coords.last() {
         coords.push(coords[0]);
     }
-    Some(Geometry::Polygon(Polygon::new(LineString::new(coords), Vec::new())))
+    Some(Geometry::Polygon(Polygon::new(
+        LineString::new(coords),
+        Vec::new(),
+    )))
 }
 
 /// The repair contract on one already-parsed geometry: no panic, output valid, and a valid
@@ -153,6 +156,12 @@ fn replay_all_corpus_seeds() {
         }
     }
     eprintln!("replayed {n} corpus seeds, skipped {skipped} outside a target's input shape");
-    assert!(n >= 70, "replayed only {n} seeds: the corpus was not read as intended");
-    assert_eq!(skipped, 0, "skipped {skipped} seeds: a corpus is being decoded wrongly");
+    assert!(
+        n >= 70,
+        "replayed only {n} seeds: the corpus was not read as intended"
+    );
+    assert_eq!(
+        skipped, 0,
+        "skipped {skipped} seeds: a corpus is being decoded wrongly"
+    );
 }
