@@ -224,16 +224,20 @@ impl GeoValidation for MultiPolygon<f64> {
                     let Some(pt) = s2.first().copied() else {
                         continue;
                     };
-                    let probe = crate::util::ring_interior_probe(s2).unwrap_or(pt);
-                    let query = rstar::AABB::from_corners([pt.x, pt.y], [pt.x, pt.y]);
+                    // A component nested inside another may have every vertex on the
+                    // parent's boundary (JTS "shell inside shell, all vertices touch").
+                    // The interior probe is strictly inside, so it tells nesting from an
+                    // island inside a hole, whose boundary vertices may touch the ring.
+                    let cand = crate::util::ring_interior_probe(s2).unwrap_or(pt);
                     let mut overlaps = false;
+                    let query = rstar::AABB::from_corners([cand.x, cand.y], [cand.x, cand.y]);
                     let _ = tree.locate_in_envelope_intersecting_int(query, |c| {
-                        if c.idx != i && point_in_ring_exclusive(pt, shells[c.idx]) {
+                        if c.idx != i && point_in_ring_exclusive(cand, shells[c.idx]) {
                             let p_other = &self.0[c.idx];
                             let in_hole = p_other
                                 .interiors()
                                 .iter()
-                                .any(|h| point_in_ring_exclusive(probe, &h.0));
+                                .any(|h| point_in_ring_exclusive(cand, &h.0));
                             if !in_hole {
                                 overlaps = true;
                                 return core::ops::ControlFlow::Break(());
@@ -254,18 +258,20 @@ impl GeoValidation for MultiPolygon<f64> {
                         if i == j {
                             continue;
                         }
-                        if let Some(pt) = shells[j].first().copied()
-                            && point_in_ring_exclusive(pt, shells[i])
-                        {
-                            let probe = crate::util::ring_interior_probe(shells[j]).unwrap_or(pt);
-                            let in_hole = self.0[i]
-                                .interiors()
-                                .iter()
-                                .any(|h| point_in_ring_exclusive(probe, &h.0));
-                            if !in_hole {
-                                errors.push(GeometryValidationError::NestedHoles);
-                                return ValidationResult::invalid(errors);
-                            }
+                        let Some(pt) = shells[j].first().copied() else {
+                            continue;
+                        };
+                        let cand = crate::util::ring_interior_probe(shells[j]).unwrap_or(pt);
+                        if !point_in_ring_exclusive(cand, shells[i]) {
+                            continue;
+                        }
+                        let in_hole = self.0[i]
+                            .interiors()
+                            .iter()
+                            .any(|h| point_in_ring_exclusive(cand, &h.0));
+                        if !in_hole {
+                            errors.push(GeometryValidationError::NestedHoles);
+                            return ValidationResult::invalid(errors);
                         }
                     }
                 }

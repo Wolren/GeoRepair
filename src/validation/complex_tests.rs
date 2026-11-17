@@ -403,6 +403,117 @@ fn test_nested_holes() {
 }
 
 #[test]
+fn test_nested_holes_reversed_order() {
+    // Measured 2026-11-17: JTS TestInvalidA "Holes - Nested" puts the inner hole first;
+    // the pair check only tested the later ring for nesting, so the input was called valid.
+    let poly = Polygon::new(
+        LineString::new(vec![
+            Coord { x: 10.0, y: 90.0 },
+            Coord { x: 90.0, y: 90.0 },
+            Coord { x: 90.0, y: 10.0 },
+            Coord { x: 10.0, y: 10.0 },
+            Coord { x: 10.0, y: 90.0 },
+        ]),
+        vec![
+            LineString::new(vec![
+                Coord { x: 30.0, y: 70.0 },
+                Coord { x: 70.0, y: 70.0 },
+                Coord { x: 70.0, y: 30.0 },
+                Coord { x: 30.0, y: 30.0 },
+                Coord { x: 30.0, y: 70.0 },
+            ]),
+            LineString::new(vec![
+                Coord { x: 20.0, y: 80.0 },
+                Coord { x: 80.0, y: 80.0 },
+                Coord { x: 80.0, y: 20.0 },
+                Coord { x: 20.0, y: 20.0 },
+                Coord { x: 20.0, y: 80.0 },
+            ]),
+        ],
+    );
+    assert!(
+        poly.validate()
+            .errors
+            .iter()
+            .any(|e| matches!(e, GeometryValidationError::NestedHoles)),
+        "the outer hole listed second must still be detected"
+    );
+}
+
+#[test]
+fn test_nested_shell_touching_at_vertices() {
+    // Measured 2026-11-17: JTS general_TestValid "mA - shell inside shell, all vertices
+    // touch". Every triangle vertex lies on the outer ring, so a first-vertex probe missed
+    // the nesting and the MultiPolygon was called valid.
+    let tri = LineString::new(vec![
+        Coord { x: 80.0, y: 30.0 },
+        Coord { x: 20.0, y: 30.0 },
+        Coord { x: 50.0, y: 20.0 },
+        Coord { x: 80.0, y: 30.0 },
+    ]);
+    let outer = LineString::new(vec![
+        Coord { x: 10.0, y: 10.0 },
+        Coord { x: 20.0, y: 30.0 },
+        Coord { x: 10.0, y: 90.0 },
+        Coord { x: 90.0, y: 90.0 },
+        Coord { x: 80.0, y: 30.0 },
+        Coord { x: 90.0, y: 10.0 },
+        Coord { x: 50.0, y: 20.0 },
+        Coord { x: 10.0, y: 10.0 },
+    ]);
+    let mp = geo::MultiPolygon::new(vec![
+        Polygon::new(outer, Vec::new()),
+        Polygon::new(tri, Vec::new()),
+    ]);
+    assert!(
+        mp.validate()
+            .errors
+            .iter()
+            .any(|e| matches!(e, GeometryValidationError::NestedHoles)),
+        "a nested shell touching the parent only at vertices must be rejected"
+    );
+}
+
+#[test]
+fn test_shell_inside_hole_is_an_island() {
+    // geos general_TestValid "mA - shell inside hole, all vertices touch (valid)".
+    // The island's vertices sit on the hole ring; that contact is legal.
+    let shell = LineString::new(vec![
+        Coord { x: 20.0, y: 380.0 },
+        Coord { x: 420.0, y: 380.0 },
+        Coord { x: 420.0, y: 20.0 },
+        Coord { x: 20.0, y: 20.0 },
+        Coord { x: 20.0, y: 380.0 },
+    ]);
+    let hole = LineString::new(vec![
+        Coord { x: 220.0, y: 340.0 },
+        Coord { x: 180.0, y: 240.0 },
+        Coord { x: 60.0, y: 200.0 },
+        Coord { x: 180.0, y: 160.0 },
+        Coord { x: 340.0, y: 60.0 },
+        Coord { x: 240.0, y: 220.0 },
+        Coord { x: 220.0, y: 340.0 },
+    ]);
+    let island = LineString::new(vec![
+        Coord { x: 180.0, y: 240.0 },
+        Coord { x: 180.0, y: 160.0 },
+        Coord { x: 240.0, y: 220.0 },
+        Coord { x: 180.0, y: 240.0 },
+    ]);
+    let mp = geo::MultiPolygon::new(vec![
+        Polygon::new(shell, vec![hole]),
+        Polygon::new(island, Vec::new()),
+    ]);
+    let errors = mp.validate().errors;
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, GeometryValidationError::NestedHoles)),
+        "an island inside a hole is not a nested shell: {errors:?}"
+    );
+}
+
+#[test]
 fn test_disconnected_interior_ring() {
     let poly = Polygon::new(
         LineString::new(vec![

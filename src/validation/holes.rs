@@ -161,10 +161,12 @@ pub(crate) fn check_holes_valid(
         }
 
         for (a, b) in overlap_pairs(&bboxes, 1) {
-            if !bbox_covers(bboxes[a], bboxes[b]) {
-                continue;
+            // The input order is arbitrary: either hole may be the outer one.
+            if bbox_covers(bboxes[a], bboxes[b]) && is_ring_nested(rings[b], rings[a], eps) {
+                errors.push(GeometryValidationError::NestedHoles);
+                return errors;
             }
-            if is_ring_nested(rings[b], rings[a], eps) {
+            if bbox_covers(bboxes[b], bboxes[a]) && is_ring_nested(rings[a], rings[b], eps) {
                 errors.push(GeometryValidationError::NestedHoles);
                 return errors;
             }
