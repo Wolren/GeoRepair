@@ -1,4 +1,5 @@
-use geo::{Coord, LineString, Polygon};
+use geo::{Coord, Geometry, LineString, Polygon};
+use geo_repair::io::wkt::read_wkt;
 use geo_repair::validation::GeoValidation;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod};
 
@@ -104,6 +105,27 @@ fn fuzz_mixed_magnitude_deadly_signal() {
 // sliver is 3.7e4 wide, below one step of the 1e8 snap grid at that extent. The repair
 // cannot measure what it would lose, so it returns the input with the repeated vertex
 // collapsed instead of an empty collection.
+/// Documented limit (2026-11-17): the coordinates reach 1e257, past the 1e8 snap grid
+/// and past a measurable even-odd area. The repair returns nothing; RustGIS keeps one
+/// part. This test pins the empty output so a change is deliberate.
+#[test]
+fn extreme_span_self_intersection_returns_nothing() {
+    let g = read_wkt(
+        "POLYGON ((7.584e-321 0.0, 5.30239915e-315 1.1124672166448326e+212, \
+         3.476364229858696e+210 1.1818214992282972e-124, 1.1818214992282972e-124 6.953531125181176e-309, \
+         3.0003662109375 -1.0, 1.1818213291159835e-125 3.64228306305473e-310, \
+         3.64228306217643e-310 1.148959759875365e-308, 4.556951262222753e-305 -4.0546456123406556e+257, \
+         -2.0836291838344226e+256 -2.0836291838344226e+256, 2.7162230957734e-311 5.468344122175726e-304, \
+         1.3920080192391e-309 5.0, 7.584e-321 0.0))",
+    )
+    .expect("the fuzz seed parses");
+    let out = g.make_valid();
+    assert!(
+        matches!(&out, Geometry::GeometryCollection(gc) if gc.0.is_empty()),
+        "documented empty output changed: {out:?}"
+    );
+}
+
 #[test]
 fn sub_grid_mutants_keep_the_input() {
     let p = |x: f64, y: f64| Coord { x, y };
@@ -126,10 +148,17 @@ fn sub_grid_mutants_keep_the_input() {
     rings.push(sliver);
     for (k, ring) in rings.into_iter().enumerate() {
         let poly = Polygon::new(LineString::new(ring.clone()), Vec::new());
+        // A valid ring comes back unchanged; an invalid one below the snap grid comes
+        // back with only its consecutive duplicates removed.
+        let valid = poly.validate().valid;
         let mut want: Vec<Coord<f64>> = Vec::new();
-        for c in &ring {
-            if want.last() != Some(c) {
-                want.push(*c);
+        if valid {
+            want = ring.clone();
+        } else {
+            for c in &ring {
+                if want.last() != Some(c) {
+                    want.push(*c);
+                }
             }
         }
         for method in [PolyMethod::Auto, PolyMethod::Structure, PolyMethod::Arrange] {
@@ -142,7 +171,10 @@ fn sub_grid_mutants_keep_the_input() {
                 panic!("mutant {k} in mode {method:?} came back as {out:?}");
             };
             assert_eq!(got.exterior().0, want, "mutant {k} in mode {method:?}");
-            assert!(out.validate().valid, "mutant {k} in mode {method:?} is invalid");
+            assert!(
+                out.validate().valid,
+                "mutant {k} in mode {method:?} is invalid"
+            );
         }
     }
 }

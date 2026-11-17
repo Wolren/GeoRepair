@@ -4,6 +4,7 @@
 //! the implementation that currently provides them.
 
 use geo::{Area, Coord, Line, LineString, MultiPolygon, Polygon};
+use geo_repair::io::wkt::read_wkt;
 use geo_repair::structure::build_area::build_area;
 use geo_repair::{MakeValid, MakeValidConfig, PolyMethod, is_valid};
 
@@ -56,6 +57,38 @@ fn make_valid(poly: &Polygon<f64>, method: PolyMethod) -> geo::Geometry<f64> {
         ..Default::default()
     };
     poly.make_valid_with_config(&config)
+}
+
+/// Measured 2026-11-17: AX_Buffer-1 case 25's second part is a valid ring wound CW.
+/// All three methods returned GEOMETRYCOLLECTION EMPTY instead of re-winding it.
+#[test]
+fn clockwise_thin_shell_keeps_its_area() {
+    let coords = [
+        (708653.498611049, 2402311.54647056),
+        (708708.895756966, 2402203.47250014),
+        (708280.326454234, 2402089.6337791),
+        (708247.896591321, 2402252.48269854),
+        (708367.379593851, 2402324.00761653),
+        (708248.882609455, 2402253.07294874),
+        (708249.523621829, 2402244.3124463),
+        (708261.854734465, 2402182.39086576),
+        (708262.818392579, 2402183.35452387),
+        (708653.498611049, 2402311.54647056),
+    ];
+    let poly = Polygon::new(
+        LineString::new(coords.iter().map(|&(x, y)| Coord { x, y }).collect()),
+        Vec::new(),
+    );
+    let want = poly.unsigned_area();
+    for method in [PolyMethod::Auto, PolyMethod::Structure, PolyMethod::Arrange] {
+        let out = make_valid(&poly, method);
+        assert!(is_valid(&out), "{method:?}: output invalid: {out:?}");
+        let got = out.unsigned_area();
+        assert!(
+            (got - want).abs() <= 1e-6 * want,
+            "{method:?}: area {got} against {want}: {out:?}"
+        );
+    }
 }
 
 #[test]
@@ -210,4 +243,25 @@ fn overlapping_parts_cancel_in_the_even_odd_area() {
         out.unsigned_area()
     );
     assert!(is_valid(&out));
+}
+
+/// Measured 2026-11-17: two overlapping bowtie holes. GeoRepair used to return a valid
+/// 5383.3333 (+16.72%); the even-odd boundary area is 4612.1212.
+#[test]
+fn bowtie_holes_reach_the_even_odd_area() {
+    let g = read_wkt(
+        "POLYGON ((10 90, 90 90, 90 10, 10 10, 10 90), \
+         (70 80, 20 80, 70 20, 20 20, 70 80), (80 70, 40 70, 80 30, 40 30, 80 70))",
+    )
+    .expect("the JTS case parses");
+    let out = g.make_valid_with_config(&MakeValidConfig {
+        poly_method: PolyMethod::Auto,
+        ..Default::default()
+    });
+    assert!(is_valid(&out), "output must be valid: {out:?}");
+    let got = out.unsigned_area();
+    assert!(
+        (got - 4612.121212121212).abs() <= 1e-6 * 4612.121212121212,
+        "even-odd area 4612.1212 against {got}"
+    );
 }

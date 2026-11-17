@@ -179,11 +179,89 @@ impl<T: GeoFloat> MakeValid for Triangle<T> {
     }
 }
 
+/// Move a vertex that the tolerant validator sees within eps of a non-adjacent edge
+/// away from that edge by 3 eps, keeping the same side. Measured 2026-11-17: AX_Buffer-1
+/// part 2 has a vertex 5.6e-11 from an edge, below the 4.6e-10 gate, and every repair
+/// path emptied the 45,799-unit shell.
+fn nudge_near_touches(poly: &Polygon<f64>) -> Option<Polygon<f64>> {
+    let n = poly.exterior().0.len().saturating_sub(1);
+    if !(4..=512).contains(&n) {
+        return None;
+    }
+    let coords = &poly.exterior().0;
+    let (mut min_x, mut max_x, mut min_y, mut max_y) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+    for c in coords {
+        min_x = min_x.min(c.x);
+        max_x = max_x.max(c.x);
+        min_y = min_y.min(c.y);
+        max_y = max_y.max(c.y);
+    }
+    let eps = 1e-12 * (max_x - min_x).abs().max((max_y - min_y).abs()).max(1.0);
+    let mut moved = coords.clone();
+    let mut any = false;
+    for i in 0..n {
+        for j in 0..n {
+            if j == i || (j + 1) % n == i || j == (i + 1) % n {
+                continue;
+            }
+            let a = moved[j];
+            let b = moved[(j + 1) % n];
+            let p = moved[i];
+            let dx = b.x - a.x;
+            let dy = b.y - a.y;
+            let len2 = dx * dx + dy * dy;
+            if len2 == 0.0 {
+                continue;
+            }
+            let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
+            if t <= 0.0 || t >= 1.0 {
+                continue;
+            }
+            let cross = dx * (p.y - a.y) - dy * (p.x - a.x);
+            let dist = cross.abs() / len2.sqrt();
+            if dist == 0.0 || dist > eps {
+                continue;
+            }
+            let side = if cross >= 0.0 { 1.0 } else { -1.0 };
+            let len = len2.sqrt();
+            let step = 3.0 * eps * side / len;
+            moved[i] = Coord {
+                x: p.x - dy * step,
+                y: p.y + dx * step,
+            };
+            any = true;
+        }
+    }
+    if !any {
+        return None;
+    }
+    Some(Polygon::new(
+        LineString::new(moved),
+        poly.interiors().to_vec(),
+    ))
+}
+
 #[cfg(any(feature = "arrange", feature = "structure"))]
 impl MakeValid for Polygon<f64> {
     type Scalar = f64;
 
     fn make_valid_with_config(&self, config: &MakeValidConfig) -> Geometry<f64> {
+        // A simple ring wound the wrong way is invalid for one O(1) reason: re-wind it
+        // and return when that is the only defect. Measured 2026-11-17: AX_Buffer-1
+        // part 2 is such a ring, and every repair method returned empty for it.
+        if self.exterior().0.len() >= 4 && !crate::util::robust_is_ccw(&self.exterior().0) {
+            let rewound = enforce_ogc_winding(Geometry::Polygon(self.clone())).0;
+            if let Geometry::Polygon(p) = &rewound {
+                if p.validate().valid {
+                    return rewound;
+                }
+                if let Some(nudged) = nudge_near_touches(p)
+                    && nudged.validate().valid
+                {
+                    return Geometry::Polygon(nudged);
+                }
+            }
+        }
         // The exterior pre-scan fuses bbox extremes with the NaN check
         if !config.keep_collapsed && self.exterior().0.len() >= 4 {
             let coords = &self.exterior().0;
@@ -258,25 +336,44 @@ fn preserve_valid_input(
     orig: &Polygon<f64>,
 ) -> Geometry<f64> {
     use crate::validation::GeoValidation;
+    // A valid input must come back unchanged. The 1e8 snap grid is coarser than a
+    // 1e15-unit coordinate, so it moves valid extreme-span rings (fuzz mut8/26/34/99,
+    // measured 2026-11-17: +12.5% to +25% area).
+    if orig.validate().valid {
+        return Geometry::Polygon(orig.clone());
+    }
+    // Below the snap grid the repair cannot measure what a rounding would lose, so the
+    // deduplicated input is the answer even when the repair returns a non-empty shape.
+    // Measured 2026-11-17: the snap moved 1e15 by 0.1 and changed the area by 12.5%.
+    if snap_cannot_represent(orig) {
+        let (ext_clean, int_clean) = filter_finite_rings(orig);
+        if let Ok((ext_ring, _)) = dedup_and_close(ext_clean) {
+            let cleaned = Polygon::new(ext_ring, int_clean);
+            if cleaned.validate().valid {
+                warn!(
+                    "SNAP_SCALE 1e8 cannot hold these coordinates; returning the input with duplicate vertices removed"
+                );
+                return Geometry::Polygon(cleaned);
+            }
+        }
+    }
     let out = maybe_collapse_keep(result, config, orig);
     if matches!(&out, Geometry::Polygon(_) | Geometry::MultiPolygon(_)) {
         return out;
     }
     let empty = matches!(&out, Geometry::GeometryCollection(gc) if gc.0.is_empty());
-    // Below the snap grid the loss cannot be measured, so an empty repair returns the input.
+    // A non-representable input that still reaches here keeps the deduplicated form.
     if empty && snap_cannot_represent(orig) {
         let (ext_clean, int_clean) = filter_finite_rings(orig);
         if let Ok((ext_ring, _)) = dedup_and_close(ext_clean) {
             let cleaned = Polygon::new(ext_ring, int_clean);
             if cleaned.validate().valid {
-                warn!("SNAP_SCALE 1e8 cannot hold these coordinates; returning the input with duplicate vertices removed");
+                warn!(
+                    "SNAP_SCALE 1e8 cannot hold these coordinates; returning the input with duplicate vertices removed"
+                );
                 return Geometry::Polygon(cleaned);
             }
         }
-    }
-    if orig.validate().valid {
-        warn!("repair emptied a valid polygon; returning the input unchanged");
-        return Geometry::Polygon(orig.clone());
     }
     out
 }
@@ -379,6 +476,73 @@ fn fast_gate_accepts(poly: &Polygon<f64>, config: &MakeValidConfig) -> Option<Ve
     Some(extremal)
 }
 
+/// A GeometryCollection of nothing has no coordinates and is also "valid"; a repair of a
+/// non-empty polygon must never accept it.
+#[cfg(any(feature = "arrange", feature = "structure"))]
+fn geometry_is_empty(g: &Geometry<f64>) -> bool {
+    use geo::CoordsIter;
+    g.coords_iter().next().is_none()
+}
+
+/// True when the repaired area equals the even-odd area of the input boundary. A result
+/// can be valid and still cover the wrong region; measured 2026-11-17 on mut13 (-99.4%)
+/// and geos-590 (+16.9%), where the arrange path had the right area.
+#[cfg(any(feature = "arrange", feature = "structure"))]
+fn area_matches_input(poly: &Polygon<f64>, out: &Geometry<f64>) -> bool {
+    use geo::{Area, LinesIter};
+    let lines: Vec<geo::Line<f64>> = poly.lines_iter().collect();
+    let Some(even) = crate::structure::build_area::build_area(&lines) else {
+        return true;
+    };
+    let want = even.unsigned_area();
+    let got = out.unsigned_area();
+    if want <= 1e-9 {
+        got <= 1e-9
+    } else {
+        (got - want).abs() <= 1e-6 * want
+    }
+}
+
+/// The even-odd faces of the input boundary, when the face extractor can build them.
+#[cfg(any(feature = "arrange", feature = "structure"))]
+fn even_odd_faces(poly: &Polygon<f64>) -> Option<MultiPolygon<f64>> {
+    use geo::LinesIter;
+    let lines: Vec<geo::Line<f64>> = poly.lines_iter().collect();
+    crate::structure::build_area::build_area(&lines)
+}
+
+/// Prefer the arrangement result when the fast structure result covers the wrong region
+/// but is still valid. Falls back to the even-odd face extraction, then to the structure
+/// result when nothing better exists.
+#[cfg(any(feature = "arrange", feature = "structure"))]
+fn prefer_matching_area(
+    poly: &Polygon<f64>,
+    config: &MakeValidConfig,
+    current: Geometry<f64>,
+) -> Geometry<f64> {
+    if area_matches_input(poly, &current) {
+        return current;
+    }
+    let (alt, _) = arrange_chain(poly, config);
+    if !geometry_is_empty(&alt) && area_matches_input(poly, &alt) {
+        return alt;
+    }
+    if let Some(faces) = even_odd_faces(poly) {
+        let g = enforce_ogc_winding(Geometry::MultiPolygon(faces.clone())).0;
+        if is_valid_with_geo(&g) && area_matches_input(poly, &g) {
+            return g;
+        }
+        // Faces that meet at a vertex can still fail the component rule as a
+        // MultiPolygon; the overlay dissolves those contacts.
+        let unioned = geo::algorithm::bool_ops::unary_union(&faces);
+        let g = enforce_ogc_winding(Geometry::MultiPolygon(unioned)).0;
+        if is_valid_with_geo(&g) && area_matches_input(poly, &g) {
+            return g;
+        }
+    }
+    current
+}
+
 /// Gated arrange -> precision-reduction -> empty chain.
 ///
 /// The second value is the certification: true when the result is the input, re-wound
@@ -396,12 +560,12 @@ fn arrange_chain(poly: &Polygon<f64>, config: &MakeValidConfig) -> (Geometry<f64
         return (enforce_ogc_winding(Geometry::Polygon(poly.clone())).0, true);
     }
     let arranged = enforce_ogc_winding(arrange_or_empty(poly, config)).0;
-    if is_valid_with_geo(&arranged) {
+    if is_valid_with_geo(&arranged) && !geometry_is_empty(&arranged) {
         (arranged, false)
     } else {
         warn!("arrange output invalid, retrying with precision reduction");
         let fb = enforce_ogc_winding(reduce_fallback(poly, config)).0;
-        if is_valid_with_geo(&fb) {
+        if is_valid_with_geo(&fb) && !geometry_is_empty(&fb) {
             (fb, false)
         } else {
             warn!("repair failed all paths, returning empty");
@@ -461,7 +625,7 @@ pub(super) fn make_valid_impl(
                     // fast path can pass a wrong-wound (CW) input
                     let g_norm = enforce_ogc_winding(g).0;
                     if is_valid_with_geo(&g_norm) {
-                        (g_norm, false)
+                        (prefer_matching_area(poly, config, g_norm), false)
                     } else {
                         warn!("Structure mode: fix output invalid, retrying with CDT arrange");
                         arrange_chain(poly, config)
@@ -499,7 +663,7 @@ pub(super) fn make_valid_impl(
                 crate::structure::FixOutcome::Repaired(r) => {
                     let r_norm = enforce_ogc_winding(r).0;
                     if is_valid_with_geo(&r_norm) {
-                        (r_norm, false)
+                        (prefer_matching_area(poly, config, r_norm), false)
                     } else {
                         warn!("Auto mode: structure_fix invalid, falling back to CDT arrange");
                         arrange_chain(poly, config)
@@ -512,6 +676,34 @@ pub(super) fn make_valid_impl(
             }
         }
     };
+    // An empty result is valid geometry but never a repair of a polygon with area.
+    // Measured 2026-11-17: a near-touch that the tolerant validator rejects emptied a
+    // 45,799-unit shell. Give the arrangement path a chance before accepting nothing.
+    let result_empty = {
+        use geo::CoordsIter;
+        result.coords_iter().next().is_none()
+    };
+    if crate::util::shoelace_abs_sum(poly.exterior().0.as_slice()) > 0.0 && result_empty {
+        let (retry, retry_certified) = arrange_chain(poly, config);
+        let retry_empty = {
+            use geo::CoordsIter;
+            retry.coords_iter().next().is_none()
+        };
+        if !retry_empty {
+            return (retry, retry_certified);
+        }
+        if let Some(faces) = even_odd_faces(poly) {
+            let g = enforce_ogc_winding(Geometry::MultiPolygon(faces.clone())).0;
+            if is_valid_with_geo(&g) && area_matches_input(poly, &g) {
+                return (g, false);
+            }
+            let unioned = geo::algorithm::bool_ops::unary_union(&faces);
+            let g = enforce_ogc_winding(Geometry::MultiPolygon(unioned)).0;
+            if is_valid_with_geo(&g) && area_matches_input(poly, &g) {
+                return (g, false);
+            }
+        }
+    }
     if !certified && has_nan(&result) {
         (empty_geom::<f64>(), false)
     } else {
@@ -701,6 +893,9 @@ pub(crate) fn enforce_ogc_winding_with_extrema(
 /// identical to what the old `ogc_orientation_ok`'s fresh search would produce (the min
 /// vertex is order-independent; only the O(n) search is saved).
 fn winding_ok(ring: &[Coord<f64>], idx: usize, reversed: bool, shell: bool) -> bool {
+    if ring.len() < 2 {
+        return false;
+    }
     let n = ring.len() - 1;
     let mapped = if reversed {
         if idx == 0 { 0 } else { n - idx }

@@ -8,6 +8,7 @@ use super::polygon::{
 };
 use super::strip::strip_degenerate;
 use super::*;
+use crate::validation::GeometryValidationError;
 use alloc::vec::Vec;
 
 #[cfg(any(feature = "arrange", feature = "structure"))]
@@ -21,6 +22,19 @@ impl MakeValid for MultiPolygon<f64> {
         // Bail early on NaN/Inf coordinates
         if self.0.iter().any(has_nan_or_infinite) {
             return empty_geom::<f64>();
+        }
+        // A MultiPolygon whose only defect is ring winding is fixed by re-winding the
+        // whole feature, islands included. Measured 2026-11-17: "shell inside hole, all
+        // vertices touch" (GEOS-valid) lost its island and 18.75% of the area.
+        {
+            let v = self.validate();
+            if !v.valid
+                && v.errors
+                    .iter()
+                    .all(|e| matches!(e, GeometryValidationError::WrongOrientation))
+            {
+                return enforce_ogc_winding(Geometry::MultiPolygon(self.clone())).0;
+            }
         }
         let polys: Vec<Geometry<f64>> = self
             .iter()
