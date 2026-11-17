@@ -44,162 +44,165 @@ make the output slightly differ.
 
 ## Performance
 
-### A test dataset (1,579,030 polygons)
+### A test dataset (1,579,028 polygons)
 
 Structure batch on a GIS dataset (813 features from a GeoPackage,
-flattened to 1,579,030 polygon parts), measured 2026-09-18. i5-12400F
+flattened to 1,579,028 polygon parts), measured 2026-11-17. i5-12400F
 (6C/12T), release LTO, Rayon 12-thread batch; GEOS is conda-forge 3.14.1,
 serial per-call, run concurrently via Rayon, geometries built via CoordSeq
 direct construction (the one-time 1.5 s pre-build is excluded).
 
 | Dataset | GeoRepair | GEOS | Ratio |
 |---------|----------:|-----:|------:|
-| Validation (1.58M) | **2.1 s** (1.3 µs/poly) | 3.0 s (1.9 µs/poly) | **1.4x** |
-| Full pass (1.58M) | **2.1 s** (1.3 µs/poly) | 3.2 s (2.1 µs/poly) | **1.5x** |
+| Validation (1.58M) | **2.18 s** (1.38 µs/poly) | 3.60 s (2.28 µs/poly) | **1.7x** |
+| Full pass (1.58M) | **2.59 s** (1.64 µs/poly) | 3.19 s (2.02 µs/poly) | **1.2x** |
 
 ### Synthetic benchmarks
 
 Full table, parallel batch (µs); ratio = GEOS / GeoRepair, >1 means
-we win. Methodology: `docs/BENCHMARKS.md`. Regenerate:
+we win. Measured 2026-11-17 on i5-12400F. The `self-int ls` rows were
+re-run in isolation to settle one full-pass outlier. Methodology:
+`docs/BENCHMARKS.md`. Regenerate:
 `python scripts/readme_bench_table.py --update <bench.json>`; CI gate:
-`python scripts/readme_bench_table.py --check <bench.json>`. The overlap and
-dense grid rows were re-measured 2026-11-05; the rest are the 2026-09-18 set.
+`python scripts/readme_bench_table.py --check <bench.json>`.
 
 | Benchmark | GeoRepair | GEOS | Ratio |
 |-----------|----------:|-----:|------:|
-| valid polygon 4v | 0.051 | 0.237 | 4.7x |
-| valid polygon 10v | 0.137 | 0.319 | 2.3x |
-| valid polygon 50v | 0.245 | 0.415 | 1.7x |
-| valid polygon 100v | 0.408 | 0.578 | 1.4x |
-| valid polygon 500v | 1.4 | 1.7 | 1.2x |
-| valid polygon 1000v | 2.4 | 2.7 | 1.1x |
-| valid polygon 5000v | 11.1 | 8.4 | 0.76x |
-| valid polygon 10000v | 21.4 | 17.4 | 0.81x |
-| invalid bowtie 4v | 0.661 | 19.9 | 30x |
-| invalid bowtie 50v | 7.7 | 65.8 | 8.5x |
-| invalid bowtie 100v | 25.1 | 118 | 4.7x |
-| invalid bowtie 500v | 56.9 | 511 | 9.0x |
-| invalid bowtie 1000v | 109 | 1001 | 9.2x |
-| star poly 100v | 8.6 | 6.6 | 0.76x |
-| star poly 500v | 172 | 91.4 | 0.53x |
-| star poly 1000v | 241 | 292 | 1.2x |
-| spaghetti 500v | 1589 | 2633 | 1.7x |
-| spaghetti 2000v | 11391 | 16251 | 1.4x |
-| self-touch 100v | 0.493 | 0.759 | 1.5x |
-| self-touch 500v | 1.5 | 1.6 | 1.0x |
-| self-touch 1000v | 2.8 | 3.2 | 1.1x |
-| collapsed 100v | 21.3 | 137 | 6.4x |
-| collapsed 500v | 113 | 554 | 4.9x |
-| collapsed 1000v | 189 | 1154 | 6.1x |
-| near-collinear 100v | 73.1 | 191 | 2.6x |
-| near-collinear 500v | 874 | 1184 | 1.4x |
-| near-collinear 1000v | 2880 | 2857 | 0.99x |
-| large coord 1e12 100v | 0.438 | 0.472 | 1.1x |
-| large coord 1e12 500v | 1.2 | 1.1 | 0.91x |
-| large coord 1e12 1000v | 2.6 | 2.6 | 1.0x |
-| valid line | 0.009 | 0.039 | 4.1x |
-| zero-length line | 0.007 | 0.247 | 36x |
-| valid ls 4v | 0.022 | 0.039 | 1.7x |
-| valid ls 10v | 0.037 | 0.044 | 1.2x |
-| valid ls 50v | 0.078 | 0.095 | 1.2x |
-| valid ls 100v | 0.146 | 0.126 | 0.86x |
-| valid ls 500v | 0.406 | 0.495 | 1.2x |
-| valid ls 1000v | 1.4 | 2.6 | 1.8x |
-| collinear ls 4v | 0.022 | 0.563 | 26x |
-| collinear ls 10v | 0.037 | 0.58 | 16x |
-| collinear ls 50v | 0.067 | 0.72 | 11x |
-| collinear ls 100v | 0.121 | 0.943 | 7.8x |
-| collinear ls 500v | 0.477 | 2.0 | 4.1x |
-| collinear ls 1000v | 1.3 | 8.6 | 6.5x |
-| zigzag ls 10v | 0.042 | 1.3 | 31x |
-| zigzag ls 50v | 0.074 | 4.7 | 63x |
-| zigzag ls 100v | 0.126 | 10.0 | 79x |
-| zigzag ls 500v | 0.493 | 56.0 | 113x |
-| zigzag ls 1000v | 1.1 | 118 | 108x |
-| spiral ls 10v | 0.096 | 0.835 | 8.7x |
-| spiral ls 50v | 0.704 | 4.3 | 6.1x |
-| spiral ls 100v | 1.6 | 16.1 | 10x |
-| spiral ls 500v | 73.7 | 551 | 7.5x |
-| spiral ls 1000v | 270 | 1861 | 6.9x |
-| self-int ls 100v | 1.2 | 2.6 | 2.2x |
-| self-int ls 500v | 5.1 | 3.8 | 0.75x |
-| self-int ls 1000v | 9.1 | 6.5 | 0.72x |
-| dense self ls 10v | 0.043 | 1.2 | 28x |
-| dense self ls 50v | 0.094 | 5.3 | 57x |
-| dense self ls 100v | 0.177 | 11.7 | 66x |
-| dense self ls 500v | 0.671 | 122 | 181x |
-| dense self ls 1000v | 1.1 | 349 | 305x |
-| duped ls 100v | 0.268 | 0.759 | 2.8x |
-| duped ls 500v | 0.492 | 1.4 | 2.8x |
-| duped ls 1000v | 0.738 | 3.1 | 4.2x |
-| mls 50x3v | 2.7 | 30.2 | 11x |
-| mls 250x3v | 15.2 | 132 | 8.7x |
-| mls 500x3v | 36.5 | 252 | 6.9x |
-| self-int mls 50x4v | 17.6 | 77.5 | 4.4x |
-| self-int mls 250x4v | 130 | 466 | 3.6x |
-| self-int mls 500x4v | 402 | 1034 | 2.6x |
-| star-burst 10sp | 3.0 | 14.6 | 4.8x |
-| star-burst 50sp | 0.707 | 249 | 353x |
-| star-burst 100sp | 1.3 | 1085 | 814x |
-| star-burst 500sp | 7.6 | 36693 | 4838x |
-| star-burst 1000sp | 14.2 | 188647 | 13304x |
-| collinear ov 10seg | 1.1 | 13.1 | 12x |
-| collinear ov 50seg | 7.4 | 60.5 | 8.2x |
-| collinear ov 100seg | 13.5 | 117 | 8.7x |
-| collinear ov 500seg | 62.2 | 628 | 10x |
-| collinear ov 1000seg | 182 | 1426 | 7.8x |
-| x-scale 10v | 2.4 | 21.1 | 8.8x |
-| x-scale 50v | 63.4 | 436 | 6.9x |
-| x-scale 100v | 306 | 1689 | 5.5x |
-| x-scale 500v | 24135 | 59625 | 2.5x |
-| x-scale 1000v | 1935 | 371599 | 192x |
-| ringing 100v | 7.5 | 66.9 | 8.9x |
-| ringing 500v | 27.9 | 364 | 13x |
-| ringing 1000v | 65.6 | 991 | 15x |
-| hilbert 256v | 35.5 | 171 | 4.8x |
-| hilbert 1024v | 219 | 1344 | 6.1x |
-| lissajous 200v | 37.0 | 174 | 4.7x |
-| lissajous 500v | 58.6 | 419 | 7.2x |
-| lissajous 1000v | 99.9 | 854 | 8.5x |
-| lissajous 2000v | 230 | 1726 | 7.5x |
-| lissajous 5000v | 671 | 6131 | 9.1x |
-| lissajous 7:4 500v | 46.2 | 49.8 | 1.1x |
-| spoke 10sp | 3.4 | 14.8 | 4.3x |
-| spoke 50sp | 0.816 | 250 | 307x |
-| spoke 100sp | 1.5 | 1098 | 739x |
-| spoke 500sp | 10.7 | 36970 | 3442x |
-| spoke 1000sp | 20.4 | 201201 | 9844x |
-| star-comb 20sp | 0.386 | 2.7 | 7.0x |
-| star-comb 100sp | 5.6 | 33.0 | 5.9x |
-| star-comb 500sp | 78.4 | 679 | 8.7x |
-| star-comb 1000sp | 668 | 2607 | 3.9x |
-| hole hier 5h | 1.5 | 1.8 | 1.2x |
-| hole hier 20h | 5.3 | 7.5 | 1.4x |
-| hole hier 50h | 19.4 | 26.1 | 1.3x |
-| hole hier 100h | 44.5 | 50.9 | 1.1x |
-| overlap mp 5sh | 7.5 | 452 | 61x |
-| overlap mp 20sh | 70.4 | 2727 | 39x |
-| overlap mp 50sh | 451 | 6972 | 15x |
-| overlap mp 100sh | 1484 | 15482 | 10x |
-| dense grid 5x5=25 | 9.7 | 1751 | 180x |
-| dense grid 10x10=100 | 45.8 | 13017 | 284x |
-| dense grid 20x20=400 | 341 | 97618 | 286x |
-| dense grid 30x30=900 | 996 | 396084 | 398x |
-| sliver 100v | 1.3 | 2.5 | 1.9x |
-| sliver 500v | 7.3 | 17.6 | 2.4x |
-| sliver 1000v | 14.0 | 27.4 | 2.0x |
-| arrange valid 4v | 0.059 | 0.275 | 4.6x |
-| arrange valid 10v | 0.102 | 0.353 | 3.4x |
-| arrange valid 50v | 0.426 | 0.484 | 1.1x |
-| arrange valid 100v | 0.498 | 0.719 | 1.4x |
-| arrange valid 500v | 1.9 | 2.0 | 1.1x |
-| arrange valid 1000v | 3.5 | 3.6 | 1.0x |
-| arrange bowtie 4v | 0.981 | 16.3 | 17x |
-| arrange bowtie 100v | 23.1 | 116 | 5.0x |
-| arrange star 10sp | 2.7 | 14.7 | 5.5x |
-| arrange star 50sp | 1.0 | 261 | 250x |
-| arrange star 100sp | 2.4 | 1189 | 491x |
-| arrange star 500sp | 7.4 | 42434 | 5747x |
+| valid polygon 4v | 0.059 | 0.277 | 4.7x |
+| valid polygon 10v | 0.099 | 0.343 | 3.5x |
+| valid polygon 50v | 0.43 | 0.46 | 1.1x |
+| valid polygon 100v | 0.598 | 0.602 | 1.0x |
+| valid polygon 500v | 1.8 | 1.3 | 0.75x |
+| valid polygon 1000v | 3.6 | 2.1 | 0.59x |
+| valid polygon 5000v | 15.7 | 10.0 | 0.63x |
+| valid polygon 10000v | 33.1 | 18.0 | 0.54x |
+| invalid bowtie 4v | 0.961 | 21.9 | 23x |
+| invalid bowtie 50v | 7.0 | 74.1 | 11x |
+| invalid bowtie 100v | 23.4 | 121 | 5.2x |
+| invalid bowtie 500v | 37.7 | 567 | 15x |
+| invalid bowtie 1000v | 108 | 1166 | 11x |
+| star poly 100v | 8.4 | 9.3 | 1.1x |
+| star poly 500v | 155 | 87.7 | 0.56x |
+| star poly 1000v | 286 | 346 | 1.2x |
+| spaghetti 500v | 76.5 | 3278 | 43x |
+| spaghetti 2000v | 468 | 20147 | 43x |
+| self-touch 100v | 0.666 | 0.902 | 1.4x |
+| self-touch 500v | 2.1 | 1.6 | 0.79x |
+| self-touch 1000v | 4.2 | 3.8 | 0.89x |
+| collapsed 100v | 19.0 | 134 | 7.1x |
+| collapsed 500v | 41.0 | 581 | 14x |
+| collapsed 1000v | 81.5 | 1161 | 14x |
+| near-collinear 100v | 57.4 | 205 | 3.6x |
+| near-collinear 500v | 745 | 1233 | 1.7x |
+| near-collinear 1000v | 2743 | 2931 | 1.1x |
+| large coord 1e12 100v | 0.439 | 0.505 | 1.2x |
+| large coord 1e12 500v | 2.0 | 2.0 | 1.0x |
+| large coord 1e12 1000v | 3.6 | 4.1 | 1.1x |
+| valid line | 0.017 | 0.043 | 2.6x |
+| zero-length line | 0.015 | 0.652 | 43x |
+| valid ls 4v | 0.034 | 0.046 | 1.3x |
+| valid ls 10v | 0.048 | 0.082 | 1.7x |
+| valid ls 50v | 0.104 | 0.095 | 0.92x |
+| valid ls 100v | 0.173 | 0.155 | 0.89x |
+| valid ls 500v | 0.705 | 0.588 | 0.83x |
+| valid ls 1000v | 1.7 | 3.3 | 1.9x |
+| collinear ls 4v | 0.03 | 0.573 | 19x |
+| collinear ls 10v | 0.049 | 0.673 | 14x |
+| collinear ls 50v | 0.108 | 0.802 | 7.4x |
+| collinear ls 100v | 0.271 | 0.957 | 3.5x |
+| collinear ls 500v | 0.815 | 2.4 | 3.0x |
+| collinear ls 1000v | 1.8 | 11.8 | 6.6x |
+| zigzag ls 10v | 0.056 | 1.4 | 24x |
+| zigzag ls 50v | 0.114 | 5.3 | 46x |
+| zigzag ls 100v | 0.198 | 10.7 | 54x |
+| zigzag ls 500v | 0.611 | 65.7 | 107x |
+| zigzag ls 1000v | 1.3 | 137 | 102x |
+| spiral ls 10v | 0.125 | 1.1 | 8.8x |
+| spiral ls 50v | 1.0 | 5.9 | 5.7x |
+| spiral ls 100v | 2.1 | 18.1 | 8.6x |
+| spiral ls 500v | 110 | 636 | 5.8x |
+| spiral ls 1000v | 328 | 2041 | 6.2x |
+| self-int ls 100v | 13.3 | 2.7 | 0.20x |
+| self-int ls 500v | 11.9 | 4.1 | 0.34x |
+| self-int ls 1000v | 23.0 | 7.2 | 0.31x |
+| dense self ls 10v | 0.049 | 1.4 | 28x |
+| dense self ls 50v | 0.095 | 6.6 | 70x |
+| dense self ls 100v | 0.171 | 14.2 | 83x |
+| dense self ls 500v | 1.1 | 169 | 152x |
+| dense self ls 1000v | 1.4 | 391 | 289x |
+| duped ls 100v | 0.258 | 0.712 | 2.8x |
+| duped ls 500v | 0.702 | 1.5 | 2.2x |
+| duped ls 1000v | 0.935 | 4.8 | 5.1x |
+| mls 50x3v | 6.4 | 37.3 | 5.9x |
+| mls 250x3v | 26.8 | 142 | 5.3x |
+| mls 500x3v | 53.5 | 285 | 5.3x |
+| mls 1000x3v | 103 | 573 | 5.6x |
+| mls 10000x3v | 2249 | 13376 | 5.9x |
+| self-int mls 50x4v | 38.2 | 82.6 | 2.2x |
+| self-int mls 250x4v | 200 | 463 | 2.3x |
+| self-int mls 500x4v | 371 | 1161 | 3.1x |
+| star-burst 10sp | 4.1 | 15.4 | 3.7x |
+| star-burst 50sp | 26.1 | 281 | 11x |
+| star-burst 100sp | 5.5 | 1108 | 203x |
+| star-burst 500sp | 22.3 | 36981 | 1661x |
+| star-burst 1000sp | 44.0 | 184765 | 4195x |
+| collinear ov 10seg | 1.3 | 12.5 | 9.3x |
+| collinear ov 50seg | 6.9 | 57.4 | 8.3x |
+| collinear ov 100seg | 14.1 | 110 | 7.8x |
+| collinear ov 500seg | 63.6 | 576 | 9.1x |
+| collinear ov 1000seg | 158 | 1183 | 7.5x |
+| x-scale 10v | 4.4 | 23.3 | 5.3x |
+| x-scale 50v | 55.0 | 395 | 7.2x |
+| x-scale 100v | 283 | 1598 | 5.7x |
+| x-scale 500v | 23519 | 57521 | 2.4x |
+| x-scale 1000v | 1853 | 332587 | 180x |
+| ringing 100v | 8.2 | 67.3 | 8.2x |
+| ringing 500v | 31.0 | 322 | 10x |
+| ringing 1000v | 72.2 | 982 | 14x |
+| hilbert 256v | 69.8 | 213 | 3.0x |
+| hilbert 1024v | 262 | 1378 | 5.3x |
+| lissajous 200v | 30.8 | 152 | 4.9x |
+| lissajous 500v | 57.9 | 415 | 7.2x |
+| lissajous 1000v | 113 | 793 | 7.0x |
+| lissajous 2000v | 287 | 1718 | 6.0x |
+| lissajous 5000v | 900 | 6559 | 7.3x |
+| lissajous 7:4 500v | 44.3 | 53.7 | 1.2x |
+| spoke 10sp | 3.9 | 15.3 | 3.9x |
+| spoke 50sp | 1.4 | 256 | 190x |
+| spoke 100sp | 3.7 | 1102 | 300x |
+| spoke 500sp | 24.9 | 39913 | 1605x |
+| spoke 1000sp | 50.5 | 202606 | 4011x |
+| star-comb 20sp | 0.411 | 3.6 | 8.7x |
+| star-comb 100sp | 5.9 | 41.5 | 7.1x |
+| star-comb 500sp | 79.4 | 863 | 11x |
+| star-comb 1000sp | 721 | 3191 | 4.4x |
+| hole hier 5h | 1.3 | 1.8 | 1.4x |
+| hole hier 20h | 5.7 | 8.0 | 1.4x |
+| hole hier 50h | 22.5 | 24.8 | 1.1x |
+| hole hier 100h | 46.1 | 53.3 | 1.2x |
+| overlap mp 5sh | 7.9 | 510 | 65x |
+| overlap mp 20sh | 80.6 | 2719 | 34x |
+| overlap mp 50sh | 482 | 7109 | 15x |
+| overlap mp 100sh | 1605 | 14673 | 9.1x |
+| dense grid 5x5=25 | 11.9 | 1770 | 149x |
+| dense grid 10x10=100 | 53.3 | 12547 | 235x |
+| dense grid 20x20=400 | 369 | 101100 | 274x |
+| dense grid 30x30=900 | 1032 | 379336 | 368x |
+| sliver 100v | 1.9 | 2.4 | 1.3x |
+| sliver 500v | 8.7 | 22.9 | 2.6x |
+| sliver 1000v | 16.6 | 41.0 | 2.5x |
+| arrange valid 4v | 0.08 | 0.311 | 3.9x |
+| arrange valid 10v | 0.119 | 0.507 | 4.2x |
+| arrange valid 50v | 0.55 | 0.804 | 1.5x |
+| arrange valid 100v | 0.711 | 0.809 | 1.1x |
+| arrange valid 500v | 2.1 | 1.8 | 0.87x |
+| arrange valid 1000v | 4.2 | 5.4 | 1.3x |
+| arrange bowtie 4v | 1.0 | 23.8 | 23x |
+| arrange bowtie 100v | 26.9 | 121 | 4.5x |
+| arrange star 10sp | 3.7 | 16.0 | 4.4x |
+| arrange star 50sp | 24.7 | 320 | 13x |
+| arrange star 100sp | 3.7 | 1324 | 361x |
+| arrange star 500sp | 21.9 | 41965 | 1913x |
 
 ## Limitations
 
